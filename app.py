@@ -14,15 +14,20 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
-# Intento de importación flexible para PostgreSQL
+# psycopg2 seguro para Render
 try:
     import psycopg2
-except ImportError:
+except Exception:
     psycopg2 = None
 
 import cloudinary
 import cloudinary.uploader
-import requests
+
+# requests seguro
+try:
+    import requests
+except Exception:
+    requests = None
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
@@ -97,7 +102,6 @@ def init_db():
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
             )''')
             
-            # ALTER TABLE SEGUROS EN POSTGRES
             for col_query in [
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';",
@@ -125,7 +129,6 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
             )''')
             
-            # ALTER TABLE SEGUROS EN SQLITE
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas"]:
                 try:
                     cursor.execute(f"ALTER TABLE galerias ADD COLUMN {col_sql} TEXT DEFAULT '';")
@@ -185,38 +188,34 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📊 RUTAS PARA INCREMENTAR MÉTRICAS (VISTAS Y DESCARGAS)
+# 📊 RUTAS DE MÉTRICAS (VISTAS Y DESCARGAS)
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
 @login_required
 def incrementar_vista(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
     try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
         q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (galeria_id,))
         conn.commit()
+        conn.close()
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 200
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
 @login_required
 def incrementar_descarga(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
     try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
         q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (galeria_id,))
         conn.commit()
+        conn.close()
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 200
 
 # 🚀 PROXY AUTENTICADO PARA ENTREGAR PDFs
 @app.route('/pdf_proxy')
@@ -231,13 +230,19 @@ def pdf_proxy():
 
     try:
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
-        res = requests.get(clean_url, timeout=15)
         
-        if res.status_code == 401:
-            api_key = os.environ.get('CLOUDINARY_API_KEY')
-            api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-            if api_key and api_secret:
-                res = requests.get(clean_url, auth=(api_key, api_secret), timeout=15)
+        if requests:
+            res = requests.get(clean_url, timeout=15)
+            if res.status_code == 401:
+                api_key = os.environ.get('CLOUDINARY_API_KEY')
+                api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+                if api_key and api_secret:
+                    res = requests.get(clean_url, auth=(api_key, api_secret), timeout=15)
+            content_data = res.content
+        else:
+            req = urllib.request.Request(clean_url)
+            with urllib.request.urlopen(req) as response:
+                content_data = response.read()
 
         disposition = 'attachment' if download_flag == '1' else 'inline'
         
@@ -245,7 +250,7 @@ def pdf_proxy():
             'Content-Type': 'application/pdf',
             'Content-Disposition': f'{disposition}; filename="{filename_custom}"'
         }
-        return Response(res.content, headers=headers, status=200)
+        return Response(content_data, headers=headers, status=200)
     except Exception as e:
         return f"Error obteniendo documento: {e}", 500
 
@@ -320,8 +325,8 @@ def index():
         cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias")
         rows = cursor.fetchall()
     except Exception:
-        conn.rollback()
         try:
+            conn.rollback()
             cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
             raw_rows = cursor.fetchall()
             rows = [r + (0, 0) for r in raw_rows]
