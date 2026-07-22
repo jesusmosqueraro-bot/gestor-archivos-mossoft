@@ -4,10 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bienvenido - Panel de Control</title>
+    
+    <!-- ÍCONO DE PESTAÑA ELEGANTE -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
+    
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 min-h-screen flex items-center justify-center p-6">
-    <div class="max-w-xl w-full bg-white rounded-2xl shadow-xl p-8 border border-slate-200 text-center">
+<body id="main-body" class="bg-slate-100 min-h-screen flex items-center justify-center p-6 transition-colors duration-300">
+
+    <div class="max-w-xl w-full bg-white rounded-2xl shadow-xl p-8 border border-slate-200 text-center relative">
+        
+        <!-- SELECTORES DE COLOR RGB (Igual que en el Gestor de Archivos) -->
+        <div class="flex justify-end items-center gap-2 mb-6 border-b pb-4">
+            <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
+                <label for="bgPicker" class="text-xs text-slate-600">Fondo:</label>
+                <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
+            </div>
+
+            <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
+                <label for="btnPicker" class="text-xs text-slate-600">Botón:</label>
+                <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
+            </div>
+        </div>
+
         <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
             📁
         </div>
@@ -19,8 +38,8 @@
         </p>
 
         <div class="flex flex-col gap-3 justify-center">
-            <!-- Botón Módulo Principal -->
-            <a href="/gestor" class="bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 flex items-center justify-center gap-2 text-sm">
+            <!-- Botón Módulo Principal (Responde al selector de color) -->
+            <a href="/gestor" class="btn-custom bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl hover:opacity-90 transition-all shadow-lg flex items-center justify-center gap-2 text-sm">
                 Entrar al Gestor de Archivos →
             </a>
 
@@ -41,27 +60,47 @@
             </a>
         </div>
     </div>
+
+    <!-- SCRIPT APLICADOR DE COLORES RGB (SINCRONIZADO CON EL GESTOR DE ARCHIVOS) -->
     <script>
-            (function() {
-                const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
-                let temporizadorInactividad;
+        function aplicarFondoRgb(colorHex) {
+            document.body.style.backgroundColor = colorHex;
+            localStorage.setItem('custom_bg_color', colorHex);
+        }
+        function aplicarBotonRgb(colorHex) {
+            document.querySelectorAll('.btn-custom').forEach(btn => { btn.style.backgroundColor = colorHex; });
+            localStorage.setItem('custom_btn_color', colorHex);
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const bg = localStorage.getItem('custom_bg_color');
+            const btn = localStorage.getItem('custom_btn_color');
+            if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
+            if (btn) { aplicarBotonRgb(btn); document.getElementById('btnPicker').value = btn; }
+        });
+    </script>
 
-                function reiniciarTemporizador() {
-                    clearTimeout(temporizadorInactividad);
-                    temporizadorInactividad = setTimeout(() => {
-                        alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                        window.location.href = "/logout";
-                    }, TIEMPO_INACTIVIDAD_MS);
-                }
+    <!-- SCRIPT DE DESCONEXIÓN POR INACTIVIDAD (25 MINUTOS) -->
+    <script>
+        (function() {
+            const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
+            let temporizadorInactividad;
 
-                const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-                eventos.forEach(evento => {
-                    document.addEventListener(evento, reiniciarTemporizador, true);
-                });
+            function reiniciarTemporizador() {
+                clearTimeout(temporizadorInactividad);
+                temporizadorInactividad = setTimeout(() => {
+                    alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
+                    window.location.href = "/logout";
+                }, TIEMPO_INACTIVIDAD_MS);
+            }
 
-                reiniciarTemporizador();
-            })();
-        </script>
+            const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+            eventos.forEach(evento => {
+                document.addEventListener(evento, reiniciarTemporizador, true);
+            });
+
+            reiniciarTemporizador();
+        })();
+    </script>
     
 </body>
 </html>
