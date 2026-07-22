@@ -312,20 +312,33 @@ def subir_archivo():
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
             
-            # Subida preservando la extensión original del archivo
+            # Subida con forzado de extensión explicito
             if ext in ['mp4', 'mov', 'webm', 'avi']:
                 r_type = "video"
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type=r_type,
+                    use_filename=True,
+                    unique_filename=True
+                )
             elif ext in ['pdf', 'txt', 'docx']:
                 r_type = "raw"
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type=r_type,
+                    format=ext,
+                    use_filename=True,
+                    unique_filename=True
+                )
             else:
                 r_type = "image"
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type=r_type,
+                    use_filename=True,
+                    unique_filename=True
+                )
 
-            upload_result = cloudinary.uploader.upload(
-                file, 
-                resource_type=r_type,
-                use_filename=True,
-                unique_filename=True
-            )
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
@@ -392,17 +405,29 @@ def editar_galeria(galeria_id):
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
                     r_type = "video"
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type=r_type,
+                        use_filename=True,
+                        unique_filename=True
+                    )
                 elif ext in ['pdf', 'txt', 'docx']:
                     r_type = "raw"
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type=r_type,
+                        format=ext,
+                        use_filename=True,
+                        unique_filename=True
+                    )
                 else:
                     r_type = "image"
-
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type=r_type,
-                    use_filename=True,
-                    unique_filename=True
-                )
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type=r_type,
+                        use_filename=True,
+                        unique_filename=True
+                    )
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
