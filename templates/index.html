@@ -11,6 +11,13 @@
             overflow-wrap: anywhere !important;
             word-break: break-word !important;
         }
+        mark.highlight {
+            background-color: #fde047;
+            color: #854d0e;
+            padding: 0 2px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300">
@@ -100,19 +107,25 @@
         </div>
         {% endif %}
 
-        <!-- Buscador e Identificador de Filtros -->
+        <!-- Buscador e Identificador de Filtros Avanzado con Sugerencias -->
         <div class="mb-6 bg-slate-50 p-3 rounded-xl border border-slate-200">
             <form action="/gestor" method="GET" class="flex flex-col gap-2">
-                <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="text" name="q" value="{{ busqueda }}" placeholder="🔍 Buscar por palabra clave, título, error o archivo..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <div class="flex flex-col sm:flex-row gap-2 relative">
+                    <input type="text" name="q" id="input-busqueda" list="sugerencias-busqueda" autocomplete="off" value="{{ busqueda }}" placeholder="🔍 Buscar por palabra clave, título, error o archivo..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <datalist id="sugerencias-busqueda">
+                        {% for item in sugerencias_titulos %}
+                            <option value="{{ item }}">
+                        {% endfor %}
+                    </datalist>
                     <button type="submit" class="bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors whitespace-nowrap">
                         Buscar
                     </button>
                 </div>
 
-                <!-- Filtros desplegables por Categoría y Tipo -->
+                <!-- Filtros desplegables por Categoría, Tipo y Formato de Archivo -->
                 <div class="flex flex-wrap items-center gap-2 pt-1">
                     <span class="text-xs font-semibold text-slate-500">Filtrar por:</span>
+                    
                     <select name="cat" onchange="this.form.submit()" class="text-xs p-1.5 border rounded-lg bg-white text-slate-700 font-medium">
                         <option value="">Todas las Categorías</option>
                         <option value="Soporte Técnico" {% if cat_filtro == 'Soporte Técnico' %}selected{% endif %}>🛠️ Soporte Técnico</option>
@@ -131,7 +144,14 @@
                         <option value="Manual" {% if tipo_filtro == 'Manual' %}selected{% endif %}>📖 Manual</option>
                     </select>
 
-                    {% if busqueda or cat_filtro or tipo_filtro %}
+                    <select name="formato" onchange="this.form.submit()" class="text-xs p-1.5 border rounded-lg bg-white text-slate-700 font-medium">
+                        <option value="">Todos los Archivos</option>
+                        <option value="imagen" {% if formato_filtro == 'imagen' %}selected{% endif %}>🖼️ Contiene Imágenes</option>
+                        <option value="video" {% if formato_filtro == 'video' %}selected{% endif %}>🎥 Contiene Videos</option>
+                        <option value="pdf" {% if formato_filtro == 'pdf' %}selected{% endif %}>📄 Contiene PDFs / Docs</option>
+                    </select>
+
+                    {% if busqueda or cat_filtro or tipo_filtro or formato_filtro %}
                         <a href="/gestor" class="text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-lg font-medium hover:bg-red-200 transition-colors ml-auto">
                             ✖ Limpiar Filtros
                         </a>
@@ -145,16 +165,16 @@
         {% if galerias %}
             <div class="flex flex-col gap-6">
                 {% for galeria in galerias %}
-                    <div class="border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden">
+                    <div class="border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden searchable-item">
                         <div class="flex flex-col sm:flex-row justify-between items-start border-b pb-3 mb-3 gap-3">
                             <div class="w-full sm:w-auto flex-1 min-w-0">
                                 
                                 <!-- Badges de Clasificación -->
                                 <div class="flex flex-wrap items-center gap-1.5 mb-2">
-                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200 highlightable">
                                         🏷️ {{ galeria.categoria }}
                                     </span>
-                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md {% if galeria.tipo == 'Protocolo de Error' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-purple-100 text-purple-800 border border-purple-200{% endif %}">
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md {% if galeria.tipo == 'Protocolo de Error' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-purple-100 text-purple-800 border border-purple-200{% endif %} highlightable">
                                         📌 {{ galeria.tipo }}
                                     </span>
                                     <span class="text-[10px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-md border shrink-0">
@@ -162,8 +182,8 @@
                                     </span>
                                 </div>
 
-                                <h3 class="text-base sm:text-lg font-bold text-slate-800 break-all">{{ galeria.titulo }}</h3>
-                                <p class="text-xs text-slate-600 mt-1 break-words leading-relaxed">{{ galeria.descripcion }}</p>
+                                <h3 class="text-base sm:text-lg font-bold text-slate-800 break-all highlightable">{{ galeria.titulo }}</h3>
+                                <p class="text-xs text-slate-600 mt-1 break-words leading-relaxed highlightable">{{ galeria.descripcion }}</p>
                             </div>
 
                             {% if rol == 'admin' %}
@@ -182,7 +202,7 @@
                         </div>
 
                         {% if rol == 'admin' %}
-                        <!-- Formulario de Edición con Categorías -->
+                        <!-- Formulario de Edición -->
                         <form id="edit-form-{{ galeria.id }}" action="/editar_galeria/{{ galeria.id }}" method="POST" enctype="multipart/form-data" class="hidden mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-3">
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
@@ -229,7 +249,7 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
                             {% for img in galeria.archivos %}
                                 <div class="border rounded-lg p-2 bg-slate-50 flex flex-col justify-between gap-2 overflow-hidden">
-                                    <p class="text-xs text-slate-700 font-medium truncate mb-1" title="{{ img }}">
+                                    <p class="text-xs text-slate-700 font-medium truncate mb-1 highlightable" title="{{ img }}">
                                         {{ img.split('/')[-1] if 'http' in img else img }}
                                     </p>
                                     <div class="flex gap-1">
@@ -278,6 +298,25 @@
     </div>
 
     <script>
+        // 🟡 FUNCIÓN JS DE RESALTADO DE TEXTO (HIGHLIGHTING)
+        document.addEventListener('DOMContentLoaded', () => {
+            const query = "{{ busqueda }}".trim();
+            if (!query) return;
+
+            const palabras = query.split(/\s+/).filter(p => p.length > 2);
+            if (palabras.length === 0) return;
+
+            const elementos = document.querySelectorAll('.highlightable');
+            elementos.forEach(el => {
+                let html = el.innerHTML;
+                palabras.forEach(palabra => {
+                    const regex = new RegExp(`(${palabra})`, 'gi');
+                    html = html.replace(regex, '<mark class="highlight">$1</mark>');
+                });
+                el.innerHTML = html;
+            });
+        });
+
         function obtenerUrlDescargaCloudinary(fileUrl) {
             if (fileUrl.includes('res.cloudinary.com')) {
                 return fileUrl.replace('/upload/', '/upload/fl_attachment/');
