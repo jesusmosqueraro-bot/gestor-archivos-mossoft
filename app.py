@@ -90,12 +90,15 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
         )''')
-        try:
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';")
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;")
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;")
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;")
         except Exception: pass
     else:
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
@@ -301,8 +304,17 @@ def index():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias")
-    rows = cursor.fetchall()
+    
+    # Consulta robusta compatible con BDs antiguas y nuevas
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias")
+        rows = cursor.fetchall()
+    except Exception:
+        conn.rollback()
+        # Fallback de seguridad en caso de fallo de columnas en tiempo de ejecucion
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
+        raw_rows = cursor.fetchall()
+        rows = [r + (0, 0) for r in raw_rows]
     
     galerias = []
     sugerencias_titulos = []
