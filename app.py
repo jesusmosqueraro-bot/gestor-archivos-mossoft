@@ -29,7 +29,7 @@ ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
-# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO (QUITA TILDES Y CONVIERTE A MINÚSCULAS)
+# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO
 def normalizar(texto):
     if not texto: return ""
     texto = unicodedata.normalize('NFD', str(texto))
@@ -81,7 +81,7 @@ def init_db():
             id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo'
+            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT ''
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
@@ -92,14 +92,14 @@ def init_db():
         try:
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
-        except Exception:
-            pass
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';")
+        except Exception: pass
     else:
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo'
+            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT ''
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
@@ -107,11 +107,11 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
         )''')
-        try:
-            cursor.execute("ALTER TABLE galerias ADD COLUMN categoria TEXT DEFAULT 'General';")
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN categoria TEXT DEFAULT 'General';")
         except Exception: pass
-        try:
-            cursor.execute("ALTER TABLE galerias ADD COLUMN tipo TEXT DEFAULT 'Instructivo';")
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN tipo TEXT DEFAULT 'Instructivo';")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN tags TEXT DEFAULT '';")
         except Exception: pass
     
     cursor.execute("SELECT COUNT(*) FROM usuarios")
@@ -230,7 +230,7 @@ def index():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias")
+    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
     rows = cursor.fetchall()
     
     galerias = []
@@ -250,6 +250,7 @@ def index():
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
         categoria = r[4] if len(r) > 4 and r[4] else 'General'
         tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
+        tags = r[6] if len(r) > 6 and r[6] else ''
 
         sugerencias_titulos.append(titulo)
 
@@ -264,10 +265,11 @@ def index():
             'fecha': fecha or fecha_defecto,
             'categoria': categoria,
             'tipo': tipo,
+            'tags': tags,
             'archivos': archivos
         }
 
-        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {' '.join(archivos)}")
+        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {tags} {' '.join(archivos)}")
 
         if palabras_clave:
             coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave)
@@ -300,6 +302,7 @@ def subir_archivo():
     descripcion = request.form.get('descripcion', '')
     categoria = request.form.get('categoria', 'General')
     tipo = request.form.get('tipo', 'Instructivo')
+    tags = request.form.get('tags', '')
 
     galeria_id = str(uuid.uuid4())[:8]
     fecha_actual = obtener_fecha_actual()
@@ -315,8 +318,8 @@ def subir_archivo():
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo) VALUES (?, ?, ?, ?, ?, ?)"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo))
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags) VALUES (%s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
         
         q_archivo = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
         for fname in archivos_guardados:
@@ -336,14 +339,14 @@ def editar_galeria(galeria_id):
     nueva_desc = (request.form.get('descripcion') or '').strip()
     nueva_cat = (request.form.get('categoria') or 'General').strip()
     nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
+    nuevos_tags = (request.form.get('tags') or '').strip()
     nuevos_archivos = request.files.getlist('nuevos_archivos')
     
     conn, db_type = get_db()
     cursor = conn.cursor()
     
     try:
-        # 1. Obtener datos anteriores antes de modificar la BD para auditoría detallada
-        q_sel = "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = ?"
+        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = ?"
         cursor.execute(q_sel, (galeria_id,))
         antiguo = cursor.fetchone()
 
@@ -353,6 +356,7 @@ def editar_galeria(galeria_id):
             desc_old = (antiguo[1] or '').strip()
             cat_old = (antiguo[2] or 'General').strip()
             tipo_old = (antiguo[3] or 'Instructivo').strip()
+            tags_old = (antiguo[4] or '').strip()
 
             if tit_old != nuevo_titulo:
                 cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
@@ -362,12 +366,12 @@ def editar_galeria(galeria_id):
                 cambios.append(f"Categoría: '{cat_old}' ➔ '{nueva_cat}'")
             if tipo_old != nuevo_tipo:
                 cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
+            if tags_old != nuevos_tags:
+                cambios.append(f"Tags: '{tags_old}' ➔ '{nuevos_tags}'")
 
-        # 2. Ejecutar actualización en BD
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, galeria_id))
+        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
         
-        # 3. Guardar archivos si se adjuntaron nuevos
         archivos_agregados = 0
         for file in nuevos_archivos:
             if file and archivo_permitido(file.filename):
@@ -384,7 +388,6 @@ def editar_galeria(galeria_id):
 
         conn.commit()
 
-        # 4. Formatear y registrar el log con trazabilidad Antes ➔ Después
         if cambios:
             detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios)
         else:
