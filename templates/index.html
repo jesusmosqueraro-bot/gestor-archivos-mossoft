@@ -5,12 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arkiv | Gestor de Archivos</title>
     
-    <!-- ÍCONO DE PESTAÑA ELEGANTE (SVG Vectorial con Gradiente) -->
+    <!-- ÍCONO DE PESTAÑA ELEGANTE -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Reglas CSS para evitar desbordamientos en pantallas pequeñas */
         body, div, p, span, h1, h2, h3, h4, textarea, input {
             overflow-wrap: anywhere !important;
             word-break: break-word !important;
@@ -79,7 +78,7 @@
         </div>
         {% endif %}
 
-        <!-- Buscador Corregido (Sin quiebre de texto en el botón) -->
+        <!-- Buscador -->
         <div class="mb-6">
             <form action="/gestor" method="GET" class="flex flex-col sm:flex-row w-full gap-2">
                 <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar por título, descripción o imagen..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -101,7 +100,6 @@
             <div class="flex flex-col gap-6">
                 {% for galeria in galerias %}
                     <div class="border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden">
-                        <!-- Cabecera de la Tarjeta Adaptada para Celulares -->
                         <div class="flex flex-col sm:flex-row justify-between items-start border-b pb-3 mb-3 gap-3">
                             <div class="w-full sm:w-auto flex-1 min-w-0">
                                 <div class="flex flex-wrap items-center gap-2 mb-1">
@@ -118,7 +116,6 @@
                                     Editar
                                 </button>
                                 
-                                <!-- FORMULARIO ELIMINAR TODO -->
                                 <form action="/eliminar_galeria/{{ galeria.id }}" method="POST" onsubmit="return confirm('⚠️ ¿ESTÁS SEGURO DE ELIMINAR ESTA GALERÍA?\n\nTítulo: {{ galeria.titulo }}\nSe borrarán todos los archivos contenidos.');" class="flex-1 sm:flex-none">
                                     <button type="submit" class="w-full text-xs bg-red-100 text-red-700 px-3 py-1 rounded hover:bg-red-200 font-semibold text-center">
                                         Eliminar Todo
@@ -129,7 +126,7 @@
                         </div>
 
                         {% if rol == 'admin' %}
-                        <!-- Formulario de Edición (Solo Admin con soporte para archivos) -->
+                        <!-- Formulario de Edición -->
                         <form id="edit-form-{{ galeria.id }}" action="/editar_galeria/{{ galeria.id }}" method="POST" enctype="multipart/form-data" class="hidden mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-3">
                             <div>
                                 <label class="block text-xs font-semibold text-amber-900 mb-1">Título de la galería</label>
@@ -156,11 +153,11 @@
                                 <div class="border rounded-lg p-2 bg-slate-50 flex flex-col justify-between gap-2 overflow-hidden">
                                     <p class="text-xs text-slate-700 font-medium truncate mb-1" title="{{ img }}">{{ img }}</p>
                                     <div class="flex gap-1">
-                                        <a href="{{ url_for('ver_archivo', filename=img) }}" target="_blank" class="flex-1 text-xs text-center bg-white border border-slate-200 text-slate-700 py-1.5 rounded hover:bg-slate-100 font-medium">
-                                            Ver / Descargar
-                                        </a>
+                                        <!-- 👁️ BOTÓN DE PREVISUALIZACIÓN -->
+                                        <button type="button" onclick="abrirPrevisualizacion('{{ url_for('ver_archivo', filename=img) }}', '{{ img }}')" class="flex-1 text-xs text-center bg-white border border-slate-200 text-slate-700 py-1.5 rounded hover:bg-slate-100 font-medium">
+                                            👁️ Vista Previa
+                                        </button>
                                         {% if rol == 'admin' %}
-                                        <!-- FORMULARIO ELIMINAR ARCHIVO INDIVIDUAL -->
                                         <form action="/eliminar_imagen/{{ galeria.id }}/{{ img }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar únicamente el archivo {{ img }}?');">
                                             <button type="submit" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2.5 py-1.5 rounded hover:bg-red-100 font-bold">
                                                 ✕
@@ -179,7 +176,73 @@
         {% endif %}
     </div>
 
+    <!-- 🖼️ MODAL DE PREVISUALIZACIÓN DE ARCHIVOS -->
+    <div id="modal-preview" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-6">
+        <div class="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden relative">
+            <!-- Cabecera del Modal -->
+            <div class="flex justify-between items-center p-3 sm:p-4 border-b bg-slate-50">
+                <h3 id="preview-filename" class="text-sm font-bold text-slate-800 truncate pr-4">Previsualización</h3>
+                <div class="flex items-center gap-2">
+                    <a id="preview-download-btn" href="#" target="_blank" download class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1">
+                        📥 Descargar Original
+                    </a>
+                    <button onclick="cerrarPrevisualizacion()" class="text-slate-400 hover:text-slate-600 text-xl font-bold px-2 py-1">✕</button>
+                </div>
+            </div>
+            
+            <!-- Contenedor Dinámico del Archivo -->
+            <div id="preview-content" class="p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-900/5 min-h-[300px]">
+                <!-- Aquí se inyecta la imagen, PDF o visor de documento -->
+            </div>
+        </div>
+    </div>
+
     <script>
+        // 🔍 Lógica para el Modal de Previsualización
+        function abrirPrevisualizacion(fileUrl, fileName) {
+            const modal = document.getElementById('modal-preview');
+            const title = document.getElementById('preview-filename');
+            const downloadBtn = document.getElementById('preview-download-btn');
+            const content = document.getElementById('preview-content');
+
+            title.textContent = fileName;
+            downloadBtn.href = fileUrl;
+
+            const ext = fileName.split('.').pop().toLowerCase();
+            content.innerHTML = '';
+
+            if (['png', 'jpg', 'jpeg', 'gif'].includes(ext)) {
+                content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
+            } else if (ext === 'pdf') {
+                content.innerHTML = `<iframe src="${fileUrl}" class="w-full h-[65vh] rounded-lg border-0"></iframe>`;
+            } else {
+                content.innerHTML = `
+                    <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
+                        <p class="text-3xl mb-2">📄</p>
+                        <p class="text-sm font-semibold text-slate-700 mb-3">Previsualización no disponible para archivos .${ext}</p>
+                        <a href="${fileUrl}" target="_blank" download class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
+                            Descargar Archivo Directamente
+                        </a>
+                    </div>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function cerrarPrevisualizacion() {
+            const modal = document.getElementById('modal-preview');
+            const content = document.getElementById('preview-content');
+            modal.classList.add('hidden');
+            content.innerHTML = ''; // Limpia memoria
+        }
+
+        // Cerrar modal con la tecla ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') cerrarPrevisualizacion();
+        });
+
+        // 🎨 Personalización RGB
         function aplicarFondoRgb(colorHex) {
             document.body.style.backgroundColor = colorHex;
             localStorage.setItem('custom_bg_color', colorHex);
@@ -197,6 +260,7 @@
     </script>
 
     <script>
+        // ⏱️ Inactividad (25 Minutos)
         (function() {
             const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
             let temporizadorInactividad;
@@ -217,6 +281,5 @@
             reiniciarTemporizador();
         })();
     </script>
-    
 </body>
 </html>
