@@ -60,6 +60,7 @@ def init_db():
         fecha TEXT NOT NULL
     )''')
     
+    # Asegurar la existencia e inicialización del usuario admin con clave '1234'
     cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)",
@@ -86,7 +87,7 @@ def enviar_correo_codigo(destinatario, codigo):
         msg = MIMEMultipart()
         msg['From'] = SMTP_USER
         msg['To'] = destinatario
-        msg['Subject'] = "Código de Verificación - Gestor de Archivos"
+        msg['Subject'] = "Código de Verificación - Arkiv"
         cuerpo = f"Tu código de verificación es: {codigo}"
         msg.attach(MIMEText(cuerpo, 'plain'))
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
@@ -139,7 +140,8 @@ def admin_required(f):
 def login():
     if request.method == 'POST':
         username = request.form.get('usuario')
-        password = request.form.get('password')
+        # CORRECCIÓN: Se recibe 'contrasena' tal como está definido en el input de login.html
+        password = request.form.get('contrasena') or request.form.get('password')
         recaptcha_response = request.form.get('g-recaptcha-response')
 
         if not verificar_recaptcha(recaptcha_response):
