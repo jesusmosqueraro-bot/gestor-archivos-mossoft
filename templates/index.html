@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Gestor de Archivos</title>
+    <title>Arkiv | Centro de Protocolos e Instructivos</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body, div, p, span, h1, h2, h3, h4, textarea, input {
+        body, div, p, span, h1, h2, h3, h4, textarea, input, select {
             overflow-wrap: anywhere !important;
             word-break: break-word !important;
         }
@@ -16,6 +16,7 @@
 <body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300">
     <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full overflow-hidden">
         
+        <!-- Encabezado -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-6 gap-4">
             <div>
                 <a href="/bienvenida" class="text-xs text-blue-600 hover:underline">← Volver al Inicio</a>
@@ -46,72 +47,134 @@
         </div>
 
         {% if rol == 'admin' %}
+        <!-- Formulario Carga de Instructivos con Clasificación -->
         <form action="/subir" method="POST" enctype="multipart/form-data" class="mb-8 p-4 bg-slate-50 border border-slate-300 rounded-lg flex flex-col gap-4">
-            <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Título de la galería / Grupo</label>
-                <input type="text" name="titulo" placeholder="Ej: Fotos del proyecto" required class="w-full text-sm p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide">📌 Nuevo Instructivo / Protocolo</h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Categoría</label>
+                    <select name="categoria" class="w-full text-xs p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="Soporte Técnico">🛠️ Soporte Técnico</option>
+                        <option value="Redes">🌐 Redes e Infraestructura</option>
+                        <option value="Servidores">🖥️ Servidores y Cloud</option>
+                        <option value="Software">💻 Software y Desarrollo</option>
+                        <option value="Base de Datos">🗄️ Base de Datos</option>
+                        <option value="General" selected>📂 General / Otros</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo de Contenido</label>
+                    <select name="tipo" class="w-full text-xs p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="Protocolo de Error">⚠️ Protocolo de Error / Fallo</option>
+                        <option value="Paso a Paso">📝 Instructivo Paso a Paso</option>
+                        <option value="Algoritmo">🔀 Algoritmo de Diagnóstico</option>
+                        <option value="Manual">📖 Manual de Usuario</option>
+                    </select>
+                </div>
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Descripción</label>
-                <textarea name="descripcion" placeholder="Ej: Capturas tomadas durante las pruebas..." rows="2" class="w-full text-sm p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Título del Instructivo / Protocolo</label>
+                <input type="text" name="titulo" placeholder="Ej: Solución a Error 504 Gateway Timeout en Servidor" required class="w-full text-sm p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Seleccionar una o varias imágenes / videos</label>
-                <input type="file" name="archivo" multiple required class="block w-full text-sm text-slate-500 file:mr-2 sm:file:mr-4 file:py-2 file:px-3 sm:file:px-4 file:rounded-full file:border-0 file:text-xs sm:file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Descripción / Pasos preliminares</label>
+                <textarea name="descripcion" placeholder="Ej: Pasos a seguir cuando el servicio no responde..." rows="2" class="w-full text-sm p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Adjuntar Capturas / Documentos / Videos de Soporte</label>
+                <input type="file" name="archivo" multiple required class="block w-full text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
             </div>
 
             <button type="submit" class="btn-custom text-white px-6 py-2 rounded-lg font-medium transition-colors w-full sm:w-auto sm:self-end bg-blue-600">
-                Subir a la Nube
+                Guardar Instructivo
             </button>
         </form>
         {% else %}
         <div class="mb-6 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg">
-            ℹ️ Modo Consulta Activo: Estás navegando con un usuario estándar. Solo tienes permisos para visualizar y descargar archivos.
+            ℹ️ Modo Consulta Activo: Puedes buscar, consultar instructivos y descargar material de apoyo.
         </div>
         {% endif %}
 
-        <div class="mb-6">
-            <form action="/gestor" method="GET" class="flex flex-col sm:flex-row w-full gap-2">
-                <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar por título, descripción o imagen..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <div class="flex gap-2 shrink-0">
-                    <button type="submit" class="w-full sm:w-auto bg-slate-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors whitespace-nowrap">
+        <!-- Buscador e Identificador de Filtros -->
+        <div class="mb-6 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <form action="/gestor" method="GET" class="flex flex-col gap-2">
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" name="q" value="{{ busqueda }}" placeholder="🔍 Buscar por palabra clave, título, error o archivo..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <button type="submit" class="bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors whitespace-nowrap">
                         Buscar
                     </button>
-                    {% if busqueda %}
-                        <a href="/gestor" class="w-full sm:w-auto text-center bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-300 transition-colors flex items-center justify-center whitespace-nowrap">
-                            Limpiar
+                </div>
+
+                <!-- Filtros desplegables por Categoría y Tipo -->
+                <div class="flex flex-wrap items-center gap-2 pt-1">
+                    <span class="text-xs font-semibold text-slate-500">Filtrar por:</span>
+                    <select name="cat" onchange="this.form.submit()" class="text-xs p-1.5 border rounded-lg bg-white text-slate-700 font-medium">
+                        <option value="">Todas las Categorías</option>
+                        <option value="Soporte Técnico" {% if cat_filtro == 'Soporte Técnico' %}selected{% endif %}>🛠️ Soporte Técnico</option>
+                        <option value="Redes" {% if cat_filtro == 'Redes' %}selected{% endif %}>🌐 Redes e Infraestructura</option>
+                        <option value="Servidores" {% if cat_filtro == 'Servidores' %}selected{% endif %}>🖥️ Servidores y Cloud</option>
+                        <option value="Software" {% if cat_filtro == 'Software' %}selected{% endif %}>💻 Software y Desarrollo</option>
+                        <option value="Base de Datos" {% if cat_filtro == 'Base de Datos' %}selected{% endif %}>🗄️ Base de Datos</option>
+                        <option value="General" {% if cat_filtro == 'General' %}selected{% endif %}>📂 General</option>
+                    </select>
+
+                    <select name="tipo" onchange="this.form.submit()" class="text-xs p-1.5 border rounded-lg bg-white text-slate-700 font-medium">
+                        <option value="">Todos los Tipos</option>
+                        <option value="Protocolo de Error" {% if tipo_filtro == 'Protocolo de Error' %}selected{% endif %}>⚠️ Protocolo de Error</option>
+                        <option value="Paso a Paso" {% if tipo_filtro == 'Paso a Paso' %}selected{% endif %}>📝 Paso a Paso</option>
+                        <option value="Algoritmo" {% if tipo_filtro == 'Algoritmo' %}selected{% endif %}>🔀 Algoritmo</option>
+                        <option value="Manual" {% if tipo_filtro == 'Manual' %}selected{% endif %}>📖 Manual</option>
+                    </select>
+
+                    {% if busqueda or cat_filtro or tipo_filtro %}
+                        <a href="/gestor" class="text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-lg font-medium hover:bg-red-200 transition-colors ml-auto">
+                            ✖ Limpiar Filtros
                         </a>
                     {% endif %}
                 </div>
             </form>
         </div>
 
-        <h2 class="text-lg font-semibold text-slate-700 mb-4">Archivos Almacenados en la Nube</h2>
+        <h2 class="text-lg font-semibold text-slate-700 mb-4">Protocolos e Instructivos Almacenados</h2>
+        
         {% if galerias %}
             <div class="flex flex-col gap-6">
                 {% for galeria in galerias %}
                     <div class="border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden">
                         <div class="flex flex-col sm:flex-row justify-between items-start border-b pb-3 mb-3 gap-3">
                             <div class="w-full sm:w-auto flex-1 min-w-0">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <h3 class="text-base sm:text-lg font-bold text-slate-800 break-all">{{ galeria.titulo }}</h3>
-                                    <span class="text-[10px] sm:text-[11px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1 shrink-0">
+                                
+                                <!-- Badges de Clasificación -->
+                                <div class="flex flex-wrap items-center gap-1.5 mb-2">
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
+                                        🏷️ {{ galeria.categoria }}
+                                    </span>
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md {% if galeria.tipo == 'Protocolo de Error' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-purple-100 text-purple-800 border border-purple-200{% endif %}">
+                                        📌 {{ galeria.tipo }}
+                                    </span>
+                                    <span class="text-[10px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-md border shrink-0">
                                         🕒 {{ galeria.fecha }}
                                     </span>
                                 </div>
-                                <p class="text-xs text-slate-500 break-words">{{ galeria.descripcion }}</p>
+
+                                <h3 class="text-base sm:text-lg font-bold text-slate-800 break-all">{{ galeria.titulo }}</h3>
+                                <p class="text-xs text-slate-600 mt-1 break-words leading-relaxed">{{ galeria.descripcion }}</p>
                             </div>
+
                             {% if rol == 'admin' %}
                             <div class="flex gap-2 w-full sm:w-auto justify-end shrink-0 pt-1 sm:pt-0">
-                                <button onclick="document.getElementById('edit-form-{{ galeria.id }}').classList.toggle('hidden')" class="text-xs bg-amber-100 text-amber-800 px-3 py-1 rounded hover:bg-amber-200 flex-1 sm:flex-none text-center">
+                                <button onclick="document.getElementById('edit-form-{{ galeria.id }}').classList.toggle('hidden')" class="text-xs bg-amber-100 text-amber-800 px-3 py-1 rounded hover:bg-amber-200 flex-1 sm:flex-none text-center font-medium">
                                     Editar
                                 </button>
                                 
-                                <form action="/eliminar_galeria/{{ galeria.id }}" method="POST" onsubmit="return confirm('⚠️ ¿ESTÁS SEGURO DE ELIMINAR ESTA GALERÍA?\n\nTítulo: {{ galeria.titulo }}\nSe borrarán todos los archivos contenidos.');" class="flex-1 sm:flex-none">
+                                <form action="/eliminar_galeria/{{ galeria.id }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar este instructivo por completo?');" class="flex-1 sm:flex-none">
                                     <button type="submit" class="w-full text-xs bg-red-100 text-red-700 px-3 py-1 rounded hover:bg-red-200 font-semibold text-center">
-                                        Eliminar Todo
+                                        Eliminar
                                     </button>
                                 </form>
                             </div>
@@ -119,9 +182,32 @@
                         </div>
 
                         {% if rol == 'admin' %}
+                        <!-- Formulario de Edición con Categorías -->
                         <form id="edit-form-{{ galeria.id }}" action="/editar_galeria/{{ galeria.id }}" method="POST" enctype="multipart/form-data" class="hidden mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs font-semibold text-amber-900 mb-1">Categoría</label>
+                                    <select name="categoria" class="text-xs p-1.5 border rounded w-full bg-white">
+                                        <option value="Soporte Técnico" {% if galeria.categoria == 'Soporte Técnico' %}selected{% endif %}>🛠️ Soporte Técnico</option>
+                                        <option value="Redes" {% if galeria.categoria == 'Redes' %}selected{% endif %}>🌐 Redes e Infraestructura</option>
+                                        <option value="Servidores" {% if galeria.categoria == 'Servidores' %}selected{% endif %}>🖥️ Servidores y Cloud</option>
+                                        <option value="Software" {% if galeria.categoria == 'Software' %}selected{% endif %}>💻 Software y Desarrollo</option>
+                                        <option value="Base de Datos" {% if galeria.categoria == 'Base de Datos' %}selected{% endif %}>🗄️ Base de Datos</option>
+                                        <option value="General" {% if galeria.categoria == 'General' %}selected{% endif %}>📂 General</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-amber-900 mb-1">Tipo de Contenido</label>
+                                    <select name="tipo" class="text-xs p-1.5 border rounded w-full bg-white">
+                                        <option value="Protocolo de Error" {% if galeria.tipo == 'Protocolo de Error' %}selected{% endif %}>⚠️ Protocolo de Error</option>
+                                        <option value="Paso a Paso" {% if galeria.tipo == 'Paso a Paso' %}selected{% endif %}>📝 Paso a Paso</option>
+                                        <option value="Algoritmo" {% if galeria.tipo == 'Algoritmo' %}selected{% endif %}>🔀 Algoritmo</option>
+                                        <option value="Manual" {% if galeria.tipo == 'Manual' %}selected{% endif %}>📖 Manual</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div>
-                                <label class="block text-xs font-semibold text-amber-900 mb-1">Título de la galería</label>
+                                <label class="block text-xs font-semibold text-amber-900 mb-1">Título del Instructivo</label>
                                 <input type="text" name="titulo" value="{{ galeria.titulo }}" required class="text-sm p-2 border rounded w-full focus:outline-none focus:ring-1 focus:ring-amber-500">
                             </div>
                             <div>
@@ -129,7 +215,7 @@
                                 <textarea name="descripcion" rows="2" class="text-sm p-2 border rounded w-full focus:outline-none focus:ring-1 focus:ring-amber-500">{{ galeria.descripcion }}</textarea>
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-amber-900 mb-1">Agregar más imágenes / archivos / videos (opcional)</label>
+                                <label class="block text-xs font-semibold text-amber-900 mb-1">Agregar más archivos de soporte</label>
                                 <input type="file" name="nuevos_archivos" multiple class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200">
                             </div>
                             <div class="flex justify-end gap-2 pt-1">
@@ -139,19 +225,18 @@
                         </form>
                         {% endif %}
 
-                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        <!-- Grid de Archivos Adjuntos -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
                             {% for img in galeria.archivos %}
                                 <div class="border rounded-lg p-2 bg-slate-50 flex flex-col justify-between gap-2 overflow-hidden">
                                     <p class="text-xs text-slate-700 font-medium truncate mb-1" title="{{ img }}">
                                         {{ img.split('/')[-1] if 'http' in img else img }}
                                     </p>
                                     <div class="flex gap-1">
-                                        <!-- 👁️ BOTÓN DE PREVISUALIZACIÓN -->
                                         <button type="button" onclick="abrirPrevisualizacion('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="flex-1 text-xs text-center bg-white border border-slate-200 text-slate-700 py-1.5 rounded hover:bg-slate-100 font-medium">
                                             👁️ Ver
                                         </button>
                                         
-                                        <!-- 📥 BOTÓN DE DESCARGA DIRECTA INSTANTÁNEA -->
                                         <a href="javascript:void(0)" onclick="descargarArchivoDirecto('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="text-xs text-center bg-blue-50 border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded hover:bg-blue-100 font-bold" title="Descargar directo">
                                             📥
                                         </a>
@@ -171,7 +256,7 @@
                 {% endfor %}
             </div>
         {% else %}
-            <p class="text-slate-400 text-sm">No se encontraron archivos o galerías.</p>
+            <p class="text-slate-400 text-sm py-4 text-center">No se encontraron instructivos o protocolos con los filtros seleccionados.</p>
         {% endif %}
     </div>
 
@@ -187,17 +272,14 @@
                     <button onclick="cerrarPrevisualizacion()" class="text-slate-400 hover:text-slate-600 text-xl font-bold px-2 py-1">✕</button>
                 </div>
             </div>
-            
             <div id="preview-content" class="p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-900/5 min-h-[300px]">
             </div>
         </div>
     </div>
 
     <script>
-        // ⚡ FUNCIÓN PARA FORZAR DESCARGA INSTANTÁNEA EN EL NAVEGADOR
         function obtenerUrlDescargaCloudinary(fileUrl) {
             if (fileUrl.includes('res.cloudinary.com')) {
-                // Inyecta 'fl_attachment' en la URL para forzar la descarga binaria inmediata
                 return fileUrl.replace('/upload/', '/upload/fl_attachment/');
             }
             return fileUrl;
@@ -218,7 +300,6 @@
                 window.URL.revokeObjectURL(blobUrl);
                 document.body.removeChild(a);
             } catch (err) {
-                // Fallback si fetch falla por CORS
                 window.open(downloadUrl, '_self');
             }
         }
