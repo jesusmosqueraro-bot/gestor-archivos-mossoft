@@ -312,7 +312,7 @@ def subir_archivo():
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
             
-            # Clasificación garantizada de tipos de recursos para Cloudinary
+            # Subida preservando la extensión original del archivo
             if ext in ['mp4', 'mov', 'webm', 'avi']:
                 r_type = "video"
             elif ext in ['pdf', 'txt', 'docx']:
@@ -320,7 +320,12 @@ def subir_archivo():
             else:
                 r_type = "image"
 
-            upload_result = cloudinary.uploader.upload(file, resource_type=r_type)
+            upload_result = cloudinary.uploader.upload(
+                file, 
+                resource_type=r_type,
+                use_filename=True,
+                unique_filename=True
+            )
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
@@ -392,7 +397,12 @@ def editar_galeria(galeria_id):
                 else:
                     r_type = "image"
 
-                upload_result = cloudinary.uploader.upload(file, resource_type=r_type)
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type=r_type,
+                    use_filename=True,
+                    unique_filename=True
+                )
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
