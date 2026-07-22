@@ -332,24 +332,28 @@ def subir_archivo():
 @login_required
 @admin_required
 def editar_galeria(galeria_id):
-    nuevo_titulo = request.form.get('titulo')
-    nueva_desc = request.form.get('descripcion')
-    nueva_cat = request.form.get('categoria', 'General')
-    nuevo_tipo = request.form.get('tipo', 'Instructivo')
+    nuevo_titulo = (request.form.get('titulo') or '').strip()
+    nueva_desc = (request.form.get('descripcion') or '').strip()
+    nueva_cat = (request.form.get('categoria') or 'General').strip()
+    nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
     nuevos_archivos = request.files.getlist('nuevos_archivos')
     
     conn, db_type = get_db()
     cursor = conn.cursor()
     
     try:
-        # 1. Consultar estado previo para la auditoría de cambios en logs
+        # 1. Obtener datos anteriores antes de modificar la BD para auditoría detallada
         q_sel = "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = ?"
         cursor.execute(q_sel, (galeria_id,))
         antiguo = cursor.fetchone()
 
         cambios = []
         if antiguo:
-            tit_old, desc_old, cat_old, tipo_old = antiguo[0], antiguo[1], antiguo[2] or 'General', antiguo[3] or 'Instructivo'
+            tit_old = (antiguo[0] or '').strip()
+            desc_old = (antiguo[1] or '').strip()
+            cat_old = (antiguo[2] or 'General').strip()
+            tipo_old = (antiguo[3] or 'Instructivo').strip()
+
             if tit_old != nuevo_titulo:
                 cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
             if desc_old != nueva_desc:
@@ -359,11 +363,11 @@ def editar_galeria(galeria_id):
             if tipo_old != nuevo_tipo:
                 cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
 
-        # 2. Guardar las modificaciones
+        # 2. Ejecutar actualización en BD
         q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ? WHERE id = ?"
         cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, galeria_id))
         
-        # 3. Guardar archivos nuevos
+        # 3. Guardar archivos si se adjuntaron nuevos
         archivos_agregados = 0
         for file in nuevos_archivos:
             if file and archivo_permitido(file.filename):
@@ -376,21 +380,21 @@ def editar_galeria(galeria_id):
                 archivos_agregados += 1
 
         if archivos_agregados > 0:
-            cambios.append(f"Se adjuntaron {archivos_agregados} archivo(s) nuevo(s)")
+            cambios.append(f"Archivos: +{archivos_agregados} nuevo(s)")
 
         conn.commit()
 
-        # 4. Registrar trazabilidad completa
+        # 4. Formatear y registrar el log con trazabilidad Antes ➔ Después
         if cambios:
-            detalles_log = f"Galería '{nuevo_titulo}' (ID: {galeria_id}) :: " + " | ".join(cambios)
+            detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios)
         else:
-            detalles_log = f"Galería '{nuevo_titulo}' (ID: {galeria_id}) re-guardada sin modificaciones"
+            detalles_log = f"'{nuevo_titulo}' re-guardado sin cambios detectados"
 
         registrar_log(session['username'], "Edición de Galería", detalles_log)
 
     except Exception as e:
         conn.rollback()
-        print(f"Error en edición: {e}")
+        print(f"Error procesando edición en BD: {e}")
 
     conn.close()
     return redirect(url_for('index'))
