@@ -355,20 +355,13 @@
             });
         });
 
-        function obtenerUrlDescargaCloudinary(fileUrl) {
-            if (fileUrl.includes('res.cloudinary.com')) {
-                return fileUrl.replace('/upload/', '/upload/fl_attachment/');
-            }
-            return fileUrl;
-        }
-
-        // 📥 DESCARGA DIRECTA
+        // 📥 DESCARGA DIRECTA MEDIANTE EL PROXY INTERNO DE FLASK
         function descargarArchivoDirecto(fileUrl, fileName) {
-            const downloadUrl = obtenerUrlDescargaCloudinary(fileUrl);
-            window.open(downloadUrl, '_blank');
+            const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=1&name=' + encodeURIComponent(fileName);
+            window.location.href = proxyUrl;
         }
 
-        // 👁️ VISOR CORREGIDO
+        // 👁️ VISOR UTILIZANDO EL PROXY DE TU PROPIO SERVIDOR (CERO ERRORES 401)
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -381,15 +374,16 @@
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
 
-            const esPDF = ext === 'pdf' || fileName.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('.pdf');
+            const esPDF = ext === 'pdf' || fileName.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('.pdf') || fileUrl.includes('/raw/upload/');
             const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
             const esImagen = (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) && !esPDF;
 
-            // 1. PDF
+            // 1. PDF SERVIDO DESDE EL PROXY INTERNO DE FLASK
             if (esPDF) {
+                const proxyInlineUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=0&name=' + encodeURIComponent(fileName);
                 content.innerHTML = `
                     <div class="w-full h-[72vh] flex flex-col items-center justify-center bg-slate-100 rounded-lg relative overflow-hidden">
-                        <iframe src="${fileUrl}" type="application/pdf" class="w-full h-full rounded-lg border-0 shadow"></iframe>
+                        <iframe src="${proxyInlineUrl}" type="application/pdf" class="w-full h-full rounded-lg border-0 shadow"></iframe>
                     </div>
                 `;
             } 
