@@ -7,17 +7,22 @@ import urllib.request
 import urllib.parse
 import json
 import unicodedata
-import psycopg2
-import cloudinary
-import cloudinary.uploader
-import requests
-from io import BytesIO
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
+
+# Intento de importación flexible para PostgreSQL
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
+import cloudinary
+import cloudinary.uploader
+import requests
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
@@ -64,7 +69,7 @@ def validar_instancia_y_sesion():
             return redirect(url_for('login', expirado='1'))
 
 def get_db():
-    if DATABASE_URL:
+    if DATABASE_URL and psycopg2:
         url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
         conn = psycopg2.connect(url)
         return conn, 'postgres'
@@ -75,62 +80,68 @@ def get_db():
         return conn, 'sqlite'
 
 def init_db():
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    if db_type == 'postgres':
-        cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-            id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-            id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-            id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
-        )''')
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;")
-        except Exception: pass
-    else:
-        cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
-        )''')
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN categoria TEXT DEFAULT 'General';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN tipo TEXT DEFAULT 'Instructivo';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN tags TEXT DEFAULT '';")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN vistas INTEGER DEFAULT 0;")
-        except Exception: pass
-        try: cursor.execute("ALTER TABLE galerias ADD COLUMN descargas INTEGER DEFAULT 0;")
-        except Exception: pass
-    
-    cursor.execute("SELECT COUNT(*) FROM usuarios")
-    if cursor.fetchone()[0] == 0:
-        query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-        cursor.execute(query_admin, ('admin', '1234', 'admin@ejemplo.com', 'admin'))
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        if db_type == 'postgres':
+            cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
+            )''')
+            
+            # ALTER TABLE SEGUROS EN POSTGRES
+            for col_query in [
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_query)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
-    conn.commit()
-    conn.close()
+        else:
+            cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
+            )''')
+            
+            # ALTER TABLE SEGUROS EN SQLITE
+            for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas"]:
+                try:
+                    cursor.execute(f"ALTER TABLE galerias ADD COLUMN {col_sql} TEXT DEFAULT '';")
+                    conn.commit()
+                except Exception:
+                    pass
+
+        cursor.execute("SELECT COUNT(*) FROM usuarios")
+        if cursor.fetchone()[0] == 0:
+            query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
+            cursor.execute(query_admin, ('admin', '1234', 'admin@ejemplo.com', 'admin'))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error inicializando base de datos: {e}")
 
 init_db()
 
@@ -305,17 +316,18 @@ def index():
     conn, db_type = get_db()
     cursor = conn.cursor()
     
-    # Consulta robusta compatible con BDs antiguas y nuevas
     try:
         cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias")
         rows = cursor.fetchall()
     except Exception:
         conn.rollback()
-        # Fallback de seguridad en caso de fallo de columnas en tiempo de ejecucion
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
-        raw_rows = cursor.fetchall()
-        rows = [r + (0, 0) for r in raw_rows]
-    
+        try:
+            cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
+            raw_rows = cursor.fetchall()
+            rows = [r + (0, 0) for r in raw_rows]
+        except Exception:
+            rows = []
+
     galerias = []
     sugerencias_titulos = []
     fecha_defecto = obtener_fecha_actual()
