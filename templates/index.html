@@ -362,19 +362,13 @@
             return fileUrl;
         }
 
-        // 📥 DESCARGA DIRECTA OPTIMIZADA
+        // 📥 DESCARGA DIRECTA
         function descargarArchivoDirecto(fileUrl, fileName) {
             const downloadUrl = obtenerUrlDescargaCloudinary(fileUrl);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.target = '_blank';
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            window.open(downloadUrl, '_blank');
         }
 
-        // 👁️ LÓGICA DE PREVISUALIZACIÓN MULTINAVEGADOR
+        // 👁️ VISOR CORREGIDO
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -387,24 +381,15 @@
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
 
-            const esPDF = ext === 'pdf' || fileName.toLowerCase().endsWith('.pdf') || fileUrl.toLowerCase().includes('.pdf');
+            const esPDF = ext === 'pdf' || fileName.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('.pdf');
             const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
-            const esImagen = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+            const esImagen = (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) && !esPDF;
 
-            // 1. EVALUAR PDF CON VISOR DE RESPALDO MULTINAVEGADOR
+            // 1. PDF
             if (esPDF) {
-                const pdfUrlCompleta = fileUrl.startsWith('http') ? fileUrl : window.location.origin + fileUrl;
-                
                 content.innerHTML = `
-                    <div class="w-full h-[70vh] flex flex-col items-center justify-center bg-slate-50 rounded-lg relative overflow-hidden">
-                        <iframe src="https://docs.google.com/gview?url=${encodeURIComponent(pdfUrlCompleta)}&embedded=true" class="w-full h-full rounded-lg border-0 shadow"></iframe>
-                        
-                        <div class="absolute bottom-3 right-3 bg-white/90 backdrop-blur border border-slate-300 p-2 rounded-lg shadow-md text-xs flex items-center gap-2">
-                            <span class="text-slate-600">¿No carga la vista previa?</span>
-                            <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="bg-blue-600 text-white px-3 py-1 rounded font-medium hover:bg-blue-700">
-                                📥 Abrir / Descargar PDF
-                            </button>
-                        </div>
+                    <div class="w-full h-[72vh] flex flex-col items-center justify-center bg-slate-100 rounded-lg relative overflow-hidden">
+                        <iframe src="${fileUrl}" type="application/pdf" class="w-full h-full rounded-lg border-0 shadow"></iframe>
                     </div>
                 `;
             } 
