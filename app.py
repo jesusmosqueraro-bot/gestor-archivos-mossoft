@@ -22,13 +22,13 @@ app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
-# 🇨🇴 CONFIGURACIÓN DE ZONA HORARIA COLOMBIA
+# 🇨🇴 ZONA HORARIA COLOMBIA
 ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
-# ☁️ CONFIGURACIÓN DE CLOUDINARY (ALMACENAMIENTO PERMANENTE EN LA NUBE)
+# ☁️ CLOUDINARY
 cloudinary.config(
     cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
     api_key=os.environ.get('CLOUDINARY_API_KEY'),
@@ -73,7 +73,7 @@ def init_db():
             id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100)
+            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
@@ -81,12 +81,18 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
         )''')
+        # Migración segura para tablas existentes
+        try:
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
+        except Exception:
+            pass
     else:
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT
+            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
@@ -94,6 +100,13 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
         )''')
+        # Migración segura SQLite
+        try:
+            cursor.execute("ALTER TABLE galerias ADD COLUMN categoria TEXT DEFAULT 'General';")
+        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE galerias ADD COLUMN tipo TEXT DEFAULT 'Instructivo';")
+        except Exception: pass
     
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
@@ -205,9 +218,12 @@ def bienvenida():
 @login_required
 def index():
     busqueda = request.args.get('q', '').strip().lower()
+    cat_filtro = request.args.get('cat', '').strip()
+    tipo_filtro = request.args.get('tipo', '').strip()
+
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, titulo, descripcion, fecha FROM galerias")
+    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias")
     rows = cursor.fetchall()
     
     galerias = []
@@ -215,16 +231,33 @@ def index():
 
     for r in rows:
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
+        categoria = r[4] if len(r) > 4 and r[4] else 'General'
+        tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
+
         query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ?"
         cursor.execute(query_arch, (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
-        item = {'id': galeria_id, 'titulo': titulo, 'descripcion': descripcion, 'fecha': fecha or fecha_defecto, 'archivos': archivos}
-        if not busqueda or (busqueda in titulo.lower() or busqueda in descripcion.lower() or any(busqueda in a.lower() for a in archivos)):
+        item = {
+            'id': galeria_id,
+            'titulo': titulo,
+            'descripcion': descripcion,
+            'fecha': fecha or fecha_defecto,
+            'categoria': categoria,
+            'tipo': tipo,
+            'archivos': archivos
+        }
+
+        # Filtro compuesto (Buscador + Categoría + Tipo)
+        coincide_busqueda = not busqueda or (busqueda in titulo.lower() or busqueda in descripcion.lower() or busqueda in categoria.lower() or busqueda in tipo.lower() or any(busqueda in a.lower() for a in archivos))
+        coincide_cat = not cat_filtro or categoria == cat_filtro
+        coincide_tipo = not tipo_filtro or tipo == tipo_filtro
+
+        if coincide_busqueda and coincide_cat and coincide_tipo:
             galerias.append(item)
 
     conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda, rol=session.get('rol'))
+    return render_template('index.html', galerias=galerias, busqueda=busqueda, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, rol=session.get('rol'))
 
 @app.route('/subir', methods=['POST'])
 @login_required
@@ -233,6 +266,8 @@ def subir_archivo():
     archivos = request.files.getlist('archivo')
     titulo = request.form.get('titulo', 'Sin título')
     descripcion = request.form.get('descripcion', '')
+    categoria = request.form.get('categoria', 'General')
+    tipo = request.form.get('tipo', 'Instructivo')
 
     galeria_id = str(uuid.uuid4())[:8]
     fecha_actual = obtener_fecha_actual()
@@ -242,16 +277,14 @@ def subir_archivo():
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
             resource_type = "video" if ext in ['mp4', 'mov', 'webm', 'avi'] else "auto"
-            
-            # Subida directa a Cloudinary
             upload_result = cloudinary.uploader.upload(file, resource_type=resource_type)
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha) VALUES (?, ?, ?, ?)"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual))
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo) VALUES (?, ?, ?, ?, ?, ?)"
+        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo))
         
         q_archivo = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
         for fname in archivos_guardados:
@@ -259,7 +292,7 @@ def subir_archivo():
         
         conn.commit()
         conn.close()
-        registrar_log(session['username'], "Creación de Galería", f"Galería subida a Cloudinary: '{titulo}'")
+        registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
 
     return redirect(url_for('index'))
 
@@ -269,14 +302,16 @@ def subir_archivo():
 def editar_galeria(galeria_id):
     nuevo_titulo = request.form.get('titulo')
     nueva_desc = request.form.get('descripcion')
+    nueva_cat = request.form.get('categoria', 'General')
+    nuevo_tipo = request.form.get('tipo', 'Instructivo')
     nuevos_archivos = request.files.getlist('nuevos_archivos')
     
     conn, db_type = get_db()
     cursor = conn.cursor()
     
     try:
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, galeria_id))
+        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, galeria_id))
         
         for file in nuevos_archivos:
             if file and archivo_permitido(file.filename):
