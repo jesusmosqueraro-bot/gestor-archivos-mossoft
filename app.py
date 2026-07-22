@@ -188,7 +188,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📊 RUTAS DE MÉTRICAS (VISTAS Y DESCARGAS)
+# 📊 RUTAS DE MÉTRICAS (VISTAS Y DESCARGAS AUDITADAS EN LOGS)
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
 @login_required
 def incrementar_vista(galeria_id):
@@ -209,15 +209,28 @@ def incrementar_descarga(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
+        
+        # 1. Obtener el título del instructivo para el detalle del Log
+        q_tit = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_tit, (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        # 2. Incrementar el contador
         q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (galeria_id,))
         conn.commit()
         conn.close()
+
+        # 3. 📝 REGISTRAR EN LA BITÁCORA DE LOGS
+        usuario_actual = session.get('username', 'Anónimo')
+        registrar_log(usuario_actual, "Descarga de Archivo", f"El usuario descargó material del instructivo: '{titulo}'")
+
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 200
 
-# 🚀 PROXY AUTENTICADO PARA ENTREGAR PDFs
+# 🚀 PROXY AUTENTICADO
 @app.route('/pdf_proxy')
 @login_required
 def pdf_proxy():
@@ -243,6 +256,11 @@ def pdf_proxy():
             req = urllib.request.Request(clean_url)
             with urllib.request.urlopen(req) as response:
                 content_data = response.read()
+
+        # Registrar en la bitácora cuando es una petición directa de descarga vía proxy
+        if download_flag == '1':
+            usuario_actual = session.get('username', 'Anónimo')
+            registrar_log(usuario_actual, "Descarga de Documento", f"Archivo: '{filename_custom}'")
 
         disposition = 'attachment' if download_flag == '1' else 'inline'
         
