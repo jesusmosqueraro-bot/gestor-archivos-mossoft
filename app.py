@@ -36,7 +36,12 @@ def validar_instancia_y_sesion():
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx'}
+
+# 🎬 EXTENSIONES PERMITIDAS (Incluye formatos de imagen, documentos y videos cortos)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
+
+# 📏 LÍMITE MÁXIMO DE CARGA: 55.000 KB (55 MB)
+app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
 # --- CONFIGURACIÓN DE CORREO Y RECAPTCHA ---
 SMTP_SERVER = "smtp.gmail.com"
