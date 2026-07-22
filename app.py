@@ -10,12 +10,14 @@ import unicodedata
 import psycopg2
 import cloudinary
 import cloudinary.uploader
+import requests
+from io import BytesIO
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
@@ -29,7 +31,6 @@ ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
-# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO
 def normalizar(texto):
     if not texto: return ""
     texto = unicodedata.normalize('NFD', str(texto))
@@ -163,6 +164,32 @@ def admin_required(f):
         if session.get('rol') != 'admin': return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+# 🚀 PROXY SEGURO PARA ENTREGAR CUALQUIER ARCHIVO / PDF SIN BLOQUEOS DE CLOUDINARY
+@app.route('/pdf_proxy')
+@login_required
+def pdf_proxy():
+    url_target = request.args.get('url')
+    download_flag = request.args.get('download', '0')
+    filename_custom = request.args.get('name', 'documento.pdf')
+
+    if not url_target:
+        return "URL requerida", 400
+
+    try:
+        # Limpiar banderas problemáticas
+        clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
+        res = requests.get(clean_url, timeout=15)
+        
+        disposition = 'attachment' if download_flag == '1' else 'inline'
+        
+        headers = {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': f'{disposition}; filename="{filename_custom}"'
+        }
+        return Response(res.content, headers=headers)
+    except Exception as e:
+        return f"Error obteniendo documento: {e}", 500
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -312,37 +339,19 @@ def subir_archivo():
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
             
-            # CONFIGURACIÓN CLAVE: Para PDFs usaremos resource_type="image"
             if ext in ['mp4', 'mov', 'webm', 'avi']:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="video",
-                    use_filename=True,
-                    unique_filename=True
-                )
-            elif ext == 'pdf':
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="image",
-                    format="pdf",
-                    use_filename=True,
-                    unique_filename=True
-                )
-            elif ext in ['txt', 'docx']:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="raw",
-                    use_filename=True,
-                    unique_filename=True
-                )
+                r_type = "video"
+            elif ext in ['pdf', 'txt', 'docx']:
+                r_type = "raw"
             else:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="image",
-                    use_filename=True,
-                    unique_filename=True
-                )
+                r_type = "image"
 
+            upload_result = cloudinary.uploader.upload(
+                file, 
+                resource_type=r_type,
+                use_filename=True,
+                unique_filename=True
+            )
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
@@ -408,34 +417,18 @@ def editar_galeria(galeria_id):
                 ext = file.filename.rsplit('.', 1)[1].lower()
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
-                        resource_type="video",
-                        use_filename=True,
-                        unique_filename=True
-                    )
-                elif ext == 'pdf':
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
-                        resource_type="image",
-                        format="pdf",
-                        use_filename=True,
-                        unique_filename=True
-                    )
-                elif ext in ['txt', 'docx']:
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
-                        resource_type="raw",
-                        use_filename=True,
-                        unique_filename=True
-                    )
+                    r_type = "video"
+                elif ext in ['pdf', 'txt', 'docx']:
+                    r_type = "raw"
                 else:
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
-                        resource_type="image",
-                        use_filename=True,
-                        unique_filename=True
-                    )
+                    r_type = "image"
+
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type=r_type,
+                    use_filename=True,
+                    unique_filename=True
+                )
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
