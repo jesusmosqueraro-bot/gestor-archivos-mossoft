@@ -6,15 +6,20 @@ import sqlite3
 import urllib.request
 import urllib.parse
 import json
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timedelta  # ⏱️ Importado para tiempo de sesión
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, session, flash
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
+
+# ⏱️ CONFIGURACIÓN DE INACTIVIDAD (25 MINUTOS)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
+
+@app.before_request
+def make_session_permanent():
+    session.permanent = True  # Renueva la duración de la sesión en cada petición
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -28,7 +33,9 @@ SMTP_PASSWORD = "gyod xyny fzvw bsxu"
 
 RECAPTCHA_SECRET_KEY = "6Lel3V4tAAAAAAWsc9oCEgoWBN95V2zQZ1E3dx2X"
 
-DB_NAME = "gestor.db"
+# 🔒 RUTA ABSOLUTA PARA EVITAR PÉRDIDA DE BASE DE DATOS
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_NAME = os.path.join(BASE_DIR, "gestor.db")
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -60,13 +67,12 @@ def init_db():
         fecha TEXT NOT NULL
     )''')
     
-    # Garantizar creación o actualización del usuario administrador por defecto
-    cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
-    if not cursor.fetchone():
+    # PROTECCIÓN: Crear 'admin' SOLO SI la tabla de usuarios está completamente vacía
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    total_usuarios = cursor.fetchone()[0]
+    if total_usuarios == 0:
         cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)",
                        ('admin', '1234', 'admin@ejemplo.com', 'admin'))
-    else:
-        cursor.execute("UPDATE usuarios SET password = '1234' WHERE username = 'admin'")
 
     conn.commit()
     conn.close()
@@ -139,7 +145,6 @@ def admin_required(f):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        # Captura adaptable de campos según nombres de inputs en login.html
         username = request.form.get('usuario') or request.form.get('username')
         password = request.form.get('contrasena') or request.form.get('password')
         recaptcha_response = request.form.get('g-recaptcha-response')
@@ -150,13 +155,14 @@ def login():
 
         # 2. Respaldo prioritario para usuario administrador
         if username == 'admin' and password == '1234':
+            session.permanent = True
             session['logged_in'] = True
             session['username'] = 'admin'
             session['rol'] = 'admin'
             registrar_log('admin', "Inicio de Sesión", "Inicio de sesión exitoso como admin")
             return redirect(url_for('bienvenida'))
 
-        # 3. Verificación en base de datos para resto de usuarios
+        # 3. Verificación en base de datos para el resto de usuarios
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("SELECT username, password, rol FROM usuarios WHERE username = ?", (username,))
@@ -164,6 +170,7 @@ def login():
         conn.close()
 
         if user and user[1] == password:
+            session.permanent = True
             session['logged_in'] = True
             session['username'] = user[0]
             session['rol'] = user[2]
@@ -172,7 +179,15 @@ def login():
 
         return render_template('login.html', error="Usuario o contraseña incorrectos.")
 
-    return render_template('login.html')
+    # Manejo de redirección limpia cuando la sesión expira por inactividad
+    mensaje_expirado = None
+    if request.args.get('expirado') == '1':
+        if session.get('username'):
+            registrar_log(session['username'], "Sesión Expirada", "Cierre automático por inactividad (25 min)")
+        session.clear()
+        mensaje_expirado = "⚠️ Tu sesión ha expirado por inactividad (25 min). Por favor, ingresa tus credenciales nuevamente."
+
+    return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
 @app.route('/logout')
 def logout():
