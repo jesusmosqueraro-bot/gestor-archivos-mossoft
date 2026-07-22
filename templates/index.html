@@ -146,9 +146,16 @@
                                         {{ img.split('/')[-1] if 'http' in img else img }}
                                     </p>
                                     <div class="flex gap-1">
+                                        <!-- 👁️ BOTÓN DE PREVISUALIZACIÓN -->
                                         <button type="button" onclick="abrirPrevisualizacion('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="flex-1 text-xs text-center bg-white border border-slate-200 text-slate-700 py-1.5 rounded hover:bg-slate-100 font-medium">
-                                            👁️ Vista Previa
+                                            👁️ Ver
                                         </button>
+                                        
+                                        <!-- 📥 BOTÓN DE DESCARGA DIRECTA INSTANTÁNEA -->
+                                        <a href="javascript:void(0)" onclick="descargarArchivoDirecto('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="text-xs text-center bg-blue-50 border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded hover:bg-blue-100 font-bold" title="Descargar directo">
+                                            📥
+                                        </a>
+
                                         {% if rol == 'admin' %}
                                         <form action="/eliminar_imagen/{{ galeria.id }}/{{ img | urlencode }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar únicamente este archivo?');">
                                             <button type="submit" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2.5 py-1.5 rounded hover:bg-red-100 font-bold">
@@ -174,9 +181,9 @@
             <div class="flex justify-between items-center p-3 sm:p-4 border-b bg-slate-50">
                 <h3 id="preview-filename" class="text-sm font-bold text-slate-800 truncate pr-4">Previsualización</h3>
                 <div class="flex items-center gap-2">
-                    <a id="preview-download-btn" href="#" target="_blank" download class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1">
+                    <button id="preview-download-btn" onclick="" class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1">
                         📥 Descargar Original
-                    </a>
+                    </button>
                     <button onclick="cerrarPrevisualizacion()" class="text-slate-400 hover:text-slate-600 text-xl font-bold px-2 py-1">✕</button>
                 </div>
             </div>
@@ -187,6 +194,35 @@
     </div>
 
     <script>
+        // ⚡ FUNCIÓN PARA FORZAR DESCARGA INSTANTÁNEA EN EL NAVEGADOR
+        function obtenerUrlDescargaCloudinary(fileUrl) {
+            if (fileUrl.includes('res.cloudinary.com')) {
+                // Inyecta 'fl_attachment' en la URL para forzar la descarga binaria inmediata
+                return fileUrl.replace('/upload/', '/upload/fl_attachment/');
+            }
+            return fileUrl;
+        }
+
+        async function descargarArchivoDirecto(fileUrl, fileName) {
+            const downloadUrl = obtenerUrlDescargaCloudinary(fileUrl);
+            try {
+                const response = await fetch(downloadUrl);
+                const blob = await response.blob();
+                const blobUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = blobUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(blobUrl);
+                document.body.removeChild(a);
+            } catch (err) {
+                // Fallback si fetch falla por CORS
+                window.open(downloadUrl, '_self');
+            }
+        }
+
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -194,7 +230,7 @@
             const content = document.getElementById('preview-content');
 
             title.textContent = fileName;
-            downloadBtn.href = fileUrl;
+            downloadBtn.onclick = () => descargarArchivoDirecto(fileUrl, fileName);
 
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
@@ -215,9 +251,9 @@
                     <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
                         <p class="text-3xl mb-2">📄</p>
                         <p class="text-sm font-semibold text-slate-700 mb-3">Archivo guardado en la nube</p>
-                        <a href="${fileUrl}" target="_blank" download class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
+                        <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
                             Descargar Archivo Directamente
-                        </a>
+                        </button>
                     </div>
                 `;
             }
