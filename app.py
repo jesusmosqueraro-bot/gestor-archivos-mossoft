@@ -217,7 +217,7 @@ def bienvenida():
 @app.route('/gestor')
 @login_required
 def index():
-    busqueda = request.args.get('q', '').strip().lower()
+    busqueda_raw = request.args.get('q', '').strip()
     cat_filtro = request.args.get('cat', '').strip()
     tipo_filtro = request.args.get('tipo', '').strip()
 
@@ -228,6 +228,19 @@ def index():
     
     galerias = []
     fecha_defecto = obtener_fecha_actual()
+
+    # Palabras conectoras a ignorar en la búsqueda tipo Google
+    STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para', 'como', 'que', 'definicion', 'definición'}
+
+    # Procesar palabras clave de la búsqueda
+    palabras_clave = []
+    if busqueda_raw:
+        # Extrae palabras de más de 1 caracter
+        palabras_raw = [p.lower() for p in busqueda_raw.split() if len(p) > 1]
+        # Filtra conectores vacíos a menos que sea la única palabra buscada
+        palabras_clave = [p for p in palabras_raw if p not in STOP_WORDS]
+        if not palabras_clave:  # Si solo buscó palabras conectoras, usar las originales
+            palabras_clave = palabras_raw
 
     for r in rows:
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
@@ -248,8 +261,15 @@ def index():
             'archivos': archivos
         }
 
-        # Filtro compuesto (Buscador + Categoría + Tipo)
-        coincide_busqueda = not busqueda or (busqueda in titulo.lower() or busqueda in descripcion.lower() or busqueda in categoria.lower() or busqueda in tipo.lower() or any(busqueda in a.lower() for a in archivos))
+        # Texto consolidado donde buscará el motor
+        texto_busqueda = f"{titulo} {descripcion} {categoria} {tipo} {' '.join(archivos)}".lower()
+
+        # Búsqueda Inteligente: basta con que coincida CUALQUIERA de las palabras clave principales
+        if palabras_clave:
+            coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave)
+        else:
+            coincide_busqueda = True
+
         coincide_cat = not cat_filtro or categoria == cat_filtro
         coincide_tipo = not tipo_filtro or tipo == tipo_filtro
 
@@ -257,7 +277,7 @@ def index():
             galerias.append(item)
 
     conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, rol=session.get('rol'))
+    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, rol=session.get('rol'))
 
 @app.route('/subir', methods=['POST'])
 @login_required
