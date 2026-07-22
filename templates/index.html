@@ -396,6 +396,7 @@
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
 
+            // Renderizado según tipo de archivo
             if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) {
                 content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
             } else if (['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/')) {
@@ -405,9 +406,19 @@
                         Tu navegador no soporta la reproducción de video.
                     </video>
                 `;
-            } else if (ext === 'pdf' || fileUrl.toLowerCase().includes('.pdf')) {
-                // Lector de PDF embebido
-                content.innerHTML = `<iframe src="https://docs.google.com/viewer?url=${encodeURIComponent(fileUrl)}&embedded=true" class="w-full h-[70vh] rounded-lg border-0 shadow-inner bg-white"></iframe>`;
+            } else if (ext === 'pdf' || fileUrl.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('/raw/upload/')) {
+                // VISOR NATIVO DE PDF
+                content.innerHTML = `
+                    <object data="${fileUrl}" type="application/pdf" class="w-full h-[70vh] rounded-lg border-0 bg-white">
+                        <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
+                            <p class="text-3xl mb-2">📄</p>
+                            <p class="text-sm font-semibold text-slate-700 mb-3">Este navegador no soporta la vista previa directa de PDF.</p>
+                            <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
+                                📥 Descargar PDF Directamente
+                            </button>
+                        </div>
+                    </object>
+                `;
             } else {
                 content.innerHTML = `
                     <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
