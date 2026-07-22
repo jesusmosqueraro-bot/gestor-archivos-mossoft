@@ -162,7 +162,7 @@
                     clearTimeout(temporizadorInactividad);
                     temporizadorInactividad = setTimeout(() => {
                         alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                        window.location.href = "/logout";
+                        window.location.href = "/login?expirado=1";
                     }, TIEMPO_INACTIVIDAD_MS);
                 }
 
