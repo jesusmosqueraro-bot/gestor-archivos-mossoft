@@ -79,16 +79,16 @@
         </div>
         {% endif %}
 
-        <!-- Buscador -->
+        <!-- Buscador Corregido (Sin quiebre de texto en el botón) -->
         <div class="mb-6">
             <form action="/gestor" method="GET" class="flex flex-col sm:flex-row w-full gap-2">
-                <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar por título, descripción o imagen..." class="w-full text-sm p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <div class="flex gap-2">
-                    <button type="submit" class="w-full sm:w-auto bg-slate-700 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-800 transition-colors">
+                <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar por título, descripción o imagen..." class="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="flex gap-2 shrink-0">
+                    <button type="submit" class="w-full sm:w-auto bg-slate-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors whitespace-nowrap">
                         Buscar
                     </button>
                     {% if busqueda %}
-                        <a href="/gestor" class="w-full sm:w-auto text-center bg-slate-200 text-slate-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-300 transition-colors flex items-center justify-center">
+                        <a href="/gestor" class="w-full sm:w-auto text-center bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-300 transition-colors flex items-center justify-center whitespace-nowrap">
                             Limpiar
                         </a>
                     {% endif %}
@@ -187,26 +187,26 @@
     </script>
 
     <script>
-            (function() {
-                const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
-                let temporizadorInactividad;
+        (function() {
+            const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
+            let temporizadorInactividad;
 
-                function reiniciarTemporizador() {
-                    clearTimeout(temporizadorInactividad);
-                    temporizadorInactividad = setTimeout(() => {
-                        alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                        window.location.href = "/logout";
-                    }, TIEMPO_INACTIVIDAD_MS);
-                }
+            function reiniciarTemporizador() {
+                clearTimeout(temporizadorInactividad);
+                temporizadorInactividad = setTimeout(() => {
+                    alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
+                    window.location.href = "/logout";
+                }, TIEMPO_INACTIVIDAD_MS);
+            }
 
-                const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-                eventos.forEach(evento => {
-                    document.addEventListener(evento, reiniciarTemporizador, true);
-                });
+            const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+            eventos.forEach(evento => {
+                document.addEventListener(evento, reiniciarTemporizador, true);
+            });
 
-                reiniciarTemporizador();
-            })();
-        </script>
+            reiniciarTemporizador();
+        })();
+    </script>
     
 </body>
 </html>
