@@ -185,5 +185,28 @@
             if (btn) { aplicarBotonRgb(btn); document.getElementById('btnPicker').value = btn; }
         });
     </script>
+
+    <script>
+            (function() {
+                const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
+                let temporizadorInactividad;
+
+                function reiniciarTemporizador() {
+                    clearTimeout(temporizadorInactividad);
+                    temporizadorInactividad = setTimeout(() => {
+                        alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
+                        window.location.href = "/logout";
+                    }, TIEMPO_INACTIVIDAD_MS);
+                }
+
+                const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+                eventos.forEach(evento => {
+                    document.addEventListener(evento, reiniciarTemporizador, true);
+                });
+
+                reiniciarTemporizador();
+            })();
+        </script>
+    
 </body>
 </html>
