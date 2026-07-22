@@ -35,6 +35,13 @@
             <p class="text-[10px] font-semibold tracking-widest text-slate-500 uppercase">Documentos y Archivo</p>
         </div>
 
+        <!-- NOTIFICACIÓN DE SESIÓN EXPIRADA POR INACTIVIDAD (25 MIN) -->
+        {% if mensaje_expirado %}
+        <div class="mb-4 p-3 bg-amber-100 border border-amber-300 text-amber-800 text-xs rounded-xl text-center font-semibold shadow-sm animate-pulse">
+            {{ mensaje_expirado }}
+        </div>
+        {% endif %}
+
         {% if error %}
         <div class="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 text-xs rounded-lg text-center font-medium">
             {{ error }}
@@ -47,7 +54,7 @@
         </div>
         {% endif %}
 
-        <!-- FORMULARIO DE ACCESO (CAMPOS CONSERVADOS) -->
+        <!-- FORMULARIO DE ACCESO -->
         <form action="/login" method="POST" class="space-y-4">
             <div>
                 <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Usuario</label>
@@ -62,7 +69,7 @@
                 <input type="password" name="contrasena" required placeholder="••••••••" class="w-full text-sm px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3b52e1]/50 focus:bg-white transition-all text-slate-800">
             </div>
 
-            <!-- GOOGLE reCAPTCHA (MANTENIENDO TU CLAVE) -->
+            <!-- GOOGLE reCAPTCHA -->
             <div class="flex justify-center pt-2">
                 <div class="g-recaptcha" data-sitekey="6Lel3V4tAAAAABOKgvK5dG2sH0lEFu38wvBELCVy"></div>
             </div>
