@@ -6,6 +6,7 @@ import sqlite3
 import urllib.request
 import urllib.parse
 import json
+import unicodedata
 import psycopg2
 import cloudinary
 import cloudinary.uploader
@@ -27,6 +28,13 @@ ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
+
+# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO (QUITA TILDES Y CONVIERTE A MINÚSCULAS)
+def normalizar(texto):
+    if not texto: return ""
+    texto = unicodedata.normalize('NFD', str(texto))
+    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+    return texto.lower().strip()
 
 # ☁️ CLOUDINARY
 cloudinary.config(
@@ -81,7 +89,6 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
         )''')
-        # Migración segura para tablas existentes
         try:
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
@@ -100,7 +107,6 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
         )''')
-        # Migración segura SQLite
         try:
             cursor.execute("ALTER TABLE galerias ADD COLUMN categoria TEXT DEFAULT 'General';")
         except Exception: pass
@@ -229,18 +235,17 @@ def index():
     galerias = []
     fecha_defecto = obtener_fecha_actual()
 
-    # Palabras conectoras a ignorar en la búsqueda tipo Google
-    STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para', 'como', 'que', 'definicion', 'definición'}
+    # Solo descartar palabras irrelevantes muy cortas de 1 o 2 letras (ej: 'de', 'la', 'a', 'e')
+    STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para'}
 
-    # Procesar palabras clave de la búsqueda
     palabras_clave = []
     if busqueda_raw:
-        # Extrae palabras de más de 1 caracter
-        palabras_raw = [p.lower() for p in busqueda_raw.split() if len(p) > 1]
-        # Filtra conectores vacíos a menos que sea la única palabra buscada
-        palabras_clave = [p for p in palabras_raw if p not in STOP_WORDS]
-        if not palabras_clave:  # Si solo buscó palabras conectoras, usar las originales
-            palabras_clave = palabras_raw
+        # Extrae y normaliza las palabras (elimina tildes y convierte a minúsculas)
+        palabras_limpias = [normalizar(p) for p in busqueda_raw.split() if normalizar(p)]
+        # Filtra únicamente conectores cortitos
+        palabras_clave = [p for p in palabras_limpias if p not in STOP_WORDS]
+        if not palabras_clave:
+            palabras_clave = palabras_limpias
 
     for r in rows:
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
@@ -261,10 +266,10 @@ def index():
             'archivos': archivos
         }
 
-        # Texto consolidado donde buscará el motor
-        texto_busqueda = f"{titulo} {descripcion} {categoria} {tipo} {' '.join(archivos)}".lower()
+        # Texto consolidado y normalizado (sin tildes) donde buscará el motor
+        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {' '.join(archivos)}")
 
-        # Búsqueda Inteligente: basta con que coincida CUALQUIERA de las palabras clave principales
+        # Búsqueda Inteligente: verifica si CUALQUIERA de las palabras clave está en el texto
         if palabras_clave:
             coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave)
         else:
