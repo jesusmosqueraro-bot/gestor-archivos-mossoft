@@ -29,7 +29,7 @@ ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
-# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO (QUITA TILDES Y CONVIERTE A MINÚSCULAS)
+# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO
 def normalizar(texto):
     if not texto: return ""
     texto = unicodedata.normalize('NFD', str(texto))
@@ -312,29 +312,33 @@ def subir_archivo():
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
             
-            # Subida con forzado de extensión explicito
+            # CONFIGURACIÓN CLAVE: Para PDFs usaremos resource_type="image"
             if ext in ['mp4', 'mov', 'webm', 'avi']:
-                r_type = "video"
                 upload_result = cloudinary.uploader.upload(
                     file, 
-                    resource_type=r_type,
+                    resource_type="video",
                     use_filename=True,
                     unique_filename=True
                 )
-            elif ext in ['pdf', 'txt', 'docx']:
-                r_type = "raw"
+            elif ext == 'pdf':
                 upload_result = cloudinary.uploader.upload(
                     file, 
-                    resource_type=r_type,
-                    format=ext,
+                    resource_type="image",
+                    format="pdf",
+                    use_filename=True,
+                    unique_filename=True
+                )
+            elif ext in ['txt', 'docx']:
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type="raw",
                     use_filename=True,
                     unique_filename=True
                 )
             else:
-                r_type = "image"
                 upload_result = cloudinary.uploader.upload(
                     file, 
-                    resource_type=r_type,
+                    resource_type="image",
                     use_filename=True,
                     unique_filename=True
                 )
@@ -404,27 +408,31 @@ def editar_galeria(galeria_id):
                 ext = file.filename.rsplit('.', 1)[1].lower()
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
-                    r_type = "video"
                     upload_result = cloudinary.uploader.upload(
                         file, 
-                        resource_type=r_type,
+                        resource_type="video",
                         use_filename=True,
                         unique_filename=True
                     )
-                elif ext in ['pdf', 'txt', 'docx']:
-                    r_type = "raw"
+                elif ext == 'pdf':
                     upload_result = cloudinary.uploader.upload(
                         file, 
-                        resource_type=r_type,
-                        format=ext,
+                        resource_type="image",
+                        format="pdf",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                elif ext in ['txt', 'docx']:
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type="raw",
                         use_filename=True,
                         unique_filename=True
                     )
                 else:
-                    r_type = "image"
                     upload_result = cloudinary.uploader.upload(
                         file, 
-                        resource_type=r_type,
+                        resource_type="image",
                         use_filename=True,
                         unique_filename=True
                     )
