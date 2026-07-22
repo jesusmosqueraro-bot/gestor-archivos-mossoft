@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitácora de Logs - Gestor de Archivos</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📁</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen p-8">
+    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-md p-6">
+        
+        <div class="flex justify-between items-center border-b pb-4 mb-6">
+            <div>
+                <a href="/gestor" class="text-xs text-blue-600 hover:underline">← Volver al Gestor</a>
+                <h1 class="text-2xl font-bold text-slate-800 mt-1">📋 Bitácora de Auditoría (Logs)</h1>
+                <p class="text-xs text-slate-500">Historial de acciones y trazabilidad de cambios "Antes ➔ Después"</p>
+            </div>
+            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg border hover:bg-slate-200 font-medium">
+                Volver
+            </a>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                        <th class="p-3">Fecha y Hora</th>
+                        <th class="p-3">Usuario</th>
+                        <th class="p-3">Acción</th>
+                        <th class="p-3">Detalle del Cambio (Antes ➔ Después)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% if logs %}
+                        {% for log in logs %}
+                        <tr class="hover:bg-slate-50/80 transition-colors">
+                            <td class="p-3 text-slate-500 font-medium whitespace-nowrap">🕒 {{ log[3] }}</td>
+                            <td class="p-3 font-bold text-slate-800">👤 {{ log[0] }}</td>
+                            <td class="p-3">
+                                <span class="px-2 py-0.5 rounded-md font-bold text-[10px] uppercase border
+                                    {% if 'Creación' in log[1] %} bg-emerald-50 text-emerald-700 border-emerald-200
+                                    {% elif 'Edición' in log[1] or 'Modificación' in log[1] %} bg-amber-50 text-amber-700 border-amber-200
+                                    {% elif 'Eliminación' in log[1] %} bg-red-50 text-red-700 border-red-200
+                                    {% else %} bg-blue-50 text-blue-700 border-blue-200 {% endif %}">
+                                    {{ log[1] }}
+                                </span>
+                            </td>
+                            <td class="p-3 text-slate-700 font-mono text-[11px] bg-slate-50/50 rounded">
+                                {{ log[2] }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-slate-400">No hay registros de auditoría aún.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</body>
+</html>
