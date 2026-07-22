@@ -311,7 +311,7 @@
         {% endif %}
     </div>
 
-    <!-- MODAL PREVISUALIZACIÓN -->
+    <!-- MODAL PREVISUALIZACIÓN MULTINAVEGADOR -->
     <div id="modal-preview" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-6">
         <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden relative">
             <div class="flex justify-between items-center p-3 sm:p-4 border-b bg-slate-50">
@@ -380,10 +380,11 @@
                 window.URL.revokeObjectURL(blobUrl);
                 document.body.removeChild(a);
             } catch (err) {
-                window.open(downloadUrl, '_self');
+                window.open(downloadUrl, '_blank');
             }
         }
 
+        // 👁️ VISOR UNIVERSAL COMPATIBLE CON CUALQUIER NAVEGADOR
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -396,36 +397,44 @@
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
 
-            // Renderizado según tipo de archivo
+            // 1. IMÁGENES
             if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) {
                 content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
-            } else if (['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/')) {
+            } 
+            // 2. VIDEOS
+            else if (['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/')) {
                 content.innerHTML = `
                     <video controls autoplay class="max-h-[65vh] w-full rounded-lg shadow-lg bg-black">
                         <source src="${fileUrl}" type="video/mp4">
                         Tu navegador no soporta la reproducción de video.
                     </video>
                 `;
-            } else if (ext === 'pdf' || fileUrl.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('/raw/upload/')) {
-                // VISOR NATIVO DE PDF
+            } 
+            // 3. DOCUMENTOS Y PDF (SOPORTE MULTINAVEGADOR NATIVO + RESPALDO)
+            else if (ext === 'pdf' || fileUrl.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('/raw/upload/')) {
+                const pdfUrlCompleta = fileUrl.startsWith('http') ? fileUrl : window.location.origin + fileUrl;
+                
                 content.innerHTML = `
-                    <object data="${fileUrl}" type="application/pdf" class="w-full h-[70vh] rounded-lg border-0 bg-white">
-                        <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
-                            <p class="text-3xl mb-2">📄</p>
-                            <p class="text-sm font-semibold text-slate-700 mb-3">Este navegador no soporta la vista previa directa de PDF.</p>
-                            <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
-                                📥 Descargar PDF Directamente
+                    <div class="w-full h-[70vh] flex flex-col items-center justify-center bg-slate-50 rounded-lg relative overflow-hidden">
+                        <iframe src="https://docs.google.com/gview?url=${encodeURIComponent(pdfUrlCompleta)}&embedded=true" class="w-full h-full rounded-lg border-0 shadow"></iframe>
+                        
+                        <div class="absolute bottom-3 right-3 bg-white/90 backdrop-blur border border-slate-300 p-2 rounded-lg shadow-md text-xs flex items-center gap-2">
+                            <span class="text-slate-600">¿No carga el documento?</span>
+                            <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="bg-blue-600 text-white px-3 py-1 rounded font-medium hover:bg-blue-700">
+                                📥 Abrir / Descargar PDF
                             </button>
                         </div>
-                    </object>
+                    </div>
                 `;
-            } else {
+            } 
+            // 4. OTROS FORMATOS
+            else {
                 content.innerHTML = `
                     <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
-                        <p class="text-3xl mb-2">📄</p>
-                        <p class="text-sm font-semibold text-slate-700 mb-3">Archivo guardado en la nube</p>
-                        <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700">
-                            Descargar Archivo Directamente
+                        <p class="text-4xl mb-3">📄</p>
+                        <p class="text-sm font-semibold text-slate-700 mb-4">${fileName}</p>
+                        <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="text-xs bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors shadow">
+                            📥 Descargar Archivo Directamente
                         </button>
                     </div>
                 `;
