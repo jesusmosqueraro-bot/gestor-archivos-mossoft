@@ -17,7 +17,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, jsonify
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
@@ -82,7 +82,7 @@ def init_db():
             id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT ''
+            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
@@ -94,13 +94,15 @@ def init_db():
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';")
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';")
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';")
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;")
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;")
         except Exception: pass
     else:
         cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT ''
+            id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
@@ -113,6 +115,10 @@ def init_db():
         try: cursor.execute("ALTER TABLE galerias ADD COLUMN tipo TEXT DEFAULT 'Instructivo';")
         except Exception: pass
         try: cursor.execute("ALTER TABLE galerias ADD COLUMN tags TEXT DEFAULT '';")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN vistas INTEGER DEFAULT 0;")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE galerias ADD COLUMN descargas INTEGER DEFAULT 0;")
         except Exception: pass
     
     cursor.execute("SELECT COUNT(*) FROM usuarios")
@@ -165,7 +171,40 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🚀 PROXY SEGURO PARA ENTREGAR CUALQUIER ARCHIVO / PDF SIN BLOQUEOS DE CLOUDINARY
+# 📊 RUTAS PARA INCREMENTAR MÉTRICAS (VISTAS Y DESCARGAS)
+@app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
+@login_required
+def incrementar_vista(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
+        cursor.execute(q, (galeria_id,))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
+@login_required
+def incrementar_descarga(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
+        cursor.execute(q, (galeria_id,))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 🚀 PROXY AUTENTICADO PARA ENTREGAR PDFs
 @app.route('/pdf_proxy')
 @login_required
 def pdf_proxy():
@@ -177,17 +216,22 @@ def pdf_proxy():
         return "URL requerida", 400
 
     try:
-        # Limpiar banderas problemáticas
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
         res = requests.get(clean_url, timeout=15)
         
+        if res.status_code == 401:
+            api_key = os.environ.get('CLOUDINARY_API_KEY')
+            api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+            if api_key and api_secret:
+                res = requests.get(clean_url, auth=(api_key, api_secret), timeout=15)
+
         disposition = 'attachment' if download_flag == '1' else 'inline'
         
         headers = {
             'Content-Type': 'application/pdf',
             'Content-Disposition': f'{disposition}; filename="{filename_custom}"'
         }
-        return Response(res.content, headers=headers)
+        return Response(res.content, headers=headers, status=200)
     except Exception as e:
         return f"Error obteniendo documento: {e}", 500
 
@@ -257,7 +301,7 @@ def index():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias")
+    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias")
     rows = cursor.fetchall()
     
     galerias = []
@@ -278,6 +322,8 @@ def index():
         categoria = r[4] if len(r) > 4 and r[4] else 'General'
         tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
         tags = r[6] if len(r) > 6 and r[6] else ''
+        vistas = r[7] if len(r) > 7 and r[7] is not None else 0
+        descargas = r[8] if len(r) > 8 and r[8] is not None else 0
 
         sugerencias_titulos.append(titulo)
 
@@ -293,6 +339,8 @@ def index():
             'categoria': categoria,
             'tipo': tipo,
             'tags': tags,
+            'vistas': vistas,
+            'descargas': descargas,
             'archivos': archivos
         }
 
@@ -340,24 +388,41 @@ def subir_archivo():
             ext = file.filename.rsplit('.', 1)[1].lower()
             
             if ext in ['mp4', 'mov', 'webm', 'avi']:
-                r_type = "video"
-            elif ext in ['pdf', 'txt', 'docx']:
-                r_type = "raw"
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type="video",
+                    use_filename=True,
+                    unique_filename=True
+                )
+            elif ext == 'pdf':
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type="image",
+                    format="pdf",
+                    use_filename=True,
+                    unique_filename=True
+                )
+            elif ext in ['txt', 'docx']:
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type="raw",
+                    use_filename=True,
+                    unique_filename=True
+                )
             else:
-                r_type = "image"
+                upload_result = cloudinary.uploader.upload(
+                    file, 
+                    resource_type="image",
+                    use_filename=True,
+                    unique_filename=True
+                )
 
-            upload_result = cloudinary.uploader.upload(
-                file, 
-                resource_type=r_type,
-                use_filename=True,
-                unique_filename=True
-            )
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags) VALUES (%s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)"
         cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
         
         q_archivo = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
@@ -417,18 +482,34 @@ def editar_galeria(galeria_id):
                 ext = file.filename.rsplit('.', 1)[1].lower()
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
-                    r_type = "video"
-                elif ext in ['pdf', 'txt', 'docx']:
-                    r_type = "raw"
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type="video",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                elif ext == 'pdf':
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type="image",
+                        format="pdf",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                elif ext in ['txt', 'docx']:
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type="raw",
+                        use_filename=True,
+                        unique_filename=True
+                    )
                 else:
-                    r_type = "image"
-
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type=r_type,
-                    use_filename=True,
-                    unique_filename=True
-                )
+                    upload_result = cloudinary.uploader.upload(
+                        file, 
+                        resource_type="image",
+                        use_filename=True,
+                        unique_filename=True
+                    )
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
