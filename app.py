@@ -29,7 +29,7 @@ ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 def obtener_fecha_actual():
     return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
-# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO
+# 🧹 FUNCIÓN PARA NORMALIZAR TEXTO (QUITA TILDES Y CONVIERTE A MINÚSCULAS)
 def normalizar(texto):
     if not texto: return ""
     texto = unicodedata.normalize('NFD', str(texto))
@@ -285,7 +285,7 @@ def index():
         elif formato_filtro == 'video':
             coincide_formato = any(any(ext in a.lower() for ext in ['.mp4', '.mov', '.webm', '.avi']) or '/video/upload/' in a for a in archivos)
         elif formato_filtro == 'pdf':
-            coincide_formato = any('.pdf' in a.lower() or '.docx' in a.lower() or '.txt' in a.lower() for a in archivos)
+            coincide_formato = any('.pdf' in a.lower() or '.docx' in a.lower() or '.txt' in a.lower() or '/raw/upload/' in a for a in archivos)
 
         if coincide_busqueda and coincide_cat and coincide_tipo and coincide_formato:
             galerias.append(item)
@@ -311,8 +311,16 @@ def subir_archivo():
     for file in archivos:
         if file and archivo_permitido(file.filename):
             ext = file.filename.rsplit('.', 1)[1].lower()
-            resource_type = "video" if ext in ['mp4', 'mov', 'webm', 'avi'] else "auto"
-            upload_result = cloudinary.uploader.upload(file, resource_type=resource_type)
+            
+            # Clasificación garantizada de tipos de recursos para Cloudinary
+            if ext in ['mp4', 'mov', 'webm', 'avi']:
+                r_type = "video"
+            elif ext in ['pdf', 'txt', 'docx']:
+                r_type = "raw"
+            else:
+                r_type = "image"
+
+            upload_result = cloudinary.uploader.upload(file, resource_type=r_type)
             archivos_guardados.append(upload_result['secure_url'])
 
     if archivos_guardados:
@@ -376,8 +384,15 @@ def editar_galeria(galeria_id):
         for file in nuevos_archivos:
             if file and archivo_permitido(file.filename):
                 ext = file.filename.rsplit('.', 1)[1].lower()
-                resource_type = "video" if ext in ['mp4', 'mov', 'webm', 'avi'] else "auto"
-                upload_result = cloudinary.uploader.upload(file, resource_type=resource_type)
+                
+                if ext in ['mp4', 'mov', 'webm', 'avi']:
+                    r_type = "video"
+                elif ext in ['pdf', 'txt', 'docx']:
+                    r_type = "raw"
+                else:
+                    r_type = "image"
+
+                upload_result = cloudinary.uploader.upload(file, resource_type=r_type)
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
