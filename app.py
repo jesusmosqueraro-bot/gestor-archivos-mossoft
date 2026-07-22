@@ -6,7 +6,8 @@ import sqlite3
 import urllib.request
 import urllib.parse
 import json
-from datetime import datetime, timedelta  # ⏱️ Importado para tiempo de sesión
+import psycopg2
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, session, flash
 from werkzeug.utils import secure_filename
@@ -33,46 +34,86 @@ SMTP_PASSWORD = "gyod xyny fzvw bsxu"
 
 RECAPTCHA_SECRET_KEY = "6Lel3V4tAAAAAAWsc9oCEgoWBN95V2zQZ1E3dx2X"
 
-# 🔒 RUTA ABSOLUTA PARA EVITAR PÉRDIDA DE BASE DE DATOS
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_NAME = os.path.join(BASE_DIR, "gestor.db")
+# 🌐 CONEXIÓN ADAPTATIVA A BASE DE DATOS (POSTGRESQL EN RENDER / SQLITE EN LOCAL)
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db():
+    if DATABASE_URL:
+        # En Render usamos la URL de PostgreSQL
+        url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
+        conn = psycopg2.connect(url)
+        return conn, 'postgres'
+    else:
+        # En PC local usamos SQLite
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        DB_NAME = os.path.join(BASE_DIR, "gestor.db")
+        conn = sqlite3.connect(DB_NAME)
+        return conn, 'sqlite'
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        email TEXT NOT NULL,
-        rol TEXT NOT NULL DEFAULT 'estandar'
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-        id TEXT PRIMARY KEY,
-        titulo TEXT NOT NULL,
-        descripcion TEXT,
-        fecha TEXT
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        galeria_id TEXT,
-        filename TEXT NOT NULL,
-        FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario TEXT NOT NULL,
-        accion TEXT NOT NULL,
-        detalles TEXT,
-        fecha TEXT NOT NULL
-    )''')
+    
+    if db_type == 'postgres':
+        cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(100) UNIQUE NOT NULL,
+            password VARCHAR(200) NOT NULL,
+            email VARCHAR(200) NOT NULL,
+            rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+            id VARCHAR(50) PRIMARY KEY,
+            titulo VARCHAR(200) NOT NULL,
+            descripcion TEXT,
+            fecha VARCHAR(100)
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+            id SERIAL PRIMARY KEY,
+            galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE,
+            filename VARCHAR(255) NOT NULL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id SERIAL PRIMARY KEY,
+            usuario VARCHAR(100) NOT NULL,
+            accion VARCHAR(100) NOT NULL,
+            detalles TEXT,
+            fecha VARCHAR(100) NOT NULL
+        )''')
+    else:
+        cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT NOT NULL,
+            rol TEXT NOT NULL DEFAULT 'estandar'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+            id TEXT PRIMARY KEY,
+            titulo TEXT NOT NULL,
+            descripcion TEXT,
+            fecha TEXT
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            galeria_id TEXT,
+            filename TEXT NOT NULL,
+            FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalles TEXT,
+            fecha TEXT NOT NULL
+        )''')
     
     # PROTECCIÓN: Crear 'admin' SOLO SI la tabla de usuarios está completamente vacía
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     total_usuarios = cursor.fetchone()[0]
     if total_usuarios == 0:
-        cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)",
-                       ('admin', '1234', 'admin@ejemplo.com', 'admin'))
+        query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
+        cursor.execute(query_admin, ('admin', '1234', 'admin@ejemplo.com', 'admin'))
 
     conn.commit()
     conn.close()
@@ -80,11 +121,11 @@ def init_db():
 init_db()
 
 def registrar_log(usuario, accion, detalles=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
     fecha_actual = datetime.now().strftime("%d/%m/%Y %I:%M %p")
-    cursor.execute("INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)",
-                   (usuario, accion, detalles, fecha_actual))
+    query = "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
+    cursor.execute(query, (usuario, accion, detalles, fecha_actual))
     conn.commit()
     conn.close()
 
@@ -163,9 +204,10 @@ def login():
             return redirect(url_for('bienvenida'))
 
         # 3. Verificación en base de datos para el resto de usuarios
-        conn = sqlite3.connect(DB_NAME)
+        conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT username, password, rol FROM usuarios WHERE username = ?", (username,))
+        query = "SELECT username, password, rol FROM usuarios WHERE username = %s" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE username = ?"
+        cursor.execute(query, (username,))
         user = cursor.fetchone()
         conn.close()
 
@@ -200,9 +242,10 @@ def logout():
 def recuperar():
     if request.method == 'POST':
         email = request.form.get('email')
-        conn = sqlite3.connect(DB_NAME)
+        conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT username FROM usuarios WHERE email = ?", (email,))
+        query = "SELECT username FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE email = ?"
+        cursor.execute(query, (email,))
         user = cursor.fetchone()
         conn.close()
 
@@ -225,9 +268,10 @@ def validar_codigo():
 
     if session.get('reset_code') and codigo_ingresado == session['reset_code']:
         username = session['reset_user']
-        conn = sqlite3.connect(DB_NAME)
+        conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET password = ? WHERE username = ?", (nueva_password, username))
+        query = "UPDATE usuarios SET password = %s WHERE username = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE username = ?"
+        cursor.execute(query, (nueva_password, username))
         conn.commit()
         conn.close()
         registrar_log(username, "Restablecimiento de Contraseña", "Contraseña cambiada por código")
@@ -252,7 +296,7 @@ def bienvenida():
 @login_required
 def index():
     busqueda = request.args.get('q', '').strip().lower()
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT id, titulo, descripcion, fecha FROM galerias")
     rows = cursor.fetchall()
@@ -265,7 +309,8 @@ def index():
         if not fecha:
             fecha = fecha_defecto
 
-        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = ?", (galeria_id,))
+        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ?"
+        cursor.execute(query_arch, (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
         item = {'id': galeria_id, 'titulo': titulo, 'descripcion': descripcion, 'fecha': fecha, 'archivos': archivos}
@@ -300,12 +345,15 @@ def subir_archivo():
             archivos_guardados.append(nombre_seguro)
 
     if archivos_guardados:
-        conn = sqlite3.connect(DB_NAME)
+        conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO galerias (id, titulo, descripcion, fecha) VALUES (?, ?, ?, ?)",
-                       (galeria_id, titulo, descripcion, fecha_actual))
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha) VALUES (?, ?, ?, ?)"
+        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual))
+        
+        q_archivo = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
         for fname in archivos_guardados:
-            cursor.execute("INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)", (galeria_id, fname))
+            cursor.execute(q_archivo, (galeria_id, fname))
+        
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Creación de Galería", f"Nueva galería creada: '{titulo}' con {len(archivos_guardados)} archivo(s)")
@@ -319,15 +367,17 @@ def editar_galeria(galeria_id):
     nuevo_titulo = request.form.get('titulo')
     nueva_desc = request.form.get('descripcion')
     
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT titulo, descripcion FROM galerias WHERE id = ?", (galeria_id,))
+    q_sel = "SELECT titulo, descripcion FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion FROM galerias WHERE id = ?"
+    cursor.execute(q_sel, (galeria_id,))
     anterior = cursor.fetchone()
     
     if anterior:
         titulo_ant, desc_ant = anterior[0], anterior[1]
-        cursor.execute("UPDATE galerias SET titulo = ?, descripcion = ? WHERE id = ?", (nuevo_titulo, nueva_desc, galeria_id))
+        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, galeria_id))
         conn.commit()
         
         cambios = []
@@ -346,14 +396,17 @@ def editar_galeria(galeria_id):
 @login_required
 @admin_required
 def eliminar_galeria(galeria_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT titulo FROM galerias WHERE id = ?", (galeria_id,))
+    q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+    cursor.execute(q_sel, (galeria_id,))
     galeria = cursor.fetchone()
     nombre_galeria = galeria[0] if galeria else galeria_id
 
-    cursor.execute("DELETE FROM galerias WHERE id = ?", (galeria_id,))
-    cursor.execute("DELETE FROM archivos WHERE galeria_id = ?", (galeria_id,))
+    q_del1 = "DELETE FROM galerias WHERE id = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?"
+    q_del2 = "DELETE FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?"
+    cursor.execute(q_del1, (galeria_id,))
+    cursor.execute(q_del2, (galeria_id,))
     conn.commit()
     conn.close()
     registrar_log(session['username'], "Eliminación de Galería", f"Se eliminó la galería completa: '{nombre_galeria}'")
@@ -363,9 +416,10 @@ def eliminar_galeria(galeria_id):
 @login_required
 @admin_required
 def eliminar_imagen(galeria_id, filename):
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM archivos WHERE galeria_id = ? AND filename = ?", (galeria_id, filename))
+    q_del = "DELETE FROM archivos WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ? AND filename = ?"
+    cursor.execute(q_del, (galeria_id, filename))
     conn.commit()
     conn.close()
     registrar_log(session['username'], "Eliminación de Imagen", f"Se eliminó el archivo: '{filename}' (Galería ID: {galeria_id})")
@@ -375,7 +429,7 @@ def eliminar_imagen(galeria_id, filename):
 @login_required
 @admin_required
 def gestion_usuarios():
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
 
     if request.method == 'POST':
@@ -385,17 +439,17 @@ def gestion_usuarios():
         nuevo_rol = request.form.get('rol', 'estandar')
 
         try:
-            cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)",
-                           (nuevo_user, nuevo_pass, nuevo_email, nuevo_rol))
+            q_ins = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
+            cursor.execute(q_ins, (nuevo_user, nuevo_pass, nuevo_email, nuevo_rol))
             conn.commit()
             registrar_log(session['username'], "Creación de Usuario", f"Nuevo usuario: '{nuevo_user}' (Rol: {nuevo_rol}, Email: {nuevo_email})")
-        except sqlite3.IntegrityError:
-            pass
+        except Exception as e:
+            print(f"Error al crear usuario: {e}")
 
     busqueda = request.args.get('q', '').strip().lower()
     if busqueda:
-        cursor.execute("SELECT id, username, email, rol FROM usuarios WHERE LOWER(username) LIKE ? OR LOWER(email) LIKE ?",
-                       (f"%{busqueda}%", f"%{busqueda}%"))
+        q_search = "SELECT id, username, email, rol FROM usuarios WHERE LOWER(username) LIKE %s OR LOWER(email) LIKE %s" if db_type == 'postgres' else "SELECT id, username, email, rol FROM usuarios WHERE LOWER(username) LIKE ? OR LOWER(email) LIKE ?"
+        cursor.execute(q_search, (f"%{busqueda}%", f"%{busqueda}%"))
     else:
         cursor.execute("SELECT id, username, email, rol FROM usuarios")
 
@@ -413,21 +467,22 @@ def editar_usuario(user_id):
     nueva_pass = request.form.get('password')
     nuevo_rol = request.form.get('rol')
 
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT username, email, rol FROM usuarios WHERE id = ?", (user_id,))
+    q_sel = "SELECT username, email, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username, email, rol FROM usuarios WHERE id = ?"
+    cursor.execute(q_sel, (user_id,))
     anterior = cursor.fetchone()
 
     if anterior:
         user_ant, email_ant, rol_ant = anterior[0], anterior[1], anterior[2]
         
         if nueva_pass and nueva_pass.strip():
-            cursor.execute("UPDATE usuarios SET username = ?, email = ?, password = ?, rol = ? WHERE id = ?",
-                           (nuevo_user, nuevo_email, nueva_pass, nuevo_rol, user_id))
+            q_upd = "UPDATE usuarios SET username = %s, email = %s, password = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET username = ?, email = ?, password = ?, rol = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_user, nuevo_email, nueva_pass, nuevo_rol, user_id))
         else:
-            cursor.execute("UPDATE usuarios SET username = ?, email = ?, rol = ? WHERE id = ?",
-                           (nuevo_user, nuevo_email, nuevo_rol, user_id))
+            q_upd = "UPDATE usuarios SET username = %s, email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET username = ?, email = ?, rol = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_user, nuevo_email, nuevo_rol, user_id))
 
         conn.commit()
 
@@ -451,13 +506,15 @@ def editar_usuario(user_id):
 @login_required
 @admin_required
 def eliminar_usuario(user_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT username FROM usuarios WHERE id = ?", (user_id,))
+    q_sel = "SELECT username FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE id = ?"
+    cursor.execute(q_sel, (user_id,))
     target_user = cursor.fetchone()
 
     if target_user and target_user[0] != 'admin':
-        cursor.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
+        q_del = "DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?"
+        cursor.execute(q_del, (user_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó permanentemente al usuario: '{target_user[0]}'")
 
@@ -468,7 +525,7 @@ def eliminar_usuario(user_id):
 @login_required
 @admin_required
 def ver_logs():
-    conn = sqlite3.connect(DB_NAME)
+    conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT usuario, accion, detalles, fecha FROM logs ORDER BY id DESC")
     lista_logs = cursor.fetchall()
