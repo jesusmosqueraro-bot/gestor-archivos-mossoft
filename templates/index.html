@@ -129,13 +129,23 @@
                         </div>
 
                         {% if rol == 'admin' %}
-                        <!-- Formulario de Edición (Solo Admin) -->
-                        <form id="edit-form-{{ galeria.id }}" action="/editar_galeria/{{ galeria.id }}" method="POST" class="hidden mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-2">
-                            <input type="text" name="titulo" value="{{ galeria.titulo }}" required class="text-sm p-2 border rounded w-full">
-                            <textarea name="descripcion" rows="2" class="text-sm p-2 border rounded w-full">{{ galeria.descripcion }}</textarea>
-                            <div class="flex justify-end gap-2">
-                                <button type="button" onclick="document.getElementById('edit-form-{{ galeria.id }}').classList.add('hidden')" class="text-xs bg-slate-200 px-3 py-1 rounded">Cancelar</button>
-                                <button type="submit" class="text-xs bg-amber-600 text-white px-3 py-1 rounded">Guardar Cambios</button>
+                        <!-- Formulario de Edición (Solo Admin con soporte para archivos) -->
+                        <form id="edit-form-{{ galeria.id }}" action="/editar_galeria/{{ galeria.id }}" method="POST" enctype="multipart/form-data" class="hidden mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-amber-900 mb-1">Título de la galería</label>
+                                <input type="text" name="titulo" value="{{ galeria.titulo }}" required class="text-sm p-2 border rounded w-full focus:outline-none focus:ring-1 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-amber-900 mb-1">Descripción</label>
+                                <textarea name="descripcion" rows="2" class="text-sm p-2 border rounded w-full focus:outline-none focus:ring-1 focus:ring-amber-500">{{ galeria.descripcion }}</textarea>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-amber-900 mb-1">Agregar más imágenes / archivos (opcional)</label>
+                                <input type="file" name="nuevos_archivos" multiple class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200">
+                            </div>
+                            <div class="flex justify-end gap-2 pt-1">
+                                <button type="button" onclick="document.getElementById('edit-form-{{ galeria.id }}').classList.add('hidden')" class="text-xs bg-slate-200 text-slate-700 px-3 py-1.5 rounded font-medium hover:bg-slate-300">Cancelar</button>
+                                <button type="submit" class="text-xs bg-amber-600 text-white px-3 py-1.5 rounded font-medium hover:bg-amber-700">Guardar Cambios</button>
                             </div>
                         </form>
                         {% endif %}
