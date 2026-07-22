@@ -12,6 +12,7 @@ import cloudinary.uploader
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 
@@ -20,6 +21,12 @@ app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
+
+# 🇨🇴 CONFIGURACIÓN DE ZONA HORARIA COLOMBIA
+ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
+
+def obtener_fecha_actual():
+    return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
 
 # ☁️ CONFIGURACIÓN DE CLOUDINARY (ALMACENAMIENTO PERMANENTE EN LA NUBE)
 cloudinary.config(
@@ -102,7 +109,7 @@ def registrar_log(usuario, accion, detalles=""):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        fecha_actual = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+        fecha_actual = obtener_fecha_actual()
         query = "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
         cursor.execute(query, (usuario, accion, detalles, fecha_actual))
         conn.commit()
@@ -204,7 +211,7 @@ def index():
     rows = cursor.fetchall()
     
     galerias = []
-    fecha_defecto = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+    fecha_defecto = obtener_fecha_actual()
 
     for r in rows:
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
@@ -228,7 +235,7 @@ def subir_archivo():
     descripcion = request.form.get('descripcion', '')
 
     galeria_id = str(uuid.uuid4())[:8]
-    fecha_actual = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+    fecha_actual = obtener_fecha_actual()
     
     archivos_guardados = []
     for file in archivos:
