@@ -209,7 +209,6 @@
                             </div>
 
                             <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end shrink-0 pt-1 sm:pt-0">
-                                <!-- 🔗 BOTÓN COPIAR ENLACE DIRECTO -->
                                 <button onclick="copiarEnlaceDirecto('{{ galeria.titulo }}')" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded hover:bg-slate-200 flex items-center gap-1 font-medium" title="Copiar enlace a este instructivo">
                                     🔗 Enlace
                                 </button>
@@ -329,7 +328,6 @@
     </div>
 
     <script>
-        // 🔗 COPIAR ENLACE DIRECTO AL PORTAPAPELES
         function copiarEnlaceDirecto(tituloInstructivo) {
             const urlDirecta = window.location.origin + '/gestor?q=' + encodeURIComponent(tituloInstructivo);
             navigator.clipboard.writeText(urlDirecta).then(() => {
@@ -339,7 +337,6 @@
             });
         }
 
-        // 🟡 RESALTADO DE TEXTO
         document.addEventListener('DOMContentLoaded', () => {
             const query = "{{ busqueda }}".trim();
             if (!query) return;
@@ -384,7 +381,7 @@
             }
         }
 
-        // 👁️ VISOR UNIVERSAL COMPATIBLE CON CUALQUIER NAVEGADOR
+        // 👁️ LÓGICA DE PREVISUALIZACIÓN CORREGIDA (PDF TIENE PRIORIDAD 1)
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -397,21 +394,12 @@
             const ext = fileName.split('.').pop().toLowerCase();
             content.innerHTML = '';
 
-            // 1. IMÁGENES
-            if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) {
-                content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
-            } 
-            // 2. VIDEOS
-            else if (['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/')) {
-                content.innerHTML = `
-                    <video controls autoplay class="max-h-[65vh] w-full rounded-lg shadow-lg bg-black">
-                        <source src="${fileUrl}" type="video/mp4">
-                        Tu navegador no soporta la reproducción de video.
-                    </video>
-                `;
-            } 
-            // 3. DOCUMENTOS Y PDF (SOPORTE MULTINAVEGADOR NATIVO + RESPALDO)
-            else if (ext === 'pdf' || fileUrl.toLowerCase().includes('.pdf') || fileUrl.toLowerCase().includes('/raw/upload/')) {
+            const esPDF = ext === 'pdf' || fileName.toLowerCase().endsWith('.pdf') || fileUrl.toLowerCase().includes('.pdf');
+            const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
+            const esImagen = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+
+            // 1. EVALUAR PDF PRIMERO (Evita confundirse con /image/upload/)
+            if (esPDF) {
                 const pdfUrlCompleta = fileUrl.startsWith('http') ? fileUrl : window.location.origin + fileUrl;
                 
                 content.innerHTML = `
@@ -419,13 +407,26 @@
                         <iframe src="https://docs.google.com/gview?url=${encodeURIComponent(pdfUrlCompleta)}&embedded=true" class="w-full h-full rounded-lg border-0 shadow"></iframe>
                         
                         <div class="absolute bottom-3 right-3 bg-white/90 backdrop-blur border border-slate-300 p-2 rounded-lg shadow-md text-xs flex items-center gap-2">
-                            <span class="text-slate-600">¿No carga el documento?</span>
+                            <span class="text-slate-600">¿No carga la vista previa?</span>
                             <button onclick="descargarArchivoDirecto('${fileUrl}', '${fileName}')" class="bg-blue-600 text-white px-3 py-1 rounded font-medium hover:bg-blue-700">
                                 📥 Abrir / Descargar PDF
                             </button>
                         </div>
                     </div>
                 `;
+            } 
+            // 2. VIDEOS
+            else if (esVideo) {
+                content.innerHTML = `
+                    <video controls autoplay class="max-h-[65vh] w-full rounded-lg shadow-lg bg-black">
+                        <source src="${fileUrl}" type="video/mp4">
+                        Tu navegador no soporta la reproducción de video.
+                    </video>
+                `;
+            } 
+            // 3. IMÁGENES
+            else if (esImagen) {
+                content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
             } 
             // 4. OTROS FORMATOS
             else {
