@@ -17,12 +17,22 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
 
+# 🔒 IDENTIFICADOR ÚNICO DEL SERVIDOR ACTIVO
+# Se regenera cada vez que Render inicia o despierta el servidor
+SERVER_INSTANCE_ID = str(uuid.uuid4())
+
 # ⏱️ CONFIGURACIÓN DE INACTIVIDAD (25 MINUTOS)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
 @app.before_request
-def make_session_permanent():
+def validar_instancia_y_sesion():
     session.permanent = True  # Renueva la duración de la sesión en cada petición
+    
+    # 🛑 PROTECCIÓN: Si el servidor se reinició / despertó de inactividad, se destruye la sesión
+    if session.get('logged_in'):
+        if session.get('instance_id') != SERVER_INSTANCE_ID:
+            session.clear()
+            return redirect(url_for('login', expirado='1'))
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -41,12 +51,10 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
     if DATABASE_URL:
-        # En Render usamos la URL de PostgreSQL
         url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
         conn = psycopg2.connect(url)
         return conn, 'postgres'
     else:
-        # En PC local usamos SQLite
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         DB_NAME = os.path.join(BASE_DIR, "gestor.db")
         conn = sqlite3.connect(DB_NAME)
@@ -110,7 +118,6 @@ def init_db():
             fecha TEXT NOT NULL
         )''')
     
-    # PROTECCIÓN: Crear 'admin' SOLO SI la tabla de usuarios está completamente vacía
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     total_usuarios = cursor.fetchone()[0]
     if total_usuarios == 0:
@@ -205,6 +212,7 @@ def login():
             session['logged_in'] = True
             session['username'] = 'admin'
             session['rol'] = 'admin'
+            session['instance_id'] = SERVER_INSTANCE_ID  # 🔑 Vincula la sesión a la instancia actual del servidor
             registrar_log('admin', "Inicio de Sesión", "Inicio de sesión exitoso como admin")
             return redirect(url_for('bienvenida'))
 
@@ -221,6 +229,7 @@ def login():
             session['logged_in'] = True
             session['username'] = user[0]
             session['rol'] = user[2]
+            session['instance_id'] = SERVER_INSTANCE_ID  # 🔑 Vincula la sesión a la instancia actual del servidor
             registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
             return redirect(url_for('bienvenida'))
 
@@ -228,10 +237,7 @@ def login():
 
     mensaje_expirado = None
     if request.args.get('expirado') == '1':
-        if session.get('username'):
-            registrar_log(session['username'], "Sesión Expirada", "Cierre automático por inactividad (25 min)")
-        session.clear()
-        mensaje_expirado = "⚠️ Tu sesión ha expirado por inactividad (25 min). Por favor, ingresa tus credenciales nuevamente."
+        mensaje_expirado = "⚠️ Tu sesión ha expirado por inactividad o reinicio del servidor. Por favor, ingresa tus credenciales nuevamente."
 
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
@@ -364,7 +370,6 @@ def subir_archivo():
 
     return redirect(url_for('index'))
 
-# 🔄 RUTA DE EDICIÓN CON SOPORTE PARA ADJUNTAR NUEVOS ARCHIVOS
 @app.route('/editar_galeria/<galeria_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -386,7 +391,6 @@ def editar_galeria(galeria_id):
             q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ? WHERE id = ?"
             cursor.execute(q_upd, (nuevo_titulo, nueva_desc, galeria_id))
             
-            # Guardar nuevas imágenes si se seleccionaron
             archivos_guardados = []
             os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             for file in nuevos_archivos:
