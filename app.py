@@ -226,6 +226,7 @@ def index():
     busqueda_raw = request.args.get('q', '').strip()
     cat_filtro = request.args.get('cat', '').strip()
     tipo_filtro = request.args.get('tipo', '').strip()
+    formato_filtro = request.args.get('formato', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -233,16 +234,14 @@ def index():
     rows = cursor.fetchall()
     
     galerias = []
+    sugerencias_titulos = []
     fecha_defecto = obtener_fecha_actual()
 
-    # Solo descartar palabras irrelevantes muy cortas de 1 o 2 letras (ej: 'de', 'la', 'a', 'e')
     STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para'}
 
     palabras_clave = []
     if busqueda_raw:
-        # Extrae y normaliza las palabras (elimina tildes y convierte a minúsculas)
         palabras_limpias = [normalizar(p) for p in busqueda_raw.split() if normalizar(p)]
-        # Filtra únicamente conectores cortitos
         palabras_clave = [p for p in palabras_limpias if p not in STOP_WORDS]
         if not palabras_clave:
             palabras_clave = palabras_limpias
@@ -251,6 +250,8 @@ def index():
         galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
         categoria = r[4] if len(r) > 4 and r[4] else 'General'
         tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
+
+        sugerencias_titulos.append(titulo)
 
         query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ?"
         cursor.execute(query_arch, (galeria_id,))
@@ -266,10 +267,8 @@ def index():
             'archivos': archivos
         }
 
-        # Texto consolidado y normalizado (sin tildes) donde buscará el motor
         texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {' '.join(archivos)}")
 
-        # Búsqueda Inteligente: verifica si CUALQUIERA de las palabras clave está en el texto
         if palabras_clave:
             coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave)
         else:
@@ -278,11 +277,19 @@ def index():
         coincide_cat = not cat_filtro or categoria == cat_filtro
         coincide_tipo = not tipo_filtro or tipo == tipo_filtro
 
-        if coincide_busqueda and coincide_cat and coincide_tipo:
+        coincide_formato = True
+        if formato_filtro == 'imagen':
+            coincide_formato = any(any(ext in a.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']) or '/image/upload/' in a for a in archivos)
+        elif formato_filtro == 'video':
+            coincide_formato = any(any(ext in a.lower() for ext in ['.mp4', '.mov', '.webm', '.avi']) or '/video/upload/' in a for a in archivos)
+        elif formato_filtro == 'pdf':
+            coincide_formato = any('.pdf' in a.lower() or '.docx' in a.lower() or '.txt' in a.lower() for a in archivos)
+
+        if coincide_busqueda and coincide_cat and coincide_tipo and coincide_formato:
             galerias.append(item)
 
     conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, rol=session.get('rol'))
+    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
 @app.route('/subir', methods=['POST'])
 @login_required
@@ -335,9 +342,29 @@ def editar_galeria(galeria_id):
     cursor = conn.cursor()
     
     try:
+        # 1. Consultar estado previo para la auditoría de cambios en logs
+        q_sel = "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo FROM galerias WHERE id = ?"
+        cursor.execute(q_sel, (galeria_id,))
+        antiguo = cursor.fetchone()
+
+        cambios = []
+        if antiguo:
+            tit_old, desc_old, cat_old, tipo_old = antiguo[0], antiguo[1], antiguo[2] or 'General', antiguo[3] or 'Instructivo'
+            if tit_old != nuevo_titulo:
+                cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
+            if desc_old != nueva_desc:
+                cambios.append(f"Descripción: '{desc_old}' ➔ '{nueva_desc}'")
+            if cat_old != nueva_cat:
+                cambios.append(f"Categoría: '{cat_old}' ➔ '{nueva_cat}'")
+            if tipo_old != nuevo_tipo:
+                cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
+
+        # 2. Guardar las modificaciones
         q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ? WHERE id = ?"
         cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, galeria_id))
         
+        # 3. Guardar archivos nuevos
+        archivos_agregados = 0
         for file in nuevos_archivos:
             if file and archivo_permitido(file.filename):
                 ext = file.filename.rsplit('.', 1)[1].lower()
@@ -346,11 +373,24 @@ def editar_galeria(galeria_id):
                 
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
+                archivos_agregados += 1
+
+        if archivos_agregados > 0:
+            cambios.append(f"Se adjuntaron {archivos_agregados} archivo(s) nuevo(s)")
 
         conn.commit()
-        registrar_log(session['username'], "Edición de Galería", f"Galería ID {galeria_id} actualizada")
+
+        # 4. Registrar trazabilidad completa
+        if cambios:
+            detalles_log = f"Galería '{nuevo_titulo}' (ID: {galeria_id}) :: " + " | ".join(cambios)
+        else:
+            detalles_log = f"Galería '{nuevo_titulo}' (ID: {galeria_id}) re-guardada sin modificaciones"
+
+        registrar_log(session['username'], "Edición de Galería", detalles_log)
+
     except Exception as e:
         conn.rollback()
+        print(f"Error en edición: {e}")
 
     conn.close()
     return redirect(url_for('index'))
