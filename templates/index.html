@@ -287,9 +287,9 @@
                                             👁️ Ver
                                         </button>
                                         
-                                        <a href="javascript:void(0)" onclick="descargarArchivoDirecto('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="text-xs text-center bg-blue-50 border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded hover:bg-blue-100 font-bold" title="Descargar directo">
+                                        <button type="button" onclick="descargarArchivoDirecto('{{ img }}', '{{ img.split('/')[-1] if 'http' in img else img }}')" class="text-xs text-center bg-blue-50 border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded hover:bg-blue-100 font-bold" title="Descargar directo">
                                             📥
-                                        </a>
+                                        </button>
 
                                         {% if rol == 'admin' %}
                                         <form action="/eliminar_imagen/{{ galeria.id }}/{{ img | urlencode }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar únicamente este archivo?');">
@@ -362,26 +362,19 @@
             return fileUrl;
         }
 
-        async function descargarArchivoDirecto(fileUrl, fileName) {
+        // 📥 DESCARGA DIRECTA OPTIMIZADA
+        function descargarArchivoDirecto(fileUrl, fileName) {
             const downloadUrl = obtenerUrlDescargaCloudinary(fileUrl);
-            try {
-                const response = await fetch(downloadUrl);
-                const blob = await response.blob();
-                const blobUrl = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = blobUrl;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(blobUrl);
-                document.body.removeChild(a);
-            } catch (err) {
-                window.open(downloadUrl, '_blank');
-            }
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.target = '_blank';
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
 
-        // 👁️ LÓGICA DE PREVISUALIZACIÓN CORREGIDA (PDF TIENE PRIORIDAD 1)
+        // 👁️ LÓGICA DE PREVISUALIZACIÓN MULTINAVEGADOR
         function abrirPrevisualizacion(fileUrl, fileName) {
             const modal = document.getElementById('modal-preview');
             const title = document.getElementById('preview-filename');
@@ -398,7 +391,7 @@
             const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
             const esImagen = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
 
-            // 1. EVALUAR PDF PRIMERO (Evita confundirse con /image/upload/)
+            // 1. EVALUAR PDF CON VISOR DE RESPALDO MULTINAVEGADOR
             if (esPDF) {
                 const pdfUrlCompleta = fileUrl.startsWith('http') ? fileUrl : window.location.origin + fileUrl;
                 
