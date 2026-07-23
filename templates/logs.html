@@ -13,25 +13,56 @@
         }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-3 sm:p-8">
+<body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300">
 
-    <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full">
+    <div class="custom-card max-w-6xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full transition-colors duration-300">
         
-        <!-- Encabezado -->
+        <!-- Encabezado y Control RGB Colapsable -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-6 gap-3">
             <div>
                 <a href="/gestor" class="text-xs text-blue-600 hover:underline">← Volver al Gestor</a>
-                <h1 class="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
+                <h1 class="custom-text text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
                     📑 Bitácora de Auditoría (Logs)
                 </h1>
                 <p class="text-xs text-slate-500">Historial de acciones, descargas y trazabilidad de la plataforma</p>
             </div>
-            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium">
-                Volver
-            </a>
+
+            <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <!-- 🎨 PANEL RGB COLAPSABLE EN LOGS -->
+                <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 transition-all duration-300">
+                    <button onclick="togglePanelRgb()" id="btn-toggle-rgb" class="text-xs font-bold px-2 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1 text-slate-700" title="Plegar / Desplegar Colores">
+                        🎨 <span id="flecha-rgb">➡️</span>
+                    </button>
+
+                    <div id="opciones-rgb" class="flex flex-wrap items-center gap-1.5 ml-1.5 transition-all duration-300 overflow-hidden">
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo General">
+                            <span class="text-[10px] font-semibold text-slate-600">Fondo</span>
+                            <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo de Tarjeta">
+                            <span class="text-[10px] font-semibold text-slate-600">Tarjeta</span>
+                            <input type="color" id="cardPicker" value="#ffffff" oninput="aplicarContenedorRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Texto">
+                            <span class="text-[10px] font-semibold text-slate-600">Texto</span>
+                            <input type="color" id="textPicker" value="#1e293b" oninput="aplicarTextoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <button onclick="restablecerTemaRgb()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-lg text-xs font-bold transition-colors" title="Restablecer Colores Originales">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+
+                <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium">
+                    Volver
+                </a>
+            </div>
         </div>
 
-        <!-- 🔍 Panel de Filtros de Auditoría -->
+        <!-- 🔍 Panel de Filtros -->
         <form action="/logs" method="GET" class="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 
@@ -57,7 +88,7 @@
                     </select>
                 </div>
 
-                <!-- Búsqueda General por Texto / Fecha -->
+                <!-- Búsqueda General (Texto o Fecha) -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">🔍 Buscar detalle o fecha</label>
                     <div class="flex gap-1">
@@ -116,7 +147,7 @@
                                         {{ log[1] }}
                                     </span>
                                 </td>
-                                <td class="p-3 leading-relaxed text-slate-600">
+                                <td class="custom-text p-3 leading-relaxed text-slate-600">
                                     {{ log[2] }}
                                 </td>
                             </tr>
@@ -134,5 +165,64 @@
 
     </div>
 
+    <script>
+        // 🎨 SISTEMA DUAL RGB CON PANELES COLAPSABLES
+        function togglePanelRgb() {
+            const contenedor = document.getElementById('opciones-rgb');
+            const flecha = document.getElementById('flecha-rgb');
+            if (contenedor.classList.contains('hidden')) {
+                contenedor.classList.remove('hidden');
+                flecha.textContent = '➡️';
+                localStorage.setItem('rgb_colapsado', 'false');
+            } else {
+                contenedor.classList.add('hidden');
+                flecha.textContent = '⬅️';
+                localStorage.setItem('rgb_colapsado', 'true');
+            }
+        }
+
+        function aplicarFondoRgb(colorHex) {
+            document.body.style.backgroundColor = colorHex;
+            localStorage.setItem('rgb_bg', colorHex);
+        }
+
+        function aplicarContenedorRgb(colorHex) {
+            document.querySelectorAll('.custom-card').forEach(card => {
+                card.style.backgroundColor = colorHex;
+            });
+            localStorage.setItem('rgb_card', colorHex);
+        }
+
+        function aplicarTextoRgb(colorHex) {
+            document.querySelectorAll('.custom-text').forEach(txt => {
+                txt.style.color = colorHex;
+            });
+            localStorage.setItem('rgb_text', colorHex);
+        }
+
+        function restablecerTemaRgb() {
+            localStorage.removeItem('rgb_bg');
+            localStorage.removeItem('rgb_card');
+            localStorage.removeItem('rgb_btn');
+            localStorage.removeItem('rgb_text');
+            location.reload();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const bg = localStorage.getItem('rgb_bg');
+            const card = localStorage.getItem('rgb_card');
+            const text = localStorage.getItem('rgb_text');
+            const isColapsado = localStorage.getItem('rgb_colapsado') === 'true';
+
+            if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
+            if (card) { aplicarContenedorRgb(card); document.getElementById('cardPicker').value = card; }
+            if (text) { aplicarTextoRgb(text); document.getElementById('textPicker').value = text; }
+
+            if (isColapsado) {
+                document.getElementById('opciones-rgb').classList.add('hidden');
+                document.getElementById('flecha-rgb').textContent = '⬅️';
+            }
+        });
+    </script>
 </body>
 </html>
