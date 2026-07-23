@@ -30,47 +30,100 @@
             </a>
         </div>
 
-        {% if eliminados %}
-            <div class="flex flex-col gap-4">
-                {% for item in eliminados %}
-                    <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex flex-wrap items-center gap-2 mb-1">
-                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
-                                    🏷️ {{ item[4] }}
-                                </span>
-                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
-                                    📌 {{ item[5] }}
-                                </span>
-                                <span class="text-[10px] bg-slate-200 text-slate-600 font-medium px-2 py-0.5 rounded">
-                                    🕒 {{ item[3] }}
-                                </span>
+        {% if eliminados or archivos_eliminados %}
+            
+            <!-- SECCIÓN 1: INSTRUCTIVOS COMPLETOS ELIMINADOS -->
+            {% if eliminados %}
+            <div class="mb-8">
+                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    📁 Instructivos Completos en Papelera ({{ eliminados | length }})
+                </h2>
+                <div class="flex flex-col gap-3">
+                    {% for item in eliminados %}
+                        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                                        🏷️ {{ item[4] }}
+                                    </span>
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                                        📌 {{ item[5] }}
+                                    </span>
+                                    <span class="text-[10px] bg-slate-200 text-slate-600 font-medium px-2 py-0.5 rounded">
+                                        🕒 {{ item[3] }}
+                                    </span>
+                                </div>
+                                <h3 class="text-base font-bold text-slate-800 truncate">{{ item[1] }}</h3>
+                                <p class="text-xs text-slate-600 line-clamp-2 mt-0.5">{{ item[2] }}</p>
                             </div>
-                            <h3 class="text-base font-bold text-slate-800 truncate">{{ item[1] }}</h3>
-                            <p class="text-xs text-slate-600 line-clamp-2 mt-0.5">{{ item[2] }}</p>
-                        </div>
 
-                        <div class="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
-                            <form action="/restaurar_galeria/{{ item[0] }}" method="POST">
-                                <button type="submit" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1">
-                                    🔄 Restaurar
-                                </button>
-                            </form>
+                            <div class="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                                <form action="/restaurar_galeria/{{ item[0] }}" method="POST">
+                                    <button type="submit" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1">
+                                        🔄 Restaurar Instructivo
+                                    </button>
+                                </form>
 
-                            <form action="/destruir_galeria/{{ item[0] }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar PERMANENTEMENTE este instructivo? Esta acción NO se puede deshacer.');">
-                                <button type="submit" class="text-xs bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg font-bold hover:bg-red-200 transition-colors">
-                                    💥 Borrar Definitivo
-                                </button>
-                            </form>
+                                <form action="/destruir_galeria/{{ item[0] }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar PERMANENTEMENTE este instructivo y todos sus archivos?');">
+                                    <button type="submit" class="text-xs bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg font-bold hover:bg-red-200 transition-colors">
+                                        💥 Borrar Definitivo
+                                    </button>
+                                </form>
+                            </div>
                         </div>
-                    </div>
-                {% endfor %}
+                    {% endfor %}
+                </div>
             </div>
+            {% endif %}
+
+            <!-- SECCIÓN 2: ARCHIVOS / CAPTURAS INDIVIDUALES ELIMINADAS -->
+            {% if archivos_eliminados %}
+            <div>
+                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    🖼️ Archivos / Capturas Sueltas Eliminadas ({{ archivos_eliminados | length }})
+                </h2>
+                <div class="flex flex-col gap-3">
+                    {% for arch in archivos_eliminados %}
+                        <div class="border border-amber-200 rounded-xl p-3.5 bg-amber-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded">
+                                        📌 Pertenecía a: {{ arch[3] }} ({{ arch[4] }})
+                                    </span>
+                                </div>
+                                <p class="text-xs font-mono font-bold text-slate-800 truncate" title="{{ arch[1] }}">
+                                    📄 {{ arch[1].split('/')[-1] if 'http' in arch[1] else arch[1] }}
+                                </p>
+                            </div>
+
+                            <div class="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-1 sm:pt-0">
+                                <a href="{{ arch[1] }}" target="_blank" class="text-xs bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg font-medium hover:bg-slate-100">
+                                    👁️ Ver
+                                </a>
+
+                                <form action="/restaurar_archivo/{{ arch[0] }}" method="POST">
+                                    <button type="submit" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1">
+                                        🔄 Reintegrar a Instructivo
+                                    </button>
+                                </form>
+
+                                <form action="/destruir_archivo/{{ arch[0] }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas destruir permanentemente esta imagen/archivo?');">
+                                    <button type="submit" class="text-xs bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold hover:bg-red-200 transition-colors">
+                                        💥 Destruir
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
         {% else %}
             <div class="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                 <p class="text-3xl mb-2">✨</p>
                 <p class="text-sm font-semibold text-slate-700">La papelera está vacía</p>
-                <p class="text-xs text-slate-400 mt-1">No hay instructivos ni protocolos eliminados actualmente.</p>
+                <p class="text-xs text-slate-400 mt-1">No hay instructivos ni capturas eliminadas actualmente.</p>
             </div>
         {% endif %}
 
