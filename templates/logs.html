@@ -33,7 +33,7 @@
 
             <p class="text-xs text-slate-500">Historial de acciones, descargas y trazabilidad</p>
 
-            <!-- 🎨 PANEL RGB COLAPSABLE MÓVIL Y DESKTOP -->
+            <!-- 🎨 PANEL RGB COLAPSABLE -->
             <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 self-start transition-all duration-300 max-w-full">
                 <button onclick="togglePanelRgb()" id="btn-toggle-rgb" class="text-xs font-bold px-2 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1 text-slate-700 shrink-0" title="Plegar / Desplegar Colores">
                     🎨 Tema <span id="flecha-rgb">➡️</span>
@@ -62,7 +62,7 @@
             </div>
         </div>
 
-        <!-- 🔍 Panel de Filtros -->
+        <!-- 🔍 Panel de Filtros con Botón de Exportación CSV -->
         <form action="/logs" method="GET" class="mb-5 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 
@@ -101,13 +101,18 @@
 
             </div>
 
-            {% if q_usuario or q_accion or q_busqueda %}
-            <div class="flex justify-end pt-1">
+            <!-- Acciones Secundarias (Exportar / Limpiar) -->
+            <div class="flex flex-wrap justify-between items-center pt-2 border-t border-slate-200 gap-2">
+                <a href="/exportar_logs_csv?usuario={{ q_usuario }}&accion={{ q_accion }}&q={{ q_busqueda }}" class="text-xs bg-emerald-600 text-white hover:bg-emerald-700 font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors">
+                    📊 Exportar a Excel (CSV)
+                </a>
+
+                {% if q_usuario or q_accion or q_busqueda %}
                 <a href="/logs" class="text-xs text-red-600 hover:underline font-semibold flex items-center gap-1">
                     ✖ Limpiar Filtros
                 </a>
+                {% endif %}
             </div>
-            {% endif %}
         </form>
 
         <!-- 📱 VISTA MÓVIL -->
