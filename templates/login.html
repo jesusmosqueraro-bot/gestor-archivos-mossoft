@@ -4,88 +4,94 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arkiv | Iniciar Sesión</title>
-    
-    <!-- FAVICON VECTORIAL EXACTO A TU NUEVO LOGO -->
-    <link rel="icon" <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
-        
+    <!-- Favicon Unificado (Mineral Atemporal) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
 
-    <div class="max-w-md w-full bg-slate-50 rounded-2xl shadow-2xl p-8 border border-slate-200/60 relative overflow-hidden">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
         
-        <!-- ÍCONO LOGO REPLICADO DE TU IMAGEN -->
-        <div class="flex justify-center mb-4">
-            <div class="w-20 h-20 bg-[#3b52e1] rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 transform hover:scale-105 transition-transform duration-300">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="3" ry="3"/>
-                    <line x1="3" y1="10" x2="21" y2="10"/>
-                    <line x1="9" y1="15" x2="15" y2="15"/>
+        <!-- ENCABEZADO CON LOGO NÓRDICO ATEMPORAL -->
+        <div class="text-center mb-6">
+            <!-- ISOTIPO VECTORIAL ARKIV -->
+            <div class="w-16 h-16 mx-auto mb-3 drop-shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full">
+                    <defs>
+                        <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#020617;stop-opacity:1" />
+                        </linearGradient>
+                        <linearGradient id="platLight" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
+                        </linearGradient>
+                        <linearGradient id="steelG" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect width="100" height="100" rx="22" fill="url(#bgSlate)"/>
+                    <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                    <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLight)" />
+                    <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelG)" />
+                    <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                    <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLight)" />
+                    <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                    <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
                 </svg>
             </div>
-        </div>
 
-        <!-- TÍTULO DE MARCA ARKIV Y SUBTÍTULO -->
-        <div class="text-center mb-6">
-            <h1 class="text-3xl font-serif font-bold tracking-tight text-slate-900">
-                Arkiv
-            </h1>
-            <div class="w-12 h-0.5 bg-slate-300 mx-auto my-2"></div>
-            <p class="text-[10px] font-semibold tracking-widest text-slate-500 uppercase">Documentos y Archivo</p>
+            <h1 class="text-2xl font-black text-slate-800 tracking-tight font-serif">Arkiv</h1>
+            <div class="h-0.5 w-8 bg-slate-200 mx-auto my-2 rounded-full"></div>
+            <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Documentos y Archivo</p>
         </div>
-
-        <!-- NOTIFICACIÓN DE SESIÓN EXPIRADA POR INACTIVIDAD (25 MIN) -->
-        {% if mensaje_expirado %}
-        <div class="mb-4 p-3 bg-amber-100 border border-amber-300 text-amber-800 text-xs rounded-xl text-center font-semibold shadow-sm animate-pulse">
-            {{ mensaje_expirado }}
-        </div>
-        {% endif %}
 
         {% if error %}
-        <div class="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 text-xs rounded-lg text-center font-medium">
-            {{ error }}
-        </div>
+            <div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl font-medium text-center">
+                ⚠️ {{ error }}
+            </div>
         {% endif %}
 
-        {% if mensaje %}
-        <div class="mb-4 p-3 bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs rounded-lg text-center font-medium">
-            {{ mensaje }}
-        </div>
+        {% if mensaje_expirado %}
+            <div class="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl font-medium text-center">
+                {{ mensaje_expirado }}
+            </div>
         {% endif %}
 
-        <!-- FORMULARIO DE ACCESO -->
-        <form action="/login" method="POST" class="space-y-4">
+        <!-- Formulario Login -->
+        <form action="/login" method="POST" class="flex flex-col gap-4">
             <div>
-                <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Usuario</label>
-                <input type="text" name="usuario" required placeholder="admin" class="w-full text-sm px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3b52e1]/50 focus:bg-white transition-all text-slate-800">
+                <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
+                <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
             </div>
 
             <div>
                 <div class="flex justify-between items-center mb-1">
-                    <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider">Contraseña</label>
-                    <a href="/recuperar" class="text-xs text-[#3b52e1] hover:underline font-medium">¿Olvidaste tu clave?</a>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
+                    <a href="/recuperar" class="text-[11px] text-blue-600 hover:underline font-medium">¿Olvidaste tu clave?</a>
                 </div>
-                <input type="password" name="contrasena" required placeholder="••••••••" class="w-full text-sm px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3b52e1]/50 focus:bg-white transition-all text-slate-800">
+                <input type="password" name="contrasena" placeholder="••••" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
             </div>
 
-            <!-- GOOGLE reCAPTCHA -->
-            <div class="flex justify-center pt-2">
-                <div class="g-recaptcha" data-sitekey="6Lel3V4tAAAAABOKgvK5dG2sH0lEFu38wvBELCVy"></div>
+            <!-- reCAPTCHA v2 -->
+            <div class="flex justify-center my-1">
+                <div class="g-recaptcha scale-90 sm:scale-100 origin-center" data-sitekey="6Lel3V4tAAAAABOKgvK5dG2sH0IEFus38wvBELCV"></div>
             </div>
 
-            <button type="submit" class="w-full bg-[#3b52e1] hover:bg-blue-700 text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform active:scale-95 text-sm">
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
                 Iniciar Sesión →
             </button>
         </form>
 
-        <!-- PIE DE PÁGINA -->
-        <div class="mt-8 pt-4 border-t border-slate-200/80 text-center text-xs text-slate-400 flex flex-col items-center gap-1">
-            <p class="flex items-center gap-1">
-                <span class="text-emerald-500">🔒</span> Conexión segura y cifrada
+        <!-- Pie de página informativo -->
+        <div class="mt-6 pt-4 border-t border-slate-100 text-center">
+            <p class="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
+                🔒 Conexión segura y cifrada
             </p>
-            <p class="text-[11px] text-slate-400">
-                <span class="bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">v1.0.0 Pro</span> • Powered by <span class="font-bold text-slate-600">MosSoft</span>
+            <p class="text-[10px] text-slate-400 mt-1">
+                <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-100">v1.0.0 Pro</span> • Powered by <strong class="text-slate-600">MosSoft</strong>
             </p>
         </div>
 
