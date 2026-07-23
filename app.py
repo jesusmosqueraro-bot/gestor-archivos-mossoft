@@ -639,16 +639,61 @@ def gestion_usuarios():
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
+# 📑 RUTA /LOGS CON FILTROS AVANZADOS (USUARIO, ACCIÓN Y BÚSQUEDA)
 @app.route('/logs')
 @login_required
 @admin_required
 def ver_logs():
+    q_usuario = request.args.get('usuario', '').strip()
+    q_accion = request.args.get('accion', '').strip()
+    q_busqueda = request.args.get('q', '').strip()
+
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT usuario, accion, detalles, fecha FROM logs ORDER BY id DESC")
+
+    # Opciones para selectores
+    cursor.execute("SELECT DISTINCT usuario FROM logs ORDER BY usuario ASC")
+    lista_usuarios = [u[0] for u in cursor.fetchall() if u[0]]
+
+    cursor.execute("SELECT DISTINCT accion FROM logs ORDER BY accion ASC")
+    lista_acciones = [a[0] for a in cursor.fetchall() if a[0]]
+
+    # Consulta con filtros dinámicos
+    query = "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1"
+    params = []
+
+    if q_usuario:
+        query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+        params.append(q_usuario)
+
+    if q_accion:
+        query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+        params.append(q_accion)
+
+    if q_busqueda:
+        p_busq = f"%{q_busqueda}%"
+        if db_type == 'postgres':
+            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
+            params.extend([p_busq, p_busq])
+        else:
+            query += " AND (detalles LIKE ? OR fecha LIKE ?)"
+            params.extend([p_busq, p_busq])
+
+    query += " ORDER BY id DESC"
+
+    cursor.execute(query, tuple(params))
     lista_logs = cursor.fetchall()
     conn.close()
-    return render_template('logs.html', logs=lista_logs)
+
+    return render_template(
+        'logs.html', 
+        logs=lista_logs, 
+        usuarios_opt=lista_usuarios, 
+        acciones_opt=lista_acciones,
+        q_usuario=q_usuario,
+        q_accion=q_accion,
+        q_busqueda=q_busqueda
+    )
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
