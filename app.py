@@ -177,7 +177,7 @@ def verificar_recaptcha(response_token):
     data = urllib.parse.urlencode({'secret': RECAPTCHA_SECRET_KEY, 'response': response_token}).encode('utf-8')
     try:
         req = urllib.request.Request(url, data=data)
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode('utf-8')).get('success', False)
     except Exception as e:
         return False
@@ -346,24 +346,13 @@ def recuperar_clave():
                 msg = MIMEMultipart()
                 msg['From'] = SMTP_USER
                 msg['To'] = email_ingresado
-                msg['Subject'] = f"🔐 Código de Recuperación: {codigo_verificacion} - ARKIV"
+                msg['Subject'] = f"Código de Verificación - Gestor de Archivos ({codigo_verificacion})"
 
-                cuerpo = f"""
-                Hola, {usuario_nombre}.
-
-                Has solicitado restablecer tu contraseña en el sistema ARKIV.
-
-                📌 Tu código de verificación es: {codigo_verificacion}
-
-                Ingresa este código en la pantalla de recuperación junto con tu nueva contraseña.
-
-                Si no solicitaste este cambio, por favor ignora este mensaje.
-                ---
-                Equipo de Soporte - MosSoft
-                """
+                cuerpo = f"Tu código de verificación es: {codigo_verificacion}"
                 msg.attach(MIMEText(cuerpo, 'plain'))
 
-                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                # Timeout de 8 segundos para evitar bloqueos/HTTP 502 en Render
+                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=8)
                 server.starttls()
                 server.login(SMTP_USER, SMTP_PASSWORD)
                 server.send_message(msg)
@@ -374,7 +363,8 @@ def recuperar_clave():
             
             except Exception as e:
                 print(f"Error enviando correo: {e}")
-                return render_template('recuperar.html', paso=1, error="Error enviando el correo. Revisa la configuración SMTP.")
+                # En caso de fallo en el correo por red, avanzamos al paso 2 para no bloquear al usuario
+                return render_template('recuperar.html', paso=2, email=email_ingresado, error="No pudimos enviar el correo por limitaciones de red del servidor, pero puedes verificar con el código asignado.")
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
@@ -396,7 +386,7 @@ def validar_codigo():
     if codigo_ingresado != codigo_correcto:
         return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
 
-    # Si el código es correcto, actualizar contraseña
+    # Si el código coincide, se actualiza la contraseña
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -405,12 +395,11 @@ def validar_codigo():
         conn.commit()
         conn.close()
 
-        # Limpiar datos temporales de la sesión
         session.pop('reset_code', None)
         session.pop('reset_email', None)
         session.pop('reset_user', None)
 
-        registrar_log(nombre_usuario, "Cambio Exitoso de Clave", f"Se actualizó la clave vía código de verificación.")
+        registrar_log(nombre_usuario, "Cambio Exitoso de Clave", "Se actualizó la clave vía código de verificación.")
         return render_template('recuperar.html', paso=1, exito="¡Contraseña actualizada con éxito! Ya puedes iniciar sesión.")
 
     except Exception as e:
