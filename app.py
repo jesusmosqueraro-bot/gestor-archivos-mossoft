@@ -60,10 +60,8 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = "jesus.mosqueraro@gmail.com"
-SMTP_PASSWORD = "gyod xyny fzvw bsxu"
+# 🔑 CLAVE API OFICIAL DE RESEND OBTENIDA
+RESEND_API_KEY = "re_cdpmoQcx_4CAA7iNGHYGZKDrm4H7CpT4Y"
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
@@ -320,50 +318,48 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 📧 FUNCIÓN AUXILIAR EN SEGUNDO PLANO PARA ENVIAR CORREO SIN BLOQUEAR RENDER
+# 📧 ENVÍO VÍA API RESEND CON TU API KEY
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_USER
-        msg['To'] = email_destino
-        msg['Subject'] = f"Código de Verificación - Gestor de Archivos ({codigo})"
+        url = "https://api.resend.com/emails"
+        payload = json.dumps({
+            "from": "ARKIV <onboarding@resend.dev>",
+            "to": [email_destino],
+            "subject": f"Código de Verificación - Gestor de Archivos ({codigo})",
+            "html": f"""
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #0f172a; max-width: 480px; border: 1px solid #e2e8f0; border-radius: 12px;">
+                <h2 style="color: #2563eb;">Código de Verificación ARKIV</h2>
+                <p>Hola <strong>{usuario_nombre}</strong>,</p>
+                <p>Tu código de verificación para restablecer tu contraseña es:</p>
+                <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1e40af; margin: 15px 0;">
+                    {codigo}
+                </div>
+                <p style="color: #64748b; font-size: 12px;">Si no solicitaste este cambio, por favor ignora este mensaje.</p>
+            </div>
+            """
+        }).encode('utf-8')
 
-        cuerpo = f"""
-        Hola {usuario_nombre},
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-        Tu código de verificación para restablecer tu contraseña es: {codigo}
-
-        Si no solicitaste este cambio, por favor ignora este mensaje.
-        """
-        msg.attach(MIMEText(cuerpo, 'plain'))
-
-        # Intentar primero por SSL (Puerto 465)
-        try:
-            server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=5)
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-        except Exception:
-            # Fallback a TLS (Puerto 587)
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-
-        print(f"✅ Correo enviado con éxito a {email_destino}")
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            res = response.read().decode('utf-8')
+            print(f"✅ Correo enviado con éxito a {email_destino}: {res}")
     except Exception as e:
-        print(f"⚠️ Error enviando correo: {e}")
+        print(f"❌ Error enviando correo vía Resend API: {e}")
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
-        email_ingresado = request.form.get('email', '').strip()
+        email_ingresado = request.form.get('email', '').strip().lower()
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE email = ?"
+        query = "SELECT username FROM usuarios WHERE LOWER(email) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(email) = ?"
         cursor.execute(query, (email_ingresado,))
         user = cursor.fetchone()
         conn.close()
@@ -376,14 +372,13 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono para respuesta web instantánea en Render
-            hilo_correo = threading.Thread(
+            # Envío asíncrono rápido sin congelar Render
+            threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
-            )
-            hilo_correo.start()
+            ).start()
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado}")
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código enviado a: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
@@ -409,7 +404,7 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE usuarios SET password = %s WHERE email = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE email = ?"
+        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(email) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(email) = ?"
         cursor.execute(q_upd, (nueva_pass, email_usuario))
         conn.commit()
         conn.close()
