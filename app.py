@@ -346,7 +346,7 @@ def recuperar_clave():
                 Hemos recibido una solicitud para recordar tu contraseña de acceso al sistema ARKIV.
 
                 📌 Tu usuario: {usuario_nombre}
-                🔑 Tu contraseña: {clave_usuario}
+                🔑 Tu contraseña actual: {clave_usuario}
 
                 Puedes iniciar sesión en: https://gestor-archivos-mossoft.onrender.com/login
 
@@ -363,15 +363,52 @@ def recuperar_clave():
                 server.quit()
 
                 registrar_log(usuario_nombre, "Recuperación de Clave", f"Se envió la clave al correo: {email_ingresado}")
-                return render_template('recuperar.html', exito="Te hemos enviado un correo con tus datos de acceso. Revisa tu bandeja de entrada.")
+                return render_template('recuperar.html', exito="Te hemos enviado un correo con tus datos de acceso.")
             
             except Exception as e:
                 print(f"Error enviando correo: {e}")
-                return render_template('recuperar.html', error="Ocurrió un error al enviar el correo. Contacta al administrador.")
+                return render_template('recuperar.html', error="Ocurrió un error al enviar el correo. Intenta de nuevo.")
         else:
-            return render_template('recuperar.html', error="El correo ingresado no está registrado en el sistema.")
+            return render_template('recuperar.html', error="El correo ingresado no está registrado.")
 
     return render_template('recuperar.html')
+
+# 🔄 VALIDACIÓN Y CAMBIO DIRECTO DE CONTRASEÑA
+@app.route('/validar_codigo', methods=['POST'])
+def validar_codigo():
+    usuario_o_codigo = request.form.get('codigo') or request.form.get('username') or request.form.get('email')
+    nueva_pass = request.form.get('nueva_password') or request.form.get('password')
+
+    if not usuario_o_codigo or not nueva_pass:
+        return render_template('recuperar.html', error="Por favor completa todos los campos.")
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_upd = """
+            UPDATE usuarios 
+            SET password = %s 
+            WHERE username = %s OR email = %s
+        """ if db_type == 'postgres' else """
+            UPDATE usuarios 
+            SET password = ? 
+            WHERE username = ? OR email = ?
+        """
+        cursor.execute(q_upd, (nueva_pass, usuario_o_codigo, usuario_o_codigo))
+        conn.commit()
+
+        if cursor.rowcount > 0:
+            registrar_log(usuario_o_codigo, "Cambio de Clave", f"Se actualizó la contraseña para '{usuario_o_codigo}'")
+            conn.close()
+            return render_template('recuperar.html', exito="¡Contraseña actualizada exitosamente! Ya puedes iniciar sesión.")
+        else:
+            conn.close()
+            return render_template('recuperar.html', error="No se encontró ningún usuario asociado a esos datos.")
+
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return render_template('recuperar.html', error=f"Error actualizando contraseña: {e}")
 
 @app.route('/logout')
 def logout():
@@ -842,6 +879,64 @@ def gestion_usuarios():
     lista_usuarios = cursor.fetchall()
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
+
+# ✏️ EDITAR USUARIO (CONTRASEÑA, CORREO, ROL)
+@app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
+@login_required
+@admin_required
+def editar_usuario(usuario_id):
+    nuevo_email = request.form.get('email', '').strip()
+    nuevo_rol = request.form.get('rol', 'estandar').strip()
+    nueva_pass = request.form.get('password', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT username FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+
+        if nueva_pass:
+            q_upd = "UPDATE usuarios SET email = %s, rol = %s, password = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nueva_pass, usuario_id))
+            detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
+        else:
+            q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
+            detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
+
+        conn.commit()
+        registrar_log(session['username'], "Edición de Usuario", detalle_log)
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
+# ❌ ELIMINAR USUARIO
+@app.route('/eliminar_usuario/<int:usuario_id>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_usuario(usuario_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT username FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+
+        q_del = "DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?"
+        cursor.execute(q_del, (usuario_id,))
+        conn.commit()
+
+        registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
 
 # 📑 RUTA /LOGS CON FILTROS
 @app.route('/logs')
