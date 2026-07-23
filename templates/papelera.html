@@ -1,1 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Papelera de Reciclaje</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body id="main-body" class="bg-slate-100 min-h-screen p-2 sm:p-6 transition-colors duration-300 relative">
 
+    <!-- 🔝 BOTÓN FLOTANTE VOLVER ARRIBA -->
+    <button id="btn-scroll-top" onclick="window.scrollTo({ top: 0, behavior: 'smooth' })" class="fixed bottom-6 right-6 bg-slate-800 text-white p-3 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 hover:bg-slate-900 z-50 border border-slate-700 flex items-center justify-center w-11 h-11" title="Volver al inicio">
+        ⬆️
+    </button>
+
+    <div class="custom-card max-w-5xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full transition-colors duration-300">
+        
+        <!-- Encabezado -->
+        <div class="flex justify-between items-center border-b pb-4 mb-6">
+            <div>
+                <a href="/gestor" class="text-xs text-blue-600 hover:underline">← Volver al Gestor</a>
+                <h1 class="custom-text text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    🗑️ Papelera de Reciclaje
+                </h1>
+                <p class="text-xs text-slate-500">Módulo de seguridad para restauración y eliminación definitiva</p>
+            </div>
+            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium whitespace-nowrap">
+                Volver
+            </a>
+        </div>
+
+        {% if eliminados %}
+            <div class="flex flex-col gap-4">
+                {% for item in eliminados %}
+                    <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                                    🏷️ {{ item[4] }}
+                                </span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                                    📌 {{ item[5] }}
+                                </span>
+                                <span class="text-[10px] bg-slate-200 text-slate-600 font-medium px-2 py-0.5 rounded">
+                                    🕒 {{ item[3] }}
+                                </span>
+                            </div>
+                            <h3 class="text-base font-bold text-slate-800 truncate">{{ item[1] }}</h3>
+                            <p class="text-xs text-slate-600 line-clamp-2 mt-0.5">{{ item[2] }}</p>
+                        </div>
+
+                        <div class="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                            <form action="/restaurar_galeria/{{ item[0] }}" method="POST">
+                                <button type="submit" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1">
+                                    🔄 Restaurar
+                                </button>
+                            </form>
+
+                            <form action="/destruir_galeria/{{ item[0] }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar PERMANENTEMENTE este instructivo? Esta acción NO se puede deshacer.');">
+                                <button type="submit" class="text-xs bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg font-bold hover:bg-red-200 transition-colors">
+                                    💥 Borrar Definitivo
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <p class="text-3xl mb-2">✨</p>
+                <p class="text-sm font-semibold text-slate-700">La papelera está vacía</p>
+                <p class="text-xs text-slate-400 mt-1">No hay instructivos ni protocolos eliminados actualmente.</p>
+            </div>
+        {% endif %}
+
+    </div>
+
+    <script>
+        window.addEventListener('scroll', () => {
+            const btn = document.getElementById('btn-scroll-top');
+            if (btn) {
+                if (window.scrollY > 200) {
+                    btn.classList.remove('opacity-0', 'pointer-events-none');
+                    btn.classList.add('opacity-100');
+                } else {
+                    btn.classList.add('opacity-0', 'pointer-events-none');
+                    btn.classList.remove('opacity-100');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
