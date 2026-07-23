@@ -9,6 +9,7 @@ import json
 import unicodedata
 import io
 import csv
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -319,7 +320,42 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 🔑 PASO 1: ENVIAR CÓDIGO DE VERIFICACIÓN AL CORREO
+# 📧 FUNCIÓN AUXILIAR EN SEGUNDO PLANO PARA ENVIAR CORREO SIN BLOQUEAR RENDER
+def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USER
+        msg['To'] = email_destino
+        msg['Subject'] = f"Código de Verificación - Gestor de Archivos ({codigo})"
+
+        cuerpo = f"""
+        Hola {usuario_nombre},
+
+        Tu código de verificación para restablecer tu contraseña es: {codigo}
+
+        Si no solicitaste este cambio, por favor ignora este mensaje.
+        """
+        msg.attach(MIMEText(cuerpo, 'plain'))
+
+        # Intentar primero por SSL (Puerto 465)
+        try:
+            server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=5)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+            server.quit()
+        except Exception:
+            # Fallback a TLS (Puerto 587)
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+            server.quit()
+
+        print(f"✅ Correo enviado con éxito a {email_destino}")
+    except Exception as e:
+        print(f"⚠️ Error enviando correo: {e}")
+
+# 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
@@ -334,37 +370,21 @@ def recuperar_clave():
 
         if user:
             usuario_nombre = user[0]
-            # Generar código numérico aleatorio de 6 dígitos
             codigo_verificacion = str(random.randint(100000, 999999))
             
-            # Guardar en sesión temporal
             session['reset_email'] = email_ingresado
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            try:
-                msg = MIMEMultipart()
-                msg['From'] = SMTP_USER
-                msg['To'] = email_ingresado
-                msg['Subject'] = f"Código de Verificación - Gestor de Archivos ({codigo_verificacion})"
+            # Envío asíncrono para respuesta web instantánea en Render
+            hilo_correo = threading.Thread(
+                target=enviar_correo_recuperacion, 
+                args=(email_ingresado, usuario_nombre, codigo_verificacion)
+            )
+            hilo_correo.start()
 
-                cuerpo = f"Tu código de verificación es: {codigo_verificacion}"
-                msg.attach(MIMEText(cuerpo, 'plain'))
-
-                # Timeout de 8 segundos para evitar bloqueos/HTTP 502 en Render
-                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=8)
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.send_message(msg)
-                server.quit()
-
-                registrar_log(usuario_nombre, "Solicitud de Código", f"Código enviado a: {email_ingresado}")
-                return render_template('recuperar.html', paso=2, email=email_ingresado)
-            
-            except Exception as e:
-                print(f"Error enviando correo: {e}")
-                # En caso de fallo en el correo por red, avanzamos al paso 2 para no bloquear al usuario
-                return render_template('recuperar.html', paso=2, email=email_ingresado, error="No pudimos enviar el correo por limitaciones de red del servidor, pero puedes verificar con el código asignado.")
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado}")
+            return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
@@ -386,7 +406,6 @@ def validar_codigo():
     if codigo_ingresado != codigo_correcto:
         return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
 
-    # Si el código coincide, se actualiza la contraseña
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
