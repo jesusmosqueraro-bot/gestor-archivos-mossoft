@@ -22,38 +22,58 @@
 </head>
 <body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300">
 
-    <!-- Notificación Toast de Portapapeles -->
+    <!-- Notificación Toast -->
     <div id="toast-copiado" class="fixed bottom-5 right-5 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl hidden z-50 flex items-center gap-2 transition-all">
         <span>✅ ¡Enlace del instructivo copiado al portapapeles!</span>
     </div>
 
-    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full overflow-hidden">
+    <!-- Contenedor Principal -->
+    <div class="custom-card max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full overflow-hidden transition-colors duration-300">
         
-        <!-- Encabezado -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-6 gap-4">
+        <!-- Encabezado y Barra de Personalización RGB -->
+        <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b pb-4 mb-6 gap-4">
             <div>
                 <a href="/bienvenida" class="text-xs text-blue-600 hover:underline">← Volver al Inicio</a>
-                <h1 class="text-xl sm:text-2xl font-bold text-slate-800">Arkiv</h1>
+                <h1 class="custom-text text-xl sm:text-2xl font-bold text-slate-800">Arkiv</h1>
                 <p class="text-xs text-slate-500">Rol de usuario: <span class="font-bold text-slate-700 uppercase">{{ rol }}</span></p>
             </div>
             
-            <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                 {% if rol == 'admin' %}
                     <a href="/usuarios" class="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg font-medium hover:bg-purple-100">Usuarios</a>
                     <a href="/logs" class="text-xs bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg font-medium hover:bg-slate-100">Bitácora Logs</a>
                 {% endif %}
 
-                <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
-                    <label for="bgPicker" class="text-xs text-slate-600">Fondo:</label>
-                    <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
+                <!-- 🎨 PANEL RGB EXPANDIDO -->
+                <div class="flex flex-wrap items-center gap-1.5 bg-slate-50 p-1.5 border border-slate-200 rounded-xl text-xs shrink-0">
+                    <span class="font-bold text-slate-600 px-1">🎨 Tema:</span>
+                    
+                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo General">
+                        <span class="text-[10px] font-semibold text-slate-600">Fondo</span>
+                        <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                    </label>
+
+                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo de Tarjetas y Contenedores">
+                        <span class="text-[10px] font-semibold text-slate-600">Tarjetas</span>
+                        <input type="color" id="cardPicker" value="#ffffff" oninput="aplicarContenedorRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                    </label>
+
+                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Botones">
+                        <span class="text-[10px] font-semibold text-slate-600">Botón</span>
+                        <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                    </label>
+
+                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Textos">
+                        <span class="text-[10px] font-semibold text-slate-600">Texto</span>
+                        <input type="color" id="textPicker" value="#1e293b" oninput="aplicarTextoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                    </label>
+
+                    <button onclick="restablecerTemaRgb()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-lg text-xs font-bold transition-colors" title="Restablecer Colores por Defecto">
+                        🔄
+                    </button>
                 </div>
 
-                <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
-                    <label for="btnPicker" class="text-xs text-slate-600">Botón:</label>
-                    <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
-                </div>
-
-                <a href="/logout" class="text-xs bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 font-medium ml-auto sm:ml-0">
+                <a href="/logout" class="text-xs bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 font-medium ml-auto lg:ml-0">
                     Salir
                 </a>
             </div>
@@ -171,12 +191,12 @@
             </form>
         </div>
 
-        <h2 class="text-lg font-semibold text-slate-700 mb-4">Protocolos e Instructivos Almacenados</h2>
+        <h2 class="custom-text text-lg font-semibold text-slate-700 mb-4">Protocolos e Instructivos Almacenados</h2>
         
         {% if galerias %}
             <div class="flex flex-col gap-6">
                 {% for galeria in galerias %}
-                    <div id="instructivo-{{ galeria.id }}" class="border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden searchable-item">
+                    <div id="instructivo-{{ galeria.id }}" class="custom-card border rounded-xl p-3 sm:p-4 bg-white shadow-sm border-slate-200 w-full overflow-hidden searchable-item transition-colors duration-300">
                         <div class="flex flex-col sm:flex-row justify-between items-start border-b pb-3 mb-3 gap-3">
                             <div class="w-full sm:w-auto flex-1 min-w-0">
                                 
@@ -201,7 +221,7 @@
                                     </span>
                                 </div>
 
-                                <h3 class="text-base sm:text-lg font-bold text-slate-800 break-all highlightable">{{ galeria.titulo }}</h3>
+                                <h3 class="custom-text text-base sm:text-lg font-bold text-slate-800 break-all highlightable">{{ galeria.titulo }}</h3>
                                 
                                 {% if galeria.tags %}
                                 <div class="flex flex-wrap gap-1 my-1.5">
@@ -213,7 +233,7 @@
                                 </div>
                                 {% endif %}
 
-                                <p class="text-xs text-slate-600 mt-1 break-words leading-relaxed highlightable">{{ galeria.descripcion }}</p>
+                                <p class="custom-text text-xs text-slate-600 mt-1 break-words leading-relaxed highlightable">{{ galeria.descripcion }}</p>
                             </div>
 
                             <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end shrink-0 pt-1 sm:pt-0">
@@ -363,7 +383,7 @@
             });
         });
 
-        // 📊 CONTADORES DE MÉTRICAS JS EN TIEMPO REAL
+        // 📊 CONTADORES Y REGISTRO EN LOGS
         function incrementarVistaUI(galeriaId) {
             fetch('/incrementar_vista/' + galeriaId, { method: 'POST' }).then(() => {
                 const el = document.getElementById('vistas-count-' + galeriaId);
@@ -378,14 +398,14 @@
             }).catch(err => console.error(err));
         }
 
-        // 📥 DESCARGA DIRECTA
+        // 📥 DESCARGA DIRECTA (PROXIED & AUDITED)
         function descargarArchivoDirecto(fileUrl, fileName, galeriaId) {
             if (galeriaId) incrementarDescargaUI(galeriaId);
             const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=1&name=' + encodeURIComponent(fileName);
             window.location.href = proxyUrl;
         }
 
-        // 👁️ VISOR CON MÉTRICA
+        // 👁️ VISOR
         function abrirPrevisualizacion(fileUrl, fileName, galeriaId) {
             if (galeriaId) incrementarVistaUI(galeriaId);
 
@@ -404,7 +424,7 @@
             const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
             const esImagen = (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) && !esPDF;
 
-            // 1. PDF SERVIDO DESDE EL PROXY INTERNO
+            // 1. PDF
             if (esPDF) {
                 const proxyInlineUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=0&name=' + encodeURIComponent(fileName);
                 content.innerHTML = `
@@ -453,19 +473,51 @@
             if (e.key === 'Escape') cerrarPrevisualizacion();
         });
 
+        // 🎨 SISTEMA DUAL RGB CON PERSISTENCIA LOCALSTORAGE
         function aplicarFondoRgb(colorHex) {
             document.body.style.backgroundColor = colorHex;
-            localStorage.setItem('custom_bg_color', colorHex);
+            localStorage.setItem('rgb_bg', colorHex);
         }
+
+        function aplicarContenedorRgb(colorHex) {
+            document.querySelectorAll('.custom-card').forEach(card => {
+                card.style.backgroundColor = colorHex;
+            });
+            localStorage.setItem('rgb_card', colorHex);
+        }
+
         function aplicarBotonRgb(colorHex) {
-            document.querySelectorAll('.btn-custom').forEach(btn => { btn.style.backgroundColor = colorHex; });
-            localStorage.setItem('custom_btn_color', colorHex);
+            document.querySelectorAll('.btn-custom').forEach(btn => { 
+                btn.style.backgroundColor = colorHex; 
+            });
+            localStorage.setItem('rgb_btn', colorHex);
         }
+
+        function aplicarTextoRgb(colorHex) {
+            document.querySelectorAll('.custom-text').forEach(txt => {
+                txt.style.color = colorHex;
+            });
+            localStorage.setItem('rgb_text', colorHex);
+        }
+
+        function restablecerTemaRgb() {
+            localStorage.removeItem('rgb_bg');
+            localStorage.removeItem('rgb_card');
+            localStorage.removeItem('rgb_btn');
+            localStorage.removeItem('rgb_text');
+            location.reload();
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
-            const bg = localStorage.getItem('custom_bg_color');
-            const btn = localStorage.getItem('custom_btn_color');
+            const bg = localStorage.getItem('rgb_bg');
+            const card = localStorage.getItem('rgb_card');
+            const btn = localStorage.getItem('rgb_btn');
+            const text = localStorage.getItem('rgb_text');
+
             if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
+            if (card) { aplicarContenedorRgb(card); document.getElementById('cardPicker').value = card; }
             if (btn) { aplicarBotonRgb(btn); document.getElementById('btnPicker').value = btn; }
+            if (text) { aplicarTextoRgb(text); document.getElementById('textPicker').value = text; }
         });
     </script>
 
