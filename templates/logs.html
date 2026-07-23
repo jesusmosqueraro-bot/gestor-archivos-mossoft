@@ -7,7 +7,12 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body id="main-body" class="bg-slate-100 min-h-screen p-2 sm:p-6 transition-colors duration-300">
+<body id="main-body" class="bg-slate-100 min-h-screen p-2 sm:p-6 transition-colors duration-300 relative">
+
+    <!-- 🔝 BOTÓN FLOTANTE VOLVER ARRIBA -->
+    <button id="btn-scroll-top" onclick="volverArriba()" class="fixed bottom-6 right-6 bg-slate-800 text-white p-3 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 hover:bg-slate-900 hover:scale-110 z-50 border border-slate-700 flex items-center justify-center w-11 h-11" title="Volver al inicio">
+        ⬆️
+    </button>
 
     <div class="custom-card max-w-6xl mx-auto bg-white rounded-xl shadow-md p-3 sm:p-6 w-full transition-colors duration-300">
         
@@ -28,7 +33,7 @@
 
             <p class="text-xs text-slate-500">Historial de acciones, descargas y trazabilidad</p>
 
-            <!-- 🎨 PANEL RGB COLAPSABLE MÓVIL -->
+            <!-- 🎨 PANEL RGB COLAPSABLE MÓVIL Y DESKTOP -->
             <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 self-start transition-all duration-300 max-w-full">
                 <button onclick="togglePanelRgb()" id="btn-toggle-rgb" class="text-xs font-bold px-2 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1 text-slate-700 shrink-0" title="Plegar / Desplegar Colores">
                     🎨 Tema <span id="flecha-rgb">➡️</span>
@@ -105,7 +110,7 @@
             {% endif %}
         </form>
 
-        <!-- 📱 VISTA MÓVIL (Tarjetas limpias para teléfonos) -->
+        <!-- 📱 VISTA MÓVIL -->
         <div class="block md:hidden flex flex-col gap-3">
             {% if logs %}
                 {% for log in logs %}
@@ -140,7 +145,7 @@
             {% endif %}
         </div>
 
-        <!-- 💻 VISTA ESCRITORIO (Tabla horizontal responsive) -->
+        <!-- 💻 VISTA ESCRITORIO -->
         <div class="hidden md:block overflow-x-auto rounded-lg border border-slate-200">
             <table class="w-full text-left text-xs text-slate-700 min-w-[700px]">
                 <thead class="bg-slate-50 border-b text-slate-600 font-semibold uppercase tracking-wider">
@@ -196,6 +201,24 @@
     </div>
 
     <script>
+        // 🔝 FUNCION VOLVER ARRIBA
+        function volverArriba() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        window.addEventListener('scroll', () => {
+            const btn = document.getElementById('btn-scroll-top');
+            if (btn) {
+                if (window.scrollY > 200) {
+                    btn.classList.remove('opacity-0', 'pointer-events-none');
+                    btn.classList.add('opacity-100');
+                } else {
+                    btn.classList.add('opacity-0', 'pointer-events-none');
+                    btn.classList.remove('opacity-100');
+                }
+            }
+        });
+
         // 🎨 SISTEMA DUAL RGB CON PANELES COLAPSABLES
         function togglePanelRgb() {
             const contenedor = document.getElementById('opciones-rgb');
