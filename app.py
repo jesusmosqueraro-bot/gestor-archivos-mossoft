@@ -60,8 +60,11 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 🔑 CLAVE API OFICIAL DE RESEND OBTENIDA
-RESEND_API_KEY = "re_cdpmoQcx_4CAA7iNGHYGZKDrm4H7CpT4Y"
+# 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
+SMTP_SERVER_SSL = "smtp.gmail.com"
+SMTP_PORT_SSL = 465
+SMTP_USER = "jesus.mosqueraro@gmail.com"
+SMTP_PASSWORD = "gyod xyny fzvw bsxu"
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
@@ -318,38 +321,32 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 📧 ENVÍO VÍA API RESEND CON TU API KEY
+# 📧 ENVÍO VÍA GMAIL SSL PUERTO 465 (RÁPIDO Y DIRECTO DESDE RENDER)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        url = "https://api.resend.com/emails"
-        payload = json.dumps({
-            "from": "ARKIV <onboarding@resend.dev>",
-            "to": [email_destino],
-            "subject": f"Código de Verificación - Gestor de Archivos ({codigo})",
-            "html": f"""
-            <div style="font-family: Arial, sans-serif; padding: 20px; color: #0f172a; max-width: 480px; border: 1px solid #e2e8f0; border-radius: 12px;">
-                <h2 style="color: #2563eb;">Código de Verificación ARKIV</h2>
-                <p>Hola <strong>{usuario_nombre}</strong>,</p>
-                <p>Tu código de verificación para restablecer tu contraseña es:</p>
-                <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1e40af; margin: 15px 0;">
-                    {codigo}
-                </div>
-                <p style="color: #64748b; font-size: 12px;">Si no solicitaste este cambio, por favor ignora este mensaje.</p>
-            </div>
-            """
-        }).encode('utf-8')
+        msg = MIMEMultipart()
+        msg['From'] = f"ARKIV Soporte <{SMTP_USER}>"
+        msg['To'] = email_destino
+        msg['Subject'] = f"Código de Verificación - Gestor de Archivos"
 
-        headers = {
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        cuerpo = f"""Hola {usuario_nombre},
 
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as response:
-            res = response.read().decode('utf-8')
-            print(f"✅ Correo enviado con éxito a {email_destino}: {res}")
+Tu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}
+
+Si no solicitaste este cambio, por favor ignora este mensaje.
+---
+Equipo de Soporte - ARKIV
+"""
+        msg.attach(MIMEText(cuerpo, 'plain'))
+
+        # Conexión cifrada SSL directa por Puerto 465 (evita bloqueos de Render)
+        server = smtplib.SMTP_SSL(SMTP_SERVER_SSL, SMTP_PORT_SSL, timeout=10)
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"✅ Correo enviado con éxito desde Gmail a: {email_destino}")
     except Exception as e:
-        print(f"❌ Error enviando correo vía Resend API: {e}")
+        print(f"❌ Error enviando correo vía Gmail SSL: {e}")
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
@@ -372,7 +369,7 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono rápido sin congelar Render
+            # Envío asíncrono para respuesta instantánea en la interfaz
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
