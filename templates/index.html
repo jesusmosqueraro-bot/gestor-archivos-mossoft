@@ -30,7 +30,7 @@
     <!-- Contenedor Principal -->
     <div class="custom-card max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full overflow-hidden transition-colors duration-300">
         
-        <!-- Encabezado y Barra de Personalización RGB -->
+        <!-- Encabezado y Barra de Personalización RGB Colapsable -->
         <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b pb-4 mb-6 gap-4">
             <div>
                 <a href="/bienvenida" class="text-xs text-blue-600 hover:underline">← Volver al Inicio</a>
@@ -44,33 +44,37 @@
                     <a href="/logs" class="text-xs bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg font-medium hover:bg-slate-100">Bitácora Logs</a>
                 {% endif %}
 
-                <!-- 🎨 PANEL RGB EXPANDIDO -->
-                <div class="flex flex-wrap items-center gap-1.5 bg-slate-50 p-1.5 border border-slate-200 rounded-xl text-xs shrink-0">
-                    <span class="font-bold text-slate-600 px-1">🎨 Tema:</span>
-                    
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo General">
-                        <span class="text-[10px] font-semibold text-slate-600">Fondo</span>
-                        <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo de Tarjetas y Contenedores">
-                        <span class="text-[10px] font-semibold text-slate-600">Tarjetas</span>
-                        <input type="color" id="cardPicker" value="#ffffff" oninput="aplicarContenedorRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Botones">
-                        <span class="text-[10px] font-semibold text-slate-600">Botón</span>
-                        <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Textos">
-                        <span class="text-[10px] font-semibold text-slate-600">Texto</span>
-                        <input type="color" id="textPicker" value="#1e293b" oninput="aplicarTextoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <button onclick="restablecerTemaRgb()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-lg text-xs font-bold transition-colors" title="Restablecer Colores por Defecto">
-                        🔄
+                <!-- 🎨 PANEL RGB COLAPSABLE -->
+                <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 transition-all duration-300">
+                    <button onclick="togglePanelRgb()" id="btn-toggle-rgb" class="text-xs font-bold px-2 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1 text-slate-700" title="Plegar / Desplegar Colores">
+                        🎨 <span id="flecha-rgb">➡️</span>
                     </button>
+
+                    <div id="opciones-rgb" class="flex flex-wrap items-center gap-1.5 ml-1.5 transition-all duration-300 overflow-hidden">
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo General">
+                            <span class="text-[10px] font-semibold text-slate-600">Fondo</span>
+                            <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo de Tarjetas">
+                            <span class="text-[10px] font-semibold text-slate-600">Tarjetas</span>
+                            <input type="color" id="cardPicker" value="#ffffff" oninput="aplicarContenedorRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Botones">
+                            <span class="text-[10px] font-semibold text-slate-600">Botón</span>
+                            <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Texto">
+                            <span class="text-[10px] font-semibold text-slate-600">Texto</span>
+                            <input type="color" id="textPicker" value="#1e293b" oninput="aplicarTextoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
+                        </label>
+
+                        <button onclick="restablecerTemaRgb()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-lg text-xs font-bold transition-colors" title="Restablecer Colores Originales">
+                            🔄
+                        </button>
+                    </div>
                 </div>
 
                 <a href="/logout" class="text-xs bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 font-medium ml-auto lg:ml-0">
@@ -398,7 +402,7 @@
             }).catch(err => console.error(err));
         }
 
-        // 📥 DESCARGA DIRECTA (PROXIED & AUDITED)
+        // 📥 DESCARGA DIRECTA
         function descargarArchivoDirecto(fileUrl, fileName, galeriaId) {
             if (galeriaId) incrementarDescargaUI(galeriaId);
             const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=1&name=' + encodeURIComponent(fileName);
@@ -473,7 +477,21 @@
             if (e.key === 'Escape') cerrarPrevisualizacion();
         });
 
-        // 🎨 SISTEMA DUAL RGB CON PERSISTENCIA LOCALSTORAGE
+        // 🎨 SISTEMA DUAL RGB CON PANELES COLAPSABLES
+        function togglePanelRgb() {
+            const contenedor = document.getElementById('opciones-rgb');
+            const flecha = document.getElementById('flecha-rgb');
+            if (contenedor.classList.contains('hidden')) {
+                contenedor.classList.remove('hidden');
+                flecha.textContent = '➡️';
+                localStorage.setItem('rgb_colapsado', 'false');
+            } else {
+                contenedor.classList.add('hidden');
+                flecha.textContent = '⬅️';
+                localStorage.setItem('rgb_colapsado', 'true');
+            }
+        }
+
         function aplicarFondoRgb(colorHex) {
             document.body.style.backgroundColor = colorHex;
             localStorage.setItem('rgb_bg', colorHex);
@@ -513,11 +531,17 @@
             const card = localStorage.getItem('rgb_card');
             const btn = localStorage.getItem('rgb_btn');
             const text = localStorage.getItem('rgb_text');
+            const isColapsado = localStorage.getItem('rgb_colapsado') === 'true';
 
             if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
             if (card) { aplicarContenedorRgb(card); document.getElementById('cardPicker').value = card; }
             if (btn) { aplicarBotonRgb(btn); document.getElementById('btnPicker').value = btn; }
             if (text) { aplicarTextoRgb(text); document.getElementById('textPicker').value = text; }
+
+            if (isColapsado) {
+                document.getElementById('opciones-rgb').classList.add('hidden');
+                document.getElementById('flecha-rgb').textContent = '⬅️';
+            }
         });
     </script>
 
