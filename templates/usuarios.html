@@ -3,177 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Usuarios</title>
+    <title>Arkiv | Gestión de Usuarios</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 min-h-screen p-8">
-    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-md p-6">
-        <div class="flex justify-between items-center mb-6 border-b pb-4">
+<body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300 relative">
+
+    <div class="custom-card max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full transition-colors duration-300">
+        
+        <!-- Encabezado -->
+        <div class="flex justify-between items-center border-b pb-4 mb-6">
             <div>
                 <a href="/bienvenida" class="text-xs text-blue-600 hover:underline">← Volver al Inicio</a>
-                <h1 class="text-2xl font-bold text-slate-800">Módulo de Gestión de Usuarios</h1>
+                <h1 class="custom-text text-xl sm:text-2xl font-bold text-slate-800">Módulo de Gestión de Usuarios</h1>
             </div>
-            <a href="/gestor" class="text-xs bg-slate-200 text-slate-700 px-3 py-1.5 rounded hover:bg-slate-300 transition-colors">Ir al Gestor de Archivos</a>
+            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium whitespace-nowrap">
+                Ir al Gestor de Archivos
+            </a>
         </div>
 
         <!-- Formulario Crear Usuario -->
-        <form action="/usuarios" method="POST" class="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">Nombre de Usuario</label>
-                <input type="text" name="username" placeholder="ej. juan23" required class="w-full text-sm p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
+        <form action="/usuarios" method="POST" class="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-lg flex flex-col gap-3">
+            <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wide">Crear Nuevo Usuario</h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre de Usuario</label>
+                    <input type="text" name="username" placeholder="Ej: juan.perez" required class="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Correo Electrónico</label>
+                    <input type="email" name="email" placeholder="juan@correo.com" required class="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
             </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
-                <input type="email" name="email" placeholder="juan@correo.com" required class="w-full text-sm p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Contraseña Inicial</label>
+                    <input type="password" name="password" placeholder="••••" required class="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Rol de Acceso</label>
+                    <select name="rol" class="w-full text-xs p-2 border border-slate-300 rounded bg-white font-medium">
+                        <option value="estandar">Usuario Estándar (Modo Consulta)</option>
+                        <option value="admin">Administrador (Control Total)</option>
+                    </select>
+                </div>
             </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">Contraseña Inicial</label>
-                <input type="password" name="password" placeholder="••••••••" required class="w-full text-sm p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">Rol de Acceso</label>
-                <select name="rol" class="w-full text-sm p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option value="estandar">Usuario Estándar (Modo Consulta)</option>
-                    <option value="admin">Administrador (Control Total)</option>
-                </select>
-            </div>
-            <button type="submit" class="md:col-span-2 bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors">
+
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors self-end mt-1">
                 + Crear Nuevo Usuario
             </button>
         </form>
 
-        <!-- Barra de Búsqueda -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-            <h2 class="text-lg font-bold text-slate-800">Usuarios Registrados</h2>
-            
-            <form action="/usuarios" method="GET" class="flex gap-2 w-full sm:w-auto">
-                <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar usuario o correo..." class="text-xs p-2 border border-slate-300 rounded-md w-full sm:w-64 focus:ring-2 focus:ring-blue-500 outline-none">
-                <button type="submit" class="bg-slate-700 text-white px-3 py-2 rounded-md text-xs font-medium hover:bg-slate-800 transition-colors">
-                    Buscar
-                </button>
-                {% if busqueda %}
-                    <a href="/usuarios" class="bg-slate-200 text-slate-700 px-3 py-2 rounded-md text-xs font-medium hover:bg-slate-300 transition-colors flex items-center">
-                        Limpiar
-                    </a>
-                {% endif %}
-            </form>
-        </div>
-
-        <!-- Tabla de Usuarios Registrados con Edición -->
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm text-slate-600 border border-slate-200 rounded-lg">
-                <thead class="bg-slate-100 text-slate-700 font-semibold border-b">
+        <!-- Tabla Usuarios -->
+        <h2 class="custom-text text-base font-bold text-slate-800 mb-3">Usuarios Registrados</h2>
+        <div class="overflow-x-auto rounded-lg border border-slate-200">
+            <table class="w-full text-left text-xs text-slate-700">
+                <thead class="bg-slate-50 border-b text-slate-600 font-semibold uppercase">
                     <tr>
                         <th class="p-3">ID</th>
                         <th class="p-3">Usuario</th>
                         <th class="p-3">Correo</th>
                         <th class="p-3">Rol</th>
-                        <th class="p-3 text-center">Acciones</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% if usuarios %}
-                        {% for u in usuarios %}
-                            <tr class="border-b hover:bg-slate-50">
-                                <td class="p-3">{{ u[0] }}</td>
-                                <td class="p-3 font-semibold text-slate-800">{{ u[1] }}</td>
-                                <td class="p-3 text-slate-600">{{ u[2] }}</td>
-                                <td class="p-3">
-                                    <span class="px-2 py-1 text-xs rounded-full font-bold {% if u[3] == 'admin' %}bg-purple-100 text-purple-700{% else %}bg-slate-200 text-slate-700{% endif %}">
-                                        {{ u[3] }}
-                                    </span>
-                                </td>
-                                <td class="p-3">
-                                    <div class="flex items-center justify-center gap-2">
-                                        <!-- Botón Editar Datos / Contraseña -->
-                                        <button onclick="toggleElement('edit-user-{{ u[0] }}')" class="text-xs bg-amber-100 text-amber-800 px-3 py-1 rounded hover:bg-amber-200 transition-colors">
-                                            ✏️ Editar
-                                        </button>
-                                        {% if u[1] != 'admin' %}
-                                        <!-- Botón Eliminar -->
-                                        <form action="/eliminar_usuario/{{ u[0] }}" method="POST" onsubmit="return confirm('¿Eliminar al usuario {{ u[1] }}?');">
-                                            <button type="submit" class="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded hover:bg-red-200 transition-colors">
-                                                ✕
-                                            </button>
-                                        </form>
-                                        {% endif %}
-                                    </div>
-
-                                    <!-- Formulario Desplegable para Editar Usuario Completo -->
-                                    <form id="edit-user-{{ u[0] }}" action="/editar_usuario/{{ u[0] }}" method="POST" class="hidden mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col gap-2">
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                            <div>
-                                                <label class="text-[10px] font-bold text-slate-600">Nuevo Nombre Usuario:</label>
-                                                <input type="text" name="username" value="{{ u[1] }}" required class="text-xs p-1.5 border rounded w-full">
-                                            </div>
-                                            <div>
-                                                <label class="text-[10px] font-bold text-slate-600">Nuevo Correo:</label>
-                                                <input type="email" name="email" value="{{ u[2] }}" required class="text-xs p-1.5 border rounded w-full">
-                                            </div>
-                                            <div>
-                                                <label class="text-[10px] font-bold text-slate-600">Nueva Clave (Opcional):</label>
-                                                <input type="password" name="password" placeholder="Dejar en blanco para conservar" class="text-xs p-1.5 border rounded w-full">
-                                            </div>
-                                            <div>
-                                                <label class="text-[10px] font-bold text-slate-600">Rol:</label>
-                                                <select name="rol" class="text-xs p-1.5 border rounded w-full bg-white">
-                                                    <option value="estandar" {% if u[3] == 'estandar' %}selected{% endif %}>Estándar</option>
-                                                    <option value="admin" {% if u[3] == 'admin' %}selected{% endif %}>Admin</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="flex justify-end gap-2 mt-1">
-                                            <button type="button" onclick="toggleElement('edit-user-{{ u[0] }}')" class="text-xs bg-slate-200 text-slate-700 px-2.5 py-1 rounded">Cancelar</button>
-                                            <button type="submit" class="text-xs bg-amber-600 text-white px-3 py-1 rounded hover:bg-amber-700 font-semibold">Guardar Cambios</button>
-                                        </div>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    {% else %}
-                        <tr>
-                            <td colspan="5" class="p-4 text-center text-slate-400 text-sm">No se encontraron usuarios.</td>
-                        </tr>
-                    {% endif %}
+                <tbody class="divide-y divide-slate-200 bg-white">
+                    {% for u in usuarios %}
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-3 font-mono text-slate-500">{{ u[0] }}</td>
+                        <td class="p-3 font-bold text-slate-800">{{ u[1] }}</td>
+                        <td class="p-3 text-slate-600">{{ u[2] }}</td>
+                        <td class="p-3">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold {% if u[3] == 'admin' %}bg-purple-100 text-purple-800 border border-purple-200{% else %}bg-slate-100 text-slate-700 border border-slate-200{% endif %}">
+                                {{ u[3] }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
-
-    <script>
-        function toggleElement(id) {
-            const el = document.getElementById(id);
-            if (el.classList.contains('hidden')) {
-                el.classList.remove('hidden');
-                el.classList.add('flex');
-            } else {
-                el.classList.add('hidden');
-                el.classList.remove('flex');
-            }
-        }
-    </script>
-
-<script>
-            (function() {
-                const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
-                let temporizadorInactividad;
-
-                function reiniciarTemporizador() {
-                    clearTimeout(temporizadorInactividad);
-                    temporizadorInactividad = setTimeout(() => {
-                        alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                        window.location.href = "/login?expirado=1";
-                    }, TIEMPO_INACTIVIDAD_MS);
-                }
-
-                const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-                eventos.forEach(evento => {
-                    document.addEventListener(evento, reiniciarTemporizador, true);
-                });
-
-                reiniciarTemporizador();
-            })();
-        </script>
-    
 </body>
 </html>
