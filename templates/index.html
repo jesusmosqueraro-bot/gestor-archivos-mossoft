@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arkiv | Centro de Protocolos e Instructivos</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body, div, p, span, h1, h2, h3, h4, textarea, input, select {
@@ -47,6 +47,10 @@
                 {% if rol == 'admin' %}
                     <a href="/usuarios" class="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg font-medium hover:bg-purple-100">Usuarios</a>
                     <a href="/logs" class="text-xs bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg font-medium hover:bg-slate-100">Bitácora Logs</a>
+                    <!-- 🗑️ BOTÓN DE ACCESO A PAPELERA -->
+                    <a href="/papelera" class="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg font-medium hover:bg-amber-100 flex items-center gap-1">
+                        🗑️ Papelera
+                    </a>
                 {% endif %}
 
                 <!-- 🎨 PANEL RGB COLAPSABLE -->
@@ -255,7 +259,7 @@
                                     Editar
                                 </button>
                                 
-                                <form action="/eliminar_galeria/{{ galeria.id }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas eliminar este instructivo por completo?');">
+                                <form action="/eliminar_galeria/{{ galeria.id }}" method="POST" onsubmit="return confirm('⚠️ ¿Deseas enviar este instructivo a la Papelera de Reciclaje?');">
                                     <button type="submit" class="text-xs bg-red-100 text-red-700 px-3 py-1 rounded hover:bg-red-200 font-semibold">
                                         Eliminar
                                     </button>
