@@ -319,7 +319,7 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 🔑 RECUPERACIÓN DE CONTRASEÑA
+# 🔑 PASO 1: ENVIAR CÓDIGO DE VERIFICACIÓN AL CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
@@ -327,30 +327,37 @@ def recuperar_clave():
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username, password FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username, password FROM usuarios WHERE email = ?"
+        query = "SELECT username FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE email = ?"
         cursor.execute(query, (email_ingresado,))
         user = cursor.fetchone()
         conn.close()
 
         if user:
-            usuario_nombre, clave_usuario = user[0], user[1]
+            usuario_nombre = user[0]
+            # Generar código numérico aleatorio de 6 dígitos
+            codigo_verificacion = str(random.randint(100000, 999999))
+            
+            # Guardar en sesión temporal
+            session['reset_email'] = email_ingresado
+            session['reset_user'] = usuario_nombre
+            session['reset_code'] = codigo_verificacion
+
             try:
                 msg = MIMEMultipart()
                 msg['From'] = SMTP_USER
                 msg['To'] = email_ingresado
-                msg['Subject'] = "🔐 Recuperación de Contraseña - ARKIV"
+                msg['Subject'] = f"🔐 Código de Recuperación: {codigo_verificacion} - ARKIV"
 
                 cuerpo = f"""
                 Hola, {usuario_nombre}.
 
-                Hemos recibido una solicitud para recordar tu contraseña de acceso al sistema ARKIV.
+                Has solicitado restablecer tu contraseña en el sistema ARKIV.
 
-                📌 Tu usuario: {usuario_nombre}
-                🔑 Tu contraseña actual: {clave_usuario}
+                📌 Tu código de verificación es: {codigo_verificacion}
 
-                Puedes iniciar sesión en: https://gestor-archivos-mossoft.onrender.com/login
+                Ingresa este código en la pantalla de recuperación junto con tu nueva contraseña.
 
-                Si no solicitaste esta información, por favor ignora este correo.
+                Si no solicitaste este cambio, por favor ignora este mensaje.
                 ---
                 Equipo de Soporte - MosSoft
                 """
@@ -362,53 +369,54 @@ def recuperar_clave():
                 server.send_message(msg)
                 server.quit()
 
-                registrar_log(usuario_nombre, "Recuperación de Clave", f"Se envió la clave al correo: {email_ingresado}")
-                return render_template('recuperar.html', exito="Te hemos enviado un correo con tus datos de acceso.")
+                registrar_log(usuario_nombre, "Solicitud de Código", f"Código enviado a: {email_ingresado}")
+                return render_template('recuperar.html', paso=2, email=email_ingresado)
             
             except Exception as e:
                 print(f"Error enviando correo: {e}")
-                return render_template('recuperar.html', error="Ocurrió un error al enviar el correo. Intenta de nuevo.")
+                return render_template('recuperar.html', paso=1, error="Error enviando el correo. Revisa la configuración SMTP.")
         else:
-            return render_template('recuperar.html', error="El correo ingresado no está registrado.")
+            return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
-    return render_template('recuperar.html')
+    return render_template('recuperar.html', paso=1)
 
-# 🔄 VALIDACIÓN Y CAMBIO DIRECTO DE CONTRASEÑA
+# 🔑 PASO 2: VALIDAR CÓDIGO Y CAMBIAR CONTRASEÑA
 @app.route('/validar_codigo', methods=['POST'])
 def validar_codigo():
-    usuario_o_codigo = request.form.get('codigo') or request.form.get('username') or request.form.get('email')
-    nueva_pass = request.form.get('nueva_password') or request.form.get('password')
+    codigo_ingresado = request.form.get('codigo', '').strip()
+    nueva_pass = request.form.get('nueva_password', '').strip()
 
-    if not usuario_o_codigo or not nueva_pass:
-        return render_template('recuperar.html', error="Por favor completa todos los campos.")
+    codigo_correcto = session.get('reset_code')
+    email_usuario = session.get('reset_email')
+    nombre_usuario = session.get('reset_user')
 
+    if not codigo_correcto or not email_usuario:
+        return render_template('recuperar.html', paso=1, error="La sesión expiró. Por favor solicita un nuevo código.")
+
+    if codigo_ingresado != codigo_correcto:
+        return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
+
+    # Si el código es correcto, actualizar contraseña
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = """
-            UPDATE usuarios 
-            SET password = %s 
-            WHERE username = %s OR email = %s
-        """ if db_type == 'postgres' else """
-            UPDATE usuarios 
-            SET password = ? 
-            WHERE username = ? OR email = ?
-        """
-        cursor.execute(q_upd, (nueva_pass, usuario_o_codigo, usuario_o_codigo))
+        q_upd = "UPDATE usuarios SET password = %s WHERE email = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE email = ?"
+        cursor.execute(q_upd, (nueva_pass, email_usuario))
         conn.commit()
+        conn.close()
 
-        if cursor.rowcount > 0:
-            registrar_log(usuario_o_codigo, "Cambio de Clave", f"Se actualizó la contraseña para '{usuario_o_codigo}'")
-            conn.close()
-            return render_template('recuperar.html', exito="¡Contraseña actualizada exitosamente! Ya puedes iniciar sesión.")
-        else:
-            conn.close()
-            return render_template('recuperar.html', error="No se encontró ningún usuario asociado a esos datos.")
+        # Limpiar datos temporales de la sesión
+        session.pop('reset_code', None)
+        session.pop('reset_email', None)
+        session.pop('reset_user', None)
+
+        registrar_log(nombre_usuario, "Cambio Exitoso de Clave", f"Se actualizó la clave vía código de verificación.")
+        return render_template('recuperar.html', paso=1, exito="¡Contraseña actualizada con éxito! Ya puedes iniciar sesión.")
 
     except Exception as e:
         conn.rollback()
         conn.close()
-        return render_template('recuperar.html', error=f"Error actualizando contraseña: {e}")
+        return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
 @app.route('/logout')
 def logout():
