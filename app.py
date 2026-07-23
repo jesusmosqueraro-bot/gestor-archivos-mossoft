@@ -2,6 +2,7 @@ import os
 import uuid
 import random
 import smtplib
+import ssl
 import sqlite3
 import urllib.request
 import urllib.parse
@@ -61,10 +62,9 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
 # 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
-SMTP_SERVER_SSL = "smtp.gmail.com"
-SMTP_PORT_SSL = 465
 SMTP_USER = "jesus.mosqueraro@gmail.com"
-SMTP_PASSWORD = "gyod xyny fzvw bsxu"
+# Clave limpia de espacios para evitar error 535 en Gmail
+SMTP_PASSWORD = "gyodxynyfzvwbsxu"
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
@@ -321,7 +321,7 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 📧 ENVÍO VÍA GMAIL SSL PUERTO 465 (RÁPIDO Y DIRECTO DESDE RENDER)
+# 📧 ENVÍO VÍA GMAIL CON FALLBACK INTELIGENTE DE PUERTOS
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         msg = MIMEMultipart()
@@ -339,14 +339,28 @@ Equipo de Soporte - ARKIV
 """
         msg.attach(MIMEText(cuerpo, 'plain'))
 
-        # Conexión cifrada SSL directa por Puerto 465 (evita bloqueos de Render)
-        server = smtplib.SMTP_SSL(SMTP_SERVER_SSL, SMTP_PORT_SSL, timeout=10)
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print(f"✅ Correo enviado con éxito desde Gmail a: {email_destino}")
+        context = ssl.create_default_context()
+        password_limpia = SMTP_PASSWORD.replace(" ", "").strip()
+
+        # Intento 1: Puerto 587 con STARTTLS
+        try:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
+                server.starttls(context=context)
+                server.login(SMTP_USER, password_limpia)
+                server.send_message(msg)
+            print(f"✅ Correo enviado con éxito vía Gmail (Puerto 587) a: {email_destino}")
+            return
+        except Exception as e587:
+            print(f"⚠️ Puerto 587 falló: {e587}. Probando Puerto 465 SSL...")
+
+        # Intento 2: Puerto 465 SSL directo (Fallback)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
+            server.login(SMTP_USER, password_limpia)
+            server.send_message(msg)
+        print(f"✅ Correo enviado con éxito vía Gmail (Puerto 465) a: {email_destino}")
+
     except Exception as e:
-        print(f"❌ Error enviando correo vía Gmail SSL: {e}")
+        print(f"❌ Error enviando correo vía Gmail desde Render: {e}")
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
@@ -369,7 +383,7 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono para respuesta instantánea en la interfaz
+            # Envío asíncrono para respuesta instantánea
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
