@@ -3,57 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bitácora de Logs - Gestor de Archivos</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📁</text></svg>">
+    <title>Arkiv | Bitácora de Auditoría</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%232563eb;stop-opacity:1' /><stop offset='100%' style='stop-color:%237c3aed;stop-opacity:1' /></linearGradient></defs><rect width='100' height='100' rx='25' fill='url(%23grad)'/><path d='M25 35 C25 32 27 30 30 30 L42 30 C45 30 47 32 49 35 L53 40 L70 40 C73 40 75 42 75 45 L75 70 C75 73 73 75 70 75 L30 75 C27 75 25 73 25 70 Z' fill='%23ffffff' opacity='0.95'/><path d='M30 45 L70 45 L70 70 C70 73 68 75 65 75 L35 75 C32 75 30 73 30 70 Z' fill='%23ffffff'/><circle cx='50' cy='58' r='4' fill='%232563eb'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, table, td, th {
+            overflow-wrap: anywhere !important;
+            word-break: break-word !important;
+        }
+    </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-8">
-    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-md p-6">
+<body class="bg-slate-100 min-h-screen p-3 sm:p-8">
+
+    <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full">
         
-        <div class="flex justify-between items-center border-b pb-4 mb-6">
+        <!-- Encabezado -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-6 gap-3">
             <div>
                 <a href="/gestor" class="text-xs text-blue-600 hover:underline">← Volver al Gestor</a>
-                <h1 class="text-2xl font-bold text-slate-800 mt-1">📋 Bitácora de Auditoría (Logs)</h1>
-                <p class="text-xs text-slate-500">Historial de acciones y trazabilidad de cambios "Antes ➔ Después"</p>
+                <h1 class="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    📑 Bitácora de Auditoría (Logs)
+                </h1>
+                <p class="text-xs text-slate-500">Historial de acciones, descargas y trazabilidad de la plataforma</p>
             </div>
-            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg border hover:bg-slate-200 font-medium">
+            <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium">
                 Volver
             </a>
         </div>
 
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse text-xs">
-                <thead>
-                    <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                        <th class="p-3">Fecha y Hora</th>
-                        <th class="p-3">Usuario</th>
-                        <th class="p-3">Acción</th>
-                        <th class="p-3">Detalle del Cambio (Antes ➔ Después)</th>
+        <!-- 🔍 Panel de Filtros de Auditoría -->
+        <form action="/logs" method="GET" class="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                
+                <!-- Filtro por Usuario -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">👤 Usuario</label>
+                    <select name="usuario" onchange="this.form.submit()" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white text-slate-700 font-medium">
+                        <option value="">Todos los Usuarios</option>
+                        {% for user in usuarios_opt %}
+                            <option value="{{ user }}" {% if q_usuario == user %}selected{% endif %}>{{ user }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Filtro por Acción -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">⚡ Acción</label>
+                    <select name="accion" onchange="this.form.submit()" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white text-slate-700 font-medium">
+                        <option value="">Todas las Acciones</option>
+                        {% for acc in acciones_opt %}
+                            <option value="{{ acc }}" {% if q_accion == acc %}selected{% endif %}>{{ acc }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Búsqueda General por Texto / Fecha -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">🔍 Buscar detalle o fecha</label>
+                    <div class="flex gap-1">
+                        <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Ej: 22/07/2026, descarga..." class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-slate-900 shrink-0">
+                            Buscar
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            {% if q_usuario or q_accion or q_busqueda %}
+            <div class="flex justify-end pt-1">
+                <a href="/logs" class="text-xs text-red-600 hover:underline font-semibold flex items-center gap-1">
+                    ✖ Limpiar Filtros
+                </a>
+            </div>
+            {% endif %}
+        </form>
+
+        <!-- Tabla de Registros -->
+        <div class="overflow-x-auto rounded-lg border border-slate-200">
+            <table class="w-full text-left text-xs text-slate-700">
+                <thead class="bg-slate-50 border-b text-slate-600 font-semibold uppercase tracking-wider">
+                    <tr>
+                        <th class="p-3">FECHA Y HORA</th>
+                        <th class="p-3">USUARIO</th>
+                        <th class="p-3">ACCIÓN</th>
+                        <th class="p-3">DETALLE DEL CAMBIO (ANTES ➔ DESPUÉS)</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-slate-200 bg-white">
                     {% if logs %}
                         {% for log in logs %}
-                        <tr class="hover:bg-slate-50/80 transition-colors">
-                            <td class="p-3 text-slate-500 font-medium whitespace-nowrap">🕒 {{ log[3] }}</td>
-                            <td class="p-3 font-bold text-slate-800">👤 {{ log[0] }}</td>
-                            <td class="p-3">
-                                <span class="px-2 py-0.5 rounded-md font-bold text-[10px] uppercase border
-                                    {% if 'Creación' in log[1] %} bg-emerald-50 text-emerald-700 border-emerald-200
-                                    {% elif 'Edición' in log[1] or 'Modificación' in log[1] %} bg-amber-50 text-amber-700 border-amber-200
-                                    {% elif 'Eliminación' in log[1] %} bg-red-50 text-red-700 border-red-200
-                                    {% else %} bg-blue-50 text-blue-700 border-blue-200 {% endif %}">
-                                    {{ log[1] }}
-                                </span>
-                            </td>
-                            <td class="p-3 text-slate-700 font-mono text-[11px] bg-slate-50/50 rounded">
-                                {{ log[2] }}
-                            </td>
-                        </tr>
+                            <tr class="hover:bg-slate-50 transition-colors">
+                                <td class="p-3 font-mono text-slate-500 whitespace-nowrap">
+                                    🕒 {{ log[3] }}
+                                </td>
+                                <td class="p-3 font-bold text-slate-800 whitespace-nowrap">
+                                    👤 {{ log[0] }}
+                                </td>
+                                <td class="p-3 whitespace-nowrap">
+                                    <span class="px-2 py-1 rounded-md text-[10px] font-bold 
+                                        {% if 'Descarga' in log[1] %}
+                                            bg-indigo-100 text-indigo-800 border border-indigo-200
+                                        {% elif 'Inicio' in log[1] %}
+                                            bg-blue-100 text-blue-800 border border-blue-200
+                                        {% elif 'Creación' in log[1] %}
+                                            bg-emerald-100 text-emerald-800 border border-emerald-200
+                                        {% elif 'Edición' in log[1] %}
+                                            bg-amber-100 text-amber-800 border border-amber-200
+                                        {% else %}
+                                            bg-slate-100 text-slate-700 border border-slate-200
+                                        {% endif %}">
+                                        {{ log[1] }}
+                                    </span>
+                                </td>
+                                <td class="p-3 leading-relaxed text-slate-600">
+                                    {{ log[2] }}
+                                </td>
+                            </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="4" class="p-4 text-center text-slate-400">No hay registros de auditoría aún.</td>
+                            <td colspan="4" class="p-6 text-center text-slate-400">
+                                No se encontraron registros de auditoría con los filtros aplicados.
+                            </td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -62,27 +134,5 @@
 
     </div>
 
-<script>
-            (function() {
-                const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
-                let temporizadorInactividad;
-
-                function reiniciarTemporizador() {
-                    clearTimeout(temporizadorInactividad);
-                    temporizadorInactividad = setTimeout(() => {
-                        alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                        window.location.href = "/logout";
-                    }, TIEMPO_INACTIVIDAD_MS);
-                }
-
-                const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-                eventos.forEach(evento => {
-                    document.addEventListener(evento, reiniciarTemporizador, true);
-                });
-
-                reiniciarTemporizador();
-            })();
-        </script>
-    
 </body>
 </html>
