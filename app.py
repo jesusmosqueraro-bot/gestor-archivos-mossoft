@@ -666,6 +666,7 @@ def destruir_galeria(galeria_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
+# ❌ ELIMINACIÓN DE ARCHIVO INDIVIDUAL (MODIFICADA PARA LOGS)
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
 @login_required
 @admin_required
@@ -673,9 +674,23 @@ def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        # 1. Obtener el título del instructivo para el log
+        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_sel, (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        # 2. Eliminar el archivo adjunto
         q_del = "DELETE FROM archivos WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ? AND filename = ?"
         cursor.execute(q_del, (galeria_id, filename))
         conn.commit()
+
+        # 3. Extraer nombre limpio del archivo para el registro
+        nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
+
+        # 4. Registrar en la Bitácora de Auditoría
+        registrar_log(session['username'], "Eliminación de Archivo", f"Se eliminó el archivo adjunto '{nombre_limpio}' del instructivo '{titulo}'")
+
     except Exception as e:
         conn.rollback()
 
