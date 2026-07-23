@@ -63,7 +63,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "jesus.mosqueraro@gmail.com"
 SMTP_PASSWORD = "gyod xyny fzvw bsxu"
-RECAPTCHA_SECRET_KEY = "6Lel3V4tAAAAAAWsc9oCEgoWBN95V2zQZ1E3dx2X"
+RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
