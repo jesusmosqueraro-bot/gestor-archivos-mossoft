@@ -63,6 +63,8 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "jesus.mosqueraro@gmail.com"
 SMTP_PASSWORD = "gyod xyny fzvw bsxu"
+
+# 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -625,7 +627,7 @@ def ver_papelera():
     # 2. Archivos/Capturas individuales eliminados de instructivos activos
     query_arch_elim = """
         SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
-        from archivos a 
+        FROM archivos a 
         JOIN galerias g ON a.galeria_id = g.id 
         WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
     """
@@ -698,7 +700,6 @@ def eliminar_imagen(galeria_id, filename):
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        # Cambio a borrado lógico de archivo
         q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
         cursor.execute(q_upd, (galeria_id, filename))
         conn.commit()
