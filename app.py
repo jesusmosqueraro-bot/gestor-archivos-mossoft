@@ -150,7 +150,7 @@ def init_db():
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(query_admin, ('admin', '1234', 'admin@ejemplo.com', 'admin'))
+            cursor.execute(query_admin, ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin'))
 
         conn.commit()
         conn.close()
@@ -318,6 +318,60 @@ def login():
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
+
+# 🔑 RECUPERACIÓN DE CONTRASEÑA
+@app.route('/recuperar', methods=['GET', 'POST'])
+def recuperar_clave():
+    if request.method == 'POST':
+        email_ingresado = request.form.get('email', '').strip()
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        query = "SELECT username, password FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username, password FROM usuarios WHERE email = ?"
+        cursor.execute(query, (email_ingresado,))
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            usuario_nombre, clave_usuario = user[0], user[1]
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = SMTP_USER
+                msg['To'] = email_ingresado
+                msg['Subject'] = "🔐 Recuperación de Contraseña - ARKIV"
+
+                cuerpo = f"""
+                Hola, {usuario_nombre}.
+
+                Hemos recibido una solicitud para recordar tu contraseña de acceso al sistema ARKIV.
+
+                📌 Tu usuario: {usuario_nombre}
+                🔑 Tu contraseña: {clave_usuario}
+
+                Puedes iniciar sesión en: https://gestor-archivos-mossoft.onrender.com/login
+
+                Si no solicitaste esta información, por favor ignora este correo.
+                ---
+                Equipo de Soporte - MosSoft
+                """
+                msg.attach(MIMEText(cuerpo, 'plain'))
+
+                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+                server.quit()
+
+                registrar_log(usuario_nombre, "Recuperación de Clave", f"Se envió la clave al correo: {email_ingresado}")
+                return render_template('recuperar.html', exito="Te hemos enviado un correo con tus datos de acceso. Revisa tu bandeja de entrada.")
+            
+            except Exception as e:
+                print(f"Error enviando correo: {e}")
+                return render_template('recuperar.html', error="Ocurrió un error al enviar el correo. Contacta al administrador.")
+        else:
+            return render_template('recuperar.html', error="El correo ingresado no está registrado en el sistema.")
+
+    return render_template('recuperar.html')
 
 @app.route('/logout')
 def logout():
@@ -620,11 +674,9 @@ def ver_papelera():
     conn, db_type = get_db()
     cursor = conn.cursor()
     
-    # 1. Instructivos completos eliminados
     cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
     eliminados = cursor.fetchall()
 
-    # 2. Archivos/Capturas individuales eliminados de instructivos activos
     query_arch_elim = """
         SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
         FROM archivos a 
@@ -687,7 +739,7 @@ def destruir_galeria(galeria_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-# 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL (MODO PAPELERA)
+# 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
 @login_required
 @admin_required
