@@ -7,6 +7,8 @@ import urllib.request
 import urllib.parse
 import json
 import unicodedata
+import io
+import csv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -188,7 +190,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📊 RUTAS DE MÉTRICAS (VISTAS Y DESCARGAS AUDITADAS EN LOGS)
+# 📊 RUTAS DE MÉTRICAS
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
 @login_required
 def incrementar_vista(galeria_id):
@@ -210,19 +212,16 @@ def incrementar_descarga(galeria_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         
-        # 1. Obtener el título del instructivo para el detalle del Log
         q_tit = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
         cursor.execute(q_tit, (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        # 2. Incrementar el contador
         q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (galeria_id,))
         conn.commit()
         conn.close()
 
-        # 3. 📝 REGISTRAR EN LA BITÁCORA DE LOGS
         usuario_actual = session.get('username', 'Anónimo')
         registrar_log(usuario_actual, "Descarga de Archivo", f"El usuario descargó material del instructivo: '{titulo}'")
 
@@ -257,7 +256,6 @@ def pdf_proxy():
             with urllib.request.urlopen(req) as response:
                 content_data = response.read()
 
-        # Registrar en la bitácora cuando es una petición directa de descarga vía proxy
         if download_flag == '1':
             usuario_actual = session.get('username', 'Anónimo')
             registrar_log(usuario_actual, "Descarga de Documento", f"Archivo: '{filename_custom}'")
@@ -639,7 +637,7 @@ def gestion_usuarios():
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
-# 📑 RUTA /LOGS CON FILTROS AVANZADOS (USUARIO, ACCIÓN Y BÚSQUEDA)
+# 📑 RUTA /LOGS CON FILTROS
 @app.route('/logs')
 @login_required
 @admin_required
@@ -651,14 +649,12 @@ def ver_logs():
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    # Opciones para selectores
     cursor.execute("SELECT DISTINCT usuario FROM logs ORDER BY usuario ASC")
     lista_usuarios = [u[0] for u in cursor.fetchall() if u[0]]
 
     cursor.execute("SELECT DISTINCT accion FROM logs ORDER BY accion ASC")
     lista_acciones = [a[0] for a in cursor.fetchall() if a[0]]
 
-    # Consulta con filtros dinámicos
     query = "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1"
     params = []
 
@@ -694,6 +690,64 @@ def ver_logs():
         q_accion=q_accion,
         q_busqueda=q_busqueda
     )
+
+# 📊 EXPORTAR AUDITORÍA A EXCEL / CSV
+@app.route('/exportar_logs_csv')
+@login_required
+@admin_required
+def exportar_logs_csv():
+    q_usuario = request.args.get('usuario', '').strip()
+    q_accion = request.args.get('accion', '').strip()
+    q_busqueda = request.args.get('q', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    query = "SELECT fecha, usuario, accion, detalles FROM logs WHERE 1=1"
+    params = []
+
+    if q_usuario:
+        query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+        params.append(q_usuario)
+
+    if q_accion:
+        query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+        params.append(q_accion)
+
+    if q_busqueda:
+        p_busq = f"%{q_busqueda}%"
+        if db_type == 'postgres':
+            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
+            params.extend([p_busq, p_busq])
+        else:
+            query += " AND (detalles LIKE ? OR fecha LIKE ?)"
+            params.extend([p_busq, p_busq])
+
+    query += " ORDER BY id DESC"
+
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['FECHA Y HORA', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
+
+    for row in rows:
+        writer.writerow(row)
+
+    # Convertir a UTF-8 con BOM para que Excel abra tildes directamente
+    csv_bytes = '\ufeff' + output.getvalue()
+    
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    filename = f"Arkiv_Auditoria_Logs_{fecha_filename}.csv"
+
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }
+
+    return Response(csv_bytes, headers=headers, status=200)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
