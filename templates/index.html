@@ -20,12 +20,17 @@
         }
     </style>
 </head>
-<body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300">
+<body id="main-body" class="bg-slate-100 min-h-screen p-3 sm:p-8 transition-colors duration-300 relative">
 
     <!-- Notificación Toast -->
-    <div id="toast-copiado" class="fixed bottom-5 right-5 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl hidden z-50 flex items-center gap-2 transition-all">
+    <div id="toast-copiado" class="fixed bottom-5 left-5 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl hidden z-50 flex items-center gap-2 transition-all">
         <span>✅ ¡Enlace del instructivo copiado al portapapeles!</span>
     </div>
+
+    <!-- 🔝 BOTÓN FLOTANTE VOLVER ARRIBA -->
+    <button id="btn-scroll-top" onclick="volverArriba()" class="fixed bottom-6 right-6 bg-slate-800 text-white p-3 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 hover:bg-slate-900 hover:scale-110 z-50 border border-slate-700 flex items-center justify-center w-11 h-11" title="Volver al inicio">
+        ⬆️
+    </button>
 
     <!-- Contenedor Principal -->
     <div class="custom-card max-w-4xl mx-auto bg-white rounded-xl shadow-md p-4 sm:p-6 w-full overflow-hidden transition-colors duration-300">
@@ -360,6 +365,24 @@
     </div>
 
     <script>
+        // 🔝 FUNCION VOLVER ARRIBA
+        function volverArriba() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        window.addEventListener('scroll', () => {
+            const btn = document.getElementById('btn-scroll-top');
+            if (btn) {
+                if (window.scrollY > 200) {
+                    btn.classList.remove('opacity-0', 'pointer-events-none');
+                    btn.classList.add('opacity-100');
+                } else {
+                    btn.classList.add('opacity-0', 'pointer-events-none');
+                    btn.classList.remove('opacity-100');
+                }
+            }
+        });
+
         function copiarEnlaceDirecto(tituloInstructivo) {
             const urlDirecta = window.location.origin + '/gestor?q=' + encodeURIComponent(tituloInstructivo);
             navigator.clipboard.writeText(urlDirecta).then(() => {
@@ -428,7 +451,6 @@
             const esVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext) || fileUrl.includes('/video/upload/');
             const esImagen = (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) || fileUrl.includes('/image/upload/')) && !esPDF;
 
-            // 1. PDF
             if (esPDF) {
                 const proxyInlineUrl = '/pdf_proxy?url=' + encodeURIComponent(fileUrl) + '&download=0&name=' + encodeURIComponent(fileName);
                 content.innerHTML = `
@@ -436,22 +458,16 @@
                         <iframe src="${proxyInlineUrl}" type="application/pdf" class="w-full h-full rounded-lg border-0 shadow"></iframe>
                     </div>
                 `;
-            } 
-            // 2. VIDEOS
-            else if (esVideo) {
+            } else if (esVideo) {
                 content.innerHTML = `
                     <video controls autoplay class="max-h-[65vh] w-full rounded-lg shadow-lg bg-black">
                         <source src="${fileUrl}" type="video/mp4">
                         Tu navegador no soporta la reproducción de video.
                     </video>
                 `;
-            } 
-            // 3. IMÁGENES
-            else if (esImagen) {
+            } else if (esImagen) {
                 content.innerHTML = `<img src="${fileUrl}" alt="${fileName}" class="max-h-[70vh] w-auto object-contain rounded-lg shadow-md">`;
-            } 
-            // 4. OTROS FORMATOS
-            else {
+            } else {
                 content.innerHTML = `
                     <div class="text-center p-6 bg-white rounded-lg shadow border border-slate-200">
                         <p class="text-4xl mb-3">📄</p>
