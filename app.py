@@ -98,7 +98,7 @@ def init_db():
                 id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL
+                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
@@ -110,7 +110,8 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -126,7 +127,7 @@ def init_db():
                 id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
@@ -138,6 +139,11 @@ def init_db():
                     conn.commit()
                 except Exception:
                     pass
+            try:
+                cursor.execute("ALTER TABLE archivos ADD COLUMN estado TEXT DEFAULT 'activo';")
+                conn.commit()
+            except Exception:
+                pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -373,7 +379,7 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ?"
+        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
         cursor.execute(query_arch, (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
@@ -471,7 +477,7 @@ def subir_archivo():
         q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
         cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
         
-        q_archivo = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
+        q_archivo = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
         for fname in archivos_guardados:
             cursor.execute(q_archivo, (galeria_id, fname))
         
@@ -557,7 +563,7 @@ def editar_galeria(galeria_id):
                         unique_filename=True
                     )
                 
-                q_ins_arch = "INSERT INTO archivos (galeria_id, filename) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename) VALUES (?, ?)"
+                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
                 archivos_agregados += 1
 
@@ -580,7 +586,7 @@ def editar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('index'))
 
-# 🗑️ BORRADO LÓGICO (SOFT DELETE ➔ PAPELERA)
+# 🗑️ BORRADO LÓGICO DE INSTRUCTIVO
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -604,19 +610,32 @@ def eliminar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('index'))
 
-# ♻️ MÓDULO PAPELERA DE RECICLAJE
+# ♻️ MÓDULO PAPELERA DE RECICLAJE (INSTRUCTIVOS + ARCHIVOS ADJUNTOS)
 @app.route('/papelera')
 @login_required
 @admin_required
 def ver_papelera():
     conn, db_type = get_db()
     cursor = conn.cursor()
+    
+    # 1. Instructivos completos eliminados
     cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
     eliminados = cursor.fetchall()
-    conn.close()
-    return render_template('papelera.html', eliminados=eliminados)
 
-# 🔄 RESTAURAR DESDE PAPELERA
+    # 2. Archivos/Capturas individuales eliminados de instructivos activos
+    query_arch_elim = """
+        SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+        from archivos a 
+        JOIN galerias g ON a.galeria_id = g.id 
+        WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
+    """
+    cursor.execute(query_arch_elim)
+    archivos_eliminados = cursor.fetchall()
+
+    conn.close()
+    return render_template('papelera.html', eliminados=eliminados, archivos_eliminados=archivos_eliminados)
+
+# 🔄 RESTAURAR INSTRUCTIVO COMPLETO
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -640,7 +659,7 @@ def restaurar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-# 💥 BORRADO DEFINITIVO
+# 💥 BORRADO DEFINITIVO DE INSTRUCTIVO
 @app.route('/destruir_galeria/<galeria_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -666,7 +685,7 @@ def destruir_galeria(galeria_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-# ❌ ELIMINACIÓN DE ARCHIVO INDIVIDUAL (MODIFICADA PARA LOGS)
+# 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL (MODO PAPELERA)
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
 @login_required
 @admin_required
@@ -674,28 +693,78 @@ def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        # 1. Obtener el título del instructivo para el log
         q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
         cursor.execute(q_sel, (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        # 2. Eliminar el archivo adjunto
-        q_del = "DELETE FROM archivos WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ? AND filename = ?"
-        cursor.execute(q_del, (galeria_id, filename))
+        # Cambio a borrado lógico de archivo
+        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
+        cursor.execute(q_upd, (galeria_id, filename))
         conn.commit()
 
-        # 3. Extraer nombre limpio del archivo para el registro
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
-
-        # 4. Registrar en la Bitácora de Auditoría
-        registrar_log(session['username'], "Eliminación de Archivo", f"Se eliminó el archivo adjunto '{nombre_limpio}' del instructivo '{titulo}'")
+        registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
 
     except Exception as e:
         conn.rollback()
 
     conn.close()
     return redirect(url_for('index'))
+
+# 🔄 RESTAURAR ARCHIVO INDIVIDUAL
+@app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST'])
+@login_required
+@admin_required
+def restaurar_archivo(archivo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        query_info = """
+            SELECT a.filename, g.titulo 
+            FROM archivos a 
+            JOIN galerias g ON a.galeria_id = g.id 
+            WHERE a.id = %s
+        """ if db_type == 'postgres' else """
+            SELECT a.filename, g.titulo 
+            FROM archivos a 
+            JOIN galerias g ON a.galeria_id = g.id 
+            WHERE a.id = ?
+        """
+        cursor.execute(query_info, (archivo_id,))
+        row = cursor.fetchone()
+
+        q_upd = "UPDATE archivos SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'activo' WHERE id = ?"
+        cursor.execute(q_upd, (archivo_id,))
+        conn.commit()
+
+        if row:
+            nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
+            registrar_log(session['username'], "Restauración de Archivo", f"Se reintegró el archivo '{nombre_limpio}' al instructivo '{row[1]}'.")
+
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 💥 DESTRUIR ARCHIVO INDIVIDUAL PERMANENTEMENTE
+@app.route('/destruir_archivo/<int:archivo_id>', methods=['POST'])
+@login_required
+@admin_required
+def destruir_archivo(archivo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_del = "DELETE FROM archivos WHERE id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE id = ?"
+        cursor.execute(q_del, (archivo_id,))
+        conn.commit()
+        registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
 
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
