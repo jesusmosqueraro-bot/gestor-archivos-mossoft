@@ -3,104 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bienvenido - Panel de Control</title>
-    
-    <!-- ÍCONO DE PESTAÑA ELEGANTE -->
-    <link rel="icon" <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
-        
+    <title>Arkiv | Inicio</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f172a'/><path d='M30 30h40v40H30z' fill='%232563eb'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body id="main-body" class="bg-slate-100 min-h-screen flex items-center justify-center p-6 transition-colors duration-300">
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col justify-between font-sans">
 
-    <div class="max-w-xl w-full bg-white rounded-2xl shadow-xl p-8 border border-slate-200 text-center relative">
-        
-        <!-- SELECTORES DE COLOR RGB (Igual que en el Gestor de Archivos) -->
-        <div class="flex justify-end items-center gap-2 mb-6 border-b pb-4">
-            <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
-                <label for="bgPicker" class="text-xs text-slate-600">Fondo:</label>
-                <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
-            </div>
-
-            <div class="flex items-center gap-1 bg-slate-50 px-2 py-1 border rounded-lg">
-                <label for="btnPicker" class="text-xs text-slate-600">Botón:</label>
-                <input type="color" id="btnPicker" value="#2563eb" oninput="aplicarBotonRgb(this.value)" class="w-5 h-5 rounded cursor-pointer border-0">
-            </div>
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center font-black text-white font-serif text-lg">A</div>
+            <span class="text-xl font-bold tracking-tight text-white font-serif">ARKIV</span>
         </div>
-
-        <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
-            📁
-        </div>
-        <h1 class="text-3xl font-extrabold text-slate-800 mb-1">¡Bienvenido al Sistema!</h1>
-        <p class="text-xs font-semibold text-slate-500 mb-4">Usuario: <span class="text-slate-700">{{ username }}</span> | Rol: <span class="uppercase text-blue-600 font-bold">{{ rol }}</span></p>
-        
-        <p class="text-slate-600 mb-8 text-sm leading-relaxed">
-            Has iniciado sesión correctamente. Desde aquí puedes acceder al módulo principal de archivos o administrar usuarios y accesos.
-        </p>
-
-        <div class="flex flex-col gap-3 justify-center">
-            <!-- Botón Módulo Principal (Responde al selector de color) -->
-            <a href="/gestor" class="btn-custom bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl hover:opacity-90 transition-all shadow-lg flex items-center justify-center gap-2 text-sm">
-                Entrar al Gestor de Archivos →
-            </a>
-
-            {% if rol == 'admin' %}
-            <!-- Botón Módulo Crear/Gestionar Usuarios (Solo Admin) -->
-            <a href="/usuarios" class="bg-purple-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-purple-700 transition-all shadow-lg hover:shadow-purple-200 flex items-center justify-center gap-2 text-sm">
-                👤 Crear / Gestionar Usuarios y Permisos
-            </a>
-            
-            <!-- Botón Ver Logs de Auditoría (Solo Admin) -->
-            <a href="/logs" class="bg-slate-700 text-white font-semibold px-6 py-3 rounded-xl hover:bg-slate-800 transition-all shadow-lg text-sm">
-                📋 Bitácora e Historial de Logs
-            </a>
-            {% endif %}
-
-            <a href="/logout" class="bg-slate-100 text-slate-600 font-medium px-6 py-2.5 rounded-xl hover:bg-slate-200 transition-colors text-sm mt-2">
+        <div class="flex items-center gap-4">
+            <span class="text-xs text-slate-400 font-medium hidden sm:inline">Hola, <strong class="text-white font-bold">{{ username }}</strong></span>
+            <a href="/logout" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-3 py-1.5 rounded-xl text-xs font-bold transition-all">
                 Cerrar Sesión
             </a>
         </div>
-    </div>
+    </nav>
 
-    <!-- SCRIPT APLICADOR DE COLORES RGB (SINCRONIZADO CON EL GESTOR DE ARCHIVOS) -->
-    <script>
-        function aplicarFondoRgb(colorHex) {
-            document.body.style.backgroundColor = colorHex;
-            localStorage.setItem('custom_bg_color', colorHex);
-        }
-        function aplicarBotonRgb(colorHex) {
-            document.querySelectorAll('.btn-custom').forEach(btn => { btn.style.backgroundColor = colorHex; });
-            localStorage.setItem('custom_btn_color', colorHex);
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const bg = localStorage.getItem('custom_bg_color');
-            const btn = localStorage.getItem('custom_btn_color');
-            if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
-            if (btn) { aplicarBotonRgb(btn); document.getElementById('btnPicker').value = btn; }
-        });
-    </script>
+    <!-- MENÚ PRINCIPAL -->
+    <main class="max-w-4xl w-full mx-auto p-6 my-auto">
+        <div class="text-center mb-10">
+            <h1 class="text-3xl font-black text-white tracking-tight font-serif mb-2">Panel de Control</h1>
+            <p class="text-slate-400 text-xs">Selecciona un módulo para comenzar a trabajar</p>
+        </div>
 
-    <!-- SCRIPT DE DESCONEXIÓN POR INACTIVIDAD (25 MINUTOS) -->
-    <script>
-        (function() {
-            const TIEMPO_INACTIVIDAD_MS = 25 * 60 * 1000;
-            let temporizadorInactividad;
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            <!-- GESTOR DE ARCHIVOS -->
+            <a href="/gestor" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-blue-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
+                <div class="w-12 h-12 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-folder-open"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white group-hover:text-blue-400 transition-colors">Gestor de Instructivos</h3>
+                    <p class="text-xs text-slate-400">Consulta y descarga guías, videos y documentos.</p>
+                </div>
+            </a>
 
-            function reiniciarTemporizador() {
-                clearTimeout(temporizadorInactividad);
-                temporizadorInactividad = setTimeout(() => {
-                    alert("⚠️ Tu sesión ha expirado por inactividad (25 min). Serás redirigido al inicio de sesión.");
-                    window.location.href = "/login?expirado=1";
-                }, TIEMPO_INACTIVIDAD_MS);
-            }
+            {% if rol == 'admin' %}
+            <!-- BÓVEDA DE ACCESOS -->
+            <a href="/credenciales" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-emerald-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
+                <div class="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-vault"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white group-hover:text-emerald-400 transition-colors">Bóveda de Accesos</h3>
+                    <p class="text-xs text-slate-400">Almacena usuarios y contraseñas de otros sistemas.</p>
+                </div>
+            </a>
 
-            const eventos = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-            eventos.forEach(evento => {
-                document.addEventListener(evento, reiniciarTemporizador, true);
-            });
+            <!-- GESTIÓN DE USUARIOS -->
+            <a href="/usuarios" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-amber-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
+                <div class="w-12 h-12 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-users-gear"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white group-hover:text-amber-400 transition-colors">Gestión de Usuarios</h3>
+                    <p class="text-xs text-slate-400">Crea, edita y administra roles de acceso.</p>
+                </div>
+            </a>
 
-            reiniciarTemporizador();
-        })();
-    </script>
-    
+            <!-- LOGS Y AUDITORÍA -->
+            <a href="/logs" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-purple-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
+                <div class="w-12 h-12 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-clipboard-list"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white group-hover:text-purple-400 transition-colors">Auditoría y Logs</h3>
+                    <p class="text-xs text-slate-400">Historial completo de actividades del sistema.</p>
+                </div>
+            </a>
+            {% endif %}
+
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="text-center py-4 text-xs text-slate-500 border-t border-slate-800">
+        ARKIV System &copy; 2026 — Plataforma de Gestión Segura
+    </footer>
+
 </body>
 </html>
