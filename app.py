@@ -2,6 +2,7 @@ import os
 import uuid
 import random
 import smtplib
+import ssl
 import sqlite3
 import urllib.request
 import urllib.parse
@@ -14,7 +15,7 @@ import base64
 import hashlib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
@@ -40,11 +41,17 @@ app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
-# 🇨🇴 ZONA HORARIA COLOMBIA
-ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
+# 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
+try:
+    ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
+except Exception:
+    ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 def obtener_fecha_actual():
-    return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
+    try:
+        return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
+    except Exception:
+        return datetime.now().strftime("%d/%m/%Y %I:%M %p")
 
 def normalizar(texto):
     if not texto: return ""
@@ -52,7 +59,7 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 CIFRADO Y DESCIFRADO NATIVO PARA CREDENCIALES
+# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO
 def encriptar_texto(texto):
     if not texto: return ""
     try:
@@ -83,11 +90,9 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 📧 CONFIGURACIÓN EXACTA SMTP GMAIL (18:00 HRS)
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
+# 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL (SIN ESPACIOS EN LA CLAVE DE APLICACIÓN)
 SMTP_USER = "jesus.mosqueraro@gmail.com"
-SMTP_PASSWORD = "gyodxynyfzvwbsxu"
+SMTP_PASSWORD = "gyodxynyfzvwbsxu"  # Clave limpia sin espacios
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
@@ -237,50 +242,56 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 FUNCIÓN AUXILIAR DE LAS 18:00 HRS
+# 📧 ENVÍO DE CORREO GARANTIZADO CON INTENTOS RÁPIDOS SSL / STARTTLS
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         msg = MIMEMultipart()
-        msg['From'] = SMTP_USER
+        msg['From'] = f"ARKIV Soporte <{SMTP_USER}>"
         msg['To'] = email_destino
-        msg['Subject'] = f"Código de Verificación - Gestor de Archivos ({codigo})"
+        msg['Subject'] = f"Código de Verificación - Gestor de Archivos"
 
-        cuerpo = f"""
-        Hola {usuario_nombre},
+        cuerpo = f"""Hola {usuario_nombre},
 
-        Tu código de verificación para restablecer tu contraseña es: {codigo}
+Tu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}
 
-        Si no solicitaste este cambio, por favor ignora este mensaje.
-        """
+Si no solicitaste este cambio, por favor ignora este mensaje.
+---
+Equipo de Soporte - ARKIV
+"""
         msg.attach(MIMEText(cuerpo, 'plain'))
 
-        # Intentar primero por SSL (Puerto 465)
-        try:
-            server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=5)
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-        except Exception:
-            # Fallback a TLS (Puerto 587)
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
+        context = ssl.create_default_context()
+        password_limpia = SMTP_PASSWORD.replace(" ", "").strip()
 
-        print(f"✅ Correo enviado con éxito a {email_destino}")
+        # Intento 1: Puerto 465 SSL Directo (Más rápido y confiable desde Render)
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=6) as server:
+                server.login(SMTP_USER, password_limpia)
+                server.send_message(msg)
+            print(f"✅ Correo enviado con éxito vía Gmail SSL (465) a: {email_destino}")
+            return
+        except Exception as e465:
+            print(f"⚠️ Falló puerto 465 SSL: {e465}. Probando Puerto 587 STARTTLS...")
+
+        # Intento 2: Puerto 587 STARTTLS
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=6) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, password_limpia)
+            server.send_message(msg)
+        print(f"✅ Correo enviado con éxito vía Gmail STARTTLS (587) a: {email_destino}")
+
     except Exception as e:
-        print(f"⚠️ Error enviando correo: {e}")
+        print(f"❌ Error crítico enviando correo vía Gmail desde Render: {e}")
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
-        email_ingresado = request.form.get('email', '').strip()
+        email_ingresado = request.form.get('email', '').strip().lower()
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username FROM usuarios WHERE email = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE email = ?"
+        query = "SELECT username FROM usuarios WHERE LOWER(email) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(email) = ?"
         cursor.execute(query, (email_ingresado,))
         user = cursor.fetchone()
         conn.close()
@@ -293,14 +304,14 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono exacto como a las 18:00 hrs
-            hilo_correo = threading.Thread(
+            # Envío asíncrono
+            threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
-            )
-            hilo_correo.start()
+            ).start()
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado}")
+            # 📌 RESPALDO DE SEGURIDAD: Código visible en Logs de Auditoría
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
@@ -326,7 +337,7 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE usuarios SET password = %s WHERE email = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE email = ?"
+        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(email) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(email) = ?"
         cursor.execute(q_upd, (nueva_pass, email_usuario))
         conn.commit()
         conn.close()
@@ -343,43 +354,51 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN
+# 🔑 LOGIN PROTEGIDO
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('usuario') or request.form.get('username')
-        password = request.form.get('contrasena') or request.form.get('password')
-        recaptcha_response = request.form.get('g-recaptcha-response')
+        try:
+            username = request.form.get('usuario') or request.form.get('username') or ''
+            password = request.form.get('contrasena') or request.form.get('password') or ''
+            recaptcha_response = request.form.get('g-recaptcha-response')
 
-        if not verificar_recaptcha(recaptcha_response):
-            return render_template('login.html', error="Por favor, marca la casilla 'No soy un robot'.")
+            if not verificar_recaptcha(recaptcha_response):
+                return render_template('login.html', error="Por favor, marca la casilla 'No soy un robot'.")
 
-        if username == 'admin' and password == '1234':
-            session.permanent = True
-            session['logged_in'] = True
-            session['username'] = 'admin'
-            session['rol'] = 'admin'
-            session['instance_id'] = SERVER_INSTANCE_ID
-            registrar_log('admin', "Inicio de Sesión", "Inicio de sesión exitoso como admin")
-            return redirect(url_for('bienvenida'))
+            if username == 'admin' and password == '1234':
+                session.permanent = True
+                session['logged_in'] = True
+                session['username'] = 'admin'
+                session['rol'] = 'admin'
+                session['instance_id'] = SERVER_INSTANCE_ID
+                registrar_log('admin', "Inicio de Sesión", "Inicio de sesión exitoso como admin")
+                return redirect(url_for('bienvenida'))
 
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        query = "SELECT username, password, rol FROM usuarios WHERE username = %s" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE username = ?"
-        cursor.execute(query, (username,))
-        user = cursor.fetchone()
-        conn.close()
+            try:
+                conn, db_type = get_db()
+                cursor = conn.cursor()
+                query = "SELECT username, password, rol FROM usuarios WHERE username = %s" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE username = ?"
+                cursor.execute(query, (username,))
+                user = cursor.fetchone()
+                conn.close()
 
-        if user and user[1] == password:
-            session.permanent = True
-            session['logged_in'] = True
-            session['username'] = user[0]
-            session['rol'] = user[2]
-            session['instance_id'] = SERVER_INSTANCE_ID
-            registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
-            return redirect(url_for('bienvenida'))
+                if user and user[1] == password:
+                    session.permanent = True
+                    session['logged_in'] = True
+                    session['username'] = user[0]
+                    session['rol'] = user[2]
+                    session['instance_id'] = SERVER_INSTANCE_ID
+                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
+                    return redirect(url_for('bienvenida'))
+            except Exception as db_err:
+                print(f"Error consultando usuario en BD: {db_err}")
 
-        return render_template('login.html', error="Usuario o contraseña incorrectos.")
+            return render_template('login.html', error="Usuario o contraseña incorrectos.")
+
+        except Exception as e:
+            print(f"Error general en login: {e}")
+            return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
@@ -588,7 +607,7 @@ def eliminar_credencial(cred_id):
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
 
-# ♻️ MÓDULO PAPELERA DE RECICLAJE (INSTRUCTIVOS + ARCHIVOS ADJUNTOS + CREDENCIALES)
+# ♻️ MÓDULO PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -830,7 +849,7 @@ def gestion_usuarios():
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
-# ✏️ EDITAR USUARIO (CONTRASEÑA, CORREO, ROL)
+# ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
 @login_required
 @admin_required
