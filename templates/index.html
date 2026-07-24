@@ -133,7 +133,8 @@
                                                 <i class="fa-regular fa-eye"></i>
                                             </button>
 
-                                            <a href="{{ arch }}" download="{{ fname }}" onclick="sumarDescarga('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition-colors" title="Descargar">
+                                            <!-- DESCARGA DIRECCIONADA VÍA PROXY -->
+                                            <a href="/pdf_proxy?url={{ arch | urlencode }}&download=1&name={{ fname | urlencode }}" onclick="sumarDescarga('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition-colors" title="Descargar directamente">
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
 
