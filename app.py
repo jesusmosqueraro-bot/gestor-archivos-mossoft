@@ -53,7 +53,7 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO (SIN LIBRERÍAS EXTERNAS REQUERIDAS)
+# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO (NATIVO EN PYTHON)
 def encriptar_texto(texto):
     if not texto: return ""
     try:
@@ -140,7 +140,8 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
-                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -173,6 +174,11 @@ def init_db():
                     pass
             try:
                 cursor.execute("ALTER TABLE archivos ADD COLUMN estado TEXT DEFAULT 'activo';")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE credenciales ADD COLUMN estado TEXT DEFAULT 'activo';")
                 conn.commit()
             except Exception:
                 pass
@@ -564,6 +570,221 @@ def eliminar_credencial(cred_id):
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
 
+# ♻️ MÓDULO PAPELERA DE RECICLAJE (UNIFICADO: INSTRUCTIVOS + ARCHIVOS + CREDENCIALES)
+@app.route('/papelera')
+@login_required
+@admin_required
+def ver_papelera():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    # 1. Instructivos eliminados
+    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
+    eliminados = cursor.fetchall()
+
+    # 2. Archivos eliminados
+    query_arch_elim = """
+        SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+        FROM archivos a 
+        JOIN galerias g ON a.galeria_id = g.id 
+        WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
+    """
+    cursor.execute(query_arch_elim)
+    archivos_eliminados = cursor.fetchall()
+
+    # 3. Credenciales eliminadas (Bóveda)
+    try:
+        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        credenciales_eliminadas = cursor.fetchall()
+    except Exception:
+        credenciales_eliminadas = []
+
+    conn.close()
+    return render_template(
+        'papelera.html', 
+        eliminados=eliminados, 
+        archivos_eliminados=archivos_eliminados,
+        credenciales_eliminadas=credenciales_eliminadas
+    )
+
+# 🔄 RESTAURAR CREDENCIAL DESDE LA PAPELERA
+@app.route('/restaurar_credencial/<int:cred_id>', methods=['POST'])
+@login_required
+@admin_required
+def restaurar_credencial(cred_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT servicio FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT servicio FROM credenciales WHERE id = ?"
+        cursor.execute(q_sel, (cred_id,))
+        row = cursor.fetchone()
+        servicio = row[0] if row else f"ID {cred_id}"
+
+        q_upd = "UPDATE credenciales SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'activo' WHERE id = ?"
+        cursor.execute(q_upd, (cred_id,))
+        conn.commit()
+
+        registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 💥 DESTRUIR CREDENCIAL DEFINITIVAMENTE
+@app.route('/destruir_credencial/<int:cred_id>', methods=['POST'])
+@login_required
+@admin_required
+def destruir_credencial(cred_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT servicio FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT servicio FROM credenciales WHERE id = ?"
+        cursor.execute(q_sel, (cred_id,))
+        row = cursor.fetchone()
+        servicio = row[0] if row else f"ID {cred_id}"
+
+        q_del = "DELETE FROM credenciales WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales WHERE id = ?"
+        cursor.execute(q_del, (cred_id,))
+        conn.commit()
+
+        registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 🔄 RESTAURAR INSTRUCTIVO COMPLETO
+@app.route('/restaurar_galeria/<galeria_id>', methods=['POST'])
+@login_required
+@admin_required
+def restaurar_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_sel, (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        q_upd = "UPDATE galerias SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'activo' WHERE id = ?"
+        cursor.execute(q_upd, (galeria_id,))
+        conn.commit()
+
+        registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 💥 BORRADO DEFINITIVO DE INSTRUCTIVO
+@app.route('/destruir_galeria/<galeria_id>', methods=['POST'])
+@login_required
+@admin_required
+def destruir_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_sel, (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        q_del1 = "DELETE FROM galerias WHERE id = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?"
+        q_del2 = "DELETE FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?"
+        cursor.execute(q_del1, (galeria_id,))
+        cursor.execute(q_del2, (galeria_id,))
+        conn.commit()
+
+        registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL
+@app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_imagen(galeria_id, filename):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_sel, (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
+        cursor.execute(q_upd, (galeria_id, filename))
+        conn.commit()
+
+        nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
+        registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
+
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('index'))
+
+# 🔄 RESTAURAR ARCHIVO INDIVIDUAL
+@app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST'])
+@login_required
+@admin_required
+def restaurar_archivo(archivo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        query_info = """
+            SELECT a.filename, g.titulo 
+            FROM archivos a 
+            JOIN galerias g ON a.galeria_id = g.id 
+            WHERE a.id = %s
+        """ if db_type == 'postgres' else """
+            SELECT a.filename, g.titulo 
+            FROM archivos a 
+            JOIN galerias g ON a.galeria_id = g.id 
+            WHERE a.id = ?
+        """
+        cursor.execute(query_info, (archivo_id,))
+        row = cursor.fetchone()
+
+        q_upd = "UPDATE archivos SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'activo' WHERE id = ?"
+        cursor.execute(q_upd, (archivo_id,))
+        conn.commit()
+
+        if row:
+            nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
+            registrar_log(session['username'], "Restauración de Archivo", f"Se reintegró el archivo '{nombre_limpio}' al instructivo '{row[1]}'.")
+
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+# 💥 DESTRUIR ARCHIVO INDIVIDUAL PERMANENTEMENTE
+@app.route('/destruir_archivo/<int:archivo_id>', methods=['POST'])
+@login_required
+@admin_required
+def destruir_archivo(archivo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_del = "DELETE FROM archivos WHERE id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE id = ?"
+        cursor.execute(q_del, (archivo_id,))
+        conn.commit()
+        registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
+    except Exception as e:
+        conn.rollback()
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
 @app.route('/logout')
 def logout():
     if session.get('username'):
@@ -856,159 +1077,6 @@ def eliminar_galeria(galeria_id):
 
     conn.close()
     return redirect(url_for('index'))
-
-# ♻️ MÓDULO PAPELERA DE RECICLAJE
-@app.route('/papelera')
-@login_required
-@admin_required
-def ver_papelera():
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
-    eliminados = cursor.fetchall()
-
-    query_arch_elim = """
-        SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
-        FROM archivos a 
-        JOIN galerias g ON a.galeria_id = g.id 
-        WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
-    """
-    cursor.execute(query_arch_elim)
-    archivos_eliminados = cursor.fetchall()
-
-    conn.close()
-    return render_template('papelera.html', eliminados=eliminados, archivos_eliminados=archivos_eliminados)
-
-# 🔄 RESTAURAR INSTRUCTIVO COMPLETO
-@app.route('/restaurar_galeria/<galeria_id>', methods=['POST'])
-@login_required
-@admin_required
-def restaurar_galeria(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        q_upd = "UPDATE galerias SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (galeria_id,))
-        conn.commit()
-
-        registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
-    except Exception as e:
-        conn.rollback()
-
-    conn.close()
-    return redirect(url_for('ver_papelera'))
-
-# 💥 BORRADO DEFINITIVO DE INSTRUCTIVO
-@app.route('/destruir_galeria/<galeria_id>', methods=['POST'])
-@login_required
-@admin_required
-def destruir_galeria(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        q_del1 = "DELETE FROM galerias WHERE id = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?"
-        q_del2 = "DELETE FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?"
-        cursor.execute(q_del1, (galeria_id,))
-        cursor.execute(q_del2, (galeria_id,))
-        conn.commit()
-
-        registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
-    except Exception as e:
-        conn.rollback()
-
-    conn.close()
-    return redirect(url_for('ver_papelera'))
-
-# 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL
-@app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
-@login_required
-@admin_required
-def eliminar_imagen(galeria_id, filename):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
-        cursor.execute(q_upd, (galeria_id, filename))
-        conn.commit()
-
-        nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
-        registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
-
-    except Exception as e:
-        conn.rollback()
-
-    conn.close()
-    return redirect(url_for('index'))
-
-# 🔄 RESTAURAR ARCHIVO INDIVIDUAL
-@app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST'])
-@login_required
-@admin_required
-def restaurar_archivo(archivo_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        query_info = """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
-            WHERE a.id = %s
-        """ if db_type == 'postgres' else """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
-            WHERE a.id = ?
-        """
-        cursor.execute(query_info, (archivo_id,))
-        row = cursor.fetchone()
-
-        q_upd = "UPDATE archivos SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (archivo_id,))
-        conn.commit()
-
-        if row:
-            nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
-            registrar_log(session['username'], "Restauración de Archivo", f"Se reintegró el archivo '{nombre_limpio}' al instructivo '{row[1]}'.")
-
-    except Exception as e:
-        conn.rollback()
-
-    conn.close()
-    return redirect(url_for('ver_papelera'))
-
-# 💥 DESTRUIR ARCHIVO INDIVIDUAL PERMANENTEMENTE
-@app.route('/destruir_archivo/<int:archivo_id>', methods=['POST'])
-@login_required
-@admin_required
-def destruir_archivo(archivo_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        q_del = "DELETE FROM archivos WHERE id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE id = ?"
-        cursor.execute(q_del, (archivo_id,))
-        conn.commit()
-        registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
-    except Exception as e:
-        conn.rollback()
-
-    conn.close()
-    return redirect(url_for('ver_papelera'))
 
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
