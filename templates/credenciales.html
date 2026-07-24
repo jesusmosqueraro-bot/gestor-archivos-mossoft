@@ -1,1 +1,248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Bóveda de Credenciales</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f172a'/><path d='M30 30h40v40H30z' fill='%232563eb'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-vault text-blue-500"></i> Bóveda de Accesos
+            </h1>
+        </div>
+
+        <button onclick="abrirModalCrear()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-blue-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+            <i class="fa-solid fa-plus"></i>
+            <span>Nueva Credencial</span>
+        </button>
+    </nav>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+        <!-- BUSCADOR -->
+        <div class="mb-6">
+            <form method="GET" action="/credenciales" class="relative max-w-md">
+                <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Buscar por aplicación, usuario o categoría..." class="w-full bg-slate-800/90 border border-slate-700/70 rounded-2xl pl-11 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all">
+            </form>
+        </div>
+
+        <!-- NOTIFICACIÓN TOAST -->
+        <div id="toast" class="fixed bottom-6 right-6 bg-emerald-600 text-white font-bold text-xs px-4 py-3 rounded-2xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 z-50 flex items-center gap-2">
+            <i class="fa-solid fa-circle-check"></i>
+            <span id="toast-msg">Copiado al portapapeles</span>
+        </div>
+
+        <!-- GRID DE TARJETAS -->
+        {% if credenciales %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {% for item in credenciales %}
+                    <div class="bg-slate-800/60 border border-slate-700/60 hover:border-slate-600/80 rounded-3xl p-5 flex flex-col justify-between shadow-lg transition-all hover:shadow-xl">
+                        
+                        <div>
+                            <div class="flex items-start justify-between gap-3 mb-3">
+                                <div>
+                                    <span class="inline-block px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider mb-1">
+                                        {{ item.categoria }}
+                                    </span>
+                                    <h3 class="text-base font-bold text-white tracking-tight">{{ item.servicio }}</h3>
+                                </div>
+                                
+                                {% if item.url %}
+                                    <a href="{{ item.url }}" target="_blank" title="Ir al enlace" class="p-2 bg-slate-700/50 hover:bg-blue-600 text-slate-300 hover:text-white rounded-xl text-xs transition-all">
+                                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                    </a>
+                                {% endif %}
+                            </div>
+
+                            <div class="space-y-2.5 my-4 bg-slate-900/50 p-3.5 rounded-2xl border border-slate-800">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="text-slate-400 text-[11px] font-medium">Usuario:</span>
+                                    <div class="flex items-center gap-1.5 font-mono text-slate-200">
+                                        <span class="truncate max-w-[160px]">{{ item.usuario }}</span>
+                                        <button onclick="copiarTexto('{{ item.usuario }}', 'Usuario')" title="Copiar usuario" class="text-slate-400 hover:text-blue-400 p-1 transition-colors">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="h-px bg-slate-800"></div>
+
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="text-slate-400 text-[11px] font-medium">Contraseña:</span>
+                                    <div class="flex items-center gap-1.5 font-mono">
+                                        <input type="password" id="pass-{{ item.id }}" value="{{ item.password }}" readonly class="bg-transparent text-slate-200 w-28 text-right focus:outline-none font-bold">
+                                        
+                                        <button onclick="togglePassword('pass-{{ item.id }}', this)" title="Ver clave" class="text-slate-400 hover:text-amber-400 p-1 transition-colors">
+                                            <i class="fa-regular fa-eye"></i>
+                                        </button>
+                                        <button onclick="copiarTexto('{{ item.password }}', 'Contraseña')" title="Copiar clave" class="text-slate-400 hover:text-emerald-400 p-1 transition-colors">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {% if item.notas %}
+                                <p class="text-[11px] text-slate-400 mb-4 line-clamp-2 italic">
+                                    <i class="fa-solid fa-note-sticky text-slate-500 mr-1"></i> {{ item.notas }}
+                                </p>
+                            {% endif %}
+                        </div>
+
+                        <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
+                            <span><i class="fa-regular fa-clock text-slate-500"></i> {{ item.fecha }}</span>
+                            
+                            <div class="flex items-center gap-1">
+                                <button onclick='abrirModalEditar({{ item | tojson }})' class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-blue-400 rounded-lg transition-colors">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                
+                                <form action="/credenciales/eliminar/{{ item.id }}" method="POST" onsubmit="return confirm('¿Seguro deseas mover este acceso a la papelera?')">
+                                    <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-red-400 rounded-lg transition-colors">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800">
+                <i class="fa-solid fa-shield-halved text-4xl text-slate-600 mb-3"></i>
+                <h3 class="text-slate-300 font-bold text-sm">No se encontraron credenciales</h3>
+                <p class="text-slate-500 text-xs mt-1">Agrega tu primer acceso haciendo clic en "Nueva Credencial".</p>
+            </div>
+        {% endif %}
+
+    </main>
+
+    <!-- MODAL CREAR / EDITAR -->
+    <div id="modal-credencial" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-titulo" class="text-base font-bold text-white">Nueva Credencial</h3>
+                <button onclick="cerrarModal()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-credencial" method="POST" action="/credenciales/crear" class="flex flex-col gap-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre del Aplicativo / Servicio *</label>
+                    <input type="text" name="servicio" id="input-servicio" required placeholder="Ej: Servidor Render, SURA, BD Postgres..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
+                        <select name="categoria" id="input-categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="General">General</option>
+                            <option value="Servidores">Servidores / Nube</option>
+                            <option value="Bases de Datos">Bases de Datos</option>
+                            <option value="Sistemas IPS">Sistemas IPS</option>
+                            <option value="Correos">Correos</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Enlace Web (URL)</label>
+                        <input type="url" name="url" id="input-url" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Usuario / Correo *</label>
+                    <input type="text" name="usuario" id="input-usuario" required placeholder="admin@empresa.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña *</label>
+                    <input type="text" name="password" id="input-password" placeholder="Escribe la contraseña..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono">
+                    <span id="pass-help" class="text-[10px] text-slate-500 hidden">Deja en blanco si no deseas cambiar la clave actual.</span>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas Adicionales</label>
+                    <textarea name="notas" id="input-notas" rows="2" placeholder="Detalles extra, IP, puerto..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25">Guardar Acceso</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SCRIPTS INTERACTIVOS -->
+    <script>
+        function copiarTexto(texto, campo) {
+            navigator.clipboard.writeText(texto).then(() => {
+                const toast = document.getElementById('toast');
+                document.getElementById('toast-msg').innerText = `${campo} copiado al portapapeles`;
+                toast.classList.remove('translate-y-20', 'opacity-0');
+                setTimeout(() => {
+                    toast.classList.add('translate-y-20', 'opacity-0');
+                }, 2000);
+            });
+        }
+
+        function togglePassword(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const icon = btn.querySelector('i');
+            if (input.type === "password") {
+                input.type = "text";
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = "password";
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        function abrirModalCrear() {
+            document.getElementById('modal-titulo').innerText = 'Nueva Credencial';
+            document.getElementById('form-credencial').action = '/credenciales/crear';
+            document.getElementById('form-credencial').reset();
+            document.getElementById('input-password').required = true;
+            document.getElementById('pass-help').classList.add('hidden');
+            document.getElementById('modal-credencial').classList.remove('hidden');
+            document.getElementById('modal-credencial').classList.add('flex');
+        }
+
+        function abrirModalEditar(item) {
+            document.getElementById('modal-titulo').innerText = 'Editar Credencial';
+            document.getElementById('form-credencial').action = `/credenciales/editar/${item.id}`;
+            document.getElementById('input-servicio').value = item.servicio;
+            document.getElementById('input-categoria').value = item.categoria;
+            document.getElementById('input-url').value = item.url;
+            document.getElementById('input-usuario').value = item.usuario;
+            document.getElementById('input-password').value = '';
+            document.getElementById('input-password').required = false;
+            document.getElementById('pass-help').classList.remove('hidden');
+            document.getElementById('input-notas').value = item.notas;
+            document.getElementById('modal-credencial').classList.remove('hidden');
+            document.getElementById('modal-credencial').classList.add('flex');
+        }
+
+        function cerrarModal() {
+            document.getElementById('modal-credencial').classList.add('hidden');
+            document.getElementById('modal-credencial').classList.remove('flex');
+        }
+    </script>
+</body>
+</html>
