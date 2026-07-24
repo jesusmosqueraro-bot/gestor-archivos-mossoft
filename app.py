@@ -10,9 +10,9 @@ import json
 import unicodedata
 import io
 import csv
-import threading
 import base64
 import hashlib
+import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
@@ -90,11 +90,11 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 📧 CONFIGURACIÓN PROTEGIDA LEYENDO VARIABLES DE ENTORNO EN RENDER
+# 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = os.environ.get('SMTP_USER', "jesus.mosqueraro@gmail.com")
-SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', "").replace(" ", "").strip()
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', "gyodxynyfzvwbsxu").replace(" ", "").strip()
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
@@ -172,7 +172,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
             
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -244,7 +244,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 FUNCIÓN DE ENVÍO DE CORREO (USANDO LA CLAVE PROTEGIDA DE RENDER)
+# 📧 ENVÍO VÍA GMAIL CON IMPRESIÓN DETALLADA DE ERRORES (DIAGNÓSTICO)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         msg = MIMEMultipart()
@@ -263,36 +263,50 @@ Equipo de Soporte - ARKIV
         msg.attach(MIMEText(cuerpo, 'plain'))
 
         context = ssl.create_default_context()
+        pass_limpia = SMTP_PASSWORD.replace(" ", "").strip()
 
-        # Intento 1: Puerto 465 SSL Directo
+        print(f"🔄 Intentando enviar correo a {email_destino} usando cuenta {SMTP_USER}...")
+
+        # Intento 1: Puerto 587 STARTTLS
+        try:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as server:
+                server.starttls(context=context)
+                server.login(SMTP_USER, pass_limpia)
+                server.send_message(msg)
+            print(f"✅ EXITO: Correo enviado vía Gmail (Puerto 587) a: {email_destino}")
+            return True
+        except Exception as e587:
+            print(f"⚠️ Fallo Puerto 587: {e587}")
+
+        # Intento 2: Puerto 465 SSL
         try:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=8) as server:
-                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.login(SMTP_USER, pass_limpia)
                 server.send_message(msg)
-            print(f"✅ Correo enviado con éxito vía Gmail SSL (465) a: {email_destino}")
-            return
+            print(f"✅ EXITO: Correo enviado vía Gmail SSL (Puerto 465) a: {email_destino}")
+            return True
         except Exception as e465:
-            print(f"⚠️ Falló puerto 465 ({e465}). Probando Puerto 587 STARTTLS...")
+            print(f"⚠️ Fallo Puerto 465 SSL: {e465}")
 
-        # Intento 2: Puerto 587 STARTTLS
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as server:
-            server.starttls(context=context)
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        print(f"✅ Correo enviado con éxito vía Gmail STARTTLS (587) a: {email_destino}")
+        return False
 
     except Exception as e:
-        print(f"❌ Error crítico enviando correo: {e}")
+        print(f"❌ ERROR CRÍTICO enviando correo: {e}")
+        traceback.print_exc()
+        return False
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = request.form.get('email', '').strip().lower()
+        print(f"📩 Solicitud de recuperación recibida para el email: '{email_ingresado}'")
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username FROM usuarios WHERE LOWER(email) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(email) = ?"
+        
+        # Búsqueda insensible a mayúsculas y espacios
+        query = "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?"
         cursor.execute(query, (email_ingresado,))
         user = cursor.fetchone()
         conn.close()
@@ -305,14 +319,17 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            threading.Thread(
-                target=enviar_correo_recuperacion, 
-                args=(email_ingresado, usuario_nombre, codigo_verificacion)
-            ).start()
+            print(f"👤 Usuario encontrado: '{usuario_nombre}'. Generando código: {codigo_verificacion}")
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado}")
+            # Ejecución directa sincrónica para capturar cualquier error en logs
+            exito_envio = enviar_correo_recuperacion(email_ingresado, usuario_nombre, codigo_verificacion)
+
+            # 📌 REGISTRO OBLIGATORIO EN LOGS (Permite ver el código si el correo falla)
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado} (Enviado: {exito_envio})")
+            
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
+            print(f"⚠️ El email '{email_ingresado}' no existe en la base de datos de usuarios.")
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
     return render_template('recuperar.html', paso=1)
@@ -336,7 +353,7 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(email) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(email) = ?"
+        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?"
         cursor.execute(q_upd, (nueva_pass, email_usuario))
         conn.commit()
         conn.close()
@@ -353,7 +370,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN
+# 🔑 LOGIN PROTEGIDO
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
