@@ -87,9 +87,8 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 📧 URL DE TU APPS SCRIPT EN GMAIL (PUERTO 443 HTTPS - SIN BLOQUEOS)
-# Pega la URL obtenida en el Paso 1 o colócala en las Variables de Entorno de Render como GMAIL_SCRIPT_URL
-GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/TU_URL_DE_GOOGLE_SCRIPT_AQUI/exec")
+# 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
+GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
@@ -239,10 +238,10 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 ENVÍO VÍA APPS SCRIPT DE GMAIL (PUERTO 443 - HTTPS GARANTIZADO)
+# 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV"
+        cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
         
         payload = {
             "para": email_destino,
@@ -250,16 +249,20 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
             "cuerpo": cuerpo
         }
 
-        data_json = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
-
-        with urllib.request.urlopen(req, timeout=12) as response:
-            res_text = response.read().decode('utf-8')
-            print(f"✅ EXITO: Correo enviado vía Gmail HTTPS a {email_destino}. Respuesta: {res_text}")
+        if requests:
+            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
+            print(f"✅ EXITO: Correo enviado a {email_destino} vía Google Script. Status: {res.status_code}")
             return True
+        else:
+            data_json = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_text = response.read().decode('utf-8')
+                print(f"✅ EXITO: Correo enviado a {email_destino} vía urllib. Respuesta: {res_text}")
+                return True
 
     except Exception as e:
-        print(f"❌ Error en envío vía Gmail Script: {e}")
+        print(f"❌ Error en envío vía Google Script: {e}")
         traceback.print_exc()
         return False
 
@@ -268,7 +271,7 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = request.form.get('email', '').strip().lower()
-        print(f"📩 Solicitud de recuperación para: '{email_ingresado}'")
+        print(f"📩 Solicitud de recuperación recibida para: '{email_ingresado}'")
         
         conn, db_type = get_db()
         cursor = conn.cursor()
@@ -285,12 +288,13 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
+            # Envío en hilo secundario para respuesta web instantánea
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado}")
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) generado para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
