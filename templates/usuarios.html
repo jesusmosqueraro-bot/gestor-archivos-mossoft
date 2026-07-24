@@ -112,7 +112,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña *</label>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña</label>
                     <input type="password" name="password" id="input-password" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
                     <span id="pass-help" class="text-[10px] text-slate-500 hidden mt-1 block">Deja en blanco si no deseas modificar la contraseña actual.</span>
                 </div>
@@ -130,6 +130,7 @@
             document.getElementById('modal-titulo').innerText = 'Nuevo Usuario';
             document.getElementById('form-usuario').action = '/usuarios';
             document.getElementById('form-usuario').reset();
+            document.getElementById('input-username').required = true;
             document.getElementById('input-username').readOnly = false;
             document.getElementById('field-username').style.display = 'block';
             document.getElementById('input-password').required = true;
@@ -143,6 +144,7 @@
             document.getElementById('form-usuario').action = `/editar_usuario/${id}`;
             document.getElementById('input-email').value = email;
             document.getElementById('input-rol').value = rol;
+            document.getElementById('input-username').required = false; // Desactiva la validación en campo oculto
             document.getElementById('field-username').style.display = 'none';
             document.getElementById('input-password').value = '';
             document.getElementById('input-password').required = false;
