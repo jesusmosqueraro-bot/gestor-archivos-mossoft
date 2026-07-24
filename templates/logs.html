@@ -3,199 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Bitácora de Auditoría</title>
-    <link rel="icon" <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
+    <title>Arkiv | Auditoría y Logs</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><text x='50%25' y='55%' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='900' font-size='65'>A</text></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body id="main-body" class="bg-slate-100 min-h-screen p-2 sm:p-6 transition-colors duration-300 relative">
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
-    <!-- 🔝 BOTÓN FLOTANTE VOLVER ARRIBA -->
-    <button id="btn-scroll-top" onclick="volverArriba()" class="fixed bottom-6 right-6 bg-slate-800 text-white p-3 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 hover:bg-slate-900 hover:scale-110 z-50 border border-slate-700 flex items-center justify-center w-11 h-11" title="Volver al inicio">
-        ⬆️
-    </button>
-
-    <div class="custom-card max-w-6xl mx-auto bg-white rounded-xl shadow-md p-3 sm:p-6 w-full transition-colors duration-300">
-        
-        <!-- Encabezado Móvil y Desktop -->
-        <div class="flex flex-col gap-3 border-b pb-4 mb-5">
-            <div class="flex justify-between items-center w-full">
-                <div>
-                    <a href="/gestor" class="text-xs text-blue-600 hover:underline">← Volver al Gestor</a>
-                    <h1 class="custom-text text-lg sm:text-2xl font-bold text-slate-800">
-                        📑 Bitácora de Auditoría
-                    </h1>
-                </div>
-
-                <a href="/gestor" class="text-xs bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 font-medium whitespace-nowrap shrink-0">
-                    Volver
-                </a>
-            </div>
-
-            <p class="text-xs text-slate-500">Historial de acciones, descargas y trazabilidad</p>
-
-            <!-- 🎨 PANEL RGB COLAPSABLE -->
-            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5 self-start transition-all duration-300 max-w-full">
-                <button onclick="togglePanelRgb()" id="btn-toggle-rgb" class="text-xs font-bold px-2 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1 text-slate-700 shrink-0" title="Plegar / Desplegar Colores">
-                    🎨 Tema <span id="flecha-rgb">➡️</span>
-                </button>
-
-                <div id="opciones-rgb" class="flex flex-wrap items-center gap-1.5 ml-2 transition-all duration-300 overflow-hidden">
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo General">
-                        <span class="text-[10px] font-semibold text-slate-600">Fondo</span>
-                        <input type="color" id="bgPicker" value="#f1f5f9" oninput="aplicarFondoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Fondo de Tarjeta">
-                        <span class="text-[10px] font-semibold text-slate-600">Tarjeta</span>
-                        <input type="color" id="cardPicker" value="#ffffff" oninput="aplicarContenedorRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <label class="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer hover:bg-slate-100" title="Cambiar Color de Texto">
-                        <span class="text-[10px] font-semibold text-slate-600">Texto</span>
-                        <input type="color" id="textPicker" value="#1e293b" oninput="aplicarTextoRgb(this.value)" class="w-4 h-4 rounded cursor-pointer border-0 p-0">
-                    </label>
-
-                    <button onclick="restablecerTemaRgb()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-lg text-xs font-bold transition-colors" title="Restablecer Colores Originales">
-                        🔄
-                    </button>
-                </div>
-            </div>
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-clipboard-list text-purple-400"></i> Bitácora de Auditoría
+            </h1>
         </div>
 
-        <!-- 🔍 Panel de Filtros con Botón de Exportación CSV -->
-        <form action="/logs" method="GET" class="mb-5 bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                
-                <!-- Filtro por Usuario -->
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">👤 Usuario</label>
-                    <select name="usuario" onchange="this.form.submit()" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white text-slate-700 font-medium">
-                        <option value="">Todos los Usuarios</option>
-                        {% for user in usuarios_opt %}
-                            <option value="{{ user }}" {% if q_usuario == user %}selected{% endif %}>{{ user }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+        <a href="/exportar_logs_csv?usuario={{ q_usuario }}&accion={{ q_accion }}&q={{ q_busqueda }}" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-emerald-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+            <i class="fa-solid fa-file-excel"></i>
+            <span>Exportar a Excel (CSV)</span>
+        </a>
+    </nav>
 
-                <!-- Filtro por Acción -->
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">⚡ Acción</label>
-                    <select name="accion" onchange="this.form.submit()" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white text-slate-700 font-medium">
-                        <option value="">Todas las Acciones</option>
-                        {% for acc in acciones_opt %}
-                            <option value="{{ acc }}" {% if q_accion == acc %}selected{% endif %}>{{ acc }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-                <!-- Búsqueda General -->
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">🔍 Buscar detalle o fecha</label>
-                    <div class="flex gap-1.5">
-                        <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Ej: 22/07/2026, descarga..." class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-slate-900 shrink-0">
-                            Buscar
-                        </button>
-                    </div>
-                </div>
-
+        <!-- BARRA DE FILTROS -->
+        <form method="GET" action="/logs" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Filtrar por Usuario</label>
+                <select name="usuario" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <option value="">Todos los Usuarios</option>
+                    {% for u in usuarios_opt %}
+                        <option value="{{ u }}" {% if u == q_usuario %}selected{% endif %}>{{ u }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
-            <!-- Acciones Secundarias (Exportar / Limpiar) -->
-            <div class="flex flex-wrap justify-between items-center pt-2 border-t border-slate-200 gap-2">
-                <a href="/exportar_logs_csv?usuario={{ q_usuario }}&accion={{ q_accion }}&q={{ q_busqueda }}" class="text-xs bg-emerald-600 text-white hover:bg-emerald-700 font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors">
-                    📊 Exportar a Excel (CSV)
-                </a>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Filtrar por Acción</label>
+                <select name="accion" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <option value="">Todas las Acciones</option>
+                    {% for a in acciones_opt %}
+                        <option value="{{ a }}" {% if a == q_accion %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-                {% if q_usuario or q_accion or q_busqueda %}
-                <a href="/logs" class="text-xs text-red-600 hover:underline font-semibold flex items-center gap-1">
-                    ✖ Limpiar Filtros
-                </a>
-                {% endif %}
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar en Detalles / Fecha</label>
+                <div class="relative">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Escribe y presiona Enter..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
             </div>
         </form>
 
-        <!-- 📱 VISTA MÓVIL -->
-        <div class="block md:hidden flex flex-col gap-3">
-            {% if logs %}
-                {% for log in logs %}
-                    <div class="border rounded-lg p-3 bg-slate-50/50 flex flex-col gap-2 border-slate-200">
-                        <div class="flex justify-between items-center text-xs">
-                            <span class="font-bold text-slate-800">👤 {{ log[0] }}</span>
-                            <span class="font-mono text-[11px] text-slate-500">🕒 {{ log[3] }}</span>
-                        </div>
-                        <div>
-                            <span class="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold 
-                                {% if 'Descarga' in log[1] %}
-                                    bg-indigo-100 text-indigo-800 border border-indigo-200
-                                {% elif 'Inicio' in log[1] %}
-                                    bg-blue-100 text-blue-800 border border-blue-200
-                                {% elif 'Creación' in log[1] %}
-                                    bg-emerald-100 text-emerald-800 border border-emerald-200
-                                {% elif 'Edición' in log[1] %}
-                                    bg-amber-100 text-amber-800 border border-amber-200
-                                {% else %}
-                                    bg-slate-100 text-slate-700 border border-slate-200
-                                {% endif %}">
-                                {{ log[1] }}
-                            </span>
-                        </div>
-                        <p class="custom-text text-xs text-slate-600 leading-relaxed pt-1 border-t border-slate-200">
-                            {{ log[2] }}
-                        </p>
-                    </div>
-                {% endfor %}
-            {% else %}
-                <p class="text-center text-xs text-slate-400 py-6">No se encontraron registros de auditoría.</p>
-            {% endif %}
-        </div>
-
-        <!-- 💻 VISTA ESCRITORIO -->
-        <div class="hidden md:block overflow-x-auto rounded-lg border border-slate-200">
-            <table class="w-full text-left text-xs text-slate-700 min-w-[700px]">
-                <thead class="bg-slate-50 border-b text-slate-600 font-semibold uppercase tracking-wider">
+        <!-- TABLA DE LOGS -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
                     <tr>
-                        <th class="p-3 whitespace-nowrap w-44">FECHA Y HORA</th>
-                        <th class="p-3 whitespace-nowrap w-32">USUARIO</th>
-                        <th class="p-3 whitespace-nowrap w-44">ACCIÓN</th>
-                        <th class="p-3 whitespace-nowrap">DETALLE DEL CAMBIO</th>
+                        <th class="pb-3 px-4 font-bold">Fecha y Hora</th>
+                        <th class="pb-3 px-4 font-bold">Usuario</th>
+                        <th class="pb-3 px-4 font-bold">Acción realizada</th>
+                        <th class="pb-3 px-4 font-bold">Detalle del Cambio</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-200 bg-white">
+                <tbody class="divide-y divide-slate-700/40">
                     {% if logs %}
-                        {% for log in logs %}
-                            <tr class="hover:bg-slate-50 transition-colors">
-                                <td class="p-3 font-mono text-slate-500 whitespace-nowrap">
-                                    🕒 {{ log[3] }}
-                                </td>
-                                <td class="p-3 font-bold text-slate-800 whitespace-nowrap">
-                                    👤 {{ log[0] }}
-                                </td>
-                                <td class="p-3 whitespace-nowrap">
-                                    <span class="px-2 py-1 rounded-md text-[10px] font-bold 
-                                        {% if 'Descarga' in log[1] %}
-                                            bg-indigo-100 text-indigo-800 border border-indigo-200
-                                        {% elif 'Inicio' in log[1] %}
-                                            bg-blue-100 text-blue-800 border border-blue-200
-                                        {% elif 'Creación' in log[1] %}
-                                            bg-emerald-100 text-emerald-800 border border-emerald-200
-                                        {% elif 'Edición' in log[1] %}
-                                            bg-amber-100 text-amber-800 border border-amber-200
-                                        {% else %}
-                                            bg-slate-100 text-slate-700 border border-slate-200
-                                        {% endif %}">
-                                        {{ log[1] }}
-                                    </span>
-                                </td>
-                                <td class="custom-text p-3 leading-relaxed text-slate-600 break-words">
-                                    {{ log[2] }}
-                                </td>
-                            </tr>
+                        {% for l in logs %}
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
+                                <i class="fa-regular fa-clock text-slate-500 mr-1.5"></i>{{ l[3] }}
+                            </td>
+                            <td class="py-3.5 px-4 font-bold text-white">
+                                <span class="inline-flex items-center gap-1 bg-slate-900/60 border border-slate-700/70 px-2.5 py-1 rounded-lg">
+                                    <i class="fa-solid fa-user text-purple-400"></i> {{ l[0] }}
+                                </span>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <span class="px-2.5 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                    {{ l[1] }}
+                                </span>
+                            </td>
+                            <td class="py-3.5 px-4 text-slate-300 italic">{{ l[2] }}</td>
+                        </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="4" class="p-6 text-center text-slate-400">
-                                No se encontraron registros de auditoría con los filtros aplicados.
+                            <td colspan="4" class="text-center py-10 text-slate-500 font-bold">
+                                No se encontraron registros de auditoría que coincidan con los filtros.
                             </td>
                         </tr>
                     {% endif %}
@@ -203,84 +105,7 @@
             </table>
         </div>
 
-    </div>
+    </main>
 
-    <script>
-        // 🔝 FUNCION VOLVER ARRIBA
-        function volverArriba() {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        window.addEventListener('scroll', () => {
-            const btn = document.getElementById('btn-scroll-top');
-            if (btn) {
-                if (window.scrollY > 200) {
-                    btn.classList.remove('opacity-0', 'pointer-events-none');
-                    btn.classList.add('opacity-100');
-                } else {
-                    btn.classList.add('opacity-0', 'pointer-events-none');
-                    btn.classList.remove('opacity-100');
-                }
-            }
-        });
-
-        // 🎨 SISTEMA DUAL RGB CON PANELES COLAPSABLES
-        function togglePanelRgb() {
-            const contenedor = document.getElementById('opciones-rgb');
-            const flecha = document.getElementById('flecha-rgb');
-            if (contenedor.classList.contains('hidden')) {
-                contenedor.classList.remove('hidden');
-                flecha.textContent = '➡️';
-                localStorage.setItem('rgb_colapsado', 'false');
-            } else {
-                contenedor.classList.add('hidden');
-                flecha.textContent = '⬅️';
-                localStorage.setItem('rgb_colapsado', 'true');
-            }
-        }
-
-        function aplicarFondoRgb(colorHex) {
-            document.body.style.backgroundColor = colorHex;
-            localStorage.setItem('rgb_bg', colorHex);
-        }
-
-        function aplicarContenedorRgb(colorHex) {
-            document.querySelectorAll('.custom-card').forEach(card => {
-                card.style.backgroundColor = colorHex;
-            });
-            localStorage.setItem('rgb_card', colorHex);
-        }
-
-        function aplicarTextoRgb(colorHex) {
-            document.querySelectorAll('.custom-text').forEach(txt => {
-                txt.style.color = colorHex;
-            });
-            localStorage.setItem('rgb_text', colorHex);
-        }
-
-        function restablecerTemaRgb() {
-            localStorage.removeItem('rgb_bg');
-            localStorage.removeItem('rgb_card');
-            localStorage.removeItem('rgb_btn');
-            localStorage.removeItem('rgb_text');
-            location.reload();
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const bg = localStorage.getItem('rgb_bg');
-            const card = localStorage.getItem('rgb_card');
-            const text = localStorage.getItem('rgb_text');
-            const isColapsado = localStorage.getItem('rgb_colapsado') === 'true';
-
-            if (bg) { aplicarFondoRgb(bg); document.getElementById('bgPicker').value = bg; }
-            if (card) { aplicarContenedorRgb(card); document.getElementById('cardPicker').value = card; }
-            if (text) { aplicarTextoRgb(text); document.getElementById('textPicker').value = text; }
-
-            if (isColapsado) {
-                document.getElementById('opciones-rgb').classList.add('hidden');
-                document.getElementById('flecha-rgb').textContent = '⬅️';
-            }
-        });
-    </script>
 </body>
 </html>
