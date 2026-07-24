@@ -11,12 +11,15 @@ import unicodedata
 import io
 import csv
 import threading
+import base64
+import hashlib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
+from cryptography.fernet import Fernet
 
 # psycopg2 seguro para Render
 try:
@@ -51,6 +54,24 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
+# 🔐 GENERADOR Y FUNCIONES DE CIFRADO DE CREDENCIALES
+def obtener_cifrador():
+    key = base64.urlsafe_b64encode(hashlib.sha256(app.secret_key.encode()).digest())
+    return Fernet(key)
+
+def encriptar_texto(texto):
+    if not texto: return ""
+    cipher = obtener_cifrador()
+    return cipher.encrypt(texto.encode('utf-8')).decode('utf-8')
+
+def desencriptar_texto(texto_cifrado):
+    if not texto_cifrado: return ""
+    try:
+        cipher = obtener_cifrador()
+        return cipher.decrypt(texto_cifrado.encode('utf-8')).decode('utf-8')
+    except Exception:
+        return "••••••••"
+
 # ☁️ CLOUDINARY
 cloudinary.config(
     cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
@@ -63,7 +84,6 @@ app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
 # 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
 SMTP_USER = "jesus.mosqueraro@gmail.com"
-# Clave limpia de espacios para evitar error 535 en Gmail
 SMTP_PASSWORD = "gyodxynyfzvwbsxu"
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
@@ -107,6 +127,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
+                id SERIAL PRIMARY KEY, servicio VARCHAR(150) NOT NULL, url TEXT, usuario VARCHAR(150) NOT NULL, password_enc TEXT NOT NULL, categoria VARCHAR(100) DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+            )''')
             
             for col_query in [
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
@@ -135,6 +158,9 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha TEXT NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
             
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -342,7 +368,6 @@ Equipo de Soporte - ARKIV
         context = ssl.create_default_context()
         password_limpia = SMTP_PASSWORD.replace(" ", "").strip()
 
-        # Intento 1: Puerto 587 con STARTTLS
         try:
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
                 server.starttls(context=context)
@@ -353,7 +378,6 @@ Equipo de Soporte - ARKIV
         except Exception as e587:
             print(f"⚠️ Puerto 587 falló: {e587}. Probando Puerto 465 SSL...")
 
-        # Intento 2: Puerto 465 SSL directo (Fallback)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
             server.login(SMTP_USER, password_limpia)
             server.send_message(msg)
@@ -383,7 +407,6 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono para respuesta instantánea
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
@@ -431,6 +454,109 @@ def validar_codigo():
         conn.rollback()
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
+
+# 🔑 MÓDULO BÓVEDA DE CREDENCIALES
+@app.route('/credenciales')
+@login_required
+@admin_required
+def ver_credenciales():
+    q_busqueda = request.args.get('q', '').strip().lower()
+    
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY servicio ASC")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    lista_credenciales = []
+    for r in rows:
+        c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r
+        pass_real = desencriptar_texto(pass_enc)
+        
+        texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+        if not q_busqueda or q_busqueda in texto_full:
+            lista_credenciales.append({
+                'id': c_id,
+                'servicio': servicio,
+                'url': url or '',
+                'usuario': usuario,
+                'password': pass_real,
+                'categoria': categoria or 'General',
+                'notas': notas or '',
+                'fecha': fecha
+            })
+            
+    return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
+
+@app.route('/credenciales/crear', methods=['POST'])
+@login_required
+@admin_required
+def crear_credencial():
+    servicio = request.form.get('servicio', '').strip()
+    url = request.form.get('url', '').strip()
+    usuario = request.form.get('usuario', '').strip()
+    password = request.form.get('password', '').strip()
+    categoria = request.form.get('categoria', 'General').strip()
+    notas = request.form.get('notas', '').strip()
+    
+    if servicio and usuario and password:
+        pass_cifrada = encriptar_texto(password)
+        fecha_act = obtener_fecha_actual()
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_ins = "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
+        cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+        conn.commit()
+        conn.close()
+        
+        registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
+        
+    return redirect(url_for('ver_credenciales'))
+
+@app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
+@login_required
+@admin_required
+def editar_credencial(cred_id):
+    servicio = request.form.get('servicio', '').strip()
+    url = request.form.get('url', '').strip()
+    usuario = request.form.get('usuario', '').strip()
+    password = request.form.get('password', '').strip()
+    categoria = request.form.get('categoria', 'General').strip()
+    notas = request.form.get('notas', '').strip()
+    
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    if password:
+        pass_cifrada = encriptar_texto(password)
+        q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, password_enc=?, categoria=?, notas=? WHERE id=?"
+        cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+    else:
+        q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, categoria=?, notas=? WHERE id=?"
+        cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
+        
+    conn.commit()
+    conn.close()
+    
+    registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
+    return redirect(url_for('ver_credenciales'))
+
+@app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_credencial(cred_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    q_upd = "UPDATE credenciales SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'eliminado' WHERE id = ?"
+    cursor.execute(q_upd, (cred_id,))
+    conn.commit()
+    conn.close()
+    
+    registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
+    return redirect(url_for('ver_credenciales'))
 
 @app.route('/logout')
 def logout():
@@ -725,7 +851,7 @@ def eliminar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('index'))
 
-# ♻️ MÓDULO PAPELERA DE RECICLAJE (INSTRUCTIVOS + ARCHIVOS ADJUNTOS)
+# ♻️ MÓDULO PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -902,7 +1028,7 @@ def gestion_usuarios():
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
-# ✏️ EDITAR USUARIO (CONTRASEÑA, CORREO, ROL)
+# ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
 @login_required
 @admin_required
