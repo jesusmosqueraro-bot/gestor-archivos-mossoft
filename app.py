@@ -36,7 +36,7 @@ except Exception:
     requests = None
 
 app = Flask(__name__)
-app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
+app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura')
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
@@ -90,12 +90,14 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL (SIN ESPACIOS EN LA CLAVE DE APLICACIÓN)
-SMTP_USER = "jesus.mosqueraro@gmail.com"
-SMTP_PASSWORD = "gyodxynyfzvwbsxu"  # Clave limpia sin espacios
+# 📧 CONFIGURACIÓN PROTEGIDA LEYENDO VARIABLES DE ENTORNO EN RENDER
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = os.environ.get('SMTP_USER', "jesus.mosqueraro@gmail.com")
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', "").replace(" ", "").strip()
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
-RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -242,7 +244,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 ENVÍO DE CORREO GARANTIZADO CON INTENTOS RÁPIDOS SSL / STARTTLS
+# 📧 FUNCIÓN DE ENVÍO DE CORREO (USANDO LA CLAVE PROTEGIDA DE RENDER)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         msg = MIMEMultipart()
@@ -261,27 +263,26 @@ Equipo de Soporte - ARKIV
         msg.attach(MIMEText(cuerpo, 'plain'))
 
         context = ssl.create_default_context()
-        password_limpia = SMTP_PASSWORD.replace(" ", "").strip()
 
-        # Intento 1: Puerto 465 SSL Directo (Más rápido y confiable desde Render)
+        # Intento 1: Puerto 465 SSL Directo
         try:
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=6) as server:
-                server.login(SMTP_USER, password_limpia)
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=8) as server:
+                server.login(SMTP_USER, SMTP_PASSWORD)
                 server.send_message(msg)
             print(f"✅ Correo enviado con éxito vía Gmail SSL (465) a: {email_destino}")
             return
         except Exception as e465:
-            print(f"⚠️ Falló puerto 465 SSL: {e465}. Probando Puerto 587 STARTTLS...")
+            print(f"⚠️ Falló puerto 465 ({e465}). Probando Puerto 587 STARTTLS...")
 
         # Intento 2: Puerto 587 STARTTLS
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=6) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as server:
             server.starttls(context=context)
-            server.login(SMTP_USER, password_limpia)
+            server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
         print(f"✅ Correo enviado con éxito vía Gmail STARTTLS (587) a: {email_destino}")
 
     except Exception as e:
-        print(f"❌ Error crítico enviando correo vía Gmail desde Render: {e}")
+        print(f"❌ Error crítico enviando correo: {e}")
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
@@ -304,13 +305,11 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío asíncrono
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
-            # 📌 RESPALDO DE SEGURIDAD: Código visible en Logs de Auditoría
             registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
@@ -354,7 +353,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN PROTEGIDO
+# 🔑 LOGIN
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
