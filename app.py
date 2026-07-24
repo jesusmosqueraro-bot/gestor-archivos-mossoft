@@ -1,8 +1,6 @@
 import os
 import uuid
 import random
-import smtplib
-import ssl
 import sqlite3
 import urllib.request
 import urllib.parse
@@ -10,11 +8,10 @@ import json
 import unicodedata
 import io
 import csv
+import threading
 import base64
 import hashlib
 import traceback
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -90,11 +87,9 @@ cloudinary.config(
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
-# 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = os.environ.get('SMTP_USER', "jesus.mosqueraro@gmail.com")
-SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', "gyodxynyfzvwbsxu").replace(" ", "").strip()
+# 📧 URL DE TU APPS SCRIPT EN GMAIL (PUERTO 443 HTTPS - SIN BLOQUEOS)
+# Pega la URL obtenida en el Paso 1 o colócala en las Variables de Entorno de Render como GMAIL_SCRIPT_URL
+GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/TU_URL_DE_GOOGLE_SCRIPT_AQUI/exec")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
@@ -244,54 +239,27 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 ENVÍO VÍA GMAIL CON IMPRESIÓN DETALLADA DE ERRORES (DIAGNÓSTICO)
+# 📧 ENVÍO VÍA APPS SCRIPT DE GMAIL (PUERTO 443 - HTTPS GARANTIZADO)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        msg = MIMEMultipart()
-        msg['From'] = f"ARKIV Soporte <{SMTP_USER}>"
-        msg['To'] = email_destino
-        msg['Subject'] = f"Código de Verificación - Gestor de Archivos"
+        cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV"
+        
+        payload = {
+            "para": email_destino,
+            "asunto": f"Código de Verificación - Gestor de Archivos",
+            "cuerpo": cuerpo
+        }
 
-        cuerpo = f"""Hola {usuario_nombre},
+        data_json = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
 
-Tu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}
-
-Si no solicitaste este cambio, por favor ignora este mensaje.
----
-Equipo de Soporte - ARKIV
-"""
-        msg.attach(MIMEText(cuerpo, 'plain'))
-
-        context = ssl.create_default_context()
-        pass_limpia = SMTP_PASSWORD.replace(" ", "").strip()
-
-        print(f"🔄 Intentando enviar correo a {email_destino} usando cuenta {SMTP_USER}...")
-
-        # Intento 1: Puerto 587 STARTTLS
-        try:
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as server:
-                server.starttls(context=context)
-                server.login(SMTP_USER, pass_limpia)
-                server.send_message(msg)
-            print(f"✅ EXITO: Correo enviado vía Gmail (Puerto 587) a: {email_destino}")
+        with urllib.request.urlopen(req, timeout=12) as response:
+            res_text = response.read().decode('utf-8')
+            print(f"✅ EXITO: Correo enviado vía Gmail HTTPS a {email_destino}. Respuesta: {res_text}")
             return True
-        except Exception as e587:
-            print(f"⚠️ Fallo Puerto 587: {e587}")
-
-        # Intento 2: Puerto 465 SSL
-        try:
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=8) as server:
-                server.login(SMTP_USER, pass_limpia)
-                server.send_message(msg)
-            print(f"✅ EXITO: Correo enviado vía Gmail SSL (Puerto 465) a: {email_destino}")
-            return True
-        except Exception as e465:
-            print(f"⚠️ Fallo Puerto 465 SSL: {e465}")
-
-        return False
 
     except Exception as e:
-        print(f"❌ ERROR CRÍTICO enviando correo: {e}")
+        print(f"❌ Error en envío vía Gmail Script: {e}")
         traceback.print_exc()
         return False
 
@@ -300,12 +268,10 @@ Equipo de Soporte - ARKIV
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = request.form.get('email', '').strip().lower()
-        print(f"📩 Solicitud de recuperación recibida para el email: '{email_ingresado}'")
+        print(f"📩 Solicitud de recuperación para: '{email_ingresado}'")
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        
-        # Búsqueda insensible a mayúsculas y espacios
         query = "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?"
         cursor.execute(query, (email_ingresado,))
         user = cursor.fetchone()
@@ -319,17 +285,14 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            print(f"👤 Usuario encontrado: '{usuario_nombre}'. Generando código: {codigo_verificacion}")
+            threading.Thread(
+                target=enviar_correo_recuperacion, 
+                args=(email_ingresado, usuario_nombre, codigo_verificacion)
+            ).start()
 
-            # Ejecución directa sincrónica para capturar cualquier error en logs
-            exito_envio = enviar_correo_recuperacion(email_ingresado, usuario_nombre, codigo_verificacion)
-
-            # 📌 REGISTRO OBLIGATORIO EN LOGS (Permite ver el código si el correo falla)
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado} (Enviado: {exito_envio})")
-            
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
-            print(f"⚠️ El email '{email_ingresado}' no existe en la base de datos de usuarios.")
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
     return render_template('recuperar.html', paso=1)
@@ -370,7 +333,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN PROTEGIDO
+# 🔑 LOGIN
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
