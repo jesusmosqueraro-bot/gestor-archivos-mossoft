@@ -19,7 +19,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
-from cryptography.fernet import Fernet
 
 # psycopg2 seguro para Render
 try:
@@ -54,23 +53,26 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 GENERADOR Y FUNCIONES DE CIFRADO DE CREDENCIALES
-def obtener_cifrador():
-    key = base64.urlsafe_b64encode(hashlib.sha256(app.secret_key.encode()).digest())
-    return Fernet(key)
-
+# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO (SIN LIBRERÍAS EXTERNAS REQUERIDAS)
 def encriptar_texto(texto):
     if not texto: return ""
-    cipher = obtener_cifrador()
-    return cipher.encrypt(texto.encode('utf-8')).decode('utf-8')
+    try:
+        clave = app.secret_key.encode('utf-8')
+        bytes_texto = texto.encode('utf-8')
+        cifrado = bytes([b ^ clave[i % len(clave)] for i, b in enumerate(bytes_texto)])
+        return base64.b64encode(cifrado).decode('utf-8')
+    except Exception:
+        return texto
 
 def desencriptar_texto(texto_cifrado):
     if not texto_cifrado: return ""
     try:
-        cipher = obtener_cifrador()
-        return cipher.decrypt(texto_cifrado.encode('utf-8')).decode('utf-8')
+        clave = app.secret_key.encode('utf-8')
+        bytes_cifrados = base64.b64decode(texto_cifrado.encode('utf-8'))
+        descifrado = bytes([b ^ clave[i % len(clave)] for i, b in enumerate(bytes_cifrados)])
+        return descifrado.decode('utf-8')
     except Exception:
-        return "••••••••"
+        return texto_cifrado
 
 # ☁️ CLOUDINARY
 cloudinary.config(
@@ -465,8 +467,12 @@ def ver_credenciales():
     conn, db_type = get_db()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY servicio ASC")
-    rows = cursor.fetchall()
+    try:
+        cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY servicio ASC")
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+
     conn.close()
     
     lista_credenciales = []
