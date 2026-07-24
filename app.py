@@ -36,7 +36,7 @@ except Exception:
     requests = None
 
 app = Flask(__name__)
-app.secret_key = 'clave_secreta_gestor_archivos_ultra_segura'
+app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura')
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
@@ -91,11 +91,11 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
 # 📧 CONFIGURACIÓN EXCLUSIVA CON GMAIL
-SMTP_USER = "jesus.mosqueraro@gmail.com"
-SMTP_PASSWORD = "gyodxynyfzvwbsxu"
+SMTP_USER = os.environ.get('SMTP_USER', "jesus.mosqueraro@gmail.com")
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', "gyodxynyfzvwbsxu")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
-RECAPTCHA_SECRET_KEY = "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC"
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -242,15 +242,23 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 ENVÍO DE CORREO DIRECTO
+# 📧 ENVÍO VÍA GMAIL RESTRACIONAL EXACTO DE LAS 18:49 PM
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        contenido = f"Hola {usuario_nombre},\n\nTu codigo de verificacion para restablecer tu contrasena en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
-        msg = MIMEText(contenido, 'plain', 'utf-8')
-
-        msg['From'] = SMTP_USER
+        msg = MIMEMultipart()
+        msg['From'] = f"ARKIV Soporte <{SMTP_USER}>"
         msg['To'] = email_destino
-        msg['Subject'] = f"Codigo ARKIV: {codigo}"
+        msg['Subject'] = f"Código de Verificación - Gestor de Archivos"
+
+        cuerpo = f"""Hola {usuario_nombre},
+
+Tu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}
+
+Si no solicitaste este cambio, por favor ignora este mensaje.
+---
+Equipo de Soporte - ARKIV
+"""
+        msg.attach(MIMEText(cuerpo, 'plain'))
 
         context = ssl.create_default_context()
         password_limpia = SMTP_PASSWORD.replace(" ", "").strip()
@@ -260,20 +268,20 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
                 server.starttls(context=context)
                 server.login(SMTP_USER, password_limpia)
                 server.send_message(msg)
-            print(f"✅ Correo enviado vía Gmail (587) a: {email_destino}")
+            print(f"✅ Correo enviado con éxito vía Gmail (Puerto 587) a: {email_destino}")
             return
-        except Exception:
-            pass
+        except Exception as e587:
+            print(f"⚠️ Puerto 587 falló: {e587}. Probando Puerto 465 SSL...")
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
             server.login(SMTP_USER, password_limpia)
             server.send_message(msg)
-        print(f"✅ Correo enviado vía Gmail SSL (465) a: {email_destino}")
+        print(f"✅ Correo enviado con éxito vía Gmail (Puerto 465) a: {email_destino}")
 
     except Exception as e:
-        print(f"❌ Error enviando correo vía Gmail: {e}")
+        print(f"❌ Error enviando correo vía Gmail desde Render: {e}")
 
-# 🔑 RECUPERACIÓN DE CLAVE
+# 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
 def recuperar_clave():
     if request.method == 'POST':
@@ -299,7 +307,7 @@ def recuperar_clave():
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
-            # 📌 RESPALDO DE SEGURIDAD EN LOGS
+            # 📌 REGISTRO EN LOGS CON EL CÓDIGO POR SEGURIDAD
             registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) generado para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
@@ -307,6 +315,7 @@ def recuperar_clave():
 
     return render_template('recuperar.html', paso=1)
 
+# 🔑 PASO 2: VALIDAR CÓDIGO Y CAMBIAR CONTRASEÑA
 @app.route('/validar_codigo', methods=['POST'])
 def validar_codigo():
     codigo_ingresado = request.form.get('codigo', '').strip()
@@ -342,7 +351,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN
+# 🔑 LOGIN PROTEGIDO
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -859,7 +868,7 @@ def editar_usuario(usuario_id):
             cursor.execute(q_upd, (nuevo_email, nuevo_rol, nueva_pass, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ? WHERE id = ?"
+            q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ?, WHERE id = ?"
             cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
