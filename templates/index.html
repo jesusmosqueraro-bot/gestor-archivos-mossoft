@@ -103,8 +103,8 @@
                                 </div>
 
                                 <div class="flex items-center gap-2 text-slate-400 text-[11px] font-mono">
-                                    <span title="Vistas"><i class="fa-regular fa-eye"></i> {{ item.vistas }}</span>
-                                    <span title="Descargas"><i class="fa-solid fa-download text-blue-400"></i> {{ item.descargas }}</span>
+                                    <span title="Vistas"><i class="fa-regular fa-eye"></i> <span id="vistas-{{ item.id }}">{{ item.vistas }}</span></span>
+                                    <span title="Descargas"><i class="fa-solid fa-download text-blue-400"></i> <span id="descargas-{{ item.id }}">{{ item.descargas }}</span></span>
                                 </div>
                             </div>
 
@@ -114,6 +114,7 @@
                             <!-- PREVISUALIZACIÓN DE ARCHIVOS -->
                             <div class="space-y-2 mb-4">
                                 {% for arch in item.archivos %}
+                                    {% set fname = arch.split('/')[-1] %}
                                     <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 flex items-center justify-between text-xs">
                                         <div class="flex items-center gap-2 truncate">
                                             {% if '.pdf' in arch.lower() %}
@@ -123,15 +124,17 @@
                                             {% else %}
                                                 <i class="fa-solid fa-file-image text-emerald-400 text-sm"></i>
                                             {% endif %}
-                                            <span class="truncate text-slate-200 text-[11px] font-mono">{{ arch.split('/')[-1] }}</span>
+                                            <span class="truncate text-slate-200 text-[11px] font-mono">{{ fname }}</span>
                                         </div>
 
                                         <div class="flex items-center gap-1">
-                                            <!-- VER / DESCARGAR PROXY -->
-                                            <a href="/pdf_proxy?url={{ arch | urlencode }}&download=0" target="_blank" onclick="sumarVista('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-white transition-colors" title="Ver archivo">
+                                            <!-- VER (MODAL / PESTAÑA CON CONTEO) -->
+                                            <button onclick="previsualizarArchivo('{{ arch }}', '{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-white transition-colors" title="Ver archivo">
                                                 <i class="fa-regular fa-eye"></i>
-                                            </a>
-                                            <a href="/pdf_proxy?url={{ arch | urlencode }}&download=1&name={{ arch.split('/')[-1] }}" onclick="sumarDescarga('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition-colors" title="Descargar">
+                                            </button>
+
+                                            <!-- DESCARGA DIRECTA RÁPIDA CDN -->
+                                            <a href="{{ arch }}" download="{{ fname }}" onclick="sumarDescarga('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition-colors" title="Descargar">
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
 
@@ -179,6 +182,19 @@
         {% endif %}
 
     </main>
+
+    <!-- MODAL VISOR PREVISUALIZADOR -->
+    <div id="modal-visor" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-4xl w-full p-5 shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex items-center justify-between border-b border-slate-700/60 pb-3 mb-3">
+                <h3 id="visor-titulo" class="text-sm font-bold text-white truncate font-mono">Previsualización de Archivo</h3>
+                <button onclick="cerrarVisor()" class="text-slate-400 hover:text-white text-base"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="visor-contenido" class="flex-1 overflow-auto flex items-center justify-center min-h-[300px] bg-slate-900/80 rounded-2xl p-2">
+                <!-- Se inyecta dinámicamente según la extensión -->
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL NUEVO INSTRUCTIVO -->
     <div id="modal-subir" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
@@ -286,14 +302,49 @@
         </div>
     </div>
 
-    <!-- SCRIPTS MÉTIRCAS Y MODALES -->
+    <!-- SCRIPTS MÉTRICAS Y PREVISUALIZACIÓN -->
     <script>
         function sumarVista(id) {
-            fetch(`/incrementar_vista/${id}`, { method: 'POST' });
+            fetch(`/incrementar_vista/${id}`, { method: 'POST' }).then(() => {
+                const el = document.getElementById(`vistas-${id}`);
+                if (el) el.innerText = parseInt(el.innerText || 0) + 1;
+            });
         }
 
         function sumarDescarga(id) {
-            fetch(`/incrementar_descarga/${id}`, { method: 'POST' });
+            fetch(`/incrementar_descarga/${id}`, { method: 'POST' }).then(() => {
+                const el = document.getElementById(`descargas-${id}`);
+                if (el) el.innerText = parseInt(el.innerText || 0) + 1;
+            });
+        }
+
+        function previsualizarArchivo(url, galeriaId) {
+            sumarVista(galeriaId);
+            
+            const fname = url.split('/').pop();
+            const ext = fname.split('.').pop().toLowerCase();
+            const visorContenido = document.getElementById('visor-contenido');
+            document.getElementById('visor-titulo').innerText = fname;
+
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+                visorContenido.innerHTML = `<img src="${url}" class="max-h-[75vh] w-auto rounded-xl object-contain shadow-lg" />`;
+            } else if (['mp4', 'webm', 'mov'].includes(ext) || url.includes('/video/upload/')) {
+                visorContenido.innerHTML = `<video controls autoplay class="max-h-[75vh] w-full rounded-xl"><source src="${url}" type="video/mp4">Tu navegador no soporta video HTML5.</video>`;
+            } else if (ext === 'pdf') {
+                visorContenido.innerHTML = `<iframe src="${url}" class="w-full h-[75vh] rounded-xl border-0"></iframe>`;
+            } else {
+                window.open(url, '_blank');
+                return;
+            }
+
+            document.getElementById('modal-visor').classList.remove('hidden');
+            document.getElementById('modal-visor').classList.add('flex');
+        }
+
+        function cerrarVisor() {
+            document.getElementById('visor-contenido').innerHTML = '';
+            document.getElementById('modal-visor').classList.add('hidden');
+            document.getElementById('modal-visor').classList.remove('flex');
         }
 
         function abrirModalSubir() {
