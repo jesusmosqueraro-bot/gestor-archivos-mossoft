@@ -299,6 +299,7 @@ def recuperar_clave():
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
+            # 📌 RESPALDO DE SEGURIDAD EN LOGS
             registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) generado para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
