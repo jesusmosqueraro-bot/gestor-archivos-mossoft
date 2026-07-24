@@ -53,7 +53,7 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO (NATIVO EN PYTHON)
+# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO
 def encriptar_texto(texto):
     if not texto: return ""
     try:
@@ -579,22 +579,28 @@ def ver_papelera():
     cursor = conn.cursor()
     
     # 1. Instructivos eliminados
-    cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
-    eliminados = cursor.fetchall()
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        eliminados = cursor.fetchall()
+    except Exception:
+        eliminados = []
 
     # 2. Archivos eliminados
-    query_arch_elim = """
-        SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
-        FROM archivos a 
-        JOIN galerias g ON a.galeria_id = g.id 
-        WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
-    """
-    cursor.execute(query_arch_elim)
-    archivos_eliminados = cursor.fetchall()
+    try:
+        query_arch_elim = """
+            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+            FROM archivos a 
+            JOIN galerias g ON a.galeria_id = g.id 
+            WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
+        """
+        cursor.execute(query_arch_elim)
+        archivos_eliminados = cursor.fetchall()
+    except Exception:
+        archivos_eliminados = []
 
     # 3. Credenciales eliminadas (Bóveda)
     try:
-        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado = 'eliminado' ORDER BY id DESC")
         credenciales_eliminadas = cursor.fetchall()
     except Exception:
         credenciales_eliminadas = []
