@@ -84,7 +84,13 @@ cloudinary.config(
     api_secret=os.environ.get('CLOUDINARY_API_SECRET')
 )
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'mov', 'webm', 'avi'}
+# 📦 EXTENSIONES PERMITIDAS (INCLUYE COMPRIMIDOS Y DOCUMENTOS DE OFFICE)
+ALLOWED_EXTENSIONS = {
+    'png', 'jpg', 'jpeg', 'gif', 'webp',
+    'pdf', 'txt', 'docx', 'xlsx', 'pptx',
+    'mp4', 'mov', 'webm', 'avi',
+    'zip', 'rar', '7z', 'tar', 'gz'
+}
 app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 
 # 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
@@ -472,6 +478,8 @@ def pdf_proxy():
             content_type = 'image/webp'
         elif fname_lower.endswith(('.mp4', '.mov', '.webm', '.avi')):
             content_type = 'video/mp4'
+        elif fname_lower.endswith(('.zip', '.rar', '.7z', '.tar', '.gz')):
+            content_type = 'application/zip'
         else:
             content_type = 'application/pdf'
 
@@ -1104,6 +1112,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
+# 📦 SUBIDA DE ARCHIVOS (IMÁGENES, VIDEOS, DOCUMENTOS Y COMPRIMIDOS .ZIP/.RAR)
 @app.route('/subir', methods=['POST'])
 @login_required
 @admin_required
@@ -1138,7 +1147,7 @@ def subir_archivo():
                     use_filename=True,
                     unique_filename=True
                 )
-            elif ext in ['txt', 'docx']:
+            elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
                 upload_result = cloudinary.uploader.upload(
                     file, 
                     resource_type="raw",
@@ -1232,7 +1241,7 @@ def editar_galeria(galeria_id):
                         use_filename=True,
                         unique_filename=True
                     )
-                elif ext in ['txt', 'docx']:
+                elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
                     upload_result = cloudinary.uploader.upload(
                         file, 
                         resource_type="raw",
