@@ -80,7 +80,7 @@
                     <option value="">Todos los Formatos</option>
                     <option value="imagen" {% if formato_filtro == 'imagen' %}selected{% endif %}>Imágenes (JPG/PNG)</option>
                     <option value="video" {% if formato_filtro == 'video' %}selected{% endif %}>Videos (MP4/WebM)</option>
-                    <option value="pdf" {% if formato_filtro == 'pdf' %}selected{% endif %}>Documentos (PDF/DOCX)</option>
+                    <option value="pdf" {% if formato_filtro == 'pdf' %}selected{% endif %}>Documentos / Comprimidos (.zip)</option>
                 </select>
             </div>
         </form>
@@ -120,8 +120,12 @@
                                         <div class="flex items-center gap-2 truncate">
                                             {% if '.pdf' in arch.lower() %}
                                                 <i class="fa-solid fa-file-pdf text-rose-400 text-sm"></i>
+                                            {% elif '.zip' in arch.lower() or '.rar' in arch.lower() or '.7z' in arch.lower() or '.tar' in arch.lower() or '.gz' in arch.lower() %}
+                                                <i class="fa-solid fa-file-zipper text-amber-400 text-sm"></i>
                                             {% elif '.mp4' in arch.lower() or '.mov' in arch.lower() or '/video/' in arch %}
                                                 <i class="fa-solid fa-file-video text-purple-400 text-sm"></i>
+                                            {% elif '.docx' in arch.lower() or '.xlsx' in arch.lower() or '.pptx' in arch.lower() or '.txt' in arch.lower() %}
+                                                <i class="fa-solid fa-file-lines text-sky-400 text-sm"></i>
                                             {% else %}
                                                 <i class="fa-solid fa-file-image text-emerald-400 text-sm"></i>
                                             {% endif %}
@@ -236,8 +240,13 @@
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Archivos Adjuntos *</label>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Archivos Adjuntos / Comprimidos (.zip, .rar) *</label>
                     <input type="file" name="archivo" multiple required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">O Seleccionar Carpeta Completa (Opcional)</label>
+                    <input type="file" name="archivo" webkitdirectory directory multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
                 </div>
 
                 <div class="mt-3 flex justify-end gap-2">
@@ -289,8 +298,13 @@
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Agregar Más Archivos (Opcional)</label>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Agregar Más Archivos / Comprimidos (Opcional)</label>
                     <input type="file" name="nuevos_archivos" multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">O Agregar Carpeta Completa (Opcional)</label>
+                    <input type="file" name="nuevos_archivos" webkitdirectory directory multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
                 </div>
 
                 <div class="mt-3 flex justify-end gap-2">
