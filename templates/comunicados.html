@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Novedades y Comunicados</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-bullhorn text-sky-400"></i> Novedades y Comunicados
+            </h1>
+        </div>
+
+        {% if rol == 'admin' %}
+        <button onclick="abrirModalCrear()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-sky-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+            <i class="fa-solid fa-plus"></i>
+            <span>Publicar Comunicado</span>
+        </button>
+        {% endif %}
+    </nav>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- PESTAÑAS Y BUSCADOR -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3">
+            <div class="flex items-center gap-2 w-full sm:w-auto">
+                <a href="/comunicados?tab=activos" class="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl text-xs font-bold transition-all {% if pestana == 'activos' %}bg-sky-600 text-white shadow-lg shadow-sky-500/20{% else %}text-slate-400 hover:bg-slate-700/50 hover:text-slate-200{% endif %}">
+                    <i class="fa-solid fa-circle-check mr-1.5"></i> Novedades Activas
+                </a>
+                <a href="/comunicados?tab=historico" class="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl text-xs font-bold transition-all {% if pestana == 'historico' %}bg-sky-600 text-white shadow-lg shadow-sky-500/20{% else %}text-slate-400 hover:bg-slate-700/50 hover:text-slate-200{% endif %}">
+                    <i class="fa-solid fa-box-archive mr-1.5"></i> Histórico
+                </a>
+            </div>
+
+            <form method="GET" action="/comunicados" class="w-full sm:w-auto">
+                <input type="hidden" name="tab" value="{{ pestana }}">
+                <div class="relative">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Buscar noticias..." class="w-full sm:w-64 bg-slate-900 border border-slate-700 rounded-xl py-2 pl-8 pr-3 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                    <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-500 text-xs"></i>
+                </div>
+            </form>
+        </div>
+
+        <!-- LISTA DE COMUNICADOS -->
+        {% if comunicados %}
+            <div class="space-y-4">
+                {% for c in comunicados %}
+                    <div class="bg-slate-800/60 border {% if c.fijado %}border-sky-500/60 shadow-lg shadow-sky-500/5{% else %}border-slate-700/60{% endif %} rounded-3xl p-5 transition-all">
+                        
+                        <!-- CABECERA -->
+                        <div class="flex items-start justify-between gap-3 mb-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                {% if c.fijado %}
+                                    <span class="px-2.5 py-0.5 bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                                        <i class="fa-solid fa-thumbtack text-xs"></i> Destacado
+                                    </span>
+                                {% endif %}
+
+                                {% if c.nivel == 'urgente' %}
+                                    <span class="px-2.5 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                        🔴 Urgente
+                                    </span>
+                                {% elif c.nivel == 'importante' %}
+                                    <span class="px-2.5 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                        🟧 Importante
+                                    </span>
+                                {% else %}
+                                    <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                        🟢 Informativo
+                                    </span>
+                                {% endif %}
+                            </div>
+
+                            <div class="text-[11px] text-slate-400 font-mono flex items-center gap-2">
+                                <span><i class="fa-regular fa-clock"></i> {{ c.fecha }}</span>
+                            </div>
+                        </div>
+
+                        <!-- TÍTULO Y CONTENIDO -->
+                        <h3 class="text-lg font-bold text-white mb-2">{{ c.titulo }}</h3>
+                        <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed mb-4">{{ c.contenido }}</p>
+
+                        <!-- IMAGEN ADJUNTA SI EXISTE -->
+                        {% if c.imagen_url %}
+                            <div class="mb-4 rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-900/50 max-h-96 flex items-center justify-center">
+                                <img src="{{ c.imagen_url }}" alt="Imagen adjunta" class="max-h-96 w-auto object-contain cursor-pointer" onclick="window.open('{{ c.imagen_url }}', '_blank')">
+                            </div>
+                        {% endif %}
+
+                        <!-- PIE DE COMUNICADO Y ACCIONES -->
+                        <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
+                            <span><i class="fa-regular fa-user text-slate-500"></i> Publicado por: <strong class="text-slate-300">{{ c.autor }}</strong></span>
+
+                            {% if rol == 'admin' %}
+                                <div class="flex items-center gap-2">
+                                    <form action="/comunicados/archivar/{{ c.id }}" method="POST">
+                                        <button type="submit" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
+                                            {% if c.estado == 'activo' %}
+                                                <i class="fa-solid fa-box-archive text-amber-400"></i> Archivar
+                                            {% else %}
+                                                <i class="fa-solid fa-arrow-rotate-left text-emerald-400"></i> Reactivar
+                                            {% endif %}
+                                        </button>
+                                    </form>
+
+                                    <form action="/comunicados/eliminar/{{ c.id }}" method="POST" onsubmit="return confirm('¿Eliminar definitivamente este comunicado?')">
+                                        <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg transition-colors" title="Eliminar">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800">
+                <i class="fa-solid fa-bullhorn text-4xl text-slate-600 mb-3"></i>
+                <h3 class="text-slate-300 font-bold text-sm">No hay comunicados registrados</h3>
+                <p class="text-slate-500 text-xs mt-1">Los nuevos avisos aparecerán aquí cuando sean publicados.</p>
+            </div>
+        {% endif %}
+
+    </main>
+
+    <!-- MODAL CREAR COMUNICADO -->
+    <div id="modal-crear" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white"><i class="fa-solid fa-bullhorn text-sky-400 mr-2"></i> Nuevo Comunicado / Noticia</h3>
+                <button onclick="cerrarModalCrear()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" action="/comunicados/crear" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
+                    <input type="text" name="titulo" required placeholder="Ej: Mantenimiento Programado Servidores" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nivel de Prioridad</label>
+                    <select name="nivel" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        <option value="info">🟢 Informativo (Novedad general)</option>
+                        <option value="importante">🟧 Importante (Cambio de procesos)</option>
+                        <option value="urgente">🔴 Urgente (Alerta crítica)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Detalle / Mensaje *</label>
+                    <textarea name="contenido" rows="4" required placeholder="Escribe el cuerpo del comunicado aquí..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Imagen o Afiche Adjunto (Opcional)</label>
+                    <input type="file" name="imagen" accept="image/*" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div class="flex items-center gap-2 py-1">
+                    <input type="checkbox" id="fijado" name="fijado" class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500">
+                    <label for="fijado" class="text-slate-300 font-bold cursor-pointer">Fijar destacado en Inicio</label>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalCrear()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-500/20">Publicar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function abrirModalCrear() {
+            document.getElementById('modal-crear').classList.remove('hidden');
+            document.getElementById('modal-crear').classList.add('flex');
+        }
+
+        function cerrarModalCrear() {
+            document.getElementById('modal-crear').classList.add('hidden');
+            document.getElementById('modal-crear').classList.remove('flex');
+        }
+    </script>
+</body>
+</html>
