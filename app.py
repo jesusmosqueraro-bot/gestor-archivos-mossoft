@@ -250,11 +250,59 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS
+@app.route('/admin/db')
+@login_required
+@admin_required
+def visor_db():
+    tabla_seleccionada = request.args.get('tabla', 'usuarios')
+    q_sql = request.args.get('sql', '').strip()
+    
+    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
+    if tabla_seleccionada not in tablas_permitidas:
+        tabla_seleccionada = 'usuarios'
+        
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    columnas = []
+    registros = []
+    error_sql = None
+    
+    try:
+        if q_sql:
+            if not q_sql.lower().startswith('select'):
+                error_sql = "Por seguridad solo se permiten consultas de lectura (SELECT)."
+            else:
+                cursor.execute(q_sql)
+                registros = cursor.fetchall()
+                if cursor.description:
+                    columnas = [desc[0] for desc in cursor.description]
+        else:
+            cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
+            registros = cursor.fetchall()
+            if cursor.description:
+                columnas = [desc[0] for desc in cursor.description]
+    except Exception as e:
+        error_sql = str(e)
+    finally:
+        conn.close()
+
+    return render_template(
+        'admin_db.html', 
+        tabla=tabla_seleccionada, 
+        tablas=tablas_permitidas, 
+        columnas=columnas, 
+        registros=registros, 
+        sql=q_sql, 
+        error=error_sql
+    )
+
 # 📢 MÓDULO MURO DE COMUNICADOS
 @app.route('/comunicados')
 @login_required
 def ver_comunicados():
-    pestana = request.args.get('tab', 'activos') # 'activos' o 'historico'
+    pestana = request.args.get('tab', 'activos')
     q_busqueda = request.args.get('q', '').strip().lower()
     
     conn, db_type = get_db()
@@ -413,7 +461,6 @@ def recuperar_clave():
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            # Envío en hilo secundario para respuesta web instantánea
             threading.Thread(
                 target=enviar_correo_recuperacion, 
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
