@@ -250,13 +250,13 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS
-@app.route('/admin/db')
+# 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
+@app.route('/admin/db', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def visor_db():
     tabla_seleccionada = request.args.get('tabla', 'usuarios')
-    q_sql = request.args.get('sql', '').strip()
+    q_sql = request.form.get('sql', '').strip() or request.args.get('sql', '').strip()
     
     tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
     if tabla_seleccionada not in tablas_permitidas:
@@ -267,14 +267,21 @@ def visor_db():
     
     columnas = []
     registros = []
+    mensaje_exito = None
     error_sql = None
     
     try:
         if q_sql:
-            if not q_sql.lower().startswith('select'):
-                error_sql = "Por seguridad solo se permiten consultas de lectura (SELECT)."
+            cursor.execute(q_sql)
+            if q_sql.lower().startswith('select'):
+                registros = cursor.fetchall()
+                if cursor.description:
+                    columnas = [desc[0] for desc in cursor.description]
             else:
-                cursor.execute(q_sql)
+                conn.commit()
+                mensaje_exito = f"Sentencia SQL ejecutada con éxito. Filas afectadas: {cursor.rowcount}"
+                registrar_log(session['username'], "Ejecución SQL Manual", f"SQL: {q_sql[:120]}")
+                cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
                 registros = cursor.fetchall()
                 if cursor.description:
                     columnas = [desc[0] for desc in cursor.description]
@@ -284,6 +291,7 @@ def visor_db():
             if cursor.description:
                 columnas = [desc[0] for desc in cursor.description]
     except Exception as e:
+        conn.rollback()
         error_sql = str(e)
     finally:
         conn.close()
@@ -295,6 +303,7 @@ def visor_db():
         columnas=columnas, 
         registros=registros, 
         sql=q_sql, 
+        exito=mensaje_exito,
         error=error_sql
     )
 
