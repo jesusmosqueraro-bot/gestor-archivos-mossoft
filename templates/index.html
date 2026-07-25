@@ -115,12 +115,15 @@
                             <!-- PREVISUALIZACIÓN DE ARCHIVOS -->
                             <div class="space-y-2 mb-4">
                                 {% for arch in item.archivos %}
-                                    {% set fname = arch.split('/')[-1] %}
+                                    {% set is_raw = '/raw/upload/' in arch %}
+                                    {% set fname_base = arch.split('/')[-1] %}
+                                    {% set fname = fname_base + '.zip' if (is_raw and not (fname_base.endswith('.zip') or fname_base.endswith('.rar') or fname_base.endswith('.7z'))) else fname_base %}
+                                    
                                     <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 flex items-center justify-between text-xs">
                                         <div class="flex items-center gap-2 truncate">
                                             {% if '.pdf' in arch.lower() %}
                                                 <i class="fa-solid fa-file-pdf text-rose-400 text-sm"></i>
-                                            {% elif '.zip' in arch.lower() or '.rar' in arch.lower() or '.7z' in arch.lower() or '.tar' in arch.lower() or '.gz' in arch.lower() %}
+                                            {% elif '.zip' in arch.lower() or '.rar' in arch.lower() or '.7z' in arch.lower() or '.tar' in arch.lower() or '.gz' in arch.lower() or is_raw %}
                                                 <i class="fa-solid fa-file-zipper text-amber-400 text-sm"></i>
                                             {% elif '.mp4' in arch.lower() or '.mov' in arch.lower() or '/video/' in arch %}
                                                 <i class="fa-solid fa-file-video text-purple-400 text-sm"></i>
@@ -334,20 +337,35 @@
         function previsualizarArchivo(url, galeriaId) {
             sumarVista(galeriaId);
             
-            const fname = url.split('/').pop();
+            let fname = url.split('/').pop();
             const ext = fname.split('.').pop().toLowerCase();
+            const isRaw = url.includes('/raw/upload/');
             const visorContenido = document.getElementById('visor-contenido');
+
+            if (isRaw && !fname.endsWith('.zip') && !fname.endsWith('.rar')) {
+                fname += '.zip';
+            }
+            
             document.getElementById('visor-titulo').innerText = fname;
 
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) && !isRaw) {
                 visorContenido.innerHTML = `<img src="${url}" class="max-h-[75vh] w-auto rounded-xl object-contain shadow-lg" />`;
             } else if (['mp4', 'webm', 'mov'].includes(ext) || url.includes('/video/upload/')) {
                 visorContenido.innerHTML = `<video controls autoplay class="max-h-[75vh] w-full rounded-xl"><source src="${url}" type="video/mp4">Tu navegador no soporta video HTML5.</video>`;
-            } else if (ext === 'pdf') {
+            } else if (ext === 'pdf' && !isRaw) {
                 visorContenido.innerHTML = `<iframe src="${url}" class="w-full h-[75vh] rounded-xl border-0"></iframe>`;
             } else {
-                window.open(url, '_blank');
-                return;
+                // 📦 Paquete Comprimido o Archivo RAW
+                visorContenido.innerHTML = `
+                    <div class="text-center p-8 flex flex-col items-center justify-center">
+                        <i class="fa-solid fa-file-zipper text-6xl text-amber-400 mb-4 animate-bounce"></i>
+                        <h4 class="text-white font-bold text-base mb-2">Paquete Comprimido / Archivo Descargable</h4>
+                        <p class="text-slate-400 text-xs mb-6 max-w-md">Este archivo no se puede previsualizar directamente en el navegador. Haz clic en el botón para descargarlo.</p>
+                        <a href="/pdf_proxy?url=${encodeURIComponent(url)}&download=1&name=${encodeURIComponent(fname)}" onclick="sumarDescarga('${galeriaId}')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg transition-all text-xs flex items-center gap-2">
+                            <i class="fa-solid fa-download"></i> Descargar ${fname}
+                        </a>
+                    </div>
+                `;
             }
 
             document.getElementById('modal-visor').classList.remove('hidden');
