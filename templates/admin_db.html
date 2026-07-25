@@ -20,7 +20,7 @@
             </a>
             <div class="h-6 w-px bg-slate-700"></div>
             <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
-                <i class="fa-solid fa-database text-cyan-400"></i> Visor de Base de Datos
+                <i class="fa-solid fa-database text-cyan-400"></i> Visor & Consola SQL
             </h1>
         </div>
     </nav>
@@ -37,17 +37,25 @@
         </div>
 
         <!-- CONSOLA SQL PERSONALIZADA -->
-        <form method="GET" action="/admin/db" class="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60 space-y-3 shadow-lg">
-            <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider">Ejecutar Consulta SQL personalizada (Solo lecturas SELECT)</label>
+        <form method="POST" action="/admin/db?tabla={{ tabla }}" class="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60 space-y-3 shadow-lg">
+            <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider">Ejecutar Consulta SQL Personalizada (SELECT, UPDATE, DELETE, INSERT)</label>
             <div class="flex flex-col sm:flex-row gap-2">
-                <input type="text" name="sql" value="{{ sql }}" placeholder="Ej: SELECT * FROM comunicados WHERE nivel = 'urgente'" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500">
-                <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-cyan-500/20">
-                    <i class="fa-solid fa-terminal"></i> Consultar
+                <input type="text" name="sql" value="{{ sql }}" placeholder="Ej: UPDATE usuarios SET rol = 'admin' WHERE id = 5" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                <button type="submit" onclick="return confirm('¿Estás seguro de ejecutar esta sentencia SQL directamente en la base de datos?')" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-cyan-500/20">
+                    <i class="fa-solid fa-terminal"></i> Ejecutar SQL
                 </button>
             </div>
         </form>
 
-        <!-- ALERTA DE ERROR DE CONSULTA SI OCURRE -->
+        <!-- ALERTA DE ÉXITO -->
+        {% if exito %}
+            <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-4 rounded-2xl text-xs flex items-center gap-3">
+                <i class="fa-solid fa-circle-check text-base text-emerald-400"></i>
+                <span>{{ exito }}</span>
+            </div>
+        {% endif %}
+
+        <!-- ALERTA DE ERROR -->
         {% if error %}
             <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 p-4 rounded-2xl text-xs flex items-center gap-3">
                 <i class="fa-solid fa-triangle-exclamation text-base text-rose-400"></i>
