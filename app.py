@@ -140,6 +140,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id SERIAL PRIMARY KEY, servicio VARCHAR(150) NOT NULL, url TEXT, usuario VARCHAR(150) NOT NULL, password_enc TEXT NOT NULL, categoria VARCHAR(100) DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
+                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
             
             for col_query in [
@@ -173,6 +176,9 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
             )''')
             
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -243,6 +249,119 @@ def admin_required(f):
         if session.get('rol') != 'admin': return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+# 📢 MÓDULO MURO DE COMUNICADOS
+@app.route('/comunicados')
+@login_required
+def ver_comunicados():
+    pestana = request.args.get('tab', 'activos') # 'activos' o 'historico'
+    q_busqueda = request.args.get('q', '').strip().lower()
+    
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
+    
+    try:
+        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
+        cursor.execute(query, (estado_filtro,))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando comunicados: {e}")
+        rows = []
+
+    conn.close()
+    
+    comunicados = []
+    for r in rows:
+        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor = r
+        texto_full = f"{titulo} {contenido} {autor}".lower()
+        if not q_busqueda or q_busqueda in texto_full:
+            comunicados.append({
+                'id': c_id,
+                'titulo': titulo,
+                'contenido': contenido,
+                'nivel': nivel,
+                'fijado': fijado,
+                'imagen_url': img_url,
+                'estado': estado,
+                'fecha': fecha,
+                'autor': autor
+            })
+
+    return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
+
+@app.route('/comunicados/crear', methods=['POST'])
+@login_required
+@admin_required
+def crear_comunicado():
+    titulo = request.form.get('titulo', '').strip()
+    contenido = request.form.get('contenido', '').strip()
+    nivel = request.form.get('nivel', 'info').strip()
+    fijado = 1 if request.form.get('fijado') == 'on' else 0
+    imagen = request.files.get('imagen')
+    
+    imagen_url = ""
+    if imagen and archivo_permitido(imagen.filename):
+        try:
+            upload_result = cloudinary.uploader.upload(
+                imagen, 
+                resource_type="image",
+                use_filename=True,
+                unique_filename=True
+            )
+            imagen_url = upload_result.get('secure_url', '')
+        except Exception as e:
+            print(f"Error subiendo imagen de comunicado: {e}")
+
+    if titulo and contenido:
+        fecha_act = obtener_fecha_actual()
+        autor = session.get('username', 'Admin')
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
+        cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+        conn.commit()
+        conn.close()
+        
+        registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+
+    return redirect(url_for('ver_comunicados'))
+
+@app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def archivar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
+    cursor.execute(q_sel, (com_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
+        q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_estado, com_id))
+        conn.commit()
+        registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+        
+    conn.close()
+    return redirect(url_for('ver_comunicados'))
+
+@app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
+    cursor.execute(q_del, (com_id,))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
+    return redirect(url_for('ver_comunicados'))
 
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
@@ -1023,7 +1142,27 @@ def home():
 @app.route('/bienvenida')
 @login_required
 def bienvenida():
-    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'))
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    comunicado_fijado = None
+    try:
+        query_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
+        cursor.execute(query_fij)
+        row = cursor.fetchone()
+        if row:
+            comunicado_fijado = {
+                'titulo': row[0],
+                'contenido': row[1],
+                'nivel': row[2],
+                'imagen_url': row[3],
+                'fecha': row[4],
+                'autor': row[5]
+            }
+    except Exception:
+        comunicado_fijado = None
+    conn.close()
+
+    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
 
 @app.route('/gestor')
 @login_required
