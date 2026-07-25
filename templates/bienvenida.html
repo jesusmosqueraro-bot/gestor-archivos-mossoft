@@ -4,78 +4,129 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arkiv | Inicio</title>
-    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col justify-between font-sans">
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
     <!-- NAVBAR -->
-    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 px-6 py-4 flex items-center justify-between">
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center font-black text-white font-serif text-lg">A</div>
-            <span class="text-xl font-bold tracking-tight text-white font-serif">ARKIV</span>
+            <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-blue-500/20">
+                A
+            </div>
+            <h1 class="text-lg font-bold text-white font-serif tracking-tight">ARKIV System</h1>
         </div>
-        <div class="flex items-center gap-4">
-            <span class="text-xs text-slate-400 font-medium hidden sm:inline">Hola, <strong class="text-white font-bold">{{ username }}</strong></span>
-            <a href="/logout" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-3 py-1.5 rounded-xl text-xs font-bold transition-all">
-                Cerrar Sesión
+
+        <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400 hidden sm:inline">Hola, <strong class="text-slate-200">{{ username }}</strong></span>
+            <a href="/logout" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5">
+                <i class="fa-solid fa-right-from-bracket text-rose-400"></i>
+                <span class="hidden sm:inline">Salir</span>
             </a>
         </div>
     </nav>
 
-    <!-- MENÚ PRINCIPAL -->
-    <main class="max-w-4xl w-full mx-auto p-6 my-auto">
-        <div class="text-center mb-10">
-            <h1 class="text-3xl font-black text-white tracking-tight font-serif mb-2">Panel de Control</h1>
-            <p class="text-slate-400 text-xs">Selecciona un módulo para comenzar a trabajar</p>
-        </div>
+    <!-- CONTENIDO MAIN -->
+    <main class="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            <!-- GESTOR DE ARCHIVOS -->
-            <a href="/gestor" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-blue-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
-                <div class="w-12 h-12 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
-                    <i class="fa-solid fa-folder-open"></i>
+        <!-- AVISO URGENTE / DESTACADO FIJADO -->
+        {% if comunicado_fijado %}
+            <div class="bg-sky-950/40 border border-sky-500/40 rounded-3xl p-5 shadow-xl relative overflow-hidden">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <span class="px-2.5 py-0.5 bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                        <i class="fa-solid fa-bullhorn"></i> Novedad Destacada
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">{{ comunicado_fijado.fecha }}</span>
                 </div>
+                <h3 class="text-base font-bold text-white mb-1">{{ comunicado_fijado.titulo }}</h3>
+                <p class="text-xs text-slate-300 line-clamp-2 mb-3">{{ comunicado_fijado.contenido }}</p>
+                <a href="/comunicados" class="text-xs font-bold text-sky-400 hover:underline flex items-center gap-1">
+                    <span>Ver detalle completo</span>
+                    <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                </a>
+            </div>
+        {% endif %}
+
+        <!-- MENÚ PRINCIPAL -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+            <!-- TARJETA INSTRUCTIVOS -->
+            <a href="/gestor" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-blue-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
                 <div>
-                    <h3 class="text-base font-bold text-white group-hover:text-blue-400 transition-colors">Gestor de Instructivos</h3>
-                    <p class="text-xs text-slate-400">Consulta y descarga guías, videos y documentos.</p>
+                    <div class="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-folder-open text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-1">Gestor de Instructivos</h3>
+                    <p class="text-xs text-slate-400">Manuales, guías rápidas, PDFs y videos interactivos.</p>
+                </div>
+                <div class="mt-6 flex items-center text-xs font-bold text-blue-400">
+                    <span>Ingresar</span>
+                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
 
+            <!-- TARJETA BÓVEDA DE CREDENCIALES -->
             {% if rol == 'admin' %}
-            <!-- BÓVEDA DE ACCESOS -->
-            <a href="/credenciales" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-emerald-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
-                <div class="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
-                    <i class="fa-solid fa-vault"></i>
-                </div>
+            <a href="/credenciales" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-amber-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
                 <div>
-                    <h3 class="text-base font-bold text-white group-hover:text-emerald-400 transition-colors">Bóveda de Accesos</h3>
-                    <p class="text-xs text-slate-400">Almacena usuarios y contraseñas de otros sistemas.</p>
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-key text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-1">Bóveda de Accesos</h3>
+                    <p class="text-xs text-slate-400">Credenciales cifradas de servidores y sistemas corporativos.</p>
+                </div>
+                <div class="mt-6 flex items-center text-xs font-bold text-amber-400">
+                    <span>Ingresar</span>
+                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
+            {% endif %}
+
+            <!-- TARJETA NOVEDADES Y COMUNICADOS -->
+            <a href="/comunicados" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-sky-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-bullhorn text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-1">Novedades y Avisos</h3>
+                    <p class="text-xs text-slate-400">Informativos oficiales, cambios de procesos y noticias internas.</p>
+                </div>
+                <div class="mt-6 flex items-center text-xs font-bold text-sky-400">
+                    <span>Ver Muro</span>
+                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
 
-            <!-- GESTIÓN DE USUARIOS -->
-            <a href="/usuarios" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-amber-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
-                <div class="w-12 h-12 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
-                    <i class="fa-solid fa-users-gear"></i>
-                </div>
+            <!-- TARJETA USUARIOS -->
+            {% if rol == 'admin' %}
+            <a href="/usuarios" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-emerald-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
                 <div>
-                    <h3 class="text-base font-bold text-white group-hover:text-amber-400 transition-colors">Gestión de Usuarios</h3>
-                    <p class="text-xs text-slate-400">Crea, edita y administra roles de acceso.</p>
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-users-gear text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-1">Gestión de Usuarios</h3>
+                    <p class="text-xs text-slate-400">Administración de cuentas, roles y accesos a la plataforma.</p>
+                </div>
+                <div class="mt-6 flex items-center text-xs font-bold text-emerald-400">
+                    <span>Administrar</span>
+                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
 
-            <!-- LOGS Y AUDITORÍA -->
-            <a href="/logs" class="p-6 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 hover:border-purple-500/50 rounded-3xl transition-all shadow-xl flex items-center gap-4 group">
-                <div class="w-12 h-12 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
-                    <i class="fa-solid fa-clipboard-list"></i>
-                </div>
+            <!-- TARJETA AUDITORÍA / LOGS -->
+            <a href="/logs" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-purple-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
                 <div>
-                    <h3 class="text-base font-bold text-white group-hover:text-purple-400 transition-colors">Auditoría y Logs</h3>
-                    <p class="text-xs text-slate-400">Historial completo de actividades del sistema.</p>
+                    <div class="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-shield-halved text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-1">Logs de Auditoría</h3>
+                    <p class="text-xs text-slate-400">Historial de actividades, inicios de sesión y descargas.</p>
+                </div>
+                <div class="mt-6 flex items-center text-xs font-bold text-purple-400">
+                    <span>Ver Logs</span>
+                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
             {% endif %}
@@ -83,10 +134,9 @@
         </div>
     </main>
 
-    <!-- FOOTER -->
-    <footer class="text-center py-4 text-xs text-slate-500 border-t border-slate-800">
-        ARKIV System &copy; 2026 — Plataforma de Gestión Segura
+    <!-- FOOTER CON VERSIÓN DE SISTEMA -->
+    <footer class="border-t border-slate-800 py-4 px-6 text-center text-slate-500 text-xs">
+        ARKIV System &bull; Versión <span class="font-bold text-slate-400">v1.3.0 Pro</span> &bull; Todos los derechos reservados.
     </footer>
-
 </body>
 </html>
