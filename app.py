@@ -92,7 +92,7 @@ ALLOWED_EXTENSIONS = {
     'zip', 'rar', '7z', 'tar', 'gz'
 }
 # 📦 LÍMITE AMPLIADO A 100 MB PARA VIDEOS DE HASTA 5-10 MINUTOS
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 
 # 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
