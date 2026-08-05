@@ -17,6 +17,13 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
+# SDK Oficial de Google GenAI
+try:
+    from google import genai
+    from google.genai import types
+except Exception:
+    genai = None
+
 # psycopg2 seguro para Render
 try:
     import psycopg2
@@ -91,7 +98,7 @@ ALLOWED_EXTENSIONS = {
     'mp4', 'mov', 'webm', 'avi',
     'zip', 'rar', '7z', 'tar', 'gz'
 }
-# 📦 LÍMITE AMPLIADO A 100 MB PARA VIDEOS DE HASTA 5-10 MINUTOS
+# 📦 LÍMITE DE TAMAÑO DE SUBIDA (350 MB)
 app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 
 # 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
@@ -250,6 +257,68 @@ def admin_required(f):
         if session.get('rol') != 'admin': return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV
+@app.route('/asistente_ia', methods=['POST'])
+@login_required
+def asistente_ia():
+    if not genai:
+        return jsonify({'respuesta': '⚠️ La librería google-genai no está instalada en el servidor.'}), 500
+
+    data = request.get_json() or {}
+    pregunta_usuario = data.get('pregunta', '').strip()
+
+    if not pregunta_usuario:
+        return jsonify({'respuesta': 'Por favor escribe una consulta válida.'}), 400
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return jsonify({'respuesta': '⚠️ La API Key de Gemini no está configurada en las variables de entorno.'}), 500
+
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        filas = cursor.fetchall()
+        conn.close()
+
+        contexto_instructivos = ""
+        for row in filas:
+            contexto_instructivos += f"- Título: {row[0]} | Categoría: {row[2]} | Tipo: {row[3]} | Descripción: {row[1]} | Tags: {row[4]}\n"
+
+        if not contexto_instructivos:
+            contexto_instructivos = "No hay instructivos registrados en el sistema actualmente."
+
+        client = genai.Client(api_key=api_key)
+
+        prompt_sistema = f"""
+Eres "ARKIV AI", el asistente inteligente oficial de la plataforma ARKIV System.
+Tu objetivo es ayudar a los usuarios a encontrar respuestas sobre los instructivos, documentos y procesos almacenados en el sistema.
+
+Esta es la lista actual de instructivos almacenados en la plataforma:
+{contexto_instructivos}
+
+Instrucciones:
+1. Responde de forma amable, clara y concisa en español.
+2. Basándote en la lista de instructivos proporcionada, responde si existe información sobre lo que el usuario pregunta.
+3. Si la información no está en los instructivos, indícalo educadamente e invita al usuario a contactar al administrador.
+"""
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"Pregunta del usuario: {pregunta_usuario}",
+            config=types.GenerateContentConfig(
+                system_instruction=prompt_sistema,
+                temperature=0.3
+            )
+        )
+
+        respuesta_ia = response.text
+        return jsonify({'respuesta': respuesta_ia})
+
+    except Exception as e:
+        print(f"Error consultando Gemini: {e}")
+        return jsonify({'respuesta': f'Ocurrió un error al procesar tu solicitud con la IA: {str(e)}'}), 500
 
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
 @app.route('/admin/db', methods=['GET', 'POST'])
