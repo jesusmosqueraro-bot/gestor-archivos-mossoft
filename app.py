@@ -257,7 +257,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV (SDK ESTABLE GOOGLE-GENERATIVEAI)
+# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV (CORREGIDO PARA GOOGLE-GENERATIVEAI)
 @app.route('/asistente_ia', methods=['POST'])
 @login_required
 def asistente_ia():
@@ -290,7 +290,10 @@ def asistente_ia():
 
         genai.configure(api_key=api_key)
 
-        prompt_sistema = f"""
+        # Usamos el prefijo explícito 'models/gemini-1.5-flash' para compatibilidad completa con v1beta
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
+
+        prompt_completo = f"""
 Eres "ARKIV AI", el asistente inteligente oficial de la plataforma ARKIV System.
 Tu objetivo es ayudar a los usuarios a encontrar respuestas sobre los instructivos, documentos y procesos almacenados en el sistema.
 
@@ -301,14 +304,11 @@ Instrucciones:
 1. Responde de forma amable, clara y concisa en español.
 2. Basándote en la lista de instructivos proporcionada, responde si existe información sobre lo que el usuario pregunta.
 3. Si la información no está en los instructivos, indícalo educadamente e invita al usuario a contactar al administrador.
+
+Pregunta del usuario: {pregunta_usuario}
 """
 
-        model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            system_instruction=prompt_sistema
-        )
-
-        response = model.generate_content(f"Pregunta del usuario: {pregunta_usuario}")
+        response = model.generate_content(prompt_completo)
 
         return jsonify({'respuesta': response.text})
 
