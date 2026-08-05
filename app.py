@@ -17,10 +17,9 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
-# SDK Oficial de Google GenAI
+# SDK Estable de Google Generative AI
 try:
-    from google import genai
-    from google.genai import types
+    import google.generativeai as genai
 except Exception:
     genai = None
 
@@ -258,12 +257,12 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV
+# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV (SDK ESTABLE GOOGLE-GENERATIVEAI)
 @app.route('/asistente_ia', methods=['POST'])
 @login_required
 def asistente_ia():
     if not genai:
-        return jsonify({'respuesta': '⚠️ La librería google-genai no está instalada en el servidor.'}), 500
+        return jsonify({'respuesta': '⚠️ La librería google-generativeai no está instalada en el servidor.'}), 500
 
     data = request.get_json() or {}
     pregunta_usuario = data.get('pregunta', '').strip()
@@ -271,7 +270,6 @@ def asistente_ia():
     if not pregunta_usuario:
         return jsonify({'respuesta': 'Por favor escribe una consulta válida.'}), 400
 
-    # Búsqueda flexible de la API Key en las variables de entorno
     api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or os.environ.get('API_KEY_GEMINI')
     if not api_key:
         return jsonify({'respuesta': '⚠️ La API Key de Gemini no está configurada en las variables de entorno.'}), 500
@@ -290,7 +288,7 @@ def asistente_ia():
         if not contexto_instructivos:
             contexto_instructivos = "No hay instructivos registrados en el sistema actualmente."
 
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
 
         prompt_sistema = f"""
 Eres "ARKIV AI", el asistente inteligente oficial de la plataforma ARKIV System.
@@ -305,22 +303,14 @@ Instrucciones:
 3. Si la información no está en los instructivos, indícalo educadamente e invita al usuario a contactar al administrador.
 """
 
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(api_version='v1')
+        model = genai.GenerativeModel(
+            model_name='gemini-1.5-flash',
+            system_instruction=prompt_sistema
         )
 
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=f"Pregunta del usuario: {pregunta_usuario}",
-            config=types.GenerateContentConfig(
-                system_instruction=prompt_sistema,
-                temperature=0.3
-            )
-        )
+        response = model.generate_content(f"Pregunta del usuario: {pregunta_usuario}")
 
-        respuesta_ia = response.text
-        return jsonify({'respuesta': respuesta_ia})
+        return jsonify({'respuesta': response.text})
 
     except Exception as e:
         print(f"Error consultando Gemini: {e}")
