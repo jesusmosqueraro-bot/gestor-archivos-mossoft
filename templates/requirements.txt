@@ -1,5 +1,0 @@
-Flask
-psycopg2-binary
-cloudinary
-requests
-google-genai
