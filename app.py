@@ -305,8 +305,13 @@ Instrucciones:
 3. Si la información no está en los instructivos, indícalo educadamente e invita al usuario a contactar al administrador.
 """
 
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(api_version='v1')
+        )
+
         response = client.models.generate_content(
-            model='gemini-1.5-flash-8b',
+            model='gemini-2.0-flash',
             contents=f"Pregunta del usuario: {pregunta_usuario}",
             config=types.GenerateContentConfig(
                 system_instruction=prompt_sistema,
