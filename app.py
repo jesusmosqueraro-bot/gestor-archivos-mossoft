@@ -271,7 +271,8 @@ def asistente_ia():
     if not pregunta_usuario:
         return jsonify({'respuesta': 'Por favor escribe una consulta válida.'}), 400
 
-    api_key = os.environ.get('GEMINI_API_KEY')
+    # Búsqueda flexible de la API Key en las variables de entorno
+    api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or os.environ.get('API_KEY_GEMINI')
     if not api_key:
         return jsonify({'respuesta': '⚠️ La API Key de Gemini no está configurada en las variables de entorno.'}), 500
 
