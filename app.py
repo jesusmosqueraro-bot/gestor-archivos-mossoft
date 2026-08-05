@@ -306,7 +306,7 @@ Instrucciones:
 """
 
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash-8b',
             contents=f"Pregunta del usuario: {pregunta_usuario}",
             config=types.GenerateContentConfig(
                 system_instruction=prompt_sistema,
