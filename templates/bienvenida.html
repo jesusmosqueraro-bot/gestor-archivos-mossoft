@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Inicio</title>
+    <title>Arkiv | Gestor de Instructivos</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -13,145 +14,500 @@
     <!-- NAVBAR -->
     <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-blue-500/20">
-                A
-            </div>
-            <h1 class="text-lg font-bold text-white font-serif tracking-tight">ARKIV System</h1>
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-folder-open text-blue-500"></i> Gestor de Instructivos
+            </h1>
         </div>
 
-        <div class="flex items-center gap-3">
-            <span class="text-xs text-slate-400 hidden sm:inline">Hola, <strong class="text-slate-200">{{ username }}</strong></span>
-            <a href="/logout" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5">
-                <i class="fa-solid fa-right-from-bracket text-rose-400"></i>
-                <span class="hidden sm:inline">Salir</span>
-            </a>
+        <div class="flex items-center gap-2">
+            {% if rol == 'admin' %}
+                <a href="/papelera" title="Papelera" class="p-2 bg-slate-700 hover:bg-slate-600 text-rose-400 rounded-xl transition-all text-xs">
+                    <i class="fa-solid fa-trash-can"></i>
+                </a>
+                <button onclick="abrirModalSubir()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-blue-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span>Nuevo Instructivo</span>
+                </button>
+            {% endif %}
         </div>
     </nav>
 
-    <!-- CONTENIDO MAIN -->
-    <main class="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-        <!-- AVISO URGENTE / DESTACADO FIJADO -->
-        {% if comunicado_fijado %}
-            <div class="bg-sky-950/40 border border-sky-500/40 rounded-3xl p-5 shadow-xl relative overflow-hidden">
-                <div class="flex items-center justify-between gap-2 mb-2">
-                    <span class="px-2.5 py-0.5 bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
-                        <i class="fa-solid fa-bullhorn"></i> Novedad Destacada
-                    </span>
-                    <span class="text-[10px] text-slate-400 font-mono">{{ comunicado_fijado.fecha }}</span>
-                </div>
-                <h3 class="text-base font-bold text-white mb-1">{{ comunicado_fijado.titulo }}</h3>
-                <p class="text-xs text-slate-300 line-clamp-2 mb-3">{{ comunicado_fijado.contenido }}</p>
-                <a href="/comunicados" class="text-xs font-bold text-sky-400 hover:underline flex items-center gap-1">
-                    <span>Ver detalle completo</span>
-                    <i class="fa-solid fa-arrow-right text-[10px]"></i>
-                </a>
+        <!-- BARRA DE BÚSQUEDA Y FILTROS -->
+        <form method="GET" action="/gestor" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Búsqueda por Texto</label>
+                <input type="text" name="q" value="{{ busqueda }}" list="sugerencias" placeholder="Buscar palabras clave..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <datalist id="sugerencias">
+                    {% for sug in sugerencias_titulos %}
+                        <option value="{{ sug }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
+                <select name="cat" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todas las Categorías</option>
+                    <option value="General" {% if cat_filtro == 'General' %}selected{% endif %}>General</option>
+                    <option value="Sistemas" {% if cat_filtro == 'Sistemas' %}selected{% endif %}>Sistemas</option>
+                    <option value="Operativa" {% if cat_filtro == 'Operativa' %}selected{% endif %}>Operativa</option>
+                    <option value="Facturación" {% if cat_filtro == 'Facturación' %}selected{% endif %}>Facturación</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo de Documento</label>
+                <select name="tipo" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todos los Tipos</option>
+                    <option value="Instructivo" {% if tipo_filtro == 'Instructivo' %}selected{% endif %}>Instructivo</option>
+                    <option value="Guía Rápida" {% if tipo_filtro == 'Guía Rápida' %}selected{% endif %}>Guía Rápida</option>
+                    <option value="Manual" {% if tipo_filtro == 'Manual' %}selected{% endif %}>Manual</option>
+                    <option value="Política" {% if tipo_filtro == 'Política' %}selected{% endif %}>Política</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Formato Adjunto</label>
+                <select name="formato" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todos los Formatos</option>
+                    <option value="imagen" {% if formato_filtro == 'imagen' %}selected{% endif %}>Imágenes (JPG/PNG)</option>
+                    <option value="video" {% if formato_filtro == 'video' %}selected{% endif %}>Videos (MP4/WebM)</option>
+                    <option value="pdf" {% if formato_filtro == 'pdf' %}selected{% endif %}>Documentos / Comprimidos (.zip)</option>
+                </select>
+            </div>
+        </form>
+
+        <!-- GRID DE TARJETAS DE INSTRUCTIVOS -->
+        {% if galerias %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {% for item in galerias %}
+                    <div class="bg-slate-800/60 border border-slate-700/60 hover:border-slate-600/80 rounded-3xl p-5 flex flex-col justify-between shadow-lg transition-all hover:shadow-xl">
+                        
+                        <div>
+                            <!-- ENCABEZADO Y BADGES -->
+                            <div class="flex items-start justify-between gap-2 mb-3">
+                                <div class="flex flex-wrap gap-1.5">
+                                    <span class="px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                        {{ item.categoria }}
+                                    </span>
+                                    <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                        {{ item.tipo }}
+                                    </span>
+                                </div>
+
+                                <div class="flex items-center gap-2 text-slate-400 text-[11px] font-mono">
+                                    <span title="Vistas"><i class="fa-regular fa-eye"></i> <span id="vistas-{{ item.id }}">{{ item.vistas }}</span></span>
+                                    <span title="Descargas"><i class="fa-solid fa-download text-blue-400"></i> <span id="descargas-{{ item.id }}">{{ item.descargas }}</span></span>
+                                </div>
+                            </div>
+
+                            <h3 class="text-base font-bold text-white tracking-tight mb-1">{{ item.titulo }}</h3>
+                            <p class="text-xs text-slate-400 mb-4 line-clamp-2 italic">{{ item.descripcion }}</p>
+
+                            <!-- PREVISUALIZACIÓN DE ARCHIVOS -->
+                            <div class="space-y-2 mb-4">
+                                {% for arch in item.archivos %}
+                                    {% set is_raw = '/raw/upload/' in arch %}
+                                    {% set fname_base = arch.split('/')[-1] %}
+                                    {% set fname = fname_base + '.zip' if (is_raw and not (fname_base.endswith('.zip') or fname_base.endswith('.rar') or fname_base.endswith('.7z'))) else fname_base %}
+                                    
+                                    <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 flex items-center justify-between text-xs">
+                                        <div class="flex items-center gap-2 truncate">
+                                            {% if '.pdf' in arch.lower() %}
+                                                <i class="fa-solid fa-file-pdf text-rose-400 text-sm"></i>
+                                            {% elif '.zip' in arch.lower() or '.rar' in arch.lower() or '.7z' in arch.lower() or '.tar' in arch.lower() or '.gz' in arch.lower() or is_raw %}
+                                                <i class="fa-solid fa-file-zipper text-amber-400 text-sm"></i>
+                                            {% elif '.mp4' in arch.lower() or '.mov' in arch.lower() or '/video/' in arch %}
+                                                <i class="fa-solid fa-file-video text-purple-400 text-sm"></i>
+                                            {% elif '.docx' in arch.lower() or '.xlsx' in arch.lower() or '.pptx' in arch.lower() or '.txt' in arch.lower() %}
+                                                <i class="fa-solid fa-file-lines text-sky-400 text-sm"></i>
+                                            {% else %}
+                                                <i class="fa-solid fa-file-image text-emerald-400 text-sm"></i>
+                                            {% endif %}
+                                            <span class="truncate text-slate-200 text-[11px] font-mono">{{ fname }}</span>
+                                        </div>
+
+                                        <div class="flex items-center gap-1">
+                                            <button onclick="previsualizarArchivo('{{ arch }}', '{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-white transition-colors" title="Ver archivo">
+                                                <i class="fa-regular fa-eye"></i>
+                                            </button>
+
+                                            <!-- DESCARGA DIRECCIONADA VÍA PROXY -->
+                                            <a href="/pdf_proxy?url={{ arch | urlencode }}&download=1&name={{ fname | urlencode }}" onclick="sumarDescarga('{{ item.id }}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition-colors" title="Descargar directamente">
+                                                <i class="fa-solid fa-download"></i>
+                                            </a>
+
+                                            {% if rol == 'admin' %}
+                                                <form action="/eliminar_imagen/{{ item.id }}/{{ arch | urlencode }}" method="POST" onsubmit="return confirm('¿Mover este archivo a la papelera?')">
+                                                    <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar archivo">
+                                                        <i class="fa-solid fa-xmark"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <!-- PIE DE TARJETA -->
+                        <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
+                            <span><i class="fa-regular fa-clock text-slate-500"></i> {{ item.fecha }}</span>
+                            
+                            {% if rol == 'admin' %}
+                            <div class="flex items-center gap-1">
+                                <button onclick='abrirModalEditar({{ item | tojson }})' class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-blue-400 rounded-lg transition-colors" title="Editar">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                
+                                <form action="/eliminar_galeria/{{ item.id }}" method="POST" onsubmit="return confirm('¿Mover todo este instructivo a la papelera?')">
+                                    <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-rose-400 rounded-lg transition-colors" title="Eliminar Instructivo">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800">
+                <i class="fa-solid fa-folder-open text-4xl text-slate-600 mb-3"></i>
+                <h3 class="text-slate-300 font-bold text-sm">No se encontraron instructivos</h3>
+                <p class="text-slate-500 text-xs mt-1">Prueba con otro término de búsqueda o categoría.</p>
             </div>
         {% endif %}
 
-        <!-- MENÚ PRINCIPAL -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-
-            <!-- TARJETA INSTRUCTIVOS -->
-            <a href="/gestor" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-blue-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-folder-open text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Gestor de Instructivos</h3>
-                    <p class="text-xs text-slate-400">Manuales, guías rápidas, PDFs y videos interactivos.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-blue-400">
-                    <span>Ingresar</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-
-            <!-- TARJETA BÓVEDA DE CREDENCIALES -->
-            {% if rol == 'admin' %}
-            <a href="/credenciales" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-amber-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-key text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Bóveda de Accesos</h3>
-                    <p class="text-xs text-slate-400">Credenciales cifradas de servidores y sistemas corporativos.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-amber-400">
-                    <span>Ingresar</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-            {% endif %}
-
-            <!-- TARJETA NOVEDADES Y COMUNICADOS -->
-            <a href="/comunicados" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-sky-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-bullhorn text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Novedades y Avisos</h3>
-                    <p class="text-xs text-slate-400">Informativos oficiales, cambios de procesos y noticias internas.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-sky-400">
-                    <span>Ver Muro</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-
-            <!-- TARJETA USUARIOS -->
-            {% if rol == 'admin' %}
-            <a href="/usuarios" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-emerald-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-users-gear text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Gestión de Usuarios</h3>
-                    <p class="text-xs text-slate-400">Administración de cuentas, roles y accesos a la plataforma.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-emerald-400">
-                    <span>Administrar</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-
-            <!-- TARJETA AUDITORÍA / LOGS -->
-            <a href="/logs" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-purple-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-shield-halved text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Logs de Auditoría</h3>
-                    <p class="text-xs text-slate-400">Historial de actividades, inicios de sesión y descargas.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-purple-400">
-                    <span>Ver Logs</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-
-            <!-- TARJETA ADMINISTRACIÓN DE BASE DE DATOS -->
-            <a href="/admin/db" class="bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-cyan-500/50 rounded-3xl p-6 transition-all group flex flex-col justify-between shadow-lg">
-                <div>
-                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-4 group-hover:scale-110 transition-transform">
-                        <i class="fa-solid fa-database text-xl"></i>
-                    </div>
-                    <h3 class="text-lg font-bold text-white mb-1">Gestión DB</h3>
-                    <p class="text-xs text-slate-400">Inspección de datos y tablas internas del sistema.</p>
-                </div>
-                <div class="mt-6 flex items-center text-xs font-bold text-cyan-400">
-                    <span>Inspeccionar</span>
-                    <i class="fa-solid fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
-                </div>
-            </a>
-            {% endif %}
-
-        </div>
     </main>
 
-    <!-- FOOTER CON VERSIÓN DE SISTEMA -->
-    <footer class="border-t border-slate-800 py-4 px-6 text-center text-slate-500 text-xs">
-        ARKIV System &bull; Versión <span class="font-bold text-slate-400">v1.3.0 Pro</span> &bull; Todos los derechos reservados.
-    </footer>
+    <!-- MODAL VISOR PREVISUALIZADOR -->
+    <div id="modal-visor" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-4xl w-full p-5 shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex items-center justify-between border-b border-slate-700/60 pb-3 mb-3">
+                <h3 id="visor-titulo" class="text-sm font-bold text-white truncate font-mono">Previsualización de Archivo</h3>
+                <button onclick="cerrarVisor()" class="text-slate-400 hover:text-white text-base"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="visor-contenido" class="flex-1 overflow-auto flex items-center justify-center min-h-[300px] bg-slate-900/80 rounded-2xl p-2">
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVO INSTRUCTIVO -->
+    <div id="modal-subir" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Nuevo Instructivo / Guía</h3>
+                <button onclick="cerrarModalSubir()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" action="/subir" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título del Instructivo *</label>
+                    <input type="text" name="titulo" required placeholder="Ej: Manual de usuario SOLVYX" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
+                        <select name="categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="General">General</option>
+                            <option value="Sistemas">Sistemas</option>
+                            <option value="Operativa">Operativa</option>
+                            <option value="Facturación">Facturación</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                        <select name="tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Instructivo">Instructivo</option>
+                            <option value="Guía Rápida">Guía Rápida</option>
+                            <option value="Manual">Manual</option>
+                            <option value="Política">Política</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción</label>
+                    <textarea name="descripcion" rows="2" placeholder="Detalla el propósito de esta guía..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Archivos Adjuntos / Comprimidos (.zip, .rar) *</label>
+                    <input type="file" name="archivo" multiple required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">O Seleccionar Carpeta Completa (Opcional)</label>
+                    <input type="file" name="archivo" webkitdirectory directory multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalSubir()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20">Subir Material</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL EDITAR INSTRUCTIVO -->
+    <div id="modal-editar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Editar Instructivo</h3>
+                <button onclick="cerrarModalEditar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-editar" method="POST" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
+                    <input type="text" name="titulo" id="edit-titulo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
+                        <select name="categoria" id="edit-categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="General">General</option>
+                            <option value="Sistemas">Sistemas</option>
+                            <option value="Operativa">Operativa</option>
+                            <option value="Facturación">Facturación</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                        <select name="tipo" id="edit-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Instructivo">Instructivo</option>
+                            <option value="Guía Rápida">Guía Rápida</option>
+                            <option value="Manual">Manual</option>
+                            <option value="Política">Política</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción</label>
+                    <textarea name="descripcion" id="edit-descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Agregar Más Archivos / Comprimidos (Opcional)</label>
+                    <input type="file" name="nuevos_archivos" multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">O Agregar Carpeta Completa (Opcional)</label>
+                    <input type="file" name="nuevos_archivos" webkitdirectory directory multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalEditar()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 🤖 WIDGET FLOTANTE DE IA EN ARKIV -->
+    <div id="ai-chat-widget" class="fixed bottom-5 right-5 z-50">
+        <!-- Botón Flotante -->
+        <button onclick="toggleAiChat()" class="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold p-4 rounded-full shadow-2xl flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/20">
+            <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+            <span class="hidden sm:inline text-xs font-bold tracking-wider uppercase">Asistente IA</span>
+        </button>
+
+        <!-- Ventana de Chat -->
+        <div id="ai-chat-box" class="hidden absolute bottom-16 right-0 w-80 sm:w-96 bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[450px]">
+            <!-- Encabezado del Chat -->
+            <div class="bg-slate-800/80 backdrop-blur-md p-4 border-b border-slate-700/60 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
+                        <i class="fa-solid fa-robot text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider">ARKIV AI</h3>
+                        <p class="text-[10px] text-slate-400">Consultas inteligentes sobre instructivos</p>
+                    </div>
+                </div>
+                <button onclick="toggleAiChat()" class="text-slate-400 hover:text-white text-xs p-1">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Área de Mensajes -->
+            <div id="ai-messages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
+                <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%]">
+                    ¡Hola! 👋 Soy el asistente inteligente de ARKIV. ¿En qué te puedo ayudar hoy con respecto a los instructivos o procedimientos?
+                </div>
+            </div>
+
+            <!-- Formulario de Entrada -->
+            <div class="p-3 bg-slate-800/50 border-t border-slate-700/60 flex gap-2">
+                <input type="text" id="ai-input" onkeypress="handleAiKeyPress(event)" placeholder="Pregunta algo sobre un proceso..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                <button onclick="enviarConsultaIA()" class="bg-cyan-600 hover:bg-cyan-500 text-white p-2.5 rounded-xl text-xs font-bold transition-all active:scale-95">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS MÉTRICAS Y PREVISUALIZACIÓN -->
+    <script>
+        function sumarVista(id) {
+            fetch(`/incrementar_vista/${id}`, { method: 'POST' }).then(() => {
+                const el = document.getElementById(`vistas-${id}`);
+                if (el) el.innerText = parseInt(el.innerText || 0) + 1;
+            });
+        }
+
+        function sumarDescarga(id) {
+            fetch(`/incrementar_descarga/${id}`, { method: 'POST' }).then(() => {
+                const el = document.getElementById(`descargas-${id}`);
+                if (el) el.innerText = parseInt(el.innerText || 0) + 1;
+            });
+        }
+
+        function previsualizarArchivo(url, galeriaId) {
+            sumarVista(galeriaId);
+            
+            let fname = url.split('/').pop();
+            const ext = fname.split('.').pop().toLowerCase();
+            const isRaw = url.includes('/raw/upload/');
+            const visorContenido = document.getElementById('visor-contenido');
+
+            if (isRaw && !fname.endsWith('.zip') && !fname.endsWith('.rar')) {
+                fname += '.zip';
+            }
+            
+            document.getElementById('visor-titulo').innerText = fname;
+
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) && !isRaw) {
+                visorContenido.innerHTML = `<img src="${url}" class="max-h-[75vh] w-auto rounded-xl object-contain shadow-lg" />`;
+            } else if (['mp4', 'webm', 'mov'].includes(ext) || url.includes('/video/upload/')) {
+                visorContenido.innerHTML = `<video controls autoplay class="max-h-[75vh] w-full rounded-xl"><source src="${url}" type="video/mp4">Tu navegador no soporta video HTML5.</video>`;
+            } else if (ext === 'pdf' && !isRaw) {
+                visorContenido.innerHTML = `<iframe src="${url}" class="w-full h-[75vh] rounded-xl border-0"></iframe>`;
+            } else {
+                // 📦 Paquete Comprimido o Archivo RAW
+                visorContenido.innerHTML = `
+                    <div class="text-center p-8 flex flex-col items-center justify-center">
+                        <i class="fa-solid fa-file-zipper text-6xl text-amber-400 mb-4 animate-bounce"></i>
+                        <h4 class="text-white font-bold text-base mb-2">Paquete Comprimido / Archivo Descargable</h4>
+                        <p class="text-slate-400 text-xs mb-6 max-w-md">Este archivo no se puede previsualizar directamente en el navegador. Haz clic en el botón para descargarlo.</p>
+                        <a href="/pdf_proxy?url=${encodeURIComponent(url)}&download=1&name=${encodeURIComponent(fname)}" onclick="sumarDescarga('${galeriaId}')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg transition-all text-xs flex items-center gap-2">
+                            <i class="fa-solid fa-download"></i> Descargar ${fname}
+                        </a>
+                    </div>
+                `;
+            }
+
+            document.getElementById('modal-visor').classList.remove('hidden');
+            document.getElementById('modal-visor').classList.add('flex');
+        }
+
+        function cerrarVisor() {
+            document.getElementById('visor-contenido').innerHTML = '';
+            document.getElementById('modal-visor').classList.add('hidden');
+            document.getElementById('modal-visor').classList.remove('flex');
+        }
+
+        function abrirModalSubir() {
+            document.getElementById('modal-subir').classList.remove('hidden');
+            document.getElementById('modal-subir').classList.add('flex');
+        }
+
+        function cerrarModalSubir() {
+            document.getElementById('modal-subir').classList.add('hidden');
+            document.getElementById('modal-subir').classList.remove('flex');
+        }
+
+        function abrirModalEditar(item) {
+            document.getElementById('form-editar').action = `/editar_galeria/${item.id}`;
+            document.getElementById('edit-titulo').value = item.titulo;
+            document.getElementById('edit-categoria').value = item.categoria;
+            document.getElementById('edit-tipo').value = item.tipo;
+            document.getElementById('edit-descripcion').value = item.descripcion;
+            document.getElementById('modal-editar').classList.remove('hidden');
+            document.getElementById('modal-editar').classList.add('flex');
+        }
+
+        function cerrarModalEditar() {
+            document.getElementById('modal-editar').classList.add('hidden');
+            document.getElementById('modal-editar').classList.remove('flex');
+        }
+
+        // Funciones del Asistente IA
+        function toggleAiChat() {
+            const box = document.getElementById('ai-chat-box');
+            box.classList.toggle('hidden');
+        }
+
+        function handleAiKeyPress(e) {
+            if (e.key === 'Enter') enviarConsultaIA();
+        }
+
+        async function enviarConsultaIA() {
+            const input = document.getElementById('ai-input');
+            const pregunta = input.value.trim();
+            if (!pregunta) return;
+
+            const chatMessages = document.getElementById('ai-messages');
+
+            chatMessages.innerHTML += `
+                <div class="flex justify-end">
+                    <div class="bg-cyan-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[85%] shadow-md">
+                        ${pregunta}
+                    </div>
+                </div>
+            `;
+
+            input.value = '';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            const loadingId = 'loading-' + Date.now();
+            chatMessages.innerHTML += `
+                <div id="${loadingId}" class="bg-slate-800 text-slate-400 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] italic flex items-center gap-2">
+                    <i class="fa-solid fa-spinner fa-spin text-cyan-400"></i> Procesando consulta...
+                </div>
+            `;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                const response = await fetch('/asistente_ia', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pregunta: pregunta })
+                });
+
+                const data = await response.json();
+                document.getElementById(loadingId).remove();
+
+                chatMessages.innerHTML += `
+                    <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] leading-relaxed">
+                        ${data.respuesta.replace(/\n/g, '<br>')}
+                    </div>
+                `;
+            } catch (err) {
+                document.getElementById(loadingId).remove();
+                chatMessages.innerHTML += `
+                    <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 p-3 rounded-2xl rounded-tl-none max-w-[85%]">
+                        ⚠️ No se pudo conectar con el servicio de IA. Inténtalo de nuevo.
+                    </div>
+                `;
+            }
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    </script>
 </body>
 </html>
