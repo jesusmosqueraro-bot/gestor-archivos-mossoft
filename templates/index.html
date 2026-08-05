@@ -318,6 +318,49 @@
         </div>
     </div>
 
+    <!-- 🤖 WIDGET FLOTANTE DE IA EN ARKIV -->
+    <div id="ai-chat-widget" class="fixed bottom-5 right-5 z-50">
+        <!-- Botón Flotante -->
+        <button onclick="toggleAiChat()" class="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold p-4 rounded-full shadow-2xl flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/20">
+            <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+            <span class="hidden sm:inline text-xs font-bold tracking-wider uppercase">Asistente IA</span>
+        </button>
+
+        <!-- Ventana de Chat -->
+        <div id="ai-chat-box" class="hidden absolute bottom-16 right-0 w-80 sm:w-96 bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[450px]">
+            <!-- Encabezado del Chat -->
+            <div class="bg-slate-800/80 backdrop-blur-md p-4 border-b border-slate-700/60 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
+                        <i class="fa-solid fa-robot text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider">ARKIV AI</h3>
+                        <p class="text-[10px] text-slate-400">Consultas inteligentes sobre instructivos</p>
+                    </div>
+                </div>
+                <button onclick="toggleAiChat()" class="text-slate-400 hover:text-white text-xs p-1">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Área de Mensajes -->
+            <div id="ai-messages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
+                <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%]">
+                    ¡Hola! 👋 Soy el asistente inteligente de ARKIV. ¿En qué te puedo ayudar hoy con respecto a los instructivos o procedimientos?
+                </div>
+            </div>
+
+            <!-- Formulario de Entrada -->
+            <div class="p-3 bg-slate-800/50 border-t border-slate-700/60 flex gap-2">
+                <input type="text" id="ai-input" onkeypress="handleAiKeyPress(event)" placeholder="Pregunta algo sobre un proceso..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                <button onclick="enviarConsultaIA()" class="bg-cyan-600 hover:bg-cyan-500 text-white p-2.5 rounded-xl text-xs font-bold transition-all active:scale-95">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- SCRIPTS MÉTRICAS Y PREVISUALIZACIÓN -->
     <script>
         function sumarVista(id) {
@@ -401,6 +444,69 @@
         function cerrarModalEditar() {
             document.getElementById('modal-editar').classList.add('hidden');
             document.getElementById('modal-editar').classList.remove('flex');
+        }
+
+        // Funciones del Asistente IA
+        function toggleAiChat() {
+            const box = document.getElementById('ai-chat-box');
+            box.classList.toggle('hidden');
+        }
+
+        function handleAiKeyPress(e) {
+            if (e.key === 'Enter') enviarConsultaIA();
+        }
+
+        async function enviarConsultaIA() {
+            const input = document.getElementById('ai-input');
+            const pregunta = input.value.trim();
+            if (!pregunta) return;
+
+            const chatMessages = document.getElementById('ai-messages');
+
+            chatMessages.innerHTML += `
+                <div class="flex justify-end">
+                    <div class="bg-cyan-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[85%] shadow-md">
+                        ${pregunta}
+                    </div>
+                </div>
+            `;
+
+            input.value = '';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            const loadingId = 'loading-' + Date.now();
+            chatMessages.innerHTML += `
+                <div id="${loadingId}" class="bg-slate-800 text-slate-400 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] italic flex items-center gap-2">
+                    <i class="fa-solid fa-spinner fa-spin text-cyan-400"></i> Procesando consulta...
+                </div>
+            `;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                const response = await fetch('/asistente_ia', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pregunta: pregunta })
+                });
+
+                const data = await response.json();
+                document.getElementById(loadingId).remove();
+
+                chatMessages.innerHTML += `
+                    <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] leading-relaxed">
+                        ${data.respuesta.replace(/\n/g, '<br>')}
+                    </div>
+                `;
+            } catch (err) {
+                document.getElementById(loadingId).remove();
+                chatMessages.innerHTML += `
+                    <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 p-3 rounded-2xl rounded-tl-none max-w-[85%]">
+                        ⚠️ No se pudo conectar con el servicio de IA. Inténtalo de nuevo.
+                    </div>
+                `;
+            }
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
     </script>
 </body>
