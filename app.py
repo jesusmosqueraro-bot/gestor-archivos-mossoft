@@ -17,14 +17,14 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
-
+# 🛡️ SEGURIDAD: Hasheo seguro de contraseñas nativo de Werkzeug
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# SDK Estable de Google Generative AI
+# 🛡️ SEGURIDAD: Cifrado simétrico autenticado Fernet
 try:
-    import google.generativeai as genai
+    from cryptography.fernet import Fernet
 except Exception:
-    genai = None
+    Fernet = None
 
 # psycopg2 seguro para Render
 try:
@@ -65,9 +65,26 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 CIFRADO Y DESCIFRADO NATIVO ULTRA SEGURO
+# 🔐 CIFRADO Y DESCIFRADO ROBUSTO PARA BÓVEDA (FERNET AES-128-CBC + HMAC)
+def _obtener_fernet_suite():
+    if Fernet is None:
+        return None
+    try:
+        key_raw = hashlib.sha256(app.secret_key.encode('utf-8')).digest()
+        fernet_key = base64.urlsafe_b64encode(key_raw)
+        return Fernet(fernet_key)
+    except Exception:
+        return None
+
 def encriptar_texto(texto):
     if not texto: return ""
+    suite = _obtener_fernet_suite()
+    if suite:
+        try:
+            return "gfn:" + suite.encrypt(texto.encode('utf-8')).decode('utf-8')
+        except Exception:
+            pass
+    # Fallback XOR compatible
     try:
         clave = app.secret_key.encode('utf-8')
         bytes_texto = texto.encode('utf-8')
@@ -78,6 +95,16 @@ def encriptar_texto(texto):
 
 def desencriptar_texto(texto_cifrado):
     if not texto_cifrado: return ""
+    # Si viene en formato Fernet
+    if str(texto_cifrado).startswith("gfn:"):
+        suite = _obtener_fernet_suite()
+        if suite:
+            try:
+                raw_token = texto_cifrado[4:].encode('utf-8')
+                return suite.decrypt(raw_token).decode('utf-8')
+            except Exception:
+                return "[Error al descifrar]"
+    # Fallback para credenciales creadas con el método anterior (XOR)
     try:
         clave = app.secret_key.encode('utf-8')
         bytes_cifrados = base64.b64decode(texto_cifrado.encode('utf-8'))
@@ -93,17 +120,16 @@ cloudinary.config(
     api_secret=os.environ.get('CLOUDINARY_API_SECRET')
 )
 
-# 📦 EXTENSIONES PERMITIDAS (INCLUYE COMPRIMIDOS Y DOCUMENTOS DE OFFICE)
+# 📦 EXTENSIONES PERMITIDAS
 ALLOWED_EXTENSIONS = {
     'png', 'jpg', 'jpeg', 'gif', 'webp',
     'pdf', 'txt', 'docx', 'xlsx', 'pptx',
     'mp4', 'mov', 'webm', 'avi',
     'zip', 'rar', '7z', 'tar', 'gz'
 }
-# 📦 LÍMITE DE TAMAÑO DE SUBIDA (350 MB)
 app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 
-# 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
+# 📧 URL DE GOOGLE APPS SCRIPT
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
@@ -136,7 +162,7 @@ def init_db():
         cursor = conn.cursor()
         if db_type == 'postgres':
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
+                id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
@@ -211,7 +237,7 @@ def init_db():
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(query_admin, ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin'))
+            cursor.execute(query_admin, ('admin', generate_password_hash('1234'), 'jesus.mosqueraro@gmail.com', 'admin'))
 
         conn.commit()
         conn.close()
@@ -240,7 +266,7 @@ def verificar_recaptcha(response_token):
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode('utf-8')).get('success', False)
-    except Exception as e:
+    except Exception:
         return False
 
 def archivo_permitido(filename):
@@ -260,236 +286,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🤖 RUTA PARA EL ASISTENTE IA DE ARKIV (CORREGIDO PARA GOOGLE-GENERATIVEAI)
-@app.route('/asistente_ia', methods=['POST'])
-@login_required
-def asistente_ia():
-    if not genai:
-        return jsonify({'respuesta': '⚠️ La librería google-generativeai no está instalada en el servidor.'}), 500
-
-    data = request.get_json() or {}
-    pregunta_usuario = data.get('pregunta', '').strip()
-
-    if not pregunta_usuario:
-        return jsonify({'respuesta': 'Por favor escribe una consulta válida.'}), 400
-
-    api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or os.environ.get('API_KEY_GEMINI')
-    if not api_key:
-        return jsonify({'respuesta': '⚠️ La API Key de Gemini no está configurada en las variables de entorno.'}), 500
-
-    try:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
-        filas = cursor.fetchall()
-        conn.close()
-
-        contexto_instructivos = ""
-        for row in filas:
-            contexto_instructivos += f"- Título: {row[0]} | Categoría: {row[2]} | Tipo: {row[3]} | Descripción: {row[1]} | Tags: {row[4]}\n"
-
-        if not contexto_instructivos:
-            contexto_instructivos = "No hay instructivos registrados en el sistema actualmente."
-
-        genai.configure(api_key=api_key)
-
-        # Usamos el prefijo explícito 'models/gemini-1.5-flash' para compatibilidad completa con v1beta
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-
-        prompt_completo = f"""
-Eres "ARKIV AI", el asistente inteligente oficial de la plataforma ARKIV System.
-Tu objetivo es ayudar a los usuarios a encontrar respuestas sobre los instructivos, documentos y procesos almacenados en el sistema.
-
-Esta es la lista actual de instructivos almacenados en la plataforma:
-{contexto_instructivos}
-
-Instrucciones:
-1. Responde de forma amable, clara y concisa en español.
-2. Basándote en la lista de instructivos proporcionada, responde si existe información sobre lo que el usuario pregunta.
-3. Si la información no está en los instructivos, indícalo educadamente e invita al usuario a contactar al administrador.
-
-Pregunta del usuario: {pregunta_usuario}
-"""
-
-        response = model.generate_content(prompt_completo)
-
-        return jsonify({'respuesta': response.text})
-
-    except Exception as e:
-        print(f"Error consultando Gemini: {e}")
-        return jsonify({'respuesta': f'Ocurrió un error al procesar tu solicitud con la IA: {str(e)}'}), 500
-
-# 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
-@app.route('/admin/db', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def visor_db():
-    tabla_seleccionada = request.args.get('tabla', 'usuarios')
-    q_sql = request.form.get('sql', '').strip() or request.args.get('sql', '').strip()
-    
-    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
-    if tabla_seleccionada not in tablas_permitidas:
-        tabla_seleccionada = 'usuarios'
-        
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    columnas = []
-    registros = []
-    mensaje_exito = None
-    error_sql = None
-    
-    try:
-        if q_sql:
-            cursor.execute(q_sql)
-            if q_sql.lower().startswith('select'):
-                registros = cursor.fetchall()
-                if cursor.description:
-                    columnas = [desc[0] for desc in cursor.description]
-            else:
-                conn.commit()
-                mensaje_exito = f"Sentencia SQL ejecutada con éxito. Filas afectadas: {cursor.rowcount}"
-                registrar_log(session['username'], "Ejecución SQL Manual", f"SQL: {q_sql[:120]}")
-                cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
-                registros = cursor.fetchall()
-                if cursor.description:
-                    columnas = [desc[0] for desc in cursor.description]
-        else:
-            cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
-            registros = cursor.fetchall()
-            if cursor.description:
-                columnas = [desc[0] for desc in cursor.description]
-    except Exception as e:
-        conn.rollback()
-        error_sql = str(e)
-    finally:
-        conn.close()
-
-    return render_template(
-        'admin_db.html', 
-        tabla=tabla_seleccionada, 
-        tablas=tablas_permitidas, 
-        columnas=columnas, 
-        registros=registros, 
-        sql=q_sql, 
-        exito=mensaje_exito,
-        error=error_sql
-    )
-
-# 📢 MÓDULO MURO DE COMUNICADOS
-@app.route('/comunicados')
-@login_required
-def ver_comunicados():
-    pestana = request.args.get('tab', 'activos')
-    q_busqueda = request.args.get('q', '').strip().lower()
-    
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
-    
-    try:
-        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
-        cursor.execute(query, (estado_filtro,))
-        rows = cursor.fetchall()
-    except Exception as e:
-        print(f"Error consultando comunicados: {e}")
-        rows = []
-
-    conn.close()
-    
-    comunicados = []
-    for r in rows:
-        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor = r
-        texto_full = f"{titulo} {contenido} {autor}".lower()
-        if not q_busqueda or q_busqueda in texto_full:
-            comunicados.append({
-                'id': c_id,
-                'titulo': titulo,
-                'contenido': contenido,
-                'nivel': nivel,
-                'fijado': fijado,
-                'imagen_url': img_url,
-                'estado': estado,
-                'fecha': fecha,
-                'autor': autor
-            })
-
-    return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
-
-@app.route('/comunicados/crear', methods=['POST'])
-@login_required
-@admin_required
-def crear_comunicado():
-    titulo = request.form.get('titulo', '').strip()
-    contenido = request.form.get('contenido', '').strip()
-    nivel = request.form.get('nivel', 'info').strip()
-    fijado = 1 if request.form.get('fijado') == 'on' else 0
-    imagen = request.files.get('imagen')
-    
-    imagen_url = ""
-    if imagen and archivo_permitido(imagen.filename):
-        try:
-            upload_result = cloudinary.uploader.upload(
-                imagen, 
-                resource_type="image",
-                use_filename=True,
-                unique_filename=True
-            )
-            imagen_url = upload_result.get('secure_url', '')
-        except Exception as e:
-            print(f"Error subiendo imagen de comunicado: {e}")
-
-    if titulo and contenido:
-        fecha_act = obtener_fecha_actual()
-        autor = session.get('username', 'Admin')
-        
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
-        cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
-        conn.commit()
-        conn.close()
-        
-        registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
-
-    return redirect(url_for('ver_comunicados'))
-
-@app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
-@login_required
-@admin_required
-def archivar_comunicado(com_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
-    cursor.execute(q_sel, (com_id,))
-    row = cursor.fetchone()
-    
-    if row:
-        nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-        q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_estado, com_id))
-        conn.commit()
-        registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
-        
-    conn.close()
-    return redirect(url_for('ver_comunicados'))
-
-@app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
-@login_required
-@admin_required
-def eliminar_comunicado(com_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
-    cursor.execute(q_del, (com_id,))
-    conn.commit()
-    conn.close()
-    registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
-    return redirect(url_for('ver_comunicados'))
-
-# 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
+# 📧 ENVÍO VÍA GMAIL APPS SCRIPT
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
@@ -502,19 +299,15 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
 
         if requests:
             res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
-            print(f"✅ EXITO: Correo enviado a {email_destino} vía Google Script. Status: {res.status_code}")
-            return True
+            return res.status_code == 200
         else:
             data_json = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
             with urllib.request.urlopen(req, timeout=15) as response:
-                res_text = response.read().decode('utf-8')
-                print(f"✅ EXITO: Correo enviado a {email_destino} vía urllib. Respuesta: {res_text}")
-                return True
+                return response.getcode() == 200
 
     except Exception as e:
-        print(f"❌ Error en envío vía Google Script: {e}")
-        traceback.print_exc()
+        print(f"❌ Error en envío de correo: {e}")
         return False
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
@@ -522,7 +315,6 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = request.form.get('email', '').strip().lower()
-        print(f"📩 Solicitud de recuperación recibida para: '{email_ingresado}'")
         
         conn, db_type = get_db()
         cursor = conn.cursor()
@@ -544,14 +336,14 @@ def recuperar_clave():
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) generado para: {email_ingresado}")
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
 
     return render_template('recuperar.html', paso=1)
 
-# 🔑 PASO 2: VALIDAR CÓDIGO Y CAMBIAR CONTRASEÑA
+# 🔑 PASO 2: VALIDAR CÓDIGO Y CAMBIAR CONTRASEÑA (CON HASH SEGURO)
 @app.route('/validar_codigo', methods=['POST'])
 def validar_codigo():
     codigo_ingresado = request.form.get('codigo', '').strip()
@@ -570,8 +362,10 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        # Hash seguro de la nueva clave
+        pass_hash = generate_password_hash(nueva_pass)
         q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?"
-        cursor.execute(q_upd, (nueva_pass, email_usuario))
+        cursor.execute(q_upd, (pass_hash, email_usuario))
         conn.commit()
         conn.close()
 
@@ -582,12 +376,12 @@ def validar_codigo():
         registrar_log(nombre_usuario, "Cambio Exitoso de Clave", "Se actualizó la clave vía código de verificación.")
         return render_template('recuperar.html', paso=1, exito="¡Contraseña actualizada con éxito! Ya puedes iniciar sesión.")
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
-# 🔑 LOGIN
+# 🔑 LOGIN (VALIDACIÓN HASH + MIGRACIÓN TRANSPARENTE)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -599,24 +393,25 @@ def login():
             if not verificar_recaptcha(recaptcha_response):
                 return render_template('login.html', error="Por favor, marca la casilla 'No soy un robot'.")
 
-            if username == 'admin' and password == '1234':
-                session.permanent = True
-                session['logged_in'] = True
-                session['username'] = 'admin'
-                session['rol'] = 'admin'
-                session['instance_id'] = SERVER_INSTANCE_ID
-                registrar_log('admin', "Inicio de Sesión", "Inicio de sesión exitoso como admin")
-                return redirect(url_for('bienvenida'))
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            query = "SELECT username, password, rol FROM usuarios WHERE username = %s" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE username = ?"
+            cursor.execute(query, (username,))
+            user = cursor.fetchone()
 
-            try:
-                conn, db_type = get_db()
-                cursor = conn.cursor()
-                query = "SELECT username, password, rol FROM usuarios WHERE username = %s" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE username = ?"
-                cursor.execute(query, (username,))
-                user = cursor.fetchone()
-                conn.close()
+            if user:
+                clave_db = user[1]
+                # Valida si es hash moderno o clave en texto plano heredada
+                es_valida = check_password_hash(clave_db, password) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else (clave_db == password)
+                
+                if es_valida:
+                    # Si aún tenía contraseña en texto plano, la migramos automáticamente a hash seguro
+                    if not (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')):
+                        q_migr = "UPDATE usuarios SET password = %s WHERE username = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE username = ?"
+                        cursor.execute(q_migr, (generate_password_hash(password), user[0]))
+                        conn.commit()
 
-                if user and user[1] == password:
+                    conn.close()
                     session.permanent = True
                     session['logged_in'] = True
                     session['username'] = user[0]
@@ -624,13 +419,12 @@ def login():
                     session['instance_id'] = SERVER_INSTANCE_ID
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
                     return redirect(url_for('bienvenida'))
-            except Exception as db_err:
-                print(f"Error consultando usuario en BD: {db_err}")
 
+            conn.close()
             return render_template('login.html', error="Usuario o contraseña incorrectos.")
 
         except Exception as e:
-            print(f"Error general en login: {e}")
+            print(f"Error en login: {e}")
             return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
@@ -649,7 +443,7 @@ def incrementar_vista(galeria_id):
         conn.close()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': 'Error actualizando vista'}), 200
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
 @login_required
@@ -673,7 +467,7 @@ def incrementar_descarga(galeria_id):
 
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': 'Error actualizando descarga'}), 200
 
 # 🚀 PROXY AUTENTICADO
 @app.route('/pdf_proxy')
@@ -900,7 +694,7 @@ def restaurar_credencial(cred_id):
         conn.commit()
 
         registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -924,7 +718,7 @@ def destruir_credencial(cred_id):
         conn.commit()
 
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -948,7 +742,7 @@ def restaurar_galeria(galeria_id):
         conn.commit()
 
         registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -974,7 +768,7 @@ def destruir_galeria(galeria_id):
         conn.commit()
 
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -1000,7 +794,7 @@ def eliminar_imagen(galeria_id, filename):
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -1036,7 +830,7 @@ def restaurar_archivo(archivo_id):
             nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
             registrar_log(session['username'], "Restauración de Archivo", f"Se reintegró el archivo '{nombre_limpio}' al instructivo '{row[1]}'.")
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -1054,12 +848,13 @@ def destruir_archivo(archivo_id):
         cursor.execute(q_del, (archivo_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
     return redirect(url_for('ver_papelera'))
 
+# 👥 GESTIÓN DE USUARIOS (CREACIÓN CON HASH SEGURO)
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1067,24 +862,28 @@ def gestion_usuarios():
     conn, db_type = get_db()
     cursor = conn.cursor()
     if request.method == 'POST':
-        nuevo_user = request.form.get('username')
-        nuevo_pass = request.form.get('password')
-        nuevo_email = request.form.get('email')
-        nuevo_rol = request.form.get('rol', 'estandar')
-        try:
-            q_ins = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(q_ins, (nuevo_user, nuevo_pass, nuevo_email, nuevo_rol))
-            conn.commit()
-            return redirect(url_for('gestion_usuarios'))
-        except Exception as e:
-            conn.rollback()
+        nuevo_user = request.form.get('username', '').strip()
+        nuevo_pass = request.form.get('password', '').strip()
+        nuevo_email = request.form.get('email', '').strip()
+        nuevo_rol = request.form.get('rol', 'estandar').strip()
+        
+        if nuevo_user and nuevo_pass and nuevo_email:
+            try:
+                pass_hash = generate_password_hash(nuevo_pass)
+                q_ins = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
+                cursor.execute(q_ins, (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
+                conn.commit()
+                registrar_log(session['username'], "Creación de Usuario", f"Se creó el usuario '{nuevo_user}' [{nuevo_rol}]")
+                return redirect(url_for('gestion_usuarios'))
+            except Exception:
+                conn.rollback()
 
     cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
-# ✏️ EDITAR USUARIO
+# ✏️ EDITAR USUARIO (CON HASH SEGURO)
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -1102,8 +901,9 @@ def editar_usuario(usuario_id):
         user_target = row[0] if row else f"ID {usuario_id}"
 
         if nueva_pass:
+            pass_hash = generate_password_hash(nueva_pass)
             q_upd = "UPDATE usuarios SET email = %s, rol = %s, password = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nueva_pass, usuario_id))
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, pass_hash, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
             q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ? WHERE id = ?"
@@ -1112,7 +912,7 @@ def editar_usuario(usuario_id):
 
         conn.commit()
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -1136,7 +936,7 @@ def eliminar_usuario(usuario_id):
         conn.commit()
 
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
@@ -1196,7 +996,7 @@ def ver_logs():
         q_busqueda=q_busqueda
     )
 
-# 📊 EXPORTAR AUDITORÍA A EXCEL / CSV
+# 📊 EXPORTAR AUDITORÍA A CSV
 @app.route('/exportar_logs_csv')
 @login_required
 @admin_required
@@ -1376,7 +1176,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
-# 📦 SUBIDA DE ARCHIVOS (IMÁGENES, VIDEOS, DOCUMENTOS Y COMPRIMIDOS .ZIP/.RAR)
+# 📦 SUBIDA DE ARCHIVOS
 @app.route('/subir', methods=['POST'])
 @login_required
 @admin_required
@@ -1561,11 +1361,161 @@ def eliminar_galeria(galeria_id):
         conn.commit()
 
         registrar_log(session['username'], "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
     conn.close()
     return redirect(url_for('index'))
+
+# 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (SOLO LECTURA SEGURA)
+@app.route('/admin/db', methods=['GET'])
+@login_required
+@admin_required
+def visor_db():
+    tabla_seleccionada = request.args.get('tabla', 'usuarios')
+    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
+    if tabla_seleccionada not in tablas_permitidas:
+        tabla_seleccionada = 'usuarios'
+        
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    columnas = []
+    registros = []
+    error_sql = None
+    
+    try:
+        cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
+        registros = cursor.fetchall()
+        if cursor.description:
+            columnas = [desc[0] for desc in cursor.description]
+    except Exception as e:
+        error_sql = "Error al consultar la tabla seleccionada."
+    finally:
+        conn.close()
+
+    return render_template(
+        'admin_db.html', 
+        tabla=tabla_seleccionada, 
+        tablas=tablas_permitidas, 
+        columnas=columnas, 
+        registros=registros, 
+        sql="", 
+        exito=None,
+        error=error_sql
+    )
+
+# 📢 MÓDULO MURO DE COMUNICADOS
+@app.route('/comunicados')
+@login_required
+def ver_comunicados():
+    pestana = request.args.get('tab', 'activos')
+    q_busqueda = request.args.get('q', '').strip().lower()
+    
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
+    
+    try:
+        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
+        cursor.execute(query, (estado_filtro,))
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+
+    conn.close()
+    
+    comunicados = []
+    for r in rows:
+        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor = r
+        texto_full = f"{titulo} {contenido} {autor}".lower()
+        if not q_busqueda or q_busqueda in texto_full:
+            comunicados.append({
+                'id': c_id,
+                'titulo': titulo,
+                'contenido': contenido,
+                'nivel': nivel,
+                'fijado': fijado,
+                'imagen_url': img_url,
+                'estado': estado,
+                'fecha': fecha,
+                'autor': autor
+            })
+
+    return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
+
+@app.route('/comunicados/crear', methods=['POST'])
+@login_required
+@admin_required
+def crear_comunicado():
+    titulo = request.form.get('titulo', '').strip()
+    contenido = request.form.get('contenido', '').strip()
+    nivel = request.form.get('nivel', 'info').strip()
+    fijado = 1 if request.form.get('fijado') == 'on' else 0
+    imagen = request.files.get('imagen')
+    
+    imagen_url = ""
+    if imagen and archivo_permitido(imagen.filename):
+        try:
+            upload_result = cloudinary.uploader.upload(
+                imagen, 
+                resource_type="image",
+                use_filename=True,
+                unique_filename=True
+            )
+            imagen_url = upload_result.get('secure_url', '')
+        except Exception as e:
+            print(f"Error subiendo imagen: {e}")
+
+    if titulo and contenido:
+        fecha_act = obtener_fecha_actual()
+        autor = session.get('username', 'Admin')
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
+        cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+        conn.commit()
+        conn.close()
+        
+        registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+
+    return redirect(url_for('ver_comunicados'))
+
+@app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def archivar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
+    cursor.execute(q_sel, (com_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
+        q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_estado, com_id))
+        conn.commit()
+        registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+        
+    conn.close()
+    return redirect(url_for('ver_comunicados'))
+
+@app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
+    cursor.execute(q_del, (com_id,))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
+    return redirect(url_for('ver_comunicados'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
