@@ -3,351 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Inicio</title>
-    <!-- Favicon Unificado (Mineral Atemporal) -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
+    <title>ARKIV - Panel Principal</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #0b0f19;
+        }
+    </style>
 </head>
-<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+<body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white flex flex-col justify-between">
 
-    <!-- NAVBAR SUPERIOR -->
-    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-            <!-- ISOTIPO MINI -->
-            <div class="w-8 h-8 drop-shadow-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full">
-                    <defs>
-                        <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#020617;stop-opacity:1" />
-                        </linearGradient>
-                        <linearGradient id="platLight" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
-                        </linearGradient>
-                        <linearGradient id="steelG" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect width="100" height="100" rx="22" fill="url(#bgSlate)"/>
-                    <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
-                    <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLight)" />
-                    <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelG)" />
-                    <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
-                    <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLight)" />
-                    <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
-                    <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
-                </svg>
+    <!-- Barra de Navegación -->
+    <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white text-lg shadow-lg shadow-cyan-500/20">
+                    <i class="fa-solid fa-box-archive"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-extrabold text-white tracking-tight leading-tight">ARKIV</h1>
+                    <span class="text-[10px] text-slate-400 font-medium tracking-wider uppercase">Sistema de Gestión Centralizada</span>
+                </div>
             </div>
-            <span class="text-xl font-black text-white tracking-tight font-serif">Arkiv</span>
+
+            <!-- Perfil y Cierre de Sesión -->
+            <div class="flex items-center gap-3">
+                <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
+                    <i class="fa-regular fa-circle-user text-cyan-400"></i>
+                    <span class="font-semibold text-slate-200">{{ username }}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold uppercase">{{ rol }}</span>
+                </div>
+                <a href="{{ url_for('logout') }}" class="p-2 sm:px-3.5 sm:py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold flex items-center gap-2 transition-all" title="Cerrar Sesión">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    <span class="hidden sm:inline">Salir</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full flex-grow">
+        
+        <!-- Saludo -->
+        <div class="mb-10 text-center sm:text-left">
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-white">¡Hola, {{ username }}! 👋</h2>
+            <p class="text-slate-400 text-sm mt-1">Selecciona el módulo al que deseas acceder:</p>
         </div>
 
-        <div class="flex items-center gap-3">
-            <div class="hidden sm:flex flex-col text-right">
-                <span class="text-xs font-bold text-slate-200 capitalize">{{ username }}</span>
-                <span class="text-[10px] text-blue-400 font-mono uppercase tracking-wider">{{ rol }}</span>
-            </div>
-            <a href="/logout" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-2.5 rounded-xl transition-all text-xs font-bold flex items-center gap-2" title="Cerrar Sesión">
-                <i class="fa-solid fa-power-off"></i>
-                <span class="hidden sm:inline">Salir</span>
-            </a>
-        </div>
-    </nav>
-
-    <!-- CONTENIDO PRINCIPAL -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
-
-        <!-- COMUNICADO FIJADO (SI EXISTE) -->
+        <!-- Comunicado Fijado (si existe) -->
         {% if comunicado_fijado %}
-            <div class="bg-gradient-to-r from-blue-900/40 via-slate-800/80 to-slate-800/80 border border-blue-500/30 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden backdrop-blur-md">
-                <div class="absolute top-0 right-0 bg-blue-500 text-slate-950 font-bold text-[9px] uppercase px-3 py-1 rounded-bl-xl tracking-wider flex items-center gap-1 shadow-md">
-                    <i class="fa-solid fa-thumbtack"></i> Aviso Fijado
-                </div>
-                
-                <div class="flex flex-col md:flex-row gap-5 items-start md:items-center">
-                    {% if comunicado_fijado.imagen_url %}
-                        <img src="{{ comunicado_fijado.imagen_url }}" class="w-full md:w-32 h-32 object-cover rounded-2xl border border-slate-700 shadow-md">
-                    {% endif %}
-                    
-                    <div class="flex-1 space-y-2">
-                        <div class="flex items-center gap-2">
-                            <span class="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                                {{ comunicado_fijado.nivel }}
-                            </span>
-                            <span class="text-[11px] text-slate-400 font-mono"><i class="fa-regular fa-clock"></i> {{ comunicado_fijado.fecha }}</span>
-                        </div>
-                        <h2 class="text-lg font-bold text-white tracking-tight">{{ comunicado_fijado.titulo }}</h2>
-                        <p class="text-xs text-slate-300 leading-relaxed line-clamp-3">{{ comunicado_fijado.contenido }}</p>
-                    </div>
-
-                    <a href="/comunicados" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all shadow-lg shadow-blue-500/20 whitespace-nowrap self-end md:self-center">
-                        Ver todo el muro →
-                    </a>
-                </div>
+        <div class="mb-10 p-6 rounded-3xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-500/30 shadow-2xl relative overflow-hidden">
+            <div class="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">
+                <i class="fa-solid fa-thumbtack"></i> Comunicado Oficial
             </div>
+            <h3 class="text-lg font-bold text-white mb-2">{{ comunicado_fijado.titulo }}</h3>
+            <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4 whitespace-pre-line">{{ comunicado_fijado.contenido }}</p>
+            <div class="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/80 pt-3">
+                <span><i class="fa-solid fa-user-pen mr-1"></i> {{ comunicado_fijado.autor }}</span>
+                <span><i class="fa-regular fa-clock mr-1"></i> {{ comunicado_fijado.fecha }}</span>
+            </div>
+        </div>
         {% endif %}
 
-        <!-- ENCABEZADO DE BIENVENIDA -->
-        <div class="text-center max-w-2xl mx-auto space-y-2">
-            <h1 class="text-2xl sm:text-3xl font-black text-white tracking-tight font-serif">
-                Bienvenido, <span class="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">{{ username }}</span>
-            </h1>
-            <p class="text-xs sm:text-sm text-slate-400">Selecciona el módulo al que deseas acceder dentro del ecosistema empresarial Arkiv.</p>
-        </div>
-
-        <!-- GRID DE MÓDULOS DEL SISTEMA -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-
-            <!-- 📁 GESTOR DE INSTRUCTIVOS -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 text-xl group-hover:bg-blue-600 group-hover:text-white transition-all shadow-md">
+        <!-- Módulos de Acceso -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            
+            <!-- 1. Gestor de Instructivos -->
+            <a href="{{ url_for('index') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-folder-open"></i>
                     </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-blue-400 transition-colors">Gestor de Instructivos</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Manuales, guías rápidas, PDFs y videos interactivos.</p>
-                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">Instructivos y Archivos</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Consulta y descarga manuales operativos, formatos institucionales y guías de procesos.</p>
                 </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    <a href="/gestor" class="text-xs font-bold text-blue-400 group-hover:text-blue-300 flex items-center gap-1.5">
-                        Ingresar <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                    </a>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-cyan-400">
+                    <span>Ingresar</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
-            </div>
+            </a>
 
-            <!-- 🔑 BÓVEDA DE ACCESOS (ADMIN) -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-amber-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20 text-xl group-hover:bg-amber-500 group-hover:text-slate-950 transition-all shadow-md">
-                        <i class="fa-solid fa-key"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-amber-400 transition-colors">Bóveda de Accesos</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Credenciales cifradas de servidores y sistemas corporativos.</p>
-                    </div>
-                </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    {% if rol == 'admin' %}
-                        <a href="/credenciales" class="text-xs font-bold text-amber-400 group-hover:text-amber-300 flex items-center gap-1.5">
-                            Ingresar <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                        </a>
-                    {% else %}
-                        <span class="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                            <i class="fa-solid fa-lock text-[10px]"></i> Exclusivo Administrador
-                        </span>
-                    {% endif %}
-                </div>
-            </div>
-
-            <!-- 📢 NOVEDADES Y AVISOS -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-cyan-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center border border-cyan-500/20 text-xl group-hover:bg-cyan-500 group-hover:text-slate-950 transition-all shadow-md">
+            <!-- 2. Novedades y Comunicados -->
+            <a href="{{ url_for('ver_comunicados') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-blue-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-bullhorn"></i>
                     </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-cyan-400 transition-colors">Novedades y Avisos</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Informativos oficiales, cambios de procesos y noticias internas.</p>
-                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">Muro de Comunicados</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Pizarra informativa con actualizaciones institucionales, circulares y avisos clave.</p>
                 </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    <a href="/comunicados" class="text-xs font-bold text-cyan-400 group-hover:text-cyan-300 flex items-center gap-1.5">
-                        Ver Muro <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                    </a>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-blue-400">
+                    <span>Ver noticias</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
-            </div>
+            </a>
 
-            <!-- 👥 GESTIÓN DE USUARIOS (ADMIN) -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20 text-xl group-hover:bg-emerald-500 group-hover:text-slate-950 transition-all shadow-md">
+            {% if rol == 'admin' %}
+            <!-- 3. Bóveda de Credenciales (Admin) -->
+            <a href="{{ url_for('ver_credenciales') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-key"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">Bóveda de Accesos</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Gestor de cuentas y contraseñas institucionales con cifrado simétrico AES/Fernet.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                    <span>Acceso Seguro</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
+
+            <!-- 4. Gestión de Usuarios (Admin) -->
+            <a href="{{ url_for('gestion_usuarios') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-purple-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-users-gear"></i>
                     </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-emerald-400 transition-colors">Gestión de Usuarios</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Administración de cuentas, roles y accesos a la plataforma.</p>
-                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-purple-400 transition-colors">Gestión de Usuarios</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Administra altas, modificaciones de roles y restablecimiento de claves.</p>
                 </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    {% if rol == 'admin' %}
-                        <a href="/usuarios" class="text-xs font-bold text-emerald-400 group-hover:text-emerald-300 flex items-center gap-1.5">
-                            Administrar <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                        </a>
-                    {% else %}
-                        <span class="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                            <i class="fa-solid fa-lock text-[10px]"></i> Exclusivo Administrador
-                        </span>
-                    {% endif %}
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-purple-400">
+                    <span>Administrar</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
-            </div>
+            </a>
 
-            <!-- 📑 LOGS DE AUDITORÍA (ADMIN) -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-purple-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20 text-xl group-hover:bg-purple-500 group-hover:text-slate-950 transition-all shadow-md">
+            <!-- 5. Papelera de Reciclaje (Admin) -->
+            <a href="{{ url_for('ver_papelera') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-rose-400 transition-colors">Papelera de Reciclaje</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Restaura o elimina definitivamente instructivos, archivos y credenciales.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-rose-400">
+                    <span>Ver papelera</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
+
+            <!-- 6. Auditoría y Logs (Admin) -->
+            <a href="{{ url_for('ver_logs') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-shield-halved"></i>
                     </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-purple-400 transition-colors">Logs de Auditoría</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Historial de actividades, inicios de sesión y descargas.</p>
-                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-amber-400 transition-colors">Auditoría y Logs</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Registro cronológico de ingresos, descargas y modificaciones en el sistema.</p>
                 </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    {% if rol == 'admin' %}
-                        <a href="/logs" class="text-xs font-bold text-purple-400 group-hover:text-purple-300 flex items-center gap-1.5">
-                            Ver Logs <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                        </a>
-                    {% else %}
-                        <span class="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                            <i class="fa-solid fa-lock text-[10px]"></i> Exclusivo Administrador
-                        </span>
-                    {% endif %}
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-amber-400">
+                    <span>Ver auditoría</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
-            </div>
-
-            <!-- 🗄️ GESTIÓN DB (ADMIN) -->
-            <div class="bg-slate-800/60 border border-slate-700/60 hover:border-teal-500/50 rounded-3xl p-6 flex flex-col justify-between shadow-xl transition-all hover:shadow-2xl hover:-translate-y-1 group">
-                <div class="space-y-4">
-                    <div class="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 flex items-center justify-center border border-teal-500/20 text-xl group-hover:bg-teal-500 group-hover:text-slate-950 transition-all shadow-md">
-                        <i class="fa-solid fa-database"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-base font-bold text-white tracking-tight group-hover:text-teal-400 transition-colors">Gestión DB</h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">Inspección de datos y tablas internas del sistema.</p>
-                    </div>
-                </div>
-                <div class="pt-6 mt-4 border-t border-slate-700/50 flex items-center justify-between">
-                    {% if rol == 'admin' %}
-                        <a href="/admin/db" class="text-xs font-bold text-teal-400 group-hover:text-teal-300 flex items-center gap-1.5">
-                            Inspeccionar <i class="fa-solid fa-arrow-right text-[10px] transition-transform group-hover:translate-x-1"></i>
-                        </a>
-                    {% else %}
-                        <span class="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                            <i class="fa-solid fa-lock text-[10px]"></i> Exclusivo Administrador
-                        </span>
-                    {% endif %}
-                </div>
-            </div>
+            </a>
+            {% endif %}
 
         </div>
-
     </main>
 
-    <!-- FOOTER ESTANDARIZADO -->
-    <footer class="mt-auto border-t border-slate-800 bg-slate-950/50 py-4 text-center text-xs text-slate-500 font-medium">
-        ARKIV System • Versión <strong class="text-slate-300">v1.3.0 Pro</strong> • Todos los derechos reservados.
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
+        ARKIV &bull; Gestor Inteligente de Archivos y Procesos &bull; 2026
     </footer>
-
-    <!-- 🤖 WIDGET FLOTANTE DE IA EN ARKIV -->
-    <div id="ai-chat-widget" class="fixed bottom-5 right-5 z-50">
-        <!-- Botón Flotante -->
-        <button onclick="toggleAiChat()" class="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold p-4 rounded-full shadow-2xl flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/20">
-            <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
-            <span class="hidden sm:inline text-xs font-bold tracking-wider uppercase">Asistente IA</span>
-        </button>
-
-        <!-- Ventana de Chat -->
-        <div id="ai-chat-box" class="hidden absolute bottom-16 right-0 w-80 sm:w-96 bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[450px]">
-            <!-- Encabezado del Chat -->
-            <div class="bg-slate-800/80 backdrop-blur-md p-4 border-b border-slate-700/60 flex items-center justify-between">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
-                        <i class="fa-solid fa-robot text-sm"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-xs font-bold text-white uppercase tracking-wider">ARKIV AI</h3>
-                        <p class="text-[10px] text-slate-400">Consultas inteligentes sobre instructivos</p>
-                    </div>
-                </div>
-                <button onclick="toggleAiChat()" class="text-slate-400 hover:text-white text-xs p-1">
-                    <i class="fa-solid fa-xmark text-base"></i>
-                </button>
-            </div>
-
-            <!-- Área de Mensajes -->
-            <div id="ai-messages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
-                <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%]">
-                    ¡Hola! 👋 Soy el asistente inteligente de ARKIV. ¿En qué te puedo ayudar hoy con respecto a los instructivos o procedimientos?
-                </div>
-            </div>
-
-            <!-- Formulario de Entrada -->
-            <div class="p-3 bg-slate-800/50 border-t border-slate-700/60 flex gap-2">
-                <input type="text" id="ai-input" onkeypress="handleAiKeyPress(event)" placeholder="Pregunta algo sobre un proceso..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
-                <button onclick="enviarConsultaIA()" class="bg-cyan-600 hover:bg-cyan-500 text-white p-2.5 rounded-xl text-xs font-bold transition-all active:scale-95">
-                    <i class="fa-solid fa-paper-plane"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- SCRIPT ASISTENTE IA -->
-    <script>
-        function toggleAiChat() {
-            const box = document.getElementById('ai-chat-box');
-            box.classList.toggle('hidden');
-        }
-
-        function handleAiKeyPress(e) {
-            if (e.key === 'Enter') enviarConsultaIA();
-        }
-
-        async function enviarConsultaIA() {
-            const input = document.getElementById('ai-input');
-            const pregunta = input.value.trim();
-            if (!pregunta) return;
-
-            const chatMessages = document.getElementById('ai-messages');
-
-            chatMessages.innerHTML += `
-                <div class="flex justify-end">
-                    <div class="bg-cyan-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[85%] shadow-md">
-                        ${pregunta}
-                    </div>
-                </div>
-            `;
-
-            input.value = '';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-
-            const loadingId = 'loading-' + Date.now();
-            chatMessages.innerHTML += `
-                <div id="${loadingId}" class="bg-slate-800 text-slate-400 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] italic flex items-center gap-2">
-                    <i class="fa-solid fa-spinner fa-spin text-cyan-400"></i> Procesando consulta...
-                </div>
-            `;
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-
-            try {
-                const response = await fetch('/asistente_ia', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pregunta: pregunta })
-                });
-
-                const data = await response.json();
-                document.getElementById(loadingId).remove();
-
-                chatMessages.innerHTML += `
-                    <div class="bg-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-none border border-slate-700/50 max-w-[85%] leading-relaxed">
-                        ${data.respuesta.replace(/\n/g, '<br>')}
-                    </div>
-                `;
-            } catch (err) {
-                document.getElementById(loadingId).remove();
-                chatMessages.innerHTML += `
-                    <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 p-3 rounded-2xl rounded-tl-none max-w-[85%]">
-                        ⚠️ No se pudo conectar con el servicio de IA. Inténtalo de nuevo.
-                    </div>
-                `;
-            }
-
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-    </script>
 
 </body>
 </html>
