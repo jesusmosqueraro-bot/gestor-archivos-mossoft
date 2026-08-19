@@ -4,21 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ARKIV - Panel Principal</title>
+    <!-- Favicon Oficial ARKIV -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='25' fill='%2306b6d4'/><path d='M28 36h44a4 4 0 0 0 4-4v-4a4 4 0 0 0-4-4H28a4 4 0 0 0-4 4v4a4 4 0 0 0 4 4zm4 8h36v26a6 6 0 0 1-6 6H38a6 6 0 0 1-6-6V44zm12 8a2 2 0 0 0 0 4h12a2 2 0 1 0 0-4H44z' fill='%23ffffff'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: #0b0f19;
-        }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
     </style>
 </head>
 <body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white flex flex-col justify-between">
 
-    <!-- Barra de Navegación -->
     <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
@@ -31,14 +29,13 @@
                 </div>
             </div>
 
-            <!-- Perfil y Cierre de Sesión -->
             <div class="flex items-center gap-3">
                 <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
                     <i class="fa-regular fa-circle-user text-cyan-400"></i>
                     <span class="font-semibold text-slate-200">{{ username }}</span>
                     <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold uppercase">{{ rol }}</span>
                 </div>
-                <a href="{{ url_for('logout') }}" class="p-2 sm:px-3.5 sm:py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold flex items-center gap-2 transition-all" title="Cerrar Sesión">
+                <a href="{{ url_for('logout') }}" class="p-2 sm:px-3.5 sm:py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold flex items-center gap-2 transition-all">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i>
                     <span class="hidden sm:inline">Salir</span>
                 </a>
@@ -46,16 +43,12 @@
         </div>
     </header>
 
-    <!-- Contenido Principal -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full flex-grow">
-        
-        <!-- Saludo -->
         <div class="mb-10 text-center sm:text-left">
             <h2 class="text-2xl sm:text-3xl font-extrabold text-white">¡Hola, {{ username }}! 👋</h2>
             <p class="text-slate-400 text-sm mt-1">Selecciona el módulo al que deseas acceder:</p>
         </div>
 
-        <!-- Comunicado Fijado (si existe) -->
         {% if comunicado_fijado %}
         <div class="mb-10 p-6 rounded-3xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-500/30 shadow-2xl relative overflow-hidden">
             <div class="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">
@@ -70,9 +63,7 @@
         </div>
         {% endif %}
 
-        <!-- Módulos de Acceso -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            
             <!-- 1. Gestor de Instructivos -->
             <a href="{{ url_for('index') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
@@ -104,14 +95,14 @@
             </a>
 
             {% if rol == 'admin' %}
-            <!-- 3. Bóveda de Credenciales (Admin) -->
+            <!-- 3. Bóveda de Accesos -->
             <a href="{{ url_for('ver_credenciales') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-key"></i>
                     </div>
                     <h3 class="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">Bóveda de Accesos</h3>
-                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Gestor de cuentas y contraseñas institucionales con cifrado simétrico AES/Fernet.</p>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Gestor de cuentas y contraseñas institucionales con cifrado seguro.</p>
                 </div>
                 <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-emerald-400">
                     <span>Acceso Seguro</span>
@@ -119,7 +110,7 @@
                 </div>
             </a>
 
-            <!-- 4. Gestión de Usuarios (Admin) -->
+            <!-- 4. Gestión de Usuarios -->
             <a href="{{ url_for('gestion_usuarios') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-purple-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -134,7 +125,7 @@
                 </div>
             </a>
 
-            <!-- 5. Papelera de Reciclaje (Admin) -->
+            <!-- 5. Papelera de Reciclaje -->
             <a href="{{ url_for('ver_papelera') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -149,7 +140,7 @@
                 </div>
             </a>
 
-            <!-- 6. Auditoría y Logs (Admin) -->
+            <!-- 6. Auditoría y Logs -->
             <a href="{{ url_for('ver_logs') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -164,7 +155,7 @@
                 </div>
             </a>
 
-            <!-- 7. Gestor de Base de Datos (Admin) -->
+            <!-- 7. Gestor de Base de Datos -->
             <a href="{{ url_for('visor_db') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -179,14 +170,11 @@
                 </div>
             </a>
             {% endif %}
-
         </div>
     </main>
 
-    <!-- Footer -->
     <footer class="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
         ARKIV &bull; Gestor Inteligente de Archivos y Procesos &bull; 2026
     </footer>
-
 </body>
 </html>
