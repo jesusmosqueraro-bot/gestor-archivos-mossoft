@@ -17,8 +17,12 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
-# 🛡️ SEGURIDAD: Hasheo seguro de contraseñas nativo de Werkzeug
+# 🛡️ SEGURIDAD: Hasheo y sanitización segura
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+# 🛡️ SEGURIDAD: Protección CSRF Global
+from flask_wtf.csrf import CSRFProtect
 
 # 🛡️ SEGURIDAD: Cifrado simétrico autenticado Fernet
 try:
@@ -42,10 +46,22 @@ except Exception:
     requests = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura')
+
+# 🔐 CLAVE SECRETA Y PROTECCIÓN DE COOKIES
+app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura_2026_prod')
+
+# 🛡️ HARDENING DE COOKIES DE SESIÓN
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,       # Bloquea lectura de sesión desde JavaScript (Anti-XSS)
+    SESSION_COOKIE_SAMESITE='Lax',      # Protege contra CSRF a nivel de navegador
+    SESSION_COOKIE_SECURE=True,         # Fuerza envío solo por HTTPS en Render
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=25)
+)
+
+# Inicializar CSRF
+csrf = CSRFProtect(app)
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
 # 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
 try:
@@ -64,6 +80,16 @@ def normalizar(texto):
     texto = unicodedata.normalize('NFD', str(texto))
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
+
+# 🛡️ ENCABEZADOS HTTP DE SEGURIDAD (SECURITY HEADERS)
+@app.after_request
+def agregar_headers_seguridad(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
 
 # 🔐 CIFRADO Y DESCIFRADO ROBUSTO PARA BÓVEDA (FERNET AES-128-CBC + HMAC)
 def _obtener_fernet_suite():
@@ -84,7 +110,6 @@ def encriptar_texto(texto):
             return "gfn:" + suite.encrypt(texto.encode('utf-8')).decode('utf-8')
         except Exception:
             pass
-    # Fallback XOR compatible
     try:
         clave = app.secret_key.encode('utf-8')
         bytes_texto = texto.encode('utf-8')
@@ -95,7 +120,6 @@ def encriptar_texto(texto):
 
 def desencriptar_texto(texto_cifrado):
     if not texto_cifrado: return ""
-    # Si viene en formato Fernet
     if str(texto_cifrado).startswith("gfn:"):
         suite = _obtener_fernet_suite()
         if suite:
@@ -104,7 +128,6 @@ def desencriptar_texto(texto_cifrado):
                 return suite.decrypt(raw_token).decode('utf-8')
             except Exception:
                 return "[Error al descifrar]"
-    # Fallback para credenciales creadas con el método anterior (XOR)
     try:
         clave = app.secret_key.encode('utf-8')
         bytes_cifrados = base64.b64decode(texto_cifrado.encode('utf-8'))
@@ -120,7 +143,7 @@ cloudinary.config(
     api_secret=os.environ.get('CLOUDINARY_API_SECRET')
 )
 
-# 📦 EXTENSIONES PERMITIDAS
+# 📦 EXTENSIONES PERMITIDAS Y LÍMITE (350 MB)
 ALLOWED_EXTENSIONS = {
     'png', 'jpg', 'jpeg', 'gif', 'webp',
     'pdf', 'txt', 'docx', 'xlsx', 'pptx',
@@ -129,10 +152,7 @@ ALLOWED_EXTENSIONS = {
 }
 app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 
-# 📧 URL DE GOOGLE APPS SCRIPT
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
-
-# 🔑 CLAVE SECRETA DE RECAPTCHA V2
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -286,6 +306,12 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# 🛡️ ENDPOINT DE SALUD / KEEP-ALIVE (SIN CSRF)
+@app.route('/health')
+@csrf.exempt
+def healthcheck():
+    return jsonify({"status": "ok", "app": "ARKIV", "timestamp": obtener_fecha_actual()}), 200
+
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
@@ -362,7 +388,6 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        # Hash seguro de la nueva clave
         pass_hash = generate_password_hash(nueva_pass)
         q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?"
         cursor.execute(q_upd, (pass_hash, email_usuario))
@@ -401,11 +426,9 @@ def login():
 
             if user:
                 clave_db = user[1]
-                # Valida si es hash moderno o clave en texto plano heredada
                 es_valida = check_password_hash(clave_db, password) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else (clave_db == password)
                 
                 if es_valida:
-                    # Si aún tenía contraseña en texto plano, la migramos automáticamente a hash seguro
                     if not (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')):
                         q_migr = "UPDATE usuarios SET password = %s WHERE username = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE username = ?"
                         cursor.execute(q_migr, (generate_password_hash(password), user[0]))
@@ -430,8 +453,9 @@ def login():
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
 
-# 📊 RUTAS DE MÉTRICAS
+# 📊 RUTAS DE MÉTRICAS (EXENTAS DE CSRF PARA FETCH JS)
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_vista(galeria_id):
     try:
@@ -446,6 +470,7 @@ def incrementar_vista(galeria_id):
         return jsonify({'success': False, 'error': 'Error actualizando vista'}), 200
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_descarga(galeria_id):
     try:
@@ -483,6 +508,9 @@ def pdf_proxy():
     try:
         if not filename_custom:
             filename_custom = url_target.split('/')[-1]
+
+        # Sanitización de nombre de archivo para evitar path traversal
+        filename_custom = secure_filename(filename_custom) or "documento.pdf"
 
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
         
@@ -527,7 +555,7 @@ def pdf_proxy():
         }
         return Response(content_data, headers=headers, status=200)
     except Exception as e:
-        return f"Error obteniendo documento: {e}", 500
+        return "Error obteniendo documento.", 500
 
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
@@ -854,7 +882,7 @@ def destruir_archivo(archivo_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-# 👥 GESTIÓN DE USUARIOS (CREACIÓN CON HASH SEGURO)
+# 👥 GESTIÓN DE USUARIOS
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -883,7 +911,7 @@ def gestion_usuarios():
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
-# ✏️ EDITAR USUARIO (CON HASH SEGURO)
+# ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
 @login_required
 @admin_required
@@ -1389,7 +1417,7 @@ def visor_db():
         registros = cursor.fetchall()
         if cursor.description:
             columnas = [desc[0] for desc in cursor.description]
-    except Exception as e:
+    except Exception:
         error_sql = "Error al consultar la tabla seleccionada."
     finally:
         conn.close()
