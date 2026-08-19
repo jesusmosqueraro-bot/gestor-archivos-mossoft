@@ -14,6 +14,10 @@
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: #0b0f19;
         }
+        select option {
+            background-color: #020617;
+            color: #f8fafc;
+        }
     </style>
 </head>
 <body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white">
@@ -88,7 +92,6 @@
 
                             <!-- Campos de Usuario y Clave -->
                             <div class="space-y-3 bg-slate-950/60 border border-slate-800/60 rounded-xl p-3.5 mb-4">
-                                <!-- Usuario -->
                                 <div>
                                     <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Usuario / Email</span>
                                     <div class="flex items-center justify-between gap-2">
@@ -128,12 +131,10 @@
                             <span><i class="fa-regular fa-clock text-[10px] mr-1"></i> {{ cred.fecha }}</span>
                             
                             <div class="flex items-center gap-2">
-                                <!-- Editar -->
                                 <button onclick="abrirModalEditar({{ cred.id }}, '{{ cred.servicio }}', '{{ cred.url }}', '{{ cred.usuario }}', '{{ cred.categoria }}', '{{ cred.notas }}')" class="p-1.5 hover:text-cyan-400 transition-colors" title="Editar">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
 
-                                <!-- Eliminar con Token CSRF -->
                                 <form method="POST" action="{{ url_for('eliminar_credencial', cred_id=cred.id) }}" onsubmit="return confirm('¿Mover esta credencial a la papelera?')">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="p-1.5 hover:text-rose-400 transition-colors" title="Eliminar">
@@ -147,7 +148,6 @@
                 {% endfor %}
             </div>
         {% else %}
-            <!-- Estado Vacío -->
             <div class="bg-slate-900/40 border border-slate-800/80 rounded-3xl p-16 text-center max-w-lg mx-auto">
                 <div class="w-16 h-16 rounded-2xl bg-slate-800/60 border border-slate-700/50 flex items-center justify-center text-slate-400 text-2xl mx-auto mb-4">
                     <i class="fa-solid fa-shield-halved"></i>
@@ -175,7 +175,6 @@
             </div>
 
             <form method="POST" action="{{ url_for('crear_credencial') }}" class="space-y-4">
-                <!-- 🛡️ TOKEN CSRF -->
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
                 <div>
@@ -195,7 +194,14 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Categoría</label>
-                        <input type="text" name="categoria" value="General" placeholder="General, Facturación..." class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <select name="categoria" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            <option value="General">General</option>
+                            <option value="Facturación">Facturación</option>
+                            <option value="Sistemas">Sistemas</option>
+                            <option value="Operaciones">Operaciones</option>
+                            <option value="Administración">Administración</option>
+                            <option value="Servicios Externos">Servicios Externos</option>
+                        </select>
                     </div>
                 </div>
 
@@ -234,7 +240,6 @@
             </div>
 
             <form id="formEditar" method="POST" action="" class="space-y-4">
-                <!-- 🛡️ TOKEN CSRF -->
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
                 <div>
@@ -254,7 +259,14 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Categoría</label>
-                        <input type="text" id="edit_categoria" name="categoria" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <select id="edit_categoria" name="categoria" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            <option value="General">General</option>
+                            <option value="Facturación">Facturación</option>
+                            <option value="Sistemas">Sistemas</option>
+                            <option value="Operaciones">Operaciones</option>
+                            <option value="Administración">Administración</option>
+                            <option value="Servicios Externos">Servicios Externos</option>
+                        </select>
                     </div>
                 </div>
 
@@ -294,7 +306,7 @@
             document.getElementById('edit_servicio').value = servicio;
             document.getElementById('edit_url').value = url;
             document.getElementById('edit_usuario').value = usuario;
-            document.getElementById('edit_categoria').value = categoria;
+            document.getElementById('edit_categoria').value = categoria || 'General';
             document.getElementById('edit_notas').value = notas;
             document.getElementById('modalEditar').classList.remove('hidden');
         }
