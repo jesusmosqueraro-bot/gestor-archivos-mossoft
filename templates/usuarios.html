@@ -3,160 +3,184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Gestión de Usuarios</title>
-    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <title>ARKIV - Gestión de Usuarios</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style> body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; } </style>
 </head>
-<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+<body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white">
 
-    <!-- NAVBAR -->
-    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
-                <i class="fa-solid fa-arrow-left"></i>
-                <span class="hidden sm:inline">Volver</span>
-            </a>
-            <div class="h-6 w-px bg-slate-700"></div>
-            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
-                <i class="fa-solid fa-users-gear text-amber-500"></i> Gestión de Usuarios
-            </h1>
-        </div>
-
-        <button onclick="abrirModalCrear()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
-            <i class="fa-solid fa-user-plus"></i>
-            <span>Nuevo Usuario</span>
-        </button>
-    </nav>
-
-    <!-- CONTENIDO -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-
-        <!-- TABLA DE USUARIOS -->
-        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl overflow-x-auto">
-            <table class="w-full text-left text-xs text-slate-300">
-                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
-                    <tr>
-                        <th class="pb-3 px-4 font-bold">ID</th>
-                        <th class="pb-3 px-4 font-bold">Usuario</th>
-                        <th class="pb-3 px-4 font-bold">Correo Electrónico</th>
-                        <th class="pb-3 px-4 font-bold">Rol</th>
-                        <th class="pb-3 px-4 font-bold text-right">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-700/40">
-                    {% for u in usuarios %}
-                    <tr class="hover:bg-slate-800/40 transition-colors">
-                        <td class="py-3.5 px-4 font-mono text-slate-500">#{{ u[0] }}</td>
-                        <td class="py-3.5 px-4 font-bold text-white">{{ u[1] }}</td>
-                        <td class="py-3.5 px-4 font-mono text-slate-300">{{ u[2] }}</td>
-                        <td class="py-3.5 px-4">
-                            {% if u[3] == 'admin' %}
-                                <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                                    <i class="fa-solid fa-crown mr-1"></i> Administrador
-                                </span>
-                            {% else %}
-                                <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                                    <i class="fa-solid fa-user mr-1"></i> Estándar
-                                </span>
-                            {% endif %}
-                        </td>
-                        <td class="py-3.5 px-4 text-right">
-                            <div class="flex items-center justify-end gap-2">
-                                <button onclick='abrirModalEditar({{ u[0] }}, "{{ u[1] }}", "{{ u[2] }}", "{{ u[3] }}")' class="p-2 hover:bg-slate-700 text-slate-300 hover:text-blue-400 rounded-xl transition-colors" title="Editar">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                </button>
-                                {% if u[1] != 'admin' %}
-                                <form action="/eliminar_usuario/{{ u[0] }}" method="POST" onsubmit="return confirm('¿Seguro deseas eliminar al usuario {{ u[1] }}?')">
-                                    <button type="submit" class="p-2 hover:bg-slate-700 text-slate-300 hover:text-rose-400 rounded-xl transition-colors" title="Eliminar">
-                                        <i class="fa-solid fa-trash-can"></i>
-                                    </button>
-                                </form>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-    </main>
-
-    <!-- MODAL CREAR / EDITAR -->
-    <div id="modal-usuario" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
-            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
-                <h3 id="modal-titulo" class="text-base font-bold text-white">Nuevo Usuario</h3>
-                <button onclick="cerrarModal()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('bienvenida') }}" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span>Volver</span>
+                </a>
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-sm">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                    <h1 class="text-base font-bold text-white">Gestión de Usuarios</h1>
+                </div>
             </div>
 
-            <form id="form-usuario" method="POST" action="/usuarios" class="flex flex-col gap-3 text-xs">
-                <div id="field-username">
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre de Usuario *</label>
-                    <input type="text" name="username" id="input-username" required placeholder="ej: jmosquera" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono">
+            <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2">
+                <i class="fa-solid fa-user-plus text-xs"></i>
+                <span>Nuevo Usuario</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-950/80 border-b border-slate-800 uppercase tracking-wider text-slate-400 font-semibold">
+                        <tr>
+                            <th class="px-6 py-4">Usuario</th>
+                            <th class="px-6 py-4">Correo Electrónico</th>
+                            <th class="px-6 py-4">Rol</th>
+                            <th class="px-6 py-4 text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/60 text-slate-300">
+                        {% for u in usuarios %}
+                        <tr class="hover:bg-slate-800/30 transition-colors">
+                            <td class="px-6 py-4 font-bold text-white flex items-center gap-2">
+                                <i class="fa-regular fa-user text-cyan-400"></i> {{ u[1] }}
+                            </td>
+                            <td class="px-6 py-4">{{ u[2] }}</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[3] == 'admin' %}bg-cyan-500/10 text-cyan-400 border border-cyan-500/20{% else %}bg-slate-800 text-slate-400{% endif %}">
+                                    {{ u[3] }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button onclick="abrirModalEditarUsuario({{ u[0] }}, '{{ u[1] }}', '{{ u[2] }}', '{{ u[3] }}')" class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                        <i class="fa-solid fa-pen-to-square"></i>
+                                    </button>
+
+                                    {% if u[1] != 'admin' %}
+                                    <form method="POST" action="{{ url_for('eliminar_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('¿Eliminar al usuario {{ u[1] }}?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Crear Usuario -->
+    <div id="modalNuevoUsuario" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-user-plus text-cyan-400"></i> Registrar Usuario
+                </h3>
+                <button onclick="cerrarModalNuevoUsuario()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form method="POST" action="{{ url_for('gestion_usuarios') }}" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Nombre de Usuario *</label>
+                    <input type="text" name="username" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Correo Electrónico *</label>
-                    <input type="email" name="email" id="input-email" required placeholder="usuario@empresa.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono">
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Correo Electrónico *</label>
+                    <input type="email" name="email" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Rol de Acceso *</label>
-                    <select name="rol" id="input-rol" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
-                        <option value="estandar">Estándar (Lectura y Descarga)</option>
-                        <option value="admin">Administrador (Acceso Total)</option>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Contraseña *</label>
+                    <input type="password" name="password" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Rol de Acceso</label>
+                    <select name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <option value="estandar">Estándar (Solo lectura y descargas)</option>
+                        <option value="admin">Administrador (Control total)</option>
                     </select>
                 </div>
 
+                <div class="pt-2 flex gap-3">
+                    <button type="button" onclick="cerrarModalNuevoUsuario()" class="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all">Cancelar</button>
+                    <button type="submit" class="w-1/2 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">Crear Usuario</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Editar Usuario -->
+    <div id="modalEditarUsuario" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-user-pen text-cyan-400"></i> Modificar Usuario
+                </h3>
+                <button onclick="cerrarModalEditarUsuario()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form id="formEditarUsuario" method="POST" action="" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña</label>
-                    <input type="password" name="password" id="input-password" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
-                    <span id="pass-help" class="text-[10px] text-slate-500 hidden mt-1 block">Deja en blanco si no deseas modificar la contraseña actual.</span>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Correo Electrónico *</label>
+                    <input type="email" id="edit_email" name="email" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
 
-                <div class="mt-3 flex justify-end gap-2">
-                    <button type="button" onclick="cerrarModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg shadow-amber-500/20">Guardar</button>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Nueva Contraseña (Opcional)</label>
+                    <input type="password" name="password" placeholder="Dejar vacío si no se desea cambiar" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Rol</label>
+                    <select id="edit_rol" name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <option value="estandar">Estándar</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </div>
+
+                <div class="pt-2 flex gap-3">
+                    <button type="button" onclick="cerrarModalEditarUsuario()" class="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all">Cancelar</button>
+                    <button type="submit" class="w-1/2 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">Guardar Cambios</button>
                 </div>
             </form>
         </div>
     </div>
 
     <script>
-        function abrirModalCrear() {
-            document.getElementById('modal-titulo').innerText = 'Nuevo Usuario';
-            document.getElementById('form-usuario').action = '/usuarios';
-            document.getElementById('form-usuario').reset();
-            document.getElementById('input-username').required = true;
-            document.getElementById('input-username').readOnly = false;
-            document.getElementById('field-username').style.display = 'block';
-            document.getElementById('input-password').required = true;
-            document.getElementById('pass-help').classList.add('hidden');
-            document.getElementById('modal-usuario').classList.remove('hidden');
-            document.getElementById('modal-usuario').classList.add('flex');
+        function abrirModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.remove('hidden'); }
+        function cerrarModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.add('hidden'); }
+        
+        function abrirModalEditarUsuario(id, username, email, rol) {
+            document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
+            document.getElementById('edit_email').value = email;
+            document.getElementById('edit_rol').value = rol;
+            document.getElementById('modalEditarUsuario').classList.remove('hidden');
         }
-
-        function abrirModalEditar(id, username, email, rol) {
-            document.getElementById('modal-titulo').innerText = `Editar Usuario (${username})`;
-            document.getElementById('form-usuario').action = `/editar_usuario/${id}`;
-            document.getElementById('input-email').value = email;
-            document.getElementById('input-rol').value = rol;
-            document.getElementById('input-username').required = false; // Desactiva la validación en campo oculto
-            document.getElementById('field-username').style.display = 'none';
-            document.getElementById('input-password').value = '';
-            document.getElementById('input-password').required = false;
-            document.getElementById('pass-help').classList.remove('hidden');
-            document.getElementById('modal-usuario').classList.remove('hidden');
-            document.getElementById('modal-usuario').classList.add('flex');
-        }
-
-        function cerrarModal() {
-            document.getElementById('modal-usuario').classList.add('hidden');
-            document.getElementById('modal-usuario').classList.remove('flex');
-        }
+        function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
     </script>
 </body>
 </html>
