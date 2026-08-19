@@ -61,7 +61,7 @@
 
         <!-- Formulario de Acceso -->
         <form method="POST" action="{{ url_for('login') }}" class="space-y-5" id="loginForm">
-            <!-- 🛡️ Token de Protección CSRF (Flask-WTF) -->
+            <!-- Token de Protección CSRF (Flask-WTF) -->
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
             <!-- Campo Usuario -->
@@ -115,10 +115,10 @@
                 </div>
             </div>
 
-            <!-- Google reCAPTCHA v2 -->
+            <!-- Google reCAPTCHA v2 con Clave de Sitio Oficial -->
             <div class="pt-1 flex justify-center overflow-hidden">
                 <div class="g-recaptcha" 
-                     data-sitekey="6LcU0mAtAAAAAIdZ43K_jPjU8nJ950Fq53nF6pP5" 
+                     data-sitekey="6LcU0mAtAAAAAOj_aciK31VM2nAuECZQe0-G36Ph" 
                      data-theme="dark"></div>
             </div>
 
