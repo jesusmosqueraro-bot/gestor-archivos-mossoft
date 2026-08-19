@@ -17,6 +17,9 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
+
+from werkzeug.security import generate_password_hash, check_password_hash
+
 # SDK Estable de Google Generative AI
 try:
     import google.generativeai as genai
