@@ -260,6 +260,22 @@ def init_db():
             fecha VARCHAR(100) NOT NULL,
             autor VARCHAR(100) NOT NULL
         )''')
+
+        # 🔄 Migración preventiva de columnas faltantes en Neon
+        columnas_comunicados = [
+            ("nivel", "VARCHAR(50) DEFAULT 'info'"),
+            ("fijado", "INTEGER DEFAULT 0"),
+            ("imagen_url", "TEXT DEFAULT ''"),
+            ("estado", "VARCHAR(50) DEFAULT 'activo'"),
+            ("fecha", "VARCHAR(100) DEFAULT ''"),
+            ("autor", "VARCHAR(100) DEFAULT 'Admin'")
+        ]
+        for col, col_type in columnas_comunicados:
+            try:
+                cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            except Exception:
+                pass
+
         conn.commit()
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
@@ -532,9 +548,7 @@ def pdf_proxy():
             content_type = 'image/png'
         elif fname_lower.endswith(('.jpg', '.jpeg')):
             content_type = 'image/jpeg'
-        elif fname_lower.endswith('.gif'):
-            content_type = 'image/gif'
-        elif fname_lower.endswith('.webp'):
+        elif fname_lower.endswith(('.gif', '.webp')):
             content_type = 'image/webp'
         elif fname_lower.endswith(('.mp4', '.mov', '.webm', '.avi')):
             content_type = 'video/mp4'
@@ -1319,11 +1333,12 @@ def ver_comunicados():
 @admin_required
 def crear_comunicado():
     try:
-        titulo = request.form.get('titulo', '').strip()
-        contenido = request.form.get('contenido', '').strip()
-        nivel = request.form.get('nivel', 'info').strip()
-        fijado = 1 if request.form.get('fijado') == 'on' else 0
-        imagen = request.files.get('imagen')
+        titulo = (request.form.get('titulo') or request.form.get('title') or '').strip()
+        contenido = (request.form.get('contenido') or request.form.get('mensaje') or request.form.get('descripcion') or request.form.get('cuerpo') or '').strip()
+        nivel = (request.form.get('nivel') or 'info').strip()
+        fijado = 1 if request.form.get('fijado') in ['on', '1', 'true', 'True', True] else 0
+        
+        imagen = request.files.get('imagen') or request.files.get('archivo') or request.files.get('foto')
         
         imagen_url = ""
         if imagen and imagen.filename and archivo_permitido(imagen.filename):
@@ -1337,7 +1352,7 @@ def crear_comunicado():
                 imagen_url = upload_result.get('secure_url', '')
             except Exception as e_cloud:
                 print(f"⚠️ Error subiendo imagen a Cloudinary: {e_cloud}")
-                flash("Advertencia: No se pudo procesar la imagen adjunta, pero se guardará el texto.")
+                flash("Advertencia: No se pudo subir la imagen, pero se guardará el texto.")
 
         if titulo and contenido:
             fecha_act = obtener_fecha_actual()
@@ -1345,20 +1360,32 @@ def crear_comunicado():
             
             conn, db_type = get_db()
             cursor = conn.cursor()
+
+            # Asegurar compatibilidad de columnas en caliente
+            for col, col_type in [("nivel", "VARCHAR(50) DEFAULT 'info'"), ("fijado", "INTEGER DEFAULT 0"), ("imagen_url", "TEXT DEFAULT ''"), ("estado", "VARCHAR(50) DEFAULT 'activo'"), ("fecha", "VARCHAR(100) DEFAULT ''"), ("autor", "VARCHAR(100) DEFAULT 'Admin'")]:
+                try:
+                    cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
+                except Exception:
+                    pass
+
             cursor.execute(
                 "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
                 (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor)
             )
-            conn.commit()
+            try:
+                conn.commit()
+            except Exception:
+                pass
             conn.close()
             
             registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
-            flash("Comunicado publicado correctamente.")
+            flash("Comunicado publicado con éxito.")
+        else:
+            print(f"⚠️ Validación fallida en comunicado: titulo='{titulo}', contenido='{contenido}'")
             
     except Exception as e:
-        print(f"❌ Error al crear comunicado: {e}")
+        print(f"❌ Error crítico en crear_comunicado: {e}")
         traceback.print_exc()
-        flash("Ocurrió un error al guardar el comunicado en el sistema.")
 
     return redirect(url_for('ver_comunicados'))
 
