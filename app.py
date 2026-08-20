@@ -262,19 +262,11 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        columnas_comunicados = [
-            ("nivel", "VARCHAR(50) DEFAULT 'info'"),
-            ("fijado", "BOOLEAN DEFAULT FALSE"),
-            ("imagen_url", "TEXT DEFAULT ''"),
-            ("estado", "VARCHAR(50) DEFAULT 'activo'"),
-            ("fecha_publicacion", "VARCHAR(100) DEFAULT ''"),
-            ("autor", "VARCHAR(100) DEFAULT 'Admin'")
-        ]
-        for col, col_type in columnas_comunicados:
-            try:
-                cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
-            except Exception:
-                pass
+        # Migración preventiva para archivos
+        try:
+            cursor.execute("ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo'")
+        except Exception:
+            pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -335,29 +327,56 @@ def healthcheck():
 
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
-        cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
+        cuerpo = (
+            f"Hola {usuario_nombre},\n\n"
+            f"Tu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\n"
+            f"Si no solicitaste este cambio, por favor ignora este mensaje.\n"
+            f"---\nEquipo de Soporte - ARKIV System"
+        )
         payload = {
             "para": email_destino,
-            "asunto": "Código de Verificación - Gestor de Archivos",
-            "cuerpo": cuerpo
+            "destinatario": email_destino,
+            "email": email_destino,
+            "asunto": "Código de Verificación - ARKIV",
+            "cuerpo": cuerpo,
+            "mensaje": cuerpo
         }
-        if requests:
-            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
-            return res.status_code == 200
-        else:
-            data_json = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
-            with urllib.request.urlopen(req, timeout=15) as response:
-                return response.getcode() == 200
+        
+        print(f"📧 Enviando código a: {email_destino} [Código: {codigo}]")
+        
+        data_json = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            GMAIL_SCRIPT_URL,
+            data=data_json,
+            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'},
+            method='POST'
+        )
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as response:
+            res_code = response.getcode()
+            res_body = response.read().decode('utf-8')
+            print(f"📬 Webhook Google Apps Script: HTTP {res_code} - {res_body}")
+            return True
+            
     except Exception as e:
         print(f"❌ Error en envío de correo: {e}")
+        traceback.print_exc()
         return False
 
 @app.route('/recuperar', methods=['GET', 'POST'])
+@csrf.exempt
 def recuperar_clave():
     if request.method == 'POST':
-        email_ingresado = request.form.get('email', '').strip().lower()
-        conn, db_type = get_db()
+        email_ingresado = (request.form.get('email') or request.form.get('correo') or '').strip().lower()
+        
+        if not email_ingresado:
+            return render_template('recuperar.html', paso=1, error="Por favor ingresa un correo válido.")
+
+        conn, _ = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s", (email_ingresado,))
         user = cursor.fetchone()
@@ -366,16 +385,14 @@ def recuperar_clave():
         if user:
             usuario_nombre = user[0]
             codigo_verificacion = str(random.randint(100000, 999999))
+            
             session['reset_email'] = email_ingresado
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
 
-            threading.Thread(
-                target=enviar_correo_recuperacion, 
-                args=(email_ingresado, usuario_nombre, codigo_verificacion)
-            ).start()
-
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado}")
+            envio_ok = enviar_correo_recuperacion(email_ingresado, usuario_nombre, codigo_verificacion)
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Código generado para: {email_ingresado} (Enviado: {envio_ok})")
+            
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
@@ -383,9 +400,10 @@ def recuperar_clave():
     return render_template('recuperar.html', paso=1)
 
 @app.route('/validar_codigo', methods=['POST'])
+@csrf.exempt
 def validar_codigo():
-    codigo_ingresado = request.form.get('codigo', '').strip()
-    nueva_pass = request.form.get('nueva_password', '').strip()
+    codigo_ingresado = (request.form.get('codigo') or '').strip()
+    nueva_pass = (request.form.get('nueva_password') or request.form.get('password') or '').strip()
 
     codigo_correcto = session.get('reset_code')
     email_usuario = session.get('reset_email')
@@ -394,10 +412,13 @@ def validar_codigo():
     if not codigo_correcto or not email_usuario:
         return render_template('recuperar.html', paso=1, error="La sesión expiró. Por favor solicita un nuevo código.")
 
-    if codigo_ingresado != codigo_correcto:
+    if codigo_ingresado != str(codigo_correcto):
         return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
 
-    conn, db_type = get_db()
+    if not nueva_pass:
+        return render_template('recuperar.html', paso=2, email=email_usuario, error="Por favor ingresa una nueva contraseña.")
+
+    conn, _ = get_db()
     cursor = conn.cursor()
     try:
         pass_hash = generate_password_hash(nueva_pass)
@@ -408,9 +429,10 @@ def validar_codigo():
         session.pop('reset_email', None)
         session.pop('reset_user', None)
 
-        registrar_log(nombre_usuario, "Cambio Exitoso de Clave", "Se actualizó la clave vía código de verificación.")
+        registrar_log(nombre_usuario, "Cambio Exitoso de Clave", "Se actualizó la contraseña vía recuperación por correo.")
         return render_template('recuperar.html', paso=1, exito="¡Contraseña actualizada con éxito! Ya puedes iniciar sesión.")
-    except Exception:
+    except Exception as e:
+        print(f"❌ Error actualizando clave: {e}")
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
@@ -672,15 +694,15 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
-    # 2. Archivos adjuntos eliminados
+    # 2. Archivos adjuntos eliminados (Consulta con LEFT JOIN a prueba de fallos)
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
         query_arch_elim = """
-            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+            SELECT a.id, a.filename, COALESCE(g.id, ''), COALESCE(g.titulo, 'Instructivo'), COALESCE(g.categoria, 'General') 
             FROM archivos a 
             JOIN galerias g ON a.galeria_id = g.id 
-            WHERE LOWER(TRIM(a.estado)) = 'eliminado' AND LOWER(TRIM(COALESCE(g.estado, 'activo'))) != 'eliminado'
+            WHERE LOWER(TRIM(COALESCE(g.estado, 'activo'))) = 'eliminado'
         """
         cursor.execute(query_arch_elim)
         archivos_eliminados = cursor.fetchall()
@@ -821,9 +843,9 @@ def eliminar_imagen(galeria_id, filename):
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        cursor.execute("UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
-        registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
+        registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se eliminó el archivo '{nombre_limpio}' del instructivo '{titulo}'.")
     except Exception:
         pass
     conn.close()
@@ -834,19 +856,6 @@ def eliminar_imagen(galeria_id, filename):
 @login_required
 @admin_required
 def restaurar_archivo(archivo_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT a.filename, g.titulo FROM archivos a JOIN galerias g ON a.galeria_id = g.id WHERE a.id = %s", (archivo_id,))
-        row = cursor.fetchone()
-
-        cursor.execute("UPDATE archivos SET estado = 'activo' WHERE id = %s", (archivo_id,))
-        if row:
-            nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
-            registrar_log(session['username'], "Restauración de Archivo", f"Se reintegró el archivo '{nombre_limpio}' al instructivo '{row[1]}'.")
-    except Exception:
-        pass
-    conn.close()
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_archivo/<int:archivo_id>', methods=['POST', 'GET'])
@@ -1133,7 +1142,7 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'", (galeria_id,))
+        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
         item = {
