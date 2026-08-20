@@ -245,9 +245,15 @@
                     <textarea name="descripcion" rows="3" placeholder="Resumen del instructivo..." class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500"></textarea>
                 </div>
 
+                <!-- Selección de Archivos o Carpetas -->
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Archivos Adjuntos (Selecciona 1 o varios archivos) *</label>
-                    <input type="file" name="archivo" multiple required class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Archivos Adjuntos *</label>
+                        <button type="button" onclick="alternarModoCarpeta('subir')" id="btn-modo-subir" class="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold">
+                            <i class="fa-solid fa-folder mr-1"></i> Cambiar a subir carpeta
+                        </button>
+                    </div>
+                    <input type="file" id="input-archivo-subir" name="archivo" multiple required class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
                 </div>
 
                 <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
@@ -311,8 +317,13 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Agregar más archivos (Múltiple)</label>
-                    <input type="file" name="nuevos_archivos" multiple class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Agregar más archivos</label>
+                        <button type="button" onclick="alternarModoCarpeta('editar')" id="btn-modo-editar" class="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold">
+                            <i class="fa-solid fa-folder mr-1"></i> Cambiar a subir carpeta
+                        </button>
+                    </div>
+                    <input type="file" id="input-archivo-editar" name="nuevos_archivos" multiple class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
                 </div>
 
                 <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
@@ -327,7 +338,7 @@
         </div>
     </div>
 
-    <!-- Scripts -->
+    <!-- Scripts de Control -->
     <script>
         function abrirModalSubir() { document.getElementById('modal-subir').classList.remove('hidden'); }
         function cerrarModalSubir() { document.getElementById('modal-subir').classList.add('hidden'); }
@@ -343,7 +354,21 @@
         }
         function cerrarModalEditar() { document.getElementById('modal-editar').classList.add('hidden'); }
 
-        // Función interactiva de Previsualización en Modal
+        // Alternar entre subir archivos sueltos o carpetas completas
+        function alternarModoCarpeta(modo) {
+            const input = document.getElementById(modo === 'subir' ? 'input-archivo-subir' : 'input-archivo-editar');
+            const btn = document.getElementById(modo === 'subir' ? 'btn-modo-subir' : 'btn-modo-editar');
+            
+            if (input.hasAttribute('webkitdirectory')) {
+                input.removeAttribute('webkitdirectory');
+                btn.innerHTML = '<i class="fa-solid fa-folder mr-1"></i> Cambiar a subir carpeta';
+            } else {
+                input.setAttribute('webkitdirectory', '');
+                btn.innerHTML = '<i class="fa-solid fa-file mr-1"></i> Cambiar a subir archivos';
+            }
+        }
+
+        // Visor de Previsualización Multiformato
         function previsualizarArchivo(url, galeriaId) {
             if (galeriaId) fetch('/incrementar_vista/' + galeriaId, {method: 'POST'});
             const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(url) + '&download=0';
@@ -355,17 +380,17 @@
             cont.innerHTML = '';
 
             if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext) || url.includes('/image/upload/')) {
-                cont.innerHTML = `<img src="${proxyUrl}" class="max-h-[75vh] max-w-full rounded-2xl shadow-lg object-contain">`;
+                cont.innerHTML = `<img src="${proxyUrl}" class="max-h-[75vh] max-w-full rounded-2xl shadow-2xl object-contain">`;
             } else if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(ext) || url.includes('/video/upload/')) {
-                cont.innerHTML = `<video controls autoplay class="max-h-[75vh] max-w-full rounded-2xl shadow-lg"><source src="${proxyUrl}" type="video/mp4">Tu navegador no soporta video.</video>`;
+                cont.innerHTML = `<video controls autoplay class="max-h-[75vh] max-w-full rounded-2xl shadow-2xl"><source src="${proxyUrl}" type="video/mp4">Tu navegador no soporta video.</video>`;
             } else if (ext === 'pdf') {
-                cont.innerHTML = `<iframe src="${proxyUrl}" class="w-full h-[75vh] rounded-2xl border-0"></iframe>`;
+                cont.innerHTML = `<iframe src="${proxyUrl}" class="w-full h-[75vh] rounded-2xl border border-slate-800 bg-slate-950"></iframe>`;
             } else {
                 cont.innerHTML = `
                     <div class="text-center p-8">
                         <i class="fa-solid fa-file-arrow-down text-5xl text-cyan-400 mb-4 block"></i>
                         <p class="text-white font-bold mb-2">${filename}</p>
-                        <p class="text-xs text-slate-400 mb-4">Este formato no admite vista previa en el navegador.</p>
+                        <p class="text-xs text-slate-400 mb-4">Este formato no admite previsualización en el navegador.</p>
                         <a href="/pdf_proxy?url=${encodeURIComponent(url)}&download=1" class="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold rounded-xl inline-flex items-center gap-2">
                             <i class="fa-solid fa-download"></i> Descargar archivo
                         </a>
