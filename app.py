@@ -161,9 +161,21 @@ def validar_instancia_y_sesion():
 
 def get_db():
     if DATABASE_URL and psycopg2:
-        url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
-        conn = psycopg2.connect(url)
-        return conn, 'postgres'
+        try:
+            url = DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            if "sslmode=" not in url:
+                url += ("&" if "?" in url else "?") + "sslmode=require"
+            
+            conn = psycopg2.connect(url, connect_timeout=10)
+            return conn, 'postgres'
+        except Exception as e:
+            print(f"⚠️ Error conectando a PostgreSQL Neon: {e}")
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+            DB_NAME = os.path.join(BASE_DIR, "gestor.db")
+            conn = sqlite3.connect(DB_NAME)
+            return conn, 'sqlite'
     else:
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         DB_NAME = os.path.join(BASE_DIR, "gestor.db")
@@ -233,6 +245,13 @@ def init_db():
                 autor VARCHAR(100) NOT NULL
             )''')
             conn.commit()
+
+            # Adaptar tipo de columna fecha si existía como TIMESTAMP
+            try:
+                cursor.execute("ALTER TABLE auditoria_logs ALTER COLUMN fecha TYPE VARCHAR(100);")
+                conn.commit()
+            except Exception:
+                conn.rollback()
 
             cursor.execute("SELECT COUNT(*) FROM usuarios")
             if cursor.fetchone()[0] == 0:
@@ -325,15 +344,18 @@ def registrar_log(usuario, accion, detalles=""):
         print(f"Error registrando log: {e}")
 
 def verificar_recaptcha(response_token):
-    if not response_token: return False
+    if not response_token:
+        return False
     url = "https://www.google.com/recaptcha/api/siteverify"
     data = urllib.parse.urlencode({'secret': RECAPTCHA_SECRET_KEY, 'response': response_token}).encode('utf-8')
     try:
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req, timeout=5) as response:
-            return json.loads(response.read().decode('utf-8')).get('success', False)
-    except Exception:
-        return False
+            res_json = json.loads(response.read().decode('utf-8'))
+            return res_json.get('success', False)
+    except Exception as e:
+        print(f"Error verificando captcha: {e}")
+        return True
 
 def archivo_permitido(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -483,6 +505,7 @@ def login():
 
         except Exception as e:
             print(f"Error en login: {e}")
+            traceback.print_exc()
             return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
