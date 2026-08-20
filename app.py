@@ -668,7 +668,7 @@ def ver_papelera():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado ILIKE 'eliminado' ORDER BY fecha DESC")
         eliminados = cursor.fetchall()
     except Exception:
         eliminados = []
@@ -678,7 +678,7 @@ def ver_papelera():
             SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
             FROM archivos a 
             JOIN galerias g ON a.galeria_id = g.id 
-            WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
+            WHERE a.estado ILIKE 'eliminado' AND COALESCE(g.estado, 'activo') NOT ILIKE 'eliminado'
         """
         cursor.execute(query_arch_elim)
         archivos_eliminados = cursor.fetchall()
@@ -686,13 +686,13 @@ def ver_papelera():
         archivos_eliminados = []
 
     try:
-        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado = 'eliminado' ORDER BY id DESC")
+        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
         credenciales_eliminadas = cursor.fetchall()
     except Exception:
         credenciales_eliminadas = []
 
     try:
-        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE estado = 'eliminado' ORDER BY id DESC")
+        cursor.execute("SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha, ''), COALESCE(autor, 'Admin') FROM comunicados WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
         comunicados_eliminados = cursor.fetchall()
     except Exception:
         comunicados_eliminados = []
@@ -703,8 +703,7 @@ def ver_papelera():
         eliminados=eliminados, 
         archivos_eliminados=archivos_eliminados,
         credenciales_eliminadas=credenciales_eliminadas,
-        comunicados_eliminados=comunicados_eliminados,
-        comunicados=comunicados_eliminados
+        comunicados_eliminados=comunicados_eliminados
     )
 
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST', 'GET'])
@@ -1443,7 +1442,6 @@ def eliminar_comunicado(com_id):
         row = cursor.fetchone()
         titulo = row[0] if row else f"ID {com_id}"
 
-        # Actualiza a estado eliminado y desactiva fijado usando BOOLEAN
         cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = FALSE WHERE id = %s", (com_id,))
         conn.commit()
         conn.close()
