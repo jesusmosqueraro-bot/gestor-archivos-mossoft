@@ -31,7 +31,7 @@ try:
 except Exception:
     Fernet = None
 
-# PostgreSQL Driver (pg8000 en Python puro y psycopg2 como respaldo)
+# PostgreSQL Driver
 try:
     import pg8000.dbapi
 except Exception:
@@ -143,13 +143,7 @@ cloudinary.config(
     api_secret=os.environ.get('CLOUDINARY_API_SECRET')
 )
 
-ALLOWED_EXTENSIONS = {
-    'png', 'jpg', 'jpeg', 'gif', 'webp',
-    'pdf', 'txt', 'docx', 'xlsx', 'pptx',
-    'mp4', 'mov', 'webm', 'avi',
-    'zip', 'rar', '7z', 'tar', 'gz'
-}
-app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB permitidos
 
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
@@ -265,6 +259,12 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
+        # Migraciones preventivas para galerias
+        try:
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -299,9 +299,6 @@ def verificar_recaptcha(response_token):
     except Exception as e:
         print(f"Error verificando captcha: {e}")
         return True
-
-def archivo_permitido(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def login_required(f):
     @wraps(f)
@@ -352,12 +349,9 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         ctx.verify_mode = ssl.CERT_NONE
         
         with urllib.request.urlopen(req, context=ctx, timeout=15) as response:
-            res_code = response.getcode()
             return True
-            
     except Exception as e:
         print(f"❌ Error en envío de correo: {e}")
-        traceback.print_exc()
         return False
 
 @app.route('/recuperar', methods=['GET', 'POST'])
@@ -528,7 +522,7 @@ def pdf_proxy():
         if not filename_custom:
             filename_custom = url_target.split('/')[-1]
 
-        filename_custom = secure_filename(filename_custom) or "documento.pdf"
+        filename_custom = secure_filename(filename_custom) or "documento"
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
         
         if requests:
@@ -549,29 +543,13 @@ def pdf_proxy():
             registrar_log(usuario_actual, "Descarga de Documento", f"Archivo: '{filename_custom}'")
 
         disposition = 'attachment' if download_flag == '1' else 'inline'
-        fname_lower = filename_custom.lower()
-        if fname_lower.endswith('.png'):
-            content_type = 'image/png'
-        elif fname_lower.endswith(('.jpg', '.jpeg')):
-            content_type = 'image/jpeg'
-        elif fname_lower.endswith(('.gif', '.webp')):
-            content_type = 'image/webp'
-        elif fname_lower.endswith(('.mp4', '.mov', '.webm', '.avi')):
-            content_type = 'video/mp4'
-        elif fname_lower.endswith(('.zip', '.rar', '.7z', '.tar', '.gz')):
-            content_type = 'application/zip'
-        else:
-            content_type = 'application/pdf'
-
         headers = {
-            'Content-Type': content_type,
             'Content-Disposition': f'{disposition}; filename="{filename_custom}"'
         }
         return Response(content_data, headers=headers, status=200)
     except Exception:
         return "Error obteniendo documento.", 500
 
-# 🔐 BÓVEDA DE CREDENCIALES (Adaptada a Neon)
 @app.route('/credenciales')
 @login_required
 @admin_required
@@ -606,7 +584,6 @@ def ver_credenciales():
                 })
     except Exception as e:
         print(f"⚠️ Error cargando credenciales: {e}")
-        traceback.print_exc()
 
     conn.close()
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
@@ -642,7 +619,6 @@ def crear_credencial():
             flash(f"Credencial '{servicio}' registrada con éxito.")
     except Exception as e:
         print(f"❌ Error creando credencial: {e}")
-        traceback.print_exc()
         
     return redirect(url_for('ver_credenciales'))
 
@@ -680,7 +656,6 @@ def editar_credencial(cred_id):
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
     except Exception as e:
         print(f"❌ Error editando credencial: {e}")
-        traceback.print_exc()
 
     return redirect(url_for('ver_credenciales'))
 
@@ -703,11 +678,9 @@ def eliminar_credencial(cred_id):
         flash(f"Credencial '{servicio}' movida a la papelera.")
     except Exception as e:
         print(f"❌ Error eliminando credencial: {e}")
-        traceback.print_exc()
 
     return redirect(url_for('ver_credenciales'))
 
-# 🗑️ PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -717,7 +690,6 @@ def ver_papelera():
     credenciales_eliminadas = []
     comunicados_eliminados = []
 
-    # 1. Instructivos eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -727,7 +699,6 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
-    # 2. Credenciales eliminadas (usando la columna eliminado de Neon)
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -742,7 +713,6 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
-    # 3. Comunicados eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -766,7 +736,6 @@ def ver_papelera():
         conn.close()
     except Exception as e:
         print(f"⚠️ Error cargando comunicados en papelera: {e}")
-        traceback.print_exc()
 
     return render_template(
         'papelera.html', 
@@ -1163,60 +1132,62 @@ def index():
         coincide_cat = not cat_filtro or categoria == cat_filtro
         coincide_tipo = not tipo_filtro or tipo == tipo_filtro
 
-        coincide_formato = True
-        if formato_filtro == 'imagen':
-            coincide_formato = any(any(ext in a.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']) or '/image/upload/' in a for a in archivos)
-        elif formato_filtro == 'video':
-            coincide_formato = any(any(ext in a.lower() for ext in ['.mp4', '.mov', '.webm', '.avi']) or '/video/upload/' in a for a in archivos)
-        elif formato_filtro == 'pdf':
-            coincide_formato = any('.pdf' in a.lower() or '.docx' in a.lower() or '.txt' in a.lower() or '/raw/upload/' in a for a in archivos)
-
-        if coincide_busqueda and coincide_cat and coincide_tipo and coincide_formato:
+        if coincide_busqueda and coincide_cat and coincide_tipo:
             galerias.append(item)
 
     conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
+    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
+# 🚀 SUBIR CUALQUIER ARCHIVO SIN RESTRICCIONES A CLOUDINARY
 @app.route('/subir', methods=['POST'])
 @login_required
 @admin_required
 def subir_archivo():
-    archivos = request.files.getlist('archivo')
-    titulo = request.form.get('titulo', 'Sin título')
-    descripcion = request.form.get('descripcion', '')
-    categoria = request.form.get('categoria', 'General')
-    tipo = request.form.get('tipo', 'Instructivo')
-    tags = request.form.get('tags', '')
+    try:
+        archivos = request.files.getlist('archivo')
+        titulo = (request.form.get('titulo') or 'Sin título').strip()
+        descripcion = (request.form.get('descripcion') or '').strip()
+        categoria = (request.form.get('categoria') or 'General').strip()
+        tipo = (request.form.get('tipo') or 'Instructivo').strip()
+        tags = (request.form.get('tags') or '').strip()
 
-    galeria_id = str(uuid.uuid4())[:8]
-    fecha_actual = obtener_fecha_actual()
-    
-    archivos_guardados = []
-    for file in archivos:
-        if file and archivo_permitido(file.filename):
-            ext = file.filename.rsplit('.', 1)[1].lower()
-            if ext in ['mp4', 'mov', 'webm', 'avi']:
-                upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
-            elif ext == 'pdf':
-                upload_result = cloudinary.uploader.upload(file, resource_type="image", format="pdf", use_filename=True, unique_filename=True)
-            elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
-                upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
-            else:
-                upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
-
-            archivos_guardados.append(upload_result['secure_url'])
-
-    if archivos_guardados:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')", 
-                       (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
+        galeria_id = str(uuid.uuid4())[:8]
+        fecha_actual = obtener_fecha_actual()
         
-        for fname in archivos_guardados:
-            cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
-        
-        conn.close()
-        registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
+        archivos_guardados = []
+        for file in archivos:
+            if file and file.filename:
+                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                
+                # Clasificación automática en Cloudinary según extensión (soporta todo tipo de archivo)
+                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
+                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
+                else:
+                    # PDF, Word, Excel, ZIP, RAR, TXT o cualquier otro archivo o carpeta comprimida
+                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
+
+                archivos_guardados.append(upload_result['secure_url'])
+
+        if archivos_guardados:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')
+            """, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
+            
+            for fname in archivos_guardados:
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
+            
+            conn.close()
+            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
+            flash("Instructivo publicado con éxito.")
+    except Exception as e:
+        print(f"❌ Error subiendo instructivo: {e}")
+        traceback.print_exc()
+        flash("Ocurrió un error al subir el instructivo.")
 
     return redirect(url_for('index'))
 
@@ -1224,17 +1195,17 @@ def subir_archivo():
 @login_required
 @admin_required
 def editar_galeria(galeria_id):
-    nuevo_titulo = (request.form.get('titulo') or '').strip()
-    nueva_desc = (request.form.get('descripcion') or '').strip()
-    nueva_cat = (request.form.get('categoria') or 'General').strip()
-    nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
-    nuevos_tags = (request.form.get('tags') or '').strip()
-    nuevos_archivos = request.files.getlist('nuevos_archivos')
-    
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
     try:
+        nuevo_titulo = (request.form.get('titulo') or '').strip()
+        nueva_desc = (request.form.get('descripcion') or '').strip()
+        nueva_cat = (request.form.get('categoria') or 'General').strip()
+        nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
+        nuevos_tags = (request.form.get('tags') or '').strip()
+        nuevos_archivos = request.files.getlist('nuevos_archivos')
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        
         cursor.execute("SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s", (galeria_id,))
         antiguo = cursor.fetchone()
 
@@ -1244,29 +1215,28 @@ def editar_galeria(galeria_id):
             desc_old = (antiguo[1] or '').strip()
             cat_old = (antiguo[2] or 'General').strip()
             tipo_old = (antiguo[3] or 'Instructivo').strip()
-            tags_old = (antiguo[4] or '').strip()
 
             if tit_old != nuevo_titulo: cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
-            if desc_old != nueva_desc: cambios.append(f"Descripción: '{desc_old}' ➔ '{nueva_desc}'")
+            if desc_old != nueva_desc: cambios.append(f"Descripción")
             if cat_old != nueva_cat: cambios.append(f"Categoría: '{cat_old}' ➔ '{nueva_cat}'")
             if tipo_old != nuevo_tipo: cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
-            if tags_old != nuevos_tags: cambios.append(f"Tags: '{tags_old}' ➔ '{nuevos_tags}'")
 
-        cursor.execute("UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id = %s", 
-                       (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
+        cursor.execute("""
+            UPDATE galerias 
+            SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s 
+            WHERE id = %s
+        """, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
-            if file and archivo_permitido(file.filename):
-                ext = file.filename.rsplit('.', 1)[1].lower()
-                if ext in ['mp4', 'mov', 'webm', 'avi']:
+            if file and file.filename:
+                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
-                elif ext == 'pdf':
-                    upload_result = cloudinary.uploader.upload(file, resource_type="image", format="pdf", use_filename=True, unique_filename=True)
-                elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
-                else:
+                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
+                else:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
                 
                 cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, upload_result['secure_url']))
                 archivos_agregados += 1
@@ -1274,12 +1244,13 @@ def editar_galeria(galeria_id):
         if archivos_agregados > 0:
             cambios.append(f"Archivos: +{archivos_agregados} nuevo(s)")
 
-        detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios) if cambios else f"'{nuevo_titulo}' re-guardado sin cambios detectados"
+        detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios) if cambios else f"'{nuevo_titulo}' re-guardado"
         registrar_log(session['username'], "Edición de Galería", detalles_log)
+        conn.close()
     except Exception as e:
         print(f"Error procesando edición en BD: {e}")
+        traceback.print_exc()
 
-    conn.close()
     return redirect(url_for('index'))
 
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST', 'GET'])
@@ -1397,7 +1368,7 @@ def crear_comunicado():
         imagen = request.files.get('imagen') or request.files.get('archivo') or request.files.get('foto')
         
         imagen_url = ""
-        if imagen and imagen.filename and archivo_permitido(imagen.filename):
+        if imagen and imagen.filename:
             try:
                 upload_result = cloudinary.uploader.upload(
                     imagen, 
@@ -1408,7 +1379,6 @@ def crear_comunicado():
                 imagen_url = upload_result.get('secure_url', '')
             except Exception as e_cloud:
                 print(f"⚠️ Error subiendo imagen a Cloudinary: {e_cloud}")
-                flash("Advertencia: No se pudo subir la imagen, pero se guardará el texto.")
 
         if titulo and contenido:
             autor = session.get('username', 'Admin')
@@ -1427,9 +1397,6 @@ def crear_comunicado():
             
             registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
             flash("Comunicado publicado con éxito.")
-        else:
-            print(f"⚠️ Validación fallida en comunicado: titulo='{titulo}', contenido='{contenido}'")
-            
     except Exception as e:
         print(f"❌ Error crítico en crear_comunicado: {e}")
         traceback.print_exc()
@@ -1462,7 +1429,6 @@ def archivar_comunicado(com_id):
         conn.close()
     except Exception as e:
         print(f"❌ Error archivando comunicado: {e}")
-        traceback.print_exc()
         
     return redirect(url_for('ver_comunicados', tab=destino_tab))
 
@@ -1485,7 +1451,6 @@ def eliminar_comunicado(com_id):
         flash(f"Comunicado '{titulo}' movido a la papelera.")
     except Exception as e:
         print(f"❌ Error enviando comunicado a papelera: {e}")
-        traceback.print_exc()
 
     return redirect(url_for('ver_comunicados'))
 
