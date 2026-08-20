@@ -258,7 +258,7 @@ def init_db():
             fijado BOOLEAN DEFAULT FALSE,
             imagen_url TEXT DEFAULT '',
             estado VARCHAR(50) DEFAULT 'activo',
-            fecha VARCHAR(100) NOT NULL,
+            fecha_publicacion VARCHAR(100) NOT NULL,
             autor VARCHAR(100) NOT NULL
         )''')
 
@@ -267,7 +267,7 @@ def init_db():
             ("fijado", "BOOLEAN DEFAULT FALSE"),
             ("imagen_url", "TEXT DEFAULT ''"),
             ("estado", "VARCHAR(50) DEFAULT 'activo'"),
-            ("fecha", "VARCHAR(100) DEFAULT ''"),
+            ("fecha_publicacion", "VARCHAR(100) DEFAULT ''"),
             ("autor", "VARCHAR(100) DEFAULT 'Admin'")
         ]
         for col, col_type in columnas_comunicados:
@@ -670,7 +670,7 @@ def ver_papelera():
         eliminados = cursor.fetchall()
         conn.close()
     except Exception as e:
-        print(f"⚠️ Error cargando galerias eliminadas: {e}")
+        print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
     # 2. Archivos adjuntos eliminados
     try:
@@ -698,18 +698,25 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
-    # 4. Comunicados eliminados (con conexión independiente y blindada)
+    # 4. Comunicados eliminados (con la columna real de Neon: fecha_publicacion)
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha, ''), COALESCE(autor, 'Admin') FROM comunicados WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, titulo, COALESCE(nivel, 'info'), 
+                   COALESCE(fecha_publicacion::text, ''), 
+                   COALESCE(autor, 'Admin') 
+            FROM comunicados 
+            WHERE LOWER(TRIM(estado)) = 'eliminado' 
+            ORDER BY id DESC
+        """)
         rows = cursor.fetchall()
         for r in rows:
             comunicados_eliminados.append({
                 'id': r[0],
                 'titulo': r[1] or 'Sin título',
                 'nivel': r[2] or 'info',
-                'fecha': r[3] or '',
+                'fecha': str(r[3])[:16] if r[3] else '',
                 'autor': r[4] or 'Admin'
             })
         conn.close()
@@ -1052,7 +1059,7 @@ def bienvenida():
     comunicado_fijado = None
     try:
         query_fij = """
-            SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor, fijado 
+            SELECT id, titulo, contenido, nivel, imagen_url, COALESCE(fecha_publicacion::text, ''), autor, fijado 
             FROM comunicados 
             WHERE COALESCE(estado, 'activo') = 'activo'
             ORDER BY 
@@ -1069,7 +1076,7 @@ def bienvenida():
                 'contenido': row[2] or '',
                 'nivel': row[3] or 'info',
                 'imagen_url': row[4] or '',
-                'fecha': row[5] or '',
+                'fecha': str(row[5])[:16] if row[5] else '',
                 'autor': row[6] or 'Admin',
                 'fijado': True if str(row[7]).lower() in ['true', 't', '1'] else False
             }
@@ -1335,7 +1342,13 @@ def ver_comunicados():
     estado_filtro = 'archivado' if pestana in ['historico', 'archivados', 'archivado'] else 'activo'
     
     try:
-        cursor.execute("SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE COALESCE(estado, 'activo') = %s ORDER BY fijado DESC, id DESC", (estado_filtro,))
+        cursor.execute("""
+            SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, 
+                   COALESCE(fecha_publicacion::text, ''), autor 
+            FROM comunicados 
+            WHERE COALESCE(estado, 'activo') = %s 
+            ORDER BY fijado DESC, id DESC
+        """, (estado_filtro,))
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -1355,7 +1368,7 @@ def ver_comunicados():
                 'fijado': True if str(fijado).lower() in ['true', 't', '1'] else False,
                 'imagen_url': img_url or '',
                 'estado': estado or 'activo',
-                'fecha': fecha or '',
+                'fecha': str(fecha)[:16] if fecha else '',
                 'autor': autor or 'Admin'
             })
 
@@ -1395,7 +1408,7 @@ def crear_comunicado():
             cursor = conn.cursor()
 
             cursor.execute(
-                "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
+                "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
                 (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor)
             )
             conn.close()
