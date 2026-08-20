@@ -159,18 +159,22 @@ def validar_instancia_y_sesion():
             return redirect(url_for('login', expirado='1'))
 
 def get_db():
-    if DATABASE_URL and psycopg2:
-        try:
-            url = DATABASE_URL.strip()
-            if url.startswith("postgres://"):
-                url = url.replace("postgres://", "postgresql://", 1)
-            if "channel_binding=" in url:
-                url = url.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
-            if "sslmode=" not in url:
-                url += ("&" if "?" in url else "?") + "sslmode=require"
-            
-            conn = psycopg2.connect(url, connect_timeout=10)
-            return conn, 'postgres'
+    url = DATABASE_URL
+    if not url:
+        raise RuntimeError("DATABASE_URL no está configurada.")
+    
+    url = url.strip()
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    if "-pooler" in url:
+        url = url.replace("-pooler", "")
+    if "channel_binding=" in url:
+        url = url.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
+    if "sslmode=" not in url:
+        url += ("&" if "?" in url else "?") + "sslmode=require"
+
+    conn = psycopg2.connect(url, connect_timeout=15)
+    return conn, 'postgres'
         except Exception as e:
             print(f"⚠️ Error conectando a PostgreSQL Neon: {e}")
             BASE_DIR = os.path.dirname(os.path.abspath(__file__))
