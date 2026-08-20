@@ -49,7 +49,7 @@ csrf = CSRFProtect(app)
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
-# 🇨🇴 ZONA HORARIA COLOMBIA
+# 🇨🇴 ZONA HORARIA COLOMBIA - HORARIO MILITAR 24H (HH:MM)
 try:
     ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
 except Exception:
@@ -57,9 +57,31 @@ except Exception:
 
 def obtener_fecha_actual():
     try:
-        return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
+        return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %H:%M")
     except Exception:
-        return datetime.now().strftime("%d/%m/%Y %I:%M %p")
+        return datetime.now().strftime("%d/%m/%Y %H:%M")
+
+def formatear_fecha_militar(fecha_val):
+    if not fecha_val:
+        return obtener_fecha_actual()
+    try:
+        if isinstance(fecha_val, datetime):
+            # Si viene con timezone o UTC de Postgres, convertir a Colombia
+            if fecha_val.tzinfo is None:
+                fecha_val = fecha_val.replace(tzinfo=timezone.utc)
+            return fecha_val.astimezone(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %H:%M")
+        
+        texto = str(fecha_val).strip()
+        # Intentar parsear strings de base de datos
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %I:%M %p", "%d/%m/%Y %H:%M"):
+            try:
+                dt = datetime.strptime(texto[:19], fmt[:len(texto[:19])])
+                return dt.strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                pass
+        return texto[:16]
+    except Exception:
+        return str(fecha_val)[:16]
 
 def normalizar(texto):
     if not texto: return ""
@@ -174,9 +196,9 @@ def init_db():
                 area VARCHAR(100) DEFAULT 'General',
                 descripcion TEXT,
                 subido_por VARCHAR(100) DEFAULT 'admin',
-                fecha_subida TIMESTAMP DEFAULT NOW(),
+                fecha_subida VARCHAR(100),
                 eliminado BOOLEAN DEFAULT FALSE,
-                fecha_eliminacion TIMESTAMP,
+                fecha_eliminacion VARCHAR(100),
                 eliminado_por VARCHAR(100),
                 tags TEXT DEFAULT '',
                 vistas INTEGER DEFAULT 0,
@@ -207,9 +229,9 @@ def init_db():
                 url_acceso TEXT DEFAULT '',
                 notas TEXT DEFAULT '',
                 creado_por VARCHAR(100) DEFAULT 'admin',
-                fecha_creacion TIMESTAMP DEFAULT NOW(),
+                fecha_creacion VARCHAR(100),
                 eliminado BOOLEAN DEFAULT FALSE,
-                fecha_eliminacion TIMESTAMP,
+                fecha_eliminacion VARCHAR(100),
                 eliminado_por VARCHAR(100)
             )''')
 
@@ -221,7 +243,7 @@ def init_db():
                 fijado BOOLEAN DEFAULT FALSE,
                 imagen_url TEXT DEFAULT '',
                 estado VARCHAR(50) DEFAULT 'activo',
-                fecha_publicacion TIMESTAMP DEFAULT NOW(),
+                fecha_publicacion VARCHAR(100),
                 autor VARCHAR(100) NOT NULL
             )''')
 
@@ -500,7 +522,7 @@ def pdf_proxy():
     except Exception as e:
         return f"Error obteniendo documento: {e}", 500
 
-# 📁 GESTOR DE INSTRUCTIVOS Y ARCHIVOS
+# 📁 GESTOR DE INSTRUCTIVOS Y ARCHIVOS (ROBUSTO Y CON HORARIO MILITAR)
 @app.route('/gestor')
 @login_required
 def index():
@@ -517,7 +539,7 @@ def index():
             SELECT id, 
                    COALESCE(titulo, 'Sin título'), 
                    COALESCE(descripcion, ''), 
-                   COALESCE(fecha_subida::text, ''), 
+                   fecha_subida, 
                    COALESCE(area, 'General'), 
                    COALESCE(tipo, 'Instructivo'), 
                    COALESCE(tags, ''), 
@@ -534,7 +556,6 @@ def index():
 
     galerias = []
     sugerencias_titulos = []
-    fecha_defecto = obtener_fecha_actual()
 
     STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para'}
 
@@ -548,15 +569,20 @@ def index():
         galeria_id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas = r
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT filename FROM archivos WHERE galeria_id::text = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
-        cursor.execute(query_arch, (str(galeria_id),))
-        archivos = [f[0] for f in cursor.fetchall() if f[0]]
+        # Consulta ultra compatible de archivos para esa galería
+        archivos = []
+        try:
+            query_arch = "SELECT filename FROM archivos WHERE galeria_id::text = %s" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ?"
+            cursor.execute(query_arch, (str(galeria_id),))
+            archivos = [f[0] for f in cursor.fetchall() if f[0] and str(f[0]).strip()]
+        except Exception as err:
+            print(f"Error cargando archivos de galeria {galeria_id}: {err}")
 
         item = {
             'id': str(galeria_id),
             'titulo': titulo,
             'descripcion': descripcion or '',
-            'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
+            'fecha': formatear_fecha_militar(fecha_subida),
             'categoria': categoria or 'General',
             'tipo': tipo or 'Instructivo',
             'tags': tags or '',
@@ -584,7 +610,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
-# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES
+# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES (CUALQUIER FORMATO Y FECHA MILITAR)
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -598,6 +624,7 @@ def subir_archivo():
         tipo = (request.form.get('tipo') or 'Instructivo').strip()
         tags = (request.form.get('tags') or '').strip()
         autor = session.get('username', 'admin')
+        fecha_actual = obtener_fecha_actual()
 
         archivos_guardados = []
         for file in archivos:
@@ -612,31 +639,30 @@ def subir_archivo():
 
                 archivos_guardados.append(upload_result['secure_url'])
 
-        if archivos_guardados:
-            conn, db_type = get_db()
-            cursor = conn.cursor()
-            
-            if db_type == 'postgres':
-                cursor.execute("""
-                    INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
-                    VALUES (%s, %s, %s, %s, %s, NOW(), FALSE, %s, 0, 0)
-                    RETURNING id
-                """, (titulo, tipo, categoria, descripcion, autor, tags))
-                nuevo_id = str(cursor.fetchone()[0])
-            else:
-                cursor.execute("""
-                    INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), 0, ?, 0, 0)
-                """, (titulo, tipo, categoria, descripcion, autor, tags))
-                nuevo_id = str(cursor.lastrowid)
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        
+        if db_type == 'postgres':
+            cursor.execute("""
+                INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
+                VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s, 0, 0)
+                RETURNING id
+            """, (titulo, tipo, categoria, descripcion, autor, fecha_actual, tags))
+            nuevo_id = str(cursor.fetchone()[0])
+        else:
+            cursor.execute("""
+                INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
+            """, (titulo, tipo, categoria, descripcion, autor, fecha_actual, tags))
+            nuevo_id = str(cursor.lastrowid)
 
-            for fname in archivos_guardados:
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')", (nuevo_id, fname))
+        for fname in archivos_guardados:
+            cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')", (nuevo_id, fname))
 
-            if db_type == 'sqlite': conn.commit()
-            conn.close()
-            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
-            flash(f"Instructivo '{titulo}' publicado con éxito.")
+        if db_type == 'sqlite': conn.commit()
+        conn.close()
+        registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
+        flash(f"Instructivo '{titulo}' publicado con éxito.")
     except Exception as e:
         print(f"❌ Error subiendo instructivo: {e}")
         traceback.print_exc()
@@ -699,7 +725,8 @@ def eliminar_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         autor = session.get('username', 'admin')
-        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET eliminado = 1 WHERE id = ?", (autor, str(galeria_id)) if db_type == 'postgres' else (str(galeria_id),))
+        fecha_elim = obtener_fecha_actual()
+        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = %s, eliminado_por = %s WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET eliminado = 1 WHERE id = ?", (fecha_elim, autor, str(galeria_id)) if db_type == 'postgres' else (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Envío a Papelera", f"Instructivo '{titulo}' enviado a papelera.")
     except Exception:
@@ -719,7 +746,7 @@ def ver_credenciales():
     lista_credenciales = []
     try:
         cursor.execute("""
-            SELECT id, titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, COALESCE(fecha_creacion::text, '') 
+            SELECT id, titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion 
             FROM credenciales 
             WHERE eliminado IS NOT TRUE 
             ORDER BY id DESC
@@ -738,7 +765,7 @@ def ver_credenciales():
                     'password': pass_real,
                     'categoria': area or 'General',
                     'notas': notas or '',
-                    'fecha': str(fecha)[:16] if fecha else ''
+                    'fecha': formatear_fecha_militar(fecha)
                 })
     except Exception as e:
         print(f"Error consultando credenciales: {e}")
@@ -759,6 +786,7 @@ def crear_credencial():
         categoria = (request.form.get('categoria') or request.form.get('area') or 'General').strip()
         notas = (request.form.get('notas') or '').strip()
         autor = session.get('username', 'admin')
+        fecha_act = obtener_fecha_actual()
         
         if servicio and usuario and password:
             pass_cifrada = encriptar_texto(password)
@@ -766,11 +794,11 @@ def crear_credencial():
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO credenciales (titulo, usuario_acceso, password_cifrada, area, url_acceso, notas, creado_por, fecha_creacion, eliminado) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), FALSE)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE)
             """ if db_type == 'postgres' else """
                 INSERT INTO credenciales (titulo, usuario_acceso, password_cifrada, area, url_acceso, notas, creado_por, fecha_creacion, eliminado) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 0)
-            """, (servicio, usuario, pass_cifrada, categoria, url, notas, autor))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """, (servicio, usuario, pass_cifrada, categoria, url, notas, autor, fecha_act))
             
             if db_type == 'sqlite': conn.commit()
             conn.close()
@@ -833,7 +861,8 @@ def eliminar_credencial(cred_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         autor = session.get('username', 'admin')
-        cursor.execute("UPDATE credenciales SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET eliminado = 1 WHERE id = ?", (autor, cred_id) if db_type == 'postgres' else (cred_id,))
+        fecha_elim = obtener_fecha_actual()
+        cursor.execute("UPDATE credenciales SET eliminado = TRUE, fecha_eliminacion = %s, eliminado_por = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET eliminado = 1 WHERE id = ?", (fecha_elim, autor, cred_id) if db_type == 'postgres' else (cred_id,))
         if db_type == 'sqlite': conn.commit()
         conn.close()
         registrar_log(session['username'], "Eliminación de Credencial", f"Enviada a papelera credencial ID '{cred_id}'")
@@ -841,7 +870,7 @@ def eliminar_credencial(cred_id):
         print(f"Error eliminando credencial: {e}")
     return redirect(url_for('ver_papelera' if request.args.get('ref') == 'papelera' else 'ver_credenciales'))
 
-# ♻️ PAPELERA DE RECICLAJE (BLINDADA)
+# ♻️ PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -857,7 +886,7 @@ def ver_papelera():
         
         # 1. Instructivos
         cursor.execute("""
-            SELECT id, titulo, descripcion, COALESCE(fecha_eliminacion::text, fecha_subida::text, ''), area, tipo 
+            SELECT id, titulo, descripcion, COALESCE(fecha_eliminacion, fecha_subida, ''), area, tipo 
             FROM galerias 
             WHERE eliminado IS TRUE 
             ORDER BY id DESC
@@ -867,7 +896,9 @@ def ver_papelera():
             WHERE eliminado = 1 
             ORDER BY id DESC
         """)
-        eliminados = cursor.fetchall()
+        rows_gal = cursor.fetchall()
+        for g in rows_gal:
+            eliminados.append((g[0], g[1], g[2], formatear_fecha_militar(g[3]), g[4], g[5]))
 
         # 2. Archivos
         cursor.execute("""
@@ -885,7 +916,7 @@ def ver_papelera():
 
         # 3. Credenciales
         cursor.execute("""
-            SELECT id, titulo, usuario_acceso, area, COALESCE(fecha_eliminacion::text, fecha_creacion::text, '') 
+            SELECT id, titulo, usuario_acceso, area, COALESCE(fecha_eliminacion, fecha_creacion, '') 
             FROM credenciales 
             WHERE eliminado IS TRUE 
             ORDER BY id DESC
@@ -895,11 +926,13 @@ def ver_papelera():
             WHERE eliminado = 1 
             ORDER BY id DESC
         """)
-        credenciales_eliminadas = cursor.fetchall()
+        rows_c = cursor.fetchall()
+        for c in rows_c:
+            credenciales_eliminadas.append((c[0], c[1], c[2], c[3], formatear_fecha_militar(c[4])))
 
         # 4. Comunicados
         cursor.execute("""
-            SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha_publicacion::text, ''), autor 
+            SELECT id, titulo, COALESCE(nivel, 'info'), fecha_publicacion, autor 
             FROM comunicados 
             WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) = 'eliminado' 
             ORDER BY id DESC
@@ -910,7 +943,7 @@ def ver_papelera():
                 'id': r[0],
                 'titulo': r[1],
                 'nivel': r[2],
-                'fecha': str(r[3])[:16] if r[3] else '',
+                'fecha': formatear_fecha_militar(r[3]),
                 'autor': r[4]
             })
 
@@ -927,7 +960,7 @@ def ver_papelera():
         comunicados_eliminados=comunicados_eliminados
     )
 
-# 🔄 RUTAS DE RESTAURACIÓN Y DESTRUCCIÓN PARA CADA MÓDULO
+# 🔄 RUTAS DE RESTAURACIÓN Y DESTRUCCIÓN
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
 @csrf.exempt
 @login_required
@@ -1108,7 +1141,7 @@ def eliminar_usuario(usuario_id):
     conn.close()
     return redirect(url_for('gestion_usuarios'))
 
-# 📑 LOGS Y AUDITORÍA
+# 📑 LOGS Y AUDITORÍA (CON FORMATO MILITAR)
 @app.route('/logs')
 @login_required
 @admin_required
@@ -1140,7 +1173,8 @@ def ver_logs():
 
         query += " ORDER BY id DESC"
         cursor.execute(query, tuple(params))
-        lista_logs = cursor.fetchall()
+        rows_logs = cursor.fetchall()
+        lista_logs = [(l[0], l[1], l[2], formatear_fecha_militar(l[3])) for l in rows_logs]
     except Exception:
         lista_logs, lista_usuarios, lista_acciones = [], [], []
     conn.close()
@@ -1158,8 +1192,9 @@ def exportar_logs_csv():
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(['FECHA Y HORA', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
-    for row in rows: writer.writerow(row)
+    writer.writerow(['FECHA Y HORA (24H)', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
+    for row in rows:
+        writer.writerow([formatear_fecha_militar(row[0]), row[1], row[2], row[3]])
 
     csv_bytes = '\ufeff' + output.getvalue()
     fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
@@ -1185,7 +1220,7 @@ def bienvenida():
     comunicado_fijado = None
     try:
         cursor.execute("""
-            SELECT titulo, contenido, nivel, imagen_url, COALESCE(fecha_publicacion::text, ''), autor 
+            SELECT titulo, contenido, nivel, imagen_url, fecha_publicacion, autor 
             FROM comunicados 
             WHERE fijado IS TRUE AND COALESCE(estado, 'activo') = 'activo' 
             ORDER BY id DESC LIMIT 1
@@ -1197,7 +1232,7 @@ def bienvenida():
         """)
         row = cursor.fetchone()
         if row:
-            comunicado_fijado = {'titulo': row[0], 'contenido': row[1], 'nivel': row[2], 'imagen_url': row[3], 'fecha': str(row[4])[:16], 'autor': row[5]}
+            comunicado_fijado = {'titulo': row[0], 'contenido': row[1], 'nivel': row[2], 'imagen_url': row[3], 'fecha': formatear_fecha_militar(row[4]), 'autor': row[5]}
     except Exception: comunicado_fijado = None
     conn.close()
     return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
@@ -1213,7 +1248,7 @@ def ver_comunicados():
     estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
     try:
         cursor.execute("""
-            SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, COALESCE(fecha_publicacion::text, ''), autor 
+            SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor 
             FROM comunicados 
             WHERE COALESCE(estado, 'activo') = %s 
             ORDER BY fijado DESC, id DESC
@@ -1236,7 +1271,7 @@ def ver_comunicados():
                 'id': c_id, 'titulo': titulo, 'contenido': contenido, 'nivel': nivel,
                 'fijado': True if str(fijado).lower() in ['true', 't', '1'] else False,
                 'imagen_url': img_url, 'estado': estado,
-                'fecha': str(fecha)[:16] if fecha else '', 'autor': autor
+                'fecha': formatear_fecha_militar(fecha), 'autor': autor
             })
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
 
@@ -1258,15 +1293,16 @@ def crear_comunicado():
 
         if titulo and contenido:
             autor = session.get('username', 'Admin')
+            fecha_act = obtener_fecha_actual()
             conn, db_type = get_db()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) 
-                VALUES (%s, %s, %s, %s, %s, 'activo', NOW(), %s)
+                VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)
             """ if db_type == 'postgres' else """
                 INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) 
-                VALUES (?, ?, ?, ?, ?, 'activo', datetime('now'), ?)
-            """, (titulo, contenido, nivel, fijado, imagen_url, autor))
+                VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)
+            """, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
             
             if db_type == 'sqlite': conn.commit()
             conn.close()
