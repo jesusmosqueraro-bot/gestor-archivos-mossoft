@@ -241,10 +241,12 @@ def init_db():
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
             id SERIAL PRIMARY KEY,
-            servicio VARCHAR(150) NOT NULL DEFAULT '',
+            titulo VARCHAR(150) DEFAULT '',
+            servicio VARCHAR(150) DEFAULT '',
             url TEXT DEFAULT '',
-            usuario VARCHAR(150) NOT NULL DEFAULT '',
-            password_enc TEXT NOT NULL DEFAULT '',
+            usuario VARCHAR(150) DEFAULT '',
+            password TEXT DEFAULT '',
+            password_enc TEXT DEFAULT '',
             categoria VARCHAR(100) DEFAULT 'General',
             notas TEXT DEFAULT '',
             fecha VARCHAR(100) DEFAULT '',
@@ -264,10 +266,12 @@ def init_db():
 
         # Migraciones preventivas para credenciales
         columnas_credenciales = [
-            ("servicio", "VARCHAR(150) NOT NULL DEFAULT ''"),
+            ("titulo", "VARCHAR(150) DEFAULT ''"),
+            ("servicio", "VARCHAR(150) DEFAULT ''"),
             ("url", "TEXT DEFAULT ''"),
-            ("usuario", "VARCHAR(150) NOT NULL DEFAULT ''"),
-            ("password_enc", "TEXT NOT NULL DEFAULT ''"),
+            ("usuario", "VARCHAR(150) DEFAULT ''"),
+            ("password", "TEXT DEFAULT ''"),
+            ("password_enc", "TEXT DEFAULT ''"),
             ("categoria", "VARCHAR(100) DEFAULT 'General'"),
             ("notas", "TEXT DEFAULT ''"),
             ("fecha", "VARCHAR(100) DEFAULT ''"),
@@ -279,7 +283,7 @@ def init_db():
             except Exception:
                 pass
 
-        # Migraciones preventivas para comunicados y archivos
+        # Migraciones preventivas para comunicados
         columnas_comunicados = [
             ("nivel", "VARCHAR(50) DEFAULT 'info'"),
             ("fijado", "BOOLEAN DEFAULT FALSE"),
@@ -612,31 +616,42 @@ def ver_credenciales():
     conn, db_type = get_db()
     cursor = conn.cursor()
     
+    lista_credenciales = []
     try:
-        cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) != 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, 
+                   COALESCE(servicio, titulo, ''), 
+                   COALESCE(url, ''), 
+                   COALESCE(usuario, ''), 
+                   COALESCE(password_enc, password, ''), 
+                   COALESCE(categoria, 'General'), 
+                   COALESCE(notas, ''), 
+                   COALESCE(fecha::text, '') 
+            FROM credenciales 
+            WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) != 'eliminado' 
+            ORDER BY id DESC
+        """)
         rows = cursor.fetchall()
-    except Exception:
-        rows = []
+        for r in rows:
+            c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r
+            pass_real = desencriptar_texto(pass_enc)
+            texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+            if not q_busqueda or q_busqueda in texto_full:
+                lista_credenciales.append({
+                    'id': c_id,
+                    'servicio': servicio or 'Sin Nombre',
+                    'url': url or '',
+                    'usuario': usuario or '',
+                    'password': pass_real,
+                    'categoria': categoria or 'General',
+                    'notas': notas or '',
+                    'fecha': str(fecha)[:16] if fecha else ''
+                })
+    except Exception as e:
+        print(f"⚠️ Error cargando credenciales: {e}")
+        traceback.print_exc()
 
     conn.close()
-    
-    lista_credenciales = []
-    for r in rows:
-        c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r
-        pass_real = desencriptar_texto(pass_enc)
-        texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
-        if not q_busqueda or q_busqueda in texto_full:
-            lista_credenciales.append({
-                'id': c_id,
-                'servicio': servicio or '',
-                'url': url or '',
-                'usuario': usuario or '',
-                'password': pass_real,
-                'categoria': categoria or 'General',
-                'notas': notas or '',
-                'fecha': fecha or ''
-            })
-            
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
 
 @app.route('/credenciales/crear', methods=['POST'])
@@ -659,9 +674,12 @@ def crear_credencial():
             conn, db_type = get_db()
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')
-            """, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+                INSERT INTO credenciales (
+                    titulo, servicio, url, usuario, password, password_enc, categoria, notas, fecha, estado
+                ) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'activo')
+            """, (servicio, servicio, url, usuario, pass_cifrada, pass_cifrada, categoria, notas, fecha_act))
+            
             conn.close()
             registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
             flash(f"Credencial '{servicio}' registrada con éxito.")
@@ -689,11 +707,17 @@ def editar_credencial(cred_id):
         
         if password:
             pass_cifrada = encriptar_texto(password)
-            cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s", 
-                           (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+            cursor.execute("""
+                UPDATE credenciales 
+                SET titulo=%s, servicio=%s, url=%s, usuario=%s, password=%s, password_enc=%s, categoria=%s, notas=%s 
+                WHERE id=%s
+            """, (servicio, servicio, url, usuario, pass_cifrada, pass_cifrada, categoria, notas, cred_id))
         else:
-            cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
-                           (servicio, url, usuario, categoria, notas, cred_id))
+            cursor.execute("""
+                UPDATE credenciales 
+                SET titulo=%s, servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s 
+                WHERE id=%s
+            """, (servicio, servicio, url, usuario, categoria, notas, cred_id))
             
         conn.close()
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
@@ -711,9 +735,9 @@ def eliminar_credencial(cred_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
+        cursor.execute("SELECT COALESCE(servicio, titulo, '') FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
-        servicio = row[0] if row else f"ID {cred_id}"
+        servicio = row[0] if row and row[0] else f"ID {cred_id}"
 
         cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
         conn.close()
@@ -748,13 +772,18 @@ def ver_papelera():
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, COALESCE(servicio, titulo, 'Sin Nombre'), usuario, categoria, COALESCE(fecha::text, '') 
+            FROM credenciales 
+            WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) = 'eliminado' 
+            ORDER BY id DESC
+        """)
         credenciales_eliminadas = cursor.fetchall()
         conn.close()
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
-    # 3. Comunicados eliminados (con fecha_publicacion garantizada)
+    # 3. Comunicados eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -763,7 +792,7 @@ def ver_papelera():
                    COALESCE(fecha_publicacion::text, ''), 
                    COALESCE(autor, 'Admin') 
             FROM comunicados 
-            WHERE LOWER(TRIM(estado)) = 'eliminado' 
+            WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) = 'eliminado' 
             ORDER BY id DESC
         """)
         rows = cursor.fetchall()
@@ -796,9 +825,9 @@ def restaurar_credencial(cred_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
+        cursor.execute("SELECT COALESCE(servicio, titulo, '') FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
-        servicio = row[0] if row else f"ID {cred_id}"
+        servicio = row[0] if row and row[0] else f"ID {cred_id}"
 
         cursor.execute("UPDATE credenciales SET estado = 'activo' WHERE id = %s", (cred_id,))
         conn.close()
@@ -815,9 +844,9 @@ def destruir_credencial(cred_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
+        cursor.execute("SELECT COALESCE(servicio, titulo, '') FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
-        servicio = row[0] if row else f"ID {cred_id}"
+        servicio = row[0] if row and row[0] else f"ID {cred_id}"
 
         cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
         conn.close()
