@@ -31,9 +31,7 @@
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {% set total_items = (eliminados|length if eliminados else 0) + (archivos_eliminados|length if archivos_eliminados else 0) + (credenciales_eliminadas|length if credenciales_eliminadas else 0) + (comunicados_eliminados|length if comunicados_eliminados else 0) %}
-
-        {% if total_items == 0 %}
+        {% if not eliminados and not archivos_eliminados and not credenciales_eliminadas and not comunicados_eliminados %}
         <div class="bg-slate-900/40 border border-slate-800 rounded-3xl p-16 text-center max-w-md mx-auto my-12">
             <i class="fa-regular fa-trash-can text-4xl text-slate-600 mb-4 block"></i>
             <h3 class="text-base font-bold text-white">La papelera está vacía</h3>
@@ -42,31 +40,31 @@
         {% else %}
         <div class="space-y-10">
 
-            <!-- SECCIÓN 1: COMUNICADOS ELIMINADOS -->
+            <!-- 1. COMUNICADOS ELIMINADOS -->
             {% if comunicados_eliminados %}
             <div>
                 <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <i class="fa-solid fa-bullhorn text-cyan-400"></i> Comunicados Eliminados ({{ comunicados_eliminados|length }})
+                    <i class="fa-solid fa-bullhorn text-cyan-400"></i> Comunicados en Papelera ({{ comunicados_eliminados|length }})
                 </h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {% for com in comunicados_eliminados %}
+                    {% for item in comunicados_eliminados %}
                     <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
                         <div>
                             <div class="flex items-center justify-between text-[11px] text-slate-500 mb-2">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">{{ com[2] }}</span>
-                                <span>{{ com[3] }}</span>
+                                <span class="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold uppercase">{{ item.nivel if item.nivel is defined else item[2] }}</span>
+                                <span>{{ item.fecha if item.fecha is defined else item[3] }}</span>
                             </div>
-                            <h3 class="text-base font-bold text-white mb-1">{{ com[1] }}</h3>
-                            <p class="text-xs text-slate-400">Publicado por: {{ com[4] }}</p>
+                            <h3 class="text-base font-bold text-white mb-1">{{ item.titulo if item.titulo is defined else item[1] }}</h3>
+                            <p class="text-xs text-slate-400">Autor: {{ item.autor if item.autor is defined else item[4] }}</p>
                         </div>
                         <div class="pt-4 border-t border-slate-800/80 mt-4 flex items-center justify-end gap-2">
-                            <form method="POST" action="{{ url_for('restaurar_comunicado', com_id=com[0]) }}">
+                            <form method="POST" action="{{ url_for('restaurar_comunicado', com_id=(item.id if item.id is defined else item[0])) }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <button type="submit" class="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
                                     <i class="fa-solid fa-rotate-left"></i> Restaurar
                                 </button>
                             </form>
-                            <form method="POST" action="{{ url_for('destruir_comunicado', com_id=com[0]) }}" onsubmit="return confirm('¿Destruir permanentemente este comunicado?')">
+                            <form method="POST" action="{{ url_for('destruir_comunicado', com_id=(item.id if item.id is defined else item[0])) }}" onsubmit="return confirm('¿Destruir permanentemente este comunicado?')">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
                                     <i class="fa-solid fa-trash"></i> Destruir
@@ -79,7 +77,7 @@
             </div>
             {% endif %}
 
-            <!-- SECCIÓN 2: INSTRUCTIVOS COMPLETOS -->
+            <!-- 2. INSTRUCTIVOS ELIMINADOS -->
             {% if eliminados %}
             <div>
                 <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -103,7 +101,7 @@
                                     <i class="fa-solid fa-rotate-left"></i> Restaurar
                                 </button>
                             </form>
-                            <form method="POST" action="{{ url_for('destruir_galeria', galeria_id=g[0]) }}" onsubmit="return confirm('¿Destruir permanentemente este instructivo y sus archivos?')">
+                            <form method="POST" action="{{ url_for('destruir_galeria', galeria_id=g[0]) }}" onsubmit="return confirm('¿Destruir permanentemente este instructivo?')">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
                                     <i class="fa-solid fa-trash"></i> Destruir
@@ -116,7 +114,7 @@
             </div>
             {% endif %}
 
-            <!-- SECCIÓN 3: ARCHIVOS ADJUNTOS -->
+            <!-- 3. ARCHIVOS ELIMINADOS -->
             {% if archivos_eliminados %}
             <div>
                 <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -149,7 +147,7 @@
             </div>
             {% endif %}
 
-            <!-- SECCIÓN 4: CREDENCIALES -->
+            <!-- 4. CREDENCIALES ELIMINADAS -->
             {% if credenciales_eliminadas %}
             <div>
                 <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
