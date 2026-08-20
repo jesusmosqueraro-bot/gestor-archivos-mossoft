@@ -162,20 +162,21 @@ def validar_instancia_y_sesion():
 def get_db():
     if DATABASE_URL and psycopg2:
         try:
-            url = DATABASE_URL
+            url = DATABASE_URL.strip()
+            # Corrección de protocolo
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
+            # Limpieza de parámetros incompatibles
+            if "channel_binding=" in url:
+                url = url.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
             if "sslmode=" not in url:
                 url += ("&" if "?" in url else "?") + "sslmode=require"
             
             conn = psycopg2.connect(url, connect_timeout=10)
             return conn, 'postgres'
         except Exception as e:
-            print(f"⚠️ Error conectando a PostgreSQL Neon: {e}")
-            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-            DB_NAME = os.path.join(BASE_DIR, "gestor.db")
-            conn = sqlite3.connect(DB_NAME)
-            return conn, 'sqlite'
+            print(f"❌ ERROR CRÍTICO CONECTANDO A NEON POSTGRESQL: {e}")
+            raise e
     else:
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         DB_NAME = os.path.join(BASE_DIR, "gestor.db")
@@ -193,8 +194,8 @@ def init_db():
                 password_hash VARCHAR(255) NOT NULL,
                 correo VARCHAR(200) NOT NULL,
                 rol VARCHAR(50) NOT NULL DEFAULT 'estandar',
-                nombre VARCHAR(100),
-                area VARCHAR(100),
+                nombre VARCHAR(100) DEFAULT '',
+                area VARCHAR(100) DEFAULT '',
                 activo BOOLEAN DEFAULT TRUE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
@@ -268,29 +269,6 @@ def init_db():
                 area TEXT,
                 activo BOOLEAN DEFAULT 1
             )''')
-            
-            # Migración SQLite legacy si existía 'username'
-            try:
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN usuario TEXT;")
-                cursor.execute("UPDATE usuarios SET usuario = username WHERE usuario IS NULL;")
-                conn.commit()
-            except Exception:
-                pass
-
-            try:
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT;")
-                cursor.execute("UPDATE usuarios SET password_hash = password WHERE password_hash IS NULL;")
-                conn.commit()
-            except Exception:
-                pass
-
-            try:
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN correo TEXT;")
-                cursor.execute("UPDATE usuarios SET correo = email WHERE correo IS NULL;")
-                conn.commit()
-            except Exception:
-                pass
-
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id TEXT PRIMARY KEY,
                 titulo TEXT NOT NULL,
@@ -427,19 +405,9 @@ def recuperar_clave():
         email_ingresado = request.form.get('email', '').strip().lower()
         conn, db_type = get_db()
         cursor = conn.cursor()
-        
-        user = None
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s", (email_ingresado,))
-            user = cursor.fetchone()
-        else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = ?", (email_ingresado,))
-                user = cursor.fetchone()
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?", (email_ingresado,))
-                user = cursor.fetchone()
-        
+        query = "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = ?"
+        cursor.execute(query, (email_ingresado,))
+        user = cursor.fetchone()
         conn.close()
 
         if user:
@@ -480,14 +448,8 @@ def validar_codigo():
     cursor = conn.cursor()
     try:
         pass_hash = generate_password_hash(nueva_pass)
-        if db_type == 'postgres':
-            cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s", (pass_hash, email_usuario))
-        else:
-            try:
-                cursor.execute("UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ?", (pass_hash, email_usuario))
-            except Exception:
-                cursor.execute("UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?", (pass_hash, email_usuario))
-                
+        q_upd = "UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ?"
+        cursor.execute(q_upd, (pass_hash, email_usuario))
         conn.commit()
         conn.close()
 
@@ -515,18 +477,9 @@ def login():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            
-            user = None
-            if db_type == 'postgres':
-                cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))", (username,))
-                user = cursor.fetchone()
-            else:
-                try:
-                    cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))", (username,))
-                    user = cursor.fetchone()
-                except Exception:
-                    cursor.execute("SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))", (username,))
-                    user = cursor.fetchone()
+            query = "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+            cursor.execute(query, (username,))
+            user = cursor.fetchone()
 
             if user:
                 clave_db = str(user[1] or '')
@@ -535,13 +488,8 @@ def login():
                 if es_valida:
                     if not (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')):
                         try:
-                            if db_type == 'postgres':
-                                cursor.execute("UPDATE usuarios SET password_hash = %s WHERE usuario = %s", (generate_password_hash(password), user[0]))
-                            else:
-                                try:
-                                    cursor.execute("UPDATE usuarios SET password_hash = ? WHERE usuario = ?", (generate_password_hash(password), user[0]))
-                                except Exception:
-                                    cursor.execute("UPDATE usuarios SET password = ? WHERE username = ?", (generate_password_hash(password), user[0]))
+                            q_migr = "UPDATE usuarios SET password_hash = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE usuario = ?"
+                            cursor.execute(q_migr, (generate_password_hash(password), user[0]))
                             conn.commit()
                         except Exception:
                             conn.rollback()
@@ -969,14 +917,8 @@ def gestion_usuarios():
         if nuevo_user and nuevo_pass and nuevo_email:
             try:
                 pass_hash = generate_password_hash(nuevo_pass)
-                if db_type == 'postgres':
-                    cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                else:
-                    try:
-                        cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (?, ?, ?, ?, 1)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                    except Exception:
-                        cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (?, ?, ?, ?, 1)"
+                cursor.execute(q_ins, (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Se creó el usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
@@ -984,17 +926,8 @@ def gestion_usuarios():
             except Exception:
                 conn.rollback()
 
-    if db_type == 'postgres':
-        cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
-        lista_usuarios = cursor.fetchall()
-    else:
-        try:
-            cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
-            lista_usuarios = cursor.fetchall()
-        except Exception:
-            cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
-            lista_usuarios = cursor.fetchall()
-            
+    cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
+    lista_usuarios = cursor.fetchall()
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
@@ -1009,44 +942,20 @@ def editar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        user_target = f"ID {usuario_id}"
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
-            row = cursor.fetchone()
-            if row: user_target = row[0]
-            
-            if nueva_pass:
-                pass_hash = generate_password_hash(nueva_pass)
-                cursor.execute("UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-            else:
-                cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s", (nuevo_email, nuevo_rol, usuario_id))
-                detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
+        q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+
+        if nueva_pass:
+            pass_hash = generate_password_hash(nueva_pass)
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, pass_hash, usuario_id))
+            detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-                
-                if nueva_pass:
-                    pass_hash = generate_password_hash(nueva_pass)
-                    cursor.execute("UPDATE usuarios SET correo = ?, rol = ?, password_hash = ? WHERE id = ?", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                    detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-                else:
-                    cursor.execute("UPDATE usuarios SET correo = ?, rol = ? WHERE id = ?", (nuevo_email, nuevo_rol, usuario_id))
-                    detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-                
-                if nueva_pass:
-                    pass_hash = generate_password_hash(nueva_pass)
-                    cursor.execute("UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                    detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-                else:
-                    cursor.execute("UPDATE usuarios SET email = ?, rol = ? WHERE id = ?", (nuevo_email, nuevo_rol, usuario_id))
-                    detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
+            detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
@@ -1063,23 +972,13 @@ def eliminar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        user_target = f"ID {usuario_id}"
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
-            row = cursor.fetchone()
-            if row: user_target = row[0]
-            cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
-        else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-            cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
-            
+        q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+
+        q_del = "DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?"
+        cursor.execute(q_del, (usuario_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
     except Exception:
