@@ -209,7 +209,7 @@ def init_db():
             activo BOOLEAN DEFAULT TRUE
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-            id VARCHAR(50) PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             titulo VARCHAR(200) NOT NULL,
             tipo VARCHAR(100) DEFAULT 'Instructivo',
             area VARCHAR(100) DEFAULT 'General',
@@ -223,7 +223,7 @@ def init_db():
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY,
-            galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE,
+            galeria_id VARCHAR(50) NOT NULL,
             filename TEXT NOT NULL,
             estado VARCHAR(50) DEFAULT 'activo'
         )''')
@@ -259,6 +259,12 @@ def init_db():
             fecha_publicacion TIMESTAMP DEFAULT NOW(),
             autor VARCHAR(100) NOT NULL
         )''')
+
+        # Asegurar columna tags en galerías
+        try:
+            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''")
+        except Exception:
+            pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -483,7 +489,7 @@ def incrementar_descarga(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
         conn.close()
@@ -536,7 +542,7 @@ def pdf_proxy():
     except Exception:
         return "Error obteniendo documento.", 500
 
-# 📁 GESTOR DE INSTRUCTIVOS (Soporta múltiples archivos y cualquier formato)
+# 📁 GESTOR DE INSTRUCTIVOS
 @app.route('/gestor')
 @login_required
 def index():
@@ -577,11 +583,11 @@ def index():
         categoria = area or 'General'
         sugerencias_titulos.append(titulo)
 
-        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (galeria_id,))
+        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (str(galeria_id),))
         archivos = [f[0] for f in cursor.fetchall()]
 
         item = {
-            'id': galeria_id,
+            'id': str(galeria_id),
             'titulo': titulo or 'Sin título',
             'descripcion': descripcion or '',
             'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
@@ -602,6 +608,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
+# 🚀 SUBIR CUALQUIER ARCHIVO (Generación de ID compatible con SERIAL / INT)
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -616,20 +623,18 @@ def subir_archivo():
         tags = (request.form.get('tags') or '').strip()
         autor = session.get('username', 'admin')
 
-        galeria_id = str(uuid.uuid4())[:8]
         archivos_guardados = []
-
         for file in archivos:
             if file and file.filename:
                 ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
                 
-                # Clasificación universal en Cloudinary (cualquier extensión soportada)
+                # Cloudinary Universal Upload
                 if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv', 'wmv', 'm4v']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
                 elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
                 else:
-                    # PDF, Word, Excel, ZIP, RAR, TXT, etc.
+                    # PDF, Office, ZIP, RAR, TXT o cualquier archivo sin restricciones
                     upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
 
                 archivos_guardados.append(upload_result['secure_url'])
@@ -637,17 +642,22 @@ def subir_archivo():
         if archivos_guardados:
             conn, db_type = get_db()
             cursor = conn.cursor()
+            
+            # Inserción con RETURNING id para respetar el SERIAL de Neon
             cursor.execute("""
-                INSERT INTO galerias (id, titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags) 
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), FALSE, %s)
-            """, (galeria_id, titulo, tipo, categoria, descripcion, autor, tags))
+                INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags) 
+                VALUES (%s, %s, %s, %s, %s, NOW(), FALSE, %s)
+                RETURNING id
+            """, (titulo, tipo, categoria, descripcion, autor, tags))
+            
+            nuevo_id = cursor.fetchone()[0]
             
             for fname in archivos_guardados:
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(nuevo_id), fname))
             
             conn.close()
             registrar_log(autor, "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
-            flash(f"Instructivo '{titulo}' publicado con {len(archivos_guardados)} archivo(s).")
+            flash(f"Instructivo '{titulo}' publicado con éxito.")
     except Exception as e:
         print(f"❌ Error subiendo instructivo: {e}")
         traceback.print_exc()
@@ -674,8 +684,8 @@ def editar_galeria(galeria_id):
         cursor.execute("""
             UPDATE galerias 
             SET titulo = %s, tipo = %s, area = %s, descripcion = %s, tags = %s 
-            WHERE id = %s
-        """, (nuevo_titulo, nuevo_tipo, nueva_cat, nueva_desc, nuevos_tags, galeria_id))
+            WHERE id::text = %s
+        """, (nuevo_titulo, nuevo_tipo, nueva_cat, nueva_desc, nuevos_tags, str(galeria_id)))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
@@ -688,7 +698,7 @@ def editar_galeria(galeria_id):
                 else:
                     upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
                 
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, upload_result['secure_url']))
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(galeria_id), upload_result['secure_url']))
                 archivos_agregados += 1
 
         conn.close()
@@ -707,12 +717,12 @@ def eliminar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
         autor = session.get('username', 'admin')
-        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id = %s", (autor, galeria_id))
+        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id::text = %s", (autor, str(galeria_id)))
         registrar_log(autor, "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
     except Exception:
         pass
@@ -862,7 +872,7 @@ def ver_papelera():
     credenciales_eliminadas = []
     comunicados_eliminados = []
 
-    # 1. Instructivos eliminados (tabla galerias alineada con Neon)
+    # 1. Instructivos eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -933,11 +943,11 @@ def restaurar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        cursor.execute("UPDATE galerias SET eliminado = FALSE, fecha_eliminacion = NULL, eliminado_por = NULL WHERE id = %s", (galeria_id,))
+        cursor.execute("UPDATE galerias SET eliminado = FALSE, fecha_eliminacion = NULL, eliminado_por = NULL WHERE id::text = %s", (str(galeria_id),))
         registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
     except Exception:
         pass
@@ -952,12 +962,12 @@ def destruir_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
-        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
+        cursor.execute("DELETE FROM galerias WHERE id::text = %s", (str(galeria_id),))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (str(galeria_id),))
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
     except Exception:
         pass
@@ -1010,11 +1020,11 @@ def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s AND filename = %s", (str(galeria_id), filename))
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se eliminó el archivo '{nombre_limpio}' del instructivo '{titulo}'.")
     except Exception:
