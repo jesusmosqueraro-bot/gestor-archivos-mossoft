@@ -18,21 +18,21 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 
-# Hasheo de contraseñas seguro
+# Hasheo y sanitización segura
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from flask_wtf.csrf import CSRFProtect
 
-# PostgreSQL Driver
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
+# PostgreSQL Drivers
 try:
     import pg8000.dbapi
 except Exception:
     pg8000 = None
+
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
 
 import cloudinary
 import cloudinary.uploader
@@ -153,27 +153,26 @@ def init_db():
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
+        
+        # 1. Tabla Usuarios
         if db_type == 'postgres':
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(200) NOT NULL, email VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50), filename TEXT NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id SERIAL PRIMARY KEY, servicio VARCHAR(150) NOT NULL, url TEXT, usuario VARCHAR(150) NOT NULL, password_enc TEXT NOT NULL, categoria VARCHAR(100) DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
-                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
+                id SERIAL PRIMARY KEY,
+                usuario VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                correo VARCHAR(200) NOT NULL,
+                rol VARCHAR(50) NOT NULL DEFAULT 'estandar',
+                nombre VARCHAR(100) DEFAULT '',
+                area VARCHAR(100) DEFAULT '',
+                activo BOOLEAN DEFAULT TRUE
             )''')
             
-            for col_query in [
+            # Migraciones preventivas en PostgreSQL para compatibilidad total
+            for q in [
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS usuario VARCHAR(100);",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS correo VARCHAR(200);",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol VARCHAR(50) DEFAULT 'estandar';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
@@ -185,33 +184,51 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
                 try:
-                    cursor.execute(col_query)
+                    cursor.execute(q)
                 except Exception:
                     pass
         else:
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                correo TEXT NOT NULL,
+                rol TEXT NOT NULL DEFAULT 'estandar'
             )''')
 
-        cursor.execute("SELECT COUNT(*) FROM usuarios")
-        if cursor.fetchone()[0] == 0:
-            query_admin = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(query_admin, ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin'))
+        # Tablas complementarias
+        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+            id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+            id SERIAL PRIMARY KEY, galeria_id VARCHAR(50), filename TEXT NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+        )''' if db_type == 'postgres' else '''CREATE TABLE IF NOT EXISTS archivos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
+        )''' if db_type == 'postgres' else '''CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
+            id SERIAL PRIMARY KEY, servicio VARCHAR(150) NOT NULL, url TEXT, usuario VARCHAR(150) NOT NULL, password_enc TEXT NOT NULL, categoria VARCHAR(100) DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+        )''' if db_type == 'postgres' else '''CREATE TABLE IF NOT EXISTS credenciales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
+            id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
+        )''' if db_type == 'postgres' else '''CREATE TABLE IF NOT EXISTS comunicados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
+        )''')
+
+        # Garantizar existencia de usuario admin
+        try:
+            cursor.execute("SELECT COUNT(*) FROM usuarios")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)",
+                               ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin'))
+        except Exception:
+            pass
 
         conn.close()
     except Exception as e:
@@ -242,9 +259,6 @@ def verificar_recaptcha(response_token):
     except Exception:
         return True
 
-def archivo_permitido(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -259,7 +273,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 RECUPERACIÓN DE CLAVE
+# 📧 CORREO RECUPERACIÓN
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
@@ -272,19 +286,28 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         with urllib.request.urlopen(req, context=ctx, timeout=15) as response:
             return True
     except Exception as e:
-        print(f"❌ Error en envío vía Google Script: {e}")
+        print(f"❌ Error enviando correo: {e}")
         return False
 
 @app.route('/recuperar', methods=['GET', 'POST'])
 @csrf.exempt
 def recuperar_clave():
     if request.method == 'POST':
-        email_ingresado = (request.form.get('email') or '').strip().lower()
+        email_ingresado = (request.form.get('email') or request.form.get('correo') or '').strip().lower()
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?"
-        cursor.execute(query, (email_ingresado,))
-        user = cursor.fetchone()
+        
+        user = None
+        for q in [
+            "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s",
+            "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = %s"
+        ]:
+            try:
+                cursor.execute(q if db_type == 'postgres' else q.replace('%s', '?'), (email_ingresado,))
+                user = cursor.fetchone()
+                if user: break
+            except Exception:
+                pass
         conn.close()
 
         if user:
@@ -304,7 +327,7 @@ def recuperar_clave():
 @csrf.exempt
 def validar_codigo():
     codigo_ingresado = (request.form.get('codigo') or '').strip()
-    nueva_pass = (request.form.get('nueva_password') or '').strip()
+    nueva_pass = (request.form.get('nueva_password') or request.form.get('password') or '').strip()
     codigo_correcto = session.get('reset_code')
     email_usuario = session.get('reset_email')
     nombre_usuario = session.get('reset_user')
@@ -318,8 +341,16 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?"
-        cursor.execute(q_upd, (nueva_pass, email_usuario))
+        pass_hash = generate_password_hash(nueva_pass)
+        for q in [
+            "UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s",
+            "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s"
+        ]:
+            try:
+                cursor.execute(q if db_type == 'postgres' else q.replace('%s', '?'), (pass_hash, email_usuario))
+            except Exception:
+                pass
+
         if db_type == 'sqlite': conn.commit()
         conn.close()
 
@@ -333,7 +364,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error=f"Error actualizando clave: {e}")
 
-# 🔑 LOGIN
+# 🔑 INICIO DE SESIÓN COMPATIBLE CON CUALQUIER COLUMNA
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -347,14 +378,29 @@ def login():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            query = "SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))"
-            cursor.execute(query, (username,))
-            user = cursor.fetchone()
+            
+            user = None
+            # Consulta inteligente con fallback entre esquemas
+            queries_login = [
+                "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))",
+                "SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))",
+                "SELECT usuario, password, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))"
+            ]
+
+            for q in queries_login:
+                try:
+                    cursor.execute(q if db_type == 'postgres' else q.replace('%s', '?'), (username,))
+                    user = cursor.fetchone()
+                    if user: break
+                except Exception:
+                    pass
+
             conn.close()
 
             if user:
                 clave_db = str(user[1] or '')
                 es_valida = check_password_hash(clave_db, password) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else (clave_db == password)
+                
                 if es_valida:
                     session.permanent = True
                     session['logged_in'] = True
@@ -533,7 +579,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
-# 🚀 SUBIDA DE ARCHIVOS (CARGA MÚLTIPLE DE CUALQUIER FORMATO A CLOUDINARY)
+# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -884,22 +930,31 @@ def gestion_usuarios():
     conn, db_type = get_db()
     cursor = conn.cursor()
     if request.method == 'POST':
-        nuevo_user = (request.form.get('username') or '').strip()
+        nuevo_user = (request.form.get('username') or request.form.get('usuario') or '').strip()
         nuevo_pass = (request.form.get('password') or '').strip()
-        nuevo_email = (request.form.get('email') or '').strip()
+        nuevo_email = (request.form.get('email') or request.form.get('correo') or '').strip()
         nuevo_rol = request.form.get('rol', 'estandar').strip()
         if nuevo_user and nuevo_pass and nuevo_email:
             try:
-                q_ins = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-                cursor.execute(q_ins, (nuevo_user, nuevo_pass, nuevo_email, nuevo_rol))
+                pass_hash = generate_password_hash(nuevo_pass)
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)"
+                cursor.execute(q_ins, (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
                 if db_type == 'sqlite': conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
             except Exception: pass
 
-    cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
-    lista_usuarios = cursor.fetchall()
+    try:
+        cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
+        lista_usuarios = cursor.fetchall()
+    except Exception:
+        try:
+            cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
+            lista_usuarios = cursor.fetchall()
+        except Exception:
+            lista_usuarios = []
+
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
@@ -907,24 +962,37 @@ def gestion_usuarios():
 @login_required
 @admin_required
 def editar_usuario(usuario_id):
-    nuevo_email = (request.form.get('email') or '').strip()
+    nuevo_email = (request.form.get('email') or request.form.get('correo') or '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
     nueva_pass = (request.form.get('password') or '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT username FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE id = ?"
-        cursor.execute(q_sel, (usuario_id,))
-        row = cursor.fetchone()
-        user_target = row[0] if row else f"ID {usuario_id}"
+        user_target = f"ID {usuario_id}"
+        try:
+            cursor.execute("SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
+            row = cursor.fetchone()
+            if row: user_target = row[0]
+        except Exception:
+            pass
 
         if nueva_pass:
-            q_upd = "UPDATE usuarios SET email = %s, rol = %s, password = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nueva_pass, usuario_id))
+            pass_hash = generate_password_hash(nueva_pass)
+            for q in [
+                "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s",
+                "UPDATE usuarios SET email = %s, rol = %s, password = %s WHERE id = %s"
+            ]:
+                try: cursor.execute(q if db_type == 'postgres' else q.replace('%s', '?'), (nuevo_email, nuevo_rol, pass_hash, usuario_id))
+                except Exception: pass
         else:
-            q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
+            for q in [
+                "UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s",
+                "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s"
+            ]:
+                try: cursor.execute(q if db_type == 'postgres' else q.replace('%s', '?'), (nuevo_email, nuevo_rol, usuario_id))
+                except Exception: pass
+
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Edición de Usuario", f"Actualizado usuario '{user_target}'")
     except Exception: pass
