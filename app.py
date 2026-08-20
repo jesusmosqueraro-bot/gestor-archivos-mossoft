@@ -258,7 +258,7 @@ def init_db():
             fijado BOOLEAN DEFAULT FALSE,
             imagen_url TEXT DEFAULT '',
             estado VARCHAR(50) DEFAULT 'activo',
-            fecha_publicacion VARCHAR(100) NOT NULL,
+            fecha_publicacion TIMESTAMP DEFAULT NOW(),
             autor VARCHAR(100) NOT NULL
         )''')
 
@@ -267,7 +267,6 @@ def init_db():
             ("fijado", "BOOLEAN DEFAULT FALSE"),
             ("imagen_url", "TEXT DEFAULT ''"),
             ("estado", "VARCHAR(50) DEFAULT 'activo'"),
-            ("fecha_publicacion", "VARCHAR(100) DEFAULT ''"),
             ("autor", "VARCHAR(100) DEFAULT 'Admin'")
         ]
         for col, col_type in columnas_comunicados:
@@ -1355,6 +1354,7 @@ def ver_comunicados():
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
 
 @app.route('/comunicados/crear', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def crear_comunicado():
@@ -1381,15 +1381,17 @@ def crear_comunicado():
                 flash("Advertencia: No se pudo subir la imagen, pero se guardará el texto.")
 
         if titulo and contenido:
-            fecha_act = obtener_fecha_actual()
             autor = session.get('username', 'Admin')
             
             conn, db_type = get_db()
             cursor = conn.cursor()
 
             cursor.execute(
-                "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
-                (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor)
+                """
+                INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) 
+                VALUES (%s, %s, %s, %s, %s, 'activo', NOW(), %s)
+                """, 
+                (titulo, contenido, nivel, fijado, imagen_url, autor)
             )
             conn.close()
             
