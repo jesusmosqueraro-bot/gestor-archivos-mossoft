@@ -12,6 +12,7 @@ import threading
 import base64
 import hashlib
 import traceback
+import ssl
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -30,11 +31,11 @@ try:
 except Exception:
     Fernet = None
 
-# PostgreSQL Driver (Soporte psycopg v3 y psycopg2)
+# PostgreSQL Driver (pg8000 en Python puro y psycopg2 como respaldo)
 try:
-    import psycopg
+    import pg8000.dbapi
 except Exception:
-    psycopg = None
+    pg8000 = None
 
 try:
     import psycopg2
@@ -165,7 +166,7 @@ def validar_instancia_y_sesion():
 
 def get_db():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL no está configurada")
+        raise RuntimeError("DATABASE_URL no está configurada.")
 
     url = DATABASE_URL.strip()
     if url.startswith("postgres://"):
@@ -177,14 +178,25 @@ def get_db():
     if "sslmode=" not in url:
         url += ("&" if "?" in url else "?") + "sslmode=require"
 
-    if psycopg:
-        conn = psycopg.connect(url, connect_timeout=15, autocommit=True)
+    if pg8000:
+        parsed = urllib.parse.urlparse(url)
+        ssl_ctx = ssl.create_default_context()
+        conn = pg8000.dbapi.connect(
+            user=parsed.username,
+            password=parsed.password,
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            database=parsed.path.lstrip('/'),
+            ssl_context=ssl_ctx,
+            timeout=15
+        )
+        conn.autocommit = True
         return conn, 'postgres'
     elif psycopg2:
         conn = psycopg2.connect(url, connect_timeout=15)
         return conn, 'postgres'
     else:
-        raise RuntimeError("No se encontró ningún controlador de PostgreSQL (psycopg o psycopg2).")
+        raise RuntimeError("No se encontró ningún controlador de PostgreSQL disponible.")
 
 def init_db():
     try:
