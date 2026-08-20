@@ -211,14 +211,15 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
             id VARCHAR(50) PRIMARY KEY,
             titulo VARCHAR(200) NOT NULL,
-            descripcion TEXT,
-            fecha VARCHAR(100),
-            categoria VARCHAR(100) DEFAULT 'General',
             tipo VARCHAR(100) DEFAULT 'Instructivo',
-            tags TEXT DEFAULT '',
-            vistas INTEGER DEFAULT 0,
-            descargas INTEGER DEFAULT 0,
-            estado VARCHAR(50) DEFAULT 'activo'
+            area VARCHAR(100) DEFAULT 'General',
+            descripcion TEXT,
+            subido_por VARCHAR(100) DEFAULT 'admin',
+            fecha_subida TIMESTAMP DEFAULT NOW(),
+            eliminado BOOLEAN DEFAULT FALSE,
+            fecha_eliminacion TIMESTAMP,
+            eliminado_por VARCHAR(100),
+            tags TEXT DEFAULT ''
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY,
@@ -258,12 +259,6 @@ def init_db():
             fecha_publicacion TIMESTAMP DEFAULT NOW(),
             autor VARCHAR(100) NOT NULL
         )''')
-
-        # Migraciones preventivas para galerias
-        try:
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''")
-        except Exception:
-            pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -479,14 +474,7 @@ def login():
 @csrf.exempt
 @login_required
 def incrementar_vista(galeria_id):
-    try:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s", (galeria_id,))
-        conn.close()
-        return jsonify({'success': True})
-    except Exception:
-        return jsonify({'success': False, 'error': 'Error actualizando vista'}), 200
+    return jsonify({'success': True})
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
 @csrf.exempt
@@ -498,15 +486,13 @@ def incrementar_descarga(galeria_id):
         cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
-
-        cursor.execute("UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s", (galeria_id,))
         conn.close()
 
         usuario_actual = session.get('username', 'Anónimo')
         registrar_log(usuario_actual, "Descarga de Archivo", f"El usuario descargó material del instructivo: '{titulo}'")
         return jsonify({'success': True})
     except Exception:
-        return jsonify({'success': False, 'error': 'Error actualizando descarga'}), 200
+        return jsonify({'success': False}), 200
 
 @app.route('/pdf_proxy')
 @login_required
@@ -550,6 +536,191 @@ def pdf_proxy():
     except Exception:
         return "Error obteniendo documento.", 500
 
+# 📁 GESTOR DE INSTRUCTIVOS (Soporta múltiples archivos y cualquier formato)
+@app.route('/gestor')
+@login_required
+def index():
+    busqueda_raw = request.args.get('q', '').strip()
+    cat_filtro = request.args.get('cat', '').strip()
+    tipo_filtro = request.args.get('tipo', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT id, titulo, tipo, area, descripcion, COALESCE(fecha_subida::text, ''), tags 
+            FROM galerias 
+            WHERE eliminado IS NOT TRUE 
+            ORDER BY id DESC
+        """)
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error leyendo galerias: {e}")
+        rows = []
+
+    galerias = []
+    sugerencias_titulos = []
+    fecha_defecto = obtener_fecha_actual()
+
+    STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para'}
+
+    palabras_clave = []
+    if busqueda_raw:
+        palabras_limpias = [normalizar(p) for p in busqueda_raw.split() if normalizar(p)]
+        palabras_clave = [p for p in palabras_limpias if p not in STOP_WORDS]
+        if not palabras_clave:
+            palabras_clave = palabras_limpias
+
+    for r in rows:
+        galeria_id, titulo, tipo, area, descripcion, fecha_subida, tags = r
+        categoria = area or 'General'
+        sugerencias_titulos.append(titulo)
+
+        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (galeria_id,))
+        archivos = [f[0] for f in cursor.fetchall()]
+
+        item = {
+            'id': galeria_id,
+            'titulo': titulo or 'Sin título',
+            'descripcion': descripcion or '',
+            'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
+            'categoria': categoria,
+            'tipo': tipo or 'Instructivo',
+            'tags': tags or '',
+            'archivos': archivos
+        }
+
+        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {tags} {' '.join(archivos)}")
+        coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave) if palabras_clave else True
+        coincide_cat = not cat_filtro or categoria == cat_filtro
+        coincide_tipo = not tipo_filtro or tipo == tipo_filtro
+
+        if coincide_busqueda and coincide_cat and coincide_tipo:
+            galerias.append(item)
+
+    conn.close()
+    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
+
+@app.route('/subir', methods=['POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def subir_archivo():
+    try:
+        archivos = request.files.getlist('archivo') or request.files.getlist('archivos') or request.files.getlist('file')
+        titulo = (request.form.get('titulo') or 'Sin título').strip()
+        descripcion = (request.form.get('descripcion') or '').strip()
+        categoria = (request.form.get('categoria') or request.form.get('area') or 'General').strip()
+        tipo = (request.form.get('tipo') or 'Instructivo').strip()
+        tags = (request.form.get('tags') or '').strip()
+        autor = session.get('username', 'admin')
+
+        galeria_id = str(uuid.uuid4())[:8]
+        archivos_guardados = []
+
+        for file in archivos:
+            if file and file.filename:
+                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                
+                # Clasificación universal en Cloudinary (cualquier extensión soportada)
+                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv', 'wmv', 'm4v']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
+                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
+                else:
+                    # PDF, Word, Excel, ZIP, RAR, TXT, etc.
+                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
+
+                archivos_guardados.append(upload_result['secure_url'])
+
+        if archivos_guardados:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO galerias (id, titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags) 
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), FALSE, %s)
+            """, (galeria_id, titulo, tipo, categoria, descripcion, autor, tags))
+            
+            for fname in archivos_guardados:
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
+            
+            conn.close()
+            registrar_log(autor, "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
+            flash(f"Instructivo '{titulo}' publicado con {len(archivos_guardados)} archivo(s).")
+    except Exception as e:
+        print(f"❌ Error subiendo instructivo: {e}")
+        traceback.print_exc()
+        flash("Ocurrió un error al subir el instructivo.")
+
+    return redirect(url_for('index'))
+
+@app.route('/editar_galeria/<galeria_id>', methods=['POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def editar_galeria(galeria_id):
+    try:
+        nuevo_titulo = (request.form.get('titulo') or '').strip()
+        nueva_desc = (request.form.get('descripcion') or '').strip()
+        nueva_cat = (request.form.get('categoria') or request.form.get('area') or 'General').strip()
+        nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
+        nuevos_tags = (request.form.get('tags') or '').strip()
+        nuevos_archivos = request.files.getlist('nuevos_archivos') or request.files.getlist('archivo')
+        
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE galerias 
+            SET titulo = %s, tipo = %s, area = %s, descripcion = %s, tags = %s 
+            WHERE id = %s
+        """, (nuevo_titulo, nuevo_tipo, nueva_cat, nueva_desc, nuevos_tags, galeria_id))
+        
+        archivos_agregados = 0
+        for file in nuevos_archivos:
+            if file and file.filename:
+                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv', 'wmv', 'm4v']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
+                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
+                else:
+                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
+                
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, upload_result['secure_url']))
+                archivos_agregados += 1
+
+        conn.close()
+        registrar_log(session['username'], "Edición de Galería", f"Se editó '{nuevo_titulo}' (+{archivos_agregados} archivos)")
+    except Exception as e:
+        print(f"Error procesando edición en BD: {e}")
+        traceback.print_exc()
+
+    return redirect(url_for('index'))
+
+@app.route('/eliminar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
+@login_required
+@admin_required
+def eliminar_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        autor = session.get('username', 'admin')
+        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id = %s", (autor, galeria_id))
+        registrar_log(autor, "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
+    except Exception:
+        pass
+
+    conn.close()
+    return redirect(url_for('index'))
+
+# 🔐 BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
 @admin_required
@@ -681,6 +852,7 @@ def eliminar_credencial(cred_id):
 
     return redirect(url_for('ver_credenciales'))
 
+# 🗑️ PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -690,15 +862,22 @@ def ver_papelera():
     credenciales_eliminadas = []
     comunicados_eliminados = []
 
+    # 1. Instructivos eliminados (tabla galerias alineada con Neon)
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, titulo, descripcion, COALESCE(fecha_eliminacion::text, fecha_subida::text, ''), area, tipo 
+            FROM galerias 
+            WHERE eliminado IS TRUE 
+            ORDER BY id DESC
+        """)
         eliminados = cursor.fetchall()
         conn.close()
     except Exception as e:
         print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
+    # 2. Credenciales eliminadas
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -713,6 +892,7 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
+    # 3. Comunicados eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -744,6 +924,45 @@ def ver_papelera():
         credenciales_eliminadas=credenciales_eliminadas, 
         comunicados_eliminados=comunicados_eliminados
     )
+
+@app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
+@login_required
+@admin_required
+def restaurar_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        cursor.execute("UPDATE galerias SET eliminado = FALSE, fecha_eliminacion = NULL, eliminado_por = NULL WHERE id = %s", (galeria_id,))
+        registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
+    except Exception:
+        pass
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/destruir_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
+@login_required
+@admin_required
+def destruir_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else galeria_id
+
+        cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
+        registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
+    except Exception:
+        pass
+    conn.close()
+    return redirect(url_for('ver_papelera'))
 
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST', 'GET'])
 @csrf.exempt
@@ -781,45 +1000,6 @@ def destruir_credencial(cred_id):
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
     except Exception as e:
         print(f"❌ Error destruyendo credencial: {e}")
-    return redirect(url_for('ver_papelera'))
-
-@app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
-@csrf.exempt
-@login_required
-@admin_required
-def restaurar_galeria(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        cursor.execute("UPDATE galerias SET estado = 'activo' WHERE id = %s", (galeria_id,))
-        registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
-    except Exception:
-        pass
-    conn.close()
-    return redirect(url_for('ver_papelera'))
-
-@app.route('/destruir_galeria/<galeria_id>', methods=['POST', 'GET'])
-@csrf.exempt
-@login_required
-@admin_required
-def destruir_galeria(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
-        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
-        registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
-    except Exception:
-        pass
-    conn.close()
     return redirect(url_for('ver_papelera'))
 
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST', 'GET'])
@@ -1071,208 +1251,6 @@ def bienvenida():
         comunicado_fijado=comunicado_fijado
     )
 
-@app.route('/gestor')
-@login_required
-def index():
-    busqueda_raw = request.args.get('q', '').strip()
-    cat_filtro = request.args.get('cat', '').strip()
-    tipo_filtro = request.args.get('tipo', '').strip()
-    formato_filtro = request.args.get('formato', '').strip()
-
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
-        rows = cursor.fetchall()
-    except Exception:
-        rows = []
-
-    galerias = []
-    sugerencias_titulos = []
-    fecha_defecto = obtener_fecha_actual()
-
-    STOP_WORDS = {'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'a', 'en', 'con', 'por', 'para'}
-
-    palabras_clave = []
-    if busqueda_raw:
-        palabras_limpias = [normalizar(p) for p in busqueda_raw.split() if normalizar(p)]
-        palabras_clave = [p for p in palabras_limpias if p not in STOP_WORDS]
-        if not palabras_clave:
-            palabras_clave = palabras_limpias
-
-    for r in rows:
-        galeria_id, titulo, descripcion, fecha = r[0], r[1], r[2], r[3]
-        categoria = r[4] if len(r) > 4 and r[4] else 'General'
-        tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
-        tags = r[6] if len(r) > 6 and r[6] else ''
-        vistas = r[7] if len(r) > 7 and r[7] is not None else 0
-        descargas = r[8] if len(r) > 8 and r[8] is not None else 0
-
-        sugerencias_titulos.append(titulo)
-
-        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (galeria_id,))
-        archivos = [f[0] for f in cursor.fetchall()]
-
-        item = {
-            'id': galeria_id,
-            'titulo': titulo,
-            'descripcion': descripcion,
-            'fecha': fecha or fecha_defecto,
-            'categoria': categoria,
-            'tipo': tipo,
-            'tags': tags,
-            'vistas': vistas,
-            'descargas': descargas,
-            'archivos': archivos
-        }
-
-        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {tags} {' '.join(archivos)}")
-        coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave) if palabras_clave else True
-        coincide_cat = not cat_filtro or categoria == cat_filtro
-        coincide_tipo = not tipo_filtro or tipo == tipo_filtro
-
-        if coincide_busqueda and coincide_cat and coincide_tipo:
-            galerias.append(item)
-
-    conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
-
-# 🚀 SUBIR CUALQUIER ARCHIVO SIN RESTRICCIONES A CLOUDINARY
-@app.route('/subir', methods=['POST'])
-@login_required
-@admin_required
-def subir_archivo():
-    try:
-        archivos = request.files.getlist('archivo')
-        titulo = (request.form.get('titulo') or 'Sin título').strip()
-        descripcion = (request.form.get('descripcion') or '').strip()
-        categoria = (request.form.get('categoria') or 'General').strip()
-        tipo = (request.form.get('tipo') or 'Instructivo').strip()
-        tags = (request.form.get('tags') or '').strip()
-
-        galeria_id = str(uuid.uuid4())[:8]
-        fecha_actual = obtener_fecha_actual()
-        
-        archivos_guardados = []
-        for file in archivos:
-            if file and file.filename:
-                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-                
-                # Clasificación automática en Cloudinary según extensión (soporta todo tipo de archivo)
-                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv']:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
-                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg']:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
-                else:
-                    # PDF, Word, Excel, ZIP, RAR, TXT o cualquier otro archivo o carpeta comprimida
-                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
-
-                archivos_guardados.append(upload_result['secure_url'])
-
-        if archivos_guardados:
-            conn, db_type = get_db()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')
-            """, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
-            
-            for fname in archivos_guardados:
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
-            
-            conn.close()
-            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
-            flash("Instructivo publicado con éxito.")
-    except Exception as e:
-        print(f"❌ Error subiendo instructivo: {e}")
-        traceback.print_exc()
-        flash("Ocurrió un error al subir el instructivo.")
-
-    return redirect(url_for('index'))
-
-@app.route('/editar_galeria/<galeria_id>', methods=['POST'])
-@login_required
-@admin_required
-def editar_galeria(galeria_id):
-    try:
-        nuevo_titulo = (request.form.get('titulo') or '').strip()
-        nueva_desc = (request.form.get('descripcion') or '').strip()
-        nueva_cat = (request.form.get('categoria') or 'General').strip()
-        nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
-        nuevos_tags = (request.form.get('tags') or '').strip()
-        nuevos_archivos = request.files.getlist('nuevos_archivos')
-        
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s", (galeria_id,))
-        antiguo = cursor.fetchone()
-
-        cambios = []
-        if antiguo:
-            tit_old = (antiguo[0] or '').strip()
-            desc_old = (antiguo[1] or '').strip()
-            cat_old = (antiguo[2] or 'General').strip()
-            tipo_old = (antiguo[3] or 'Instructivo').strip()
-
-            if tit_old != nuevo_titulo: cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
-            if desc_old != nueva_desc: cambios.append(f"Descripción")
-            if cat_old != nueva_cat: cambios.append(f"Categoría: '{cat_old}' ➔ '{nueva_cat}'")
-            if tipo_old != nuevo_tipo: cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
-
-        cursor.execute("""
-            UPDATE galerias 
-            SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s 
-            WHERE id = %s
-        """, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
-        
-        archivos_agregados = 0
-        for file in nuevos_archivos:
-            if file and file.filename:
-                ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-                if ext in ['mp4', 'mov', 'webm', 'avi', 'mkv', 'flv']:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="video", use_filename=True, unique_filename=True)
-                elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg']:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
-                else:
-                    upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
-                
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, upload_result['secure_url']))
-                archivos_agregados += 1
-
-        if archivos_agregados > 0:
-            cambios.append(f"Archivos: +{archivos_agregados} nuevo(s)")
-
-        detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios) if cambios else f"'{nuevo_titulo}' re-guardado"
-        registrar_log(session['username'], "Edición de Galería", detalles_log)
-        conn.close()
-    except Exception as e:
-        print(f"Error procesando edición en BD: {e}")
-        traceback.print_exc()
-
-    return redirect(url_for('index'))
-
-@app.route('/eliminar_galeria/<galeria_id>', methods=['POST', 'GET'])
-@csrf.exempt
-@login_required
-@admin_required
-def eliminar_galeria(galeria_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else galeria_id
-
-        cursor.execute("UPDATE galerias SET estado = 'eliminado' WHERE id = %s", (galeria_id,))
-        registrar_log(session['username'], "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
-    except Exception:
-        pass
-
-    conn.close()
-    return redirect(url_for('index'))
-
 @app.route('/admin/db', methods=['GET'])
 @login_required
 @admin_required
@@ -1310,6 +1288,7 @@ def visor_db():
         error=error_sql
     )
 
+# 📢 COMUNICADOS
 @app.route('/comunicados')
 @login_required
 def ver_comunicados():
