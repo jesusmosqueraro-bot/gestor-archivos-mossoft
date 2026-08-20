@@ -149,7 +149,7 @@ def get_db():
     conn = sqlite3.connect(DB_NAME)
     return conn, 'sqlite'
 
-# 🛡️ INICIALIZACIÓN Y ESQUEMA NEON EXACTO
+# 🛡️ INICIALIZACIÓN Y ESQUEMA EXACTO
 def init_db():
     try:
         conn, db_type = get_db()
@@ -375,7 +375,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error=f"Error actualizando clave: {e}")
 
-# 🔑 INICIO DE SESIÓN (CONSULTA EXACTA: 'usuario', 'password_hash', 'rol')
+# 🔑 INICIO DE SESIÓN
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -654,7 +654,7 @@ def editar_galeria(galeria_id):
         nueva_cat = (request.form.get('categoria') or 'General').strip()
         nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
         nuevos_tags = (request.form.get('tags') or '').strip()
-        nuevos_archivos = request.files.getlist('nuevos_archivos') or request.files.getlist('archivo')
+        nuevos_archivos = request.files.getlist('nuevos_archivos') or request.files.getlist('archivo') or request.files.getlist('archivos')
         
         conn, db_type = get_db()
         cursor = conn.cursor()
