@@ -88,22 +88,41 @@
                         <span class="px-3 py-1 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-bold uppercase tracking-wider">
                             {{ gal.categoria }}
                         </span>
-                        <span class="text-[11px] text-slate-500">{{ gal.fecha }}</span>
+                        <div class="flex items-center gap-3 text-[11px] text-slate-400 font-medium">
+                            <span title="Vistas"><i class="fa-regular fa-eye text-cyan-400 mr-1"></i>{{ gal.vistas }}</span>
+                            <span title="Descargas"><i class="fa-solid fa-download text-emerald-400 mr-1"></i>{{ gal.descargas }}</span>
+                            <span class="text-slate-500">{{ gal.fecha }}</span>
+                        </div>
                     </div>
 
                     <h2 class="text-base font-bold text-white mb-2 line-clamp-2">{{ gal.titulo }}</h2>
                     <p class="text-xs text-slate-400 mb-4 line-clamp-2 font-normal">{{ gal.descripcion }}</p>
 
-                    <!-- Lista de Archivos -->
+                    <!-- Lista de Archivos Adjuntos -->
                     {% if gal.archivos %}
                     <div class="space-y-2 mb-4">
                         {% for arch in gal.archivos %}
                         <div class="flex items-center justify-between p-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl text-xs">
-                            <span class="truncate text-slate-300 text-[11px] pr-2">{{ arch.split('/')[-1] }}</span>
+                            <span class="truncate text-slate-300 text-[11px] pr-2 flex items-center gap-1.5">
+                                {% if '.mp4' in arch or '.mov' in arch or '.webm' in arch or '.avi' in arch or '.mkv' in arch %}
+                                    <i class="fa-solid fa-film text-purple-400"></i>
+                                {% elif '.png' in arch or '.jpg' in arch or '.jpeg' in arch or '.webp' in arch or '.gif' in arch %}
+                                    <i class="fa-solid fa-image text-cyan-400"></i>
+                                {% elif '.pdf' in arch %}
+                                    <i class="fa-solid fa-file-pdf text-rose-400"></i>
+                                {% elif '.zip' in arch or '.rar' in arch or '.7z' in arch %}
+                                    <i class="fa-solid fa-file-zipper text-amber-400"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-file text-blue-400"></i>
+                                {% endif %}
+                                {{ arch.split('/')[-1] }}
+                            </span>
                             <div class="flex items-center gap-1.5 shrink-0">
-                                <a href="{{ url_for('pdf_proxy', url=arch, download=0) }}" target="_blank" onclick="fetch('/incrementar_vista/{{ gal.id }}', {method: 'POST'})" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all" title="Ver archivo">
+                                <!-- Botón Previsualizar Modal -->
+                                <button onclick="previsualizarArchivo('{{ arch }}', '{{ gal.id }}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white transition-all" title="Previsualizar">
                                     <i class="fa-solid fa-eye text-[11px]"></i>
-                                </a>
+                                </button>
+                                <!-- Botón Descargar -->
                                 <a href="{{ url_for('pdf_proxy', url=arch, download=1) }}" onclick="fetch('/incrementar_descarga/{{ gal.id }}', {method: 'POST'})" class="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 transition-all" title="Descargar">
                                     <i class="fa-solid fa-download text-[11px]"></i>
                                 </a>
@@ -133,6 +152,21 @@
         </div>
         {% endif %}
     </main>
+
+    <!-- Modal Previsualización de Archivos -->
+    <div id="modal-preview" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
+            <div class="flex items-center justify-between p-4 border-b border-slate-800">
+                <span id="preview-filename" class="text-sm font-bold text-white truncate max-w-[80%]"></span>
+                <button onclick="cerrarPreview()" class="text-slate-400 hover:text-white p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div id="preview-container" class="flex-1 overflow-auto p-4 flex items-center justify-center min-h-[400px]">
+                <!-- Contenido dinámico inyectado por JS -->
+            </div>
+        </div>
+    </div>
 
     <!-- Modal Subir Instructivo -->
     <div id="modal-subir" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
@@ -183,7 +217,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Archivos Adjuntos *</label>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Archivos Adjuntos (Selecciona 1 o más archivos con Ctrl / Shift) *</label>
                     <input type="file" name="archivo" multiple required class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
                 </div>
 
@@ -248,7 +282,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Agregar más archivos (Opcional)</label>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Agregar más archivos (Múltiple)</label>
                     <input type="file" name="nuevos_archivos" multiple class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
                 </div>
 
@@ -264,29 +298,57 @@
         </div>
     </div>
 
-    <!-- Scripts de Control de Modales -->
+    <!-- Scripts -->
     <script>
-        function abrirModalSubir() {
-            document.getElementById('modal-subir').classList.remove('hidden');
-        }
-        function cerrarModalSubir() {
-            document.getElementById('modal-subir').classList.add('hidden');
-        }
+        function abrirModalSubir() { document.getElementById('modal-subir').classList.remove('hidden'); }
+        function cerrarModalSubir() { document.getElementById('modal-subir').classList.add('hidden'); }
         function abrirModalEditar(id, titulo, descripcion, categoria, tipo, tags) {
             document.getElementById('form-editar').action = '/editar_galeria/' + id;
             document.getElementById('edit-titulo').value = titulo || '';
             document.getElementById('edit-descripcion').value = descripcion || '';
-            
             const selCat = document.getElementById('edit-categoria');
             if (selCat) selCat.value = categoria || 'General';
-
             const selTipo = document.getElementById('edit-tipo');
             if (selTipo) selTipo.value = tipo || 'Instructivo';
-
             document.getElementById('modal-editar').classList.remove('hidden');
         }
-        function cerrarModalEditar() {
-            document.getElementById('modal-editar').classList.add('hidden');
+        function cerrarModalEditar() { document.getElementById('modal-editar').classList.add('hidden'); }
+
+        // Función interactiva de Previsualización en Modal
+        function previsualizarArchivo(url, galeriaId) {
+            fetch('/incrementar_vista/' + galeriaId, {method: 'POST'});
+            const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(url) + '&download=0';
+            const filename = url.split('/').pop();
+            const ext = filename.split('.').pop().toLowerCase();
+
+            document.getElementById('preview-filename').innerText = filename;
+            const cont = document.getElementById('preview-container');
+            cont.innerHTML = '';
+
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+                cont.innerHTML = `<img src="${proxyUrl}" class="max-h-[75vh] max-w-full rounded-2xl shadow-lg object-contain">`;
+            } else if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(ext)) {
+                cont.innerHTML = `<video controls autoplay class="max-h-[75vh] max-w-full rounded-2xl shadow-lg"><source src="${proxyUrl}" type="video/mp4">Tu navegador no soporta video.</video>`;
+            } else if (ext === 'pdf') {
+                cont.innerHTML = `<iframe src="${proxyUrl}" class="w-full h-[75vh] rounded-2xl border-0"></iframe>`;
+            } else {
+                cont.innerHTML = `
+                    <div class="text-center p-8">
+                        <i class="fa-solid fa-file-arrow-down text-5xl text-cyan-400 mb-4 block"></i>
+                        <p class="text-white font-bold mb-2">${filename}</p>
+                        <p class="text-xs text-slate-400 mb-4">Este formato no admite vista previa en el navegador.</p>
+                        <a href="/pdf_proxy?url=${encodeURIComponent(url)}&download=1" class="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold rounded-xl inline-flex items-center gap-2">
+                            <i class="fa-solid fa-download"></i> Descargar archivo
+                        </a>
+                    </div>
+                `;
+            }
+            document.getElementById('modal-preview').classList.remove('hidden');
+        }
+
+        function cerrarPreview() {
+            document.getElementById('modal-preview').classList.add('hidden');
+            document.getElementById('preview-container').innerHTML = '';
         }
     </script>
 </body>
