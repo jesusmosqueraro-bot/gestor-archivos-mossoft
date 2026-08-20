@@ -208,6 +208,7 @@ def init_db():
             area VARCHAR(100) DEFAULT '',
             activo BOOLEAN DEFAULT TRUE
         )''')
+        
         cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
             id SERIAL PRIMARY KEY,
             titulo VARCHAR(200) NOT NULL,
@@ -221,12 +222,14 @@ def init_db():
             eliminado_por VARCHAR(100),
             tags TEXT DEFAULT ''
         )''')
+
         cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
             id SERIAL PRIMARY KEY,
             galeria_id VARCHAR(50) NOT NULL,
-            filename TEXT NOT NULL,
+            filename TEXT,
             estado VARCHAR(50) DEFAULT 'activo'
         )''')
+
         cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
             id SERIAL PRIMARY KEY,
             usuario VARCHAR(100),
@@ -234,6 +237,7 @@ def init_db():
             detalles TEXT,
             fecha VARCHAR(100)
         )''')
+
         cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
             id SERIAL PRIMARY KEY,
             titulo VARCHAR(150) NOT NULL,
@@ -248,6 +252,7 @@ def init_db():
             fecha_eliminacion TIMESTAMP,
             eliminado_por VARCHAR(100)
         )''')
+
         cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
             id SERIAL PRIMARY KEY,
             titulo VARCHAR(200) NOT NULL,
@@ -260,10 +265,17 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        try:
-            cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''")
-        except Exception:
-            pass
+        # 🛠️ MIGRACIONES PREVENTIVAS EN TABLAS
+        for mig_sql in [
+            "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
+            "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS filename TEXT;",
+            "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+            "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS eliminado BOOLEAN DEFAULT FALSE;"
+        ]:
+            try:
+                cursor.execute(mig_sql)
+            except Exception:
+                pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -541,7 +553,7 @@ def pdf_proxy():
     except Exception:
         return "Error obteniendo documento.", 500
 
-# 📁 GESTOR DE INSTRUCTIVOS
+# 📁 GESTOR DE INSTRUCTIVOS (Soporta múltiples archivos y cualquier formato)
 @app.route('/gestor')
 @login_required
 def index():
@@ -586,8 +598,21 @@ def index():
             categoria = area or 'General'
             sugerencias_titulos.append(titulo)
 
-            cursor.execute("SELECT filename FROM archivos WHERE galeria_id::text = %s", (str(galeria_id),))
-            archivos = [f[0] for f in cursor.fetchall() if f[0]]
+            # Consulta universal para archivos
+            archivos = []
+            try:
+                cursor.execute("SELECT COALESCE(filename, '') FROM archivos WHERE galeria_id::text = %s", (str(galeria_id),))
+                archivos = [f[0] for f in cursor.fetchall() if f[0]]
+            except Exception:
+                try:
+                    cursor.execute("SELECT * FROM archivos WHERE galeria_id::text = %s", (str(galeria_id),))
+                    filas_raw = cursor.fetchall()
+                    for f in filas_raw:
+                        for elem in f:
+                            if isinstance(elem, str) and ('http://' in elem or 'https://' in elem or '.' in elem):
+                                archivos.append(elem)
+                except Exception:
+                    archivos = []
 
             item = {
                 'id': str(galeria_id),
@@ -624,7 +649,7 @@ def index():
         rol=session.get('rol')
     )
 
-# 🚀 SUBIR CUALQUIER ARCHIVO (Generación de ID compatible con SERIAL)
+# 🚀 SUBIR CUALQUIER ARCHIVO (Carga múltiple universal sin límites)
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -650,7 +675,7 @@ def subir_archivo():
                 elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
                 else:
-                    # PDF, Word, Excel, ZIP, RAR, TXT, etc.
+                    # PDF, Word, Excel, ZIP, RAR, TXT o cualquier archivo sin restricciones
                     upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
 
                 archivos_guardados.append(upload_result['secure_url'])
@@ -659,6 +684,7 @@ def subir_archivo():
             conn, db_type = get_db()
             cursor = conn.cursor()
             
+            # Inserción con RETURNING id para respetar el SERIAL de Neon
             cursor.execute("""
                 INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags) 
                 VALUES (%s, %s, %s, %s, %s, NOW(), FALSE, %s)
@@ -668,7 +694,11 @@ def subir_archivo():
             nuevo_id = cursor.fetchone()[0]
             
             for fname in archivos_guardados:
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(nuevo_id), fname))
+                try:
+                    cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(nuevo_id), fname))
+                except Exception:
+                    cursor.execute("ALTER TABLE archivos ADD COLUMN IF NOT EXISTS filename TEXT;")
+                    cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(nuevo_id), fname))
             
             conn.close()
             registrar_log(autor, "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
@@ -713,7 +743,12 @@ def editar_galeria(galeria_id):
                 else:
                     upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
                 
-                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(galeria_id), upload_result['secure_url']))
+                try:
+                    cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(galeria_id), upload_result['secure_url']))
+                except Exception:
+                    cursor.execute("ALTER TABLE archivos ADD COLUMN IF NOT EXISTS filename TEXT;")
+                    cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (str(galeria_id), upload_result['secure_url']))
+
                 archivos_agregados += 1
 
         conn.close()
@@ -1015,7 +1050,7 @@ def destruir_credencial(cred_id):
         cursor = conn.cursor()
         cursor.execute("SELECT titulo FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
-        servicio = row[0] if row and row[0] else f"ID {cred_id}"
+        servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
         conn.close()
@@ -1495,4 +1530,3 @@ def destruir_comunicado(com_id):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
-    
