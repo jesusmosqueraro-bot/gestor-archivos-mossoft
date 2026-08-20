@@ -12,6 +12,7 @@
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
         .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     </style>
 </head>
 <body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white">
@@ -82,60 +83,88 @@
         {% else %}
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {% for gal in galerias %}
-            <article class="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between">
+            <article class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between">
+                
                 <div>
-                    <div class="flex items-center justify-between gap-2 mb-3">
-                        <span class="px-3 py-1 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                            {{ gal.categoria }}
-                        </span>
-                        <div class="flex items-center gap-3 text-[11px] text-slate-400 font-medium">
-                            <span title="Vistas"><i class="fa-regular fa-eye text-cyan-400 mr-1"></i>{{ gal.vistas }}</span>
-                            <span title="Descargas"><i class="fa-solid fa-download text-emerald-400 mr-1"></i>{{ gal.descargas }}</span>
-                            <span class="text-slate-500">{{ gal.fecha }}</span>
-                        </div>
-                    </div>
+                    <!-- Miniatura de Portada Dinámica (Imagen o Video) -->
+                    {% set portada = None %}
+                    {% for arch in gal.archivos %}
+                        {% if not portada and ('.png' in arch.lower() or '.jpg' in arch.lower() or '.jpeg' in arch.lower() or '.webp' in arch.lower() or '.gif' in arch.lower() or '.mp4' in arch.lower() or '.mov' in arch.lower() or '.webm' in arch.lower() or '.mkv' in arch.lower() or '/image/upload/' in arch or '/video/upload/' in arch) %}
+                            {% set portada = arch %}
+                        {% endif %}
+                    {% endfor %}
 
-                    <h2 class="text-base font-bold text-white mb-2 line-clamp-2">{{ gal.titulo }}</h2>
-                    <p class="text-xs text-slate-400 mb-4 line-clamp-2 font-normal">{{ gal.descripcion }}</p>
-
-                    <!-- Lista de Archivos Adjuntos -->
-                    {% if gal.archivos %}
-                    <div class="space-y-2 mb-4">
-                        {% for arch in gal.archivos %}
-                        <div class="flex items-center justify-between p-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl text-xs">
-                            <span class="truncate text-slate-300 text-[11px] pr-2 flex items-center gap-1.5">
-                                {% if '.mp4' in arch or '.mov' in arch or '.webm' in arch or '.avi' in arch or '.mkv' in arch %}
-                                    <i class="fa-solid fa-film text-purple-400"></i>
-                                {% elif '.png' in arch or '.jpg' in arch or '.jpeg' in arch or '.webp' in arch or '.gif' in arch %}
-                                    <i class="fa-solid fa-image text-cyan-400"></i>
-                                {% elif '.pdf' in arch %}
-                                    <i class="fa-solid fa-file-pdf text-rose-400"></i>
-                                {% elif '.zip' in arch or '.rar' in arch or '.7z' in arch %}
-                                    <i class="fa-solid fa-file-zipper text-amber-400"></i>
-                                {% else %}
-                                    <i class="fa-solid fa-file text-blue-400"></i>
-                                {% endif %}
-                                {{ arch.split('/')[-1] }}
-                            </span>
-                            <div class="flex items-center gap-1.5 shrink-0">
-                                <!-- Botón Previsualizar Modal -->
-                                <button onclick="previsualizarArchivo('{{ arch }}', '{{ gal.id }}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white transition-all" title="Previsualizar">
-                                    <i class="fa-solid fa-eye text-[11px]"></i>
-                                </button>
-                                <!-- Botón Descargar -->
-                                <a href="{{ url_for('pdf_proxy', url=arch, download=1) }}" onclick="fetch('/incrementar_descarga/{{ gal.id }}', {method: 'POST'})" class="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 transition-all" title="Descargar">
-                                    <i class="fa-solid fa-download text-[11px]"></i>
-                                </a>
+                    {% if portada %}
+                    <div class="relative w-full h-44 bg-slate-950 overflow-hidden border-b border-slate-800/80 cursor-pointer group" onclick="previsualizarArchivo('{{ portada }}', '{{ gal.id }}')">
+                        {% if '.mp4' in portada.lower() or '.mov' in portada.lower() or '.webm' in portada.lower() or '.mkv' in portada.lower() or '/video/upload/' in portada %}
+                            <video src="{{ portada }}#t=1" preload="metadata" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all"></video>
+                            <div class="absolute inset-0 bg-black/40 flex items-center justify-center group-hover:bg-black/20 transition-all">
+                                <div class="w-12 h-12 rounded-full bg-cyan-500/80 text-white flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-all">
+                                    <i class="fa-solid fa-play text-sm ml-0.5"></i>
+                                </div>
                             </div>
-                        </div>
-                        {% endfor %}
+                        {% else %}
+                            <img src="{{ portada }}" alt="{{ gal.titulo }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300">
+                            <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent opacity-60"></div>
+                        {% endif %}
                     </div>
                     {% endif %}
+
+                    <!-- Cuerpo de la Tarjeta -->
+                    <div class="p-5">
+                        <div class="flex items-center justify-between gap-2 mb-3">
+                            <span class="px-3 py-1 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                {{ gal.categoria }}
+                            </span>
+                            <div class="flex items-center gap-3 text-[11px] text-slate-400 font-medium">
+                                <span title="Vistas"><i class="fa-regular fa-eye text-cyan-400 mr-1"></i>{{ gal.vistas }}</span>
+                                <span title="Descargas"><i class="fa-solid fa-download text-emerald-400 mr-1"></i>{{ gal.descargas }}</span>
+                                <span class="text-slate-500">{{ gal.fecha }}</span>
+                            </div>
+                        </div>
+
+                        <h2 class="text-base font-bold text-white mb-2 line-clamp-2">{{ gal.titulo }}</h2>
+                        <p class="text-xs text-slate-400 mb-4 line-clamp-3 font-normal">{{ gal.descripcion }}</p>
+
+                        <!-- Lista de Archivos Adjuntos -->
+                        {% if gal.archivos %}
+                        <div class="space-y-2 mb-2">
+                            {% for arch in gal.archivos %}
+                            <div class="flex items-center justify-between p-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl text-xs">
+                                <span class="truncate text-slate-300 text-[11px] pr-2 flex items-center gap-2">
+                                    {% if '.mp4' in arch.lower() or '.mov' in arch.lower() or '.webm' in arch.lower() or '.mkv' in arch.lower() or '/video/upload/' in arch %}
+                                        <i class="fa-solid fa-film text-purple-400"></i>
+                                    {% elif '.png' in arch.lower() or '.jpg' in arch.lower() or '.jpeg' in arch.lower() or '.webp' in arch.lower() or '.gif' in arch.lower() or '/image/upload/' in arch %}
+                                        <i class="fa-solid fa-image text-cyan-400"></i>
+                                    {% elif '.pdf' in arch.lower() %}
+                                        <i class="fa-solid fa-file-pdf text-rose-400"></i>
+                                    {% elif '.zip' in arch.lower() or '.rar' in arch.lower() or '.7z' in arch.lower() %}
+                                        <i class="fa-solid fa-file-zipper text-amber-400"></i>
+                                    {% else %}
+                                        <i class="fa-solid fa-file text-blue-400"></i>
+                                    {% endif %}
+                                    <span class="truncate">{{ arch.split('/')[-1] }}</span>
+                                </span>
+                                <div class="flex items-center gap-1.5 shrink-0">
+                                    <!-- Botón Previsualizar -->
+                                    <button onclick="previsualizarArchivo('{{ arch }}', '{{ gal.id }}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white transition-all" title="Previsualizar">
+                                        <i class="fa-solid fa-eye text-[11px]"></i>
+                                    </button>
+                                    <!-- Botón Descargar -->
+                                    <a href="{{ url_for('pdf_proxy', url=arch, download=1) }}" onclick="fetch('/incrementar_descarga/{{ gal.id }}', {method: 'POST'})" class="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 transition-all" title="Descargar">
+                                        <i class="fa-solid fa-download text-[11px]"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
 
                 <!-- Acciones Admin -->
                 {% if rol == 'admin' %}
-                <div class="pt-3 border-t border-slate-800/80 flex items-center justify-end gap-2">
+                <div class="p-4 pt-3 border-t border-slate-800/80 flex items-center justify-end gap-2 bg-slate-900/40">
                     <button onclick="abrirModalEditar('{{ gal.id }}', '{{ gal.titulo|escape }}', '{{ gal.descripcion|escape }}', '{{ gal.categoria }}', '{{ gal.tipo }}', '{{ gal.tags|escape }}')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
                         <i class="fa-solid fa-pen-to-square"></i> Editar
                     </button>
@@ -156,14 +185,14 @@
     <!-- Modal Previsualización de Archivos -->
     <div id="modal-preview" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md hidden flex items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
-            <div class="flex items-center justify-between p-4 border-b border-slate-800">
+            <div class="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
                 <span id="preview-filename" class="text-sm font-bold text-white truncate max-w-[80%]"></span>
                 <button onclick="cerrarPreview()" class="text-slate-400 hover:text-white p-1">
                     <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
             </div>
-            <div id="preview-container" class="flex-1 overflow-auto p-4 flex items-center justify-center min-h-[400px]">
-                <!-- Contenido dinámico inyectado por JS -->
+            <div id="preview-container" class="flex-1 overflow-auto p-4 flex items-center justify-center min-h-[420px] bg-slate-950/40">
+                <!-- Contenido inyectado dinámicamente -->
             </div>
         </div>
     </div>
@@ -217,7 +246,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Archivos Adjuntos (Selecciona 1 o más archivos con Ctrl / Shift) *</label>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Archivos Adjuntos (Selecciona 1 o varios archivos) *</label>
                     <input type="file" name="archivo" multiple required class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
                 </div>
 
@@ -316,7 +345,7 @@
 
         // Función interactiva de Previsualización en Modal
         function previsualizarArchivo(url, galeriaId) {
-            fetch('/incrementar_vista/' + galeriaId, {method: 'POST'});
+            if (galeriaId) fetch('/incrementar_vista/' + galeriaId, {method: 'POST'});
             const proxyUrl = '/pdf_proxy?url=' + encodeURIComponent(url) + '&download=0';
             const filename = url.split('/').pop();
             const ext = filename.split('.').pop().toLowerCase();
@@ -325,9 +354,9 @@
             const cont = document.getElementById('preview-container');
             cont.innerHTML = '';
 
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext) || url.includes('/image/upload/')) {
                 cont.innerHTML = `<img src="${proxyUrl}" class="max-h-[75vh] max-w-full rounded-2xl shadow-lg object-contain">`;
-            } else if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(ext)) {
+            } else if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(ext) || url.includes('/video/upload/')) {
                 cont.innerHTML = `<video controls autoplay class="max-h-[75vh] max-w-full rounded-2xl shadow-lg"><source src="${proxyUrl}" type="video/mp4">Tu navegador no soporta video.</video>`;
             } else if (ext === 'pdf') {
                 cont.innerHTML = `<iframe src="${proxyUrl}" class="w-full h-[75vh] rounded-2xl border-0"></iframe>`;
