@@ -261,7 +261,7 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        # 🔄 Migración preventiva de columnas faltantes en Neon
+        # 🔄 Migración preventiva de columnas en Neon
         columnas_comunicados = [
             ("nivel", "VARCHAR(50) DEFAULT 'info'"),
             ("fijado", "INTEGER DEFAULT 0"),
@@ -1033,21 +1033,31 @@ def bienvenida():
     cursor = conn.cursor()
     comunicado_fijado = None
     try:
-        query_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
+        query_fij = """
+            SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor 
+            FROM comunicados 
+            WHERE (fijado = 1 OR fijado = '1' OR fijado = true) 
+              AND (estado = 'activo' OR estado IS NULL) 
+            ORDER BY id DESC LIMIT 1
+        """
         cursor.execute(query_fij)
         row = cursor.fetchone()
         if row:
             comunicado_fijado = {
-                'titulo': row[0],
-                'contenido': row[1],
-                'nivel': row[2],
-                'imagen_url': row[3],
-                'fecha': row[4],
-                'autor': row[5]
+                'id': row[0],
+                'titulo': row[1] or '',
+                'contenido': row[2] or '',
+                'nivel': row[3] or 'info',
+                'imagen_url': row[4] or '',
+                'fecha': row[5] or '',
+                'autor': row[6] or 'Admin'
             }
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Error obteniendo comunicado fijado: {e}")
         comunicado_fijado = None
-    conn.close()
+    finally:
+        conn.close()
+
     return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
 
 @app.route('/gestor')
@@ -1361,7 +1371,7 @@ def crear_comunicado():
             conn, db_type = get_db()
             cursor = conn.cursor()
 
-            # Asegurar compatibilidad de columnas en caliente
+            # Migración preventiva en caliente
             for col, col_type in [("nivel", "VARCHAR(50) DEFAULT 'info'"), ("fijado", "INTEGER DEFAULT 0"), ("imagen_url", "TEXT DEFAULT ''"), ("estado", "VARCHAR(50) DEFAULT 'activo'"), ("fecha", "VARCHAR(100) DEFAULT ''"), ("autor", "VARCHAR(100) DEFAULT 'Admin'")]:
                 try:
                     cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
@@ -1389,34 +1399,50 @@ def crear_comunicado():
 
     return redirect(url_for('ver_comunicados'))
 
-@app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
+@app.route('/comunicados/archivar/<int:com_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def archivar_comunicado(com_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s", (com_id,))
-    row = cursor.fetchone()
-    
-    if row:
-        nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-        cursor.execute("UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s", (nuevo_estado, com_id))
-        conn.commit()
-        registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
         
-    conn.close()
+        if row:
+            estado_actual = row[0] or 'activo'
+            nuevo_estado = 'archivado' if estado_actual == 'activo' else 'activo'
+            cursor.execute("UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s", (nuevo_estado, com_id))
+            conn.commit()
+            registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+            flash(f"Comunicado '{row[1]}' movido a {nuevo_estado}.")
+        conn.close()
+    except Exception as e:
+        print(f"❌ Error archivando comunicado: {e}")
+        traceback.print_exc()
+        
     return redirect(url_for('ver_comunicados'))
 
-@app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
+@app.route('/comunicados/eliminar/<int:com_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def eliminar_comunicado(com_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
-    conn.commit()
-    conn.close()
-    registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
+        conn.commit()
+        conn.close()
+        registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado '{titulo}'")
+        flash("Comunicado eliminado permanentemente.")
+    except Exception as e:
+        print(f"❌ Error eliminando comunicado: {e}")
+        traceback.print_exc()
+
     return redirect(url_for('ver_comunicados'))
 
 if __name__ == '__main__':
