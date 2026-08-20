@@ -67,7 +67,7 @@ def normalizar(texto):
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
 
-# 🔐 CIFRADO Y DESCIFRADO NATIVO
+# 🔐 CIFRADO Y DESCIFRADO
 def encriptar_texto(texto):
     if not texto: return ""
     try:
@@ -149,7 +149,7 @@ def get_db():
     conn = sqlite3.connect(DB_NAME)
     return conn, 'sqlite'
 
-# 🛡️ INICIALIZACIÓN Y ESQUEMA EXACTO
+# 🛡️ INICIALIZACIÓN CON ESQUEMA COMPLETO Y MIGRACIONES
 def init_db():
     try:
         conn, db_type = get_db()
@@ -229,6 +229,7 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS eliminado BOOLEAN DEFAULT FALSE;",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS filename TEXT;",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
@@ -583,7 +584,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
-# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES (CUALQUIER FORMATO)
+# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -840,7 +841,7 @@ def eliminar_credencial(cred_id):
         print(f"Error eliminando credencial: {e}")
     return redirect(url_for('ver_papelera' if request.args.get('ref') == 'papelera' else 'ver_credenciales'))
 
-# ♻️ PAPELERA DE RECICLAJE
+# ♻️ PAPELERA DE RECICLAJE (BLINDADA)
 @app.route('/papelera')
 @login_required
 @admin_required
@@ -926,6 +927,7 @@ def ver_papelera():
         comunicados_eliminados=comunicados_eliminados
     )
 
+# 🔄 RUTAS DE RESTAURACIÓN Y DESTRUCCIÓN PARA CADA MÓDULO
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
 @csrf.exempt
 @login_required
@@ -983,6 +985,36 @@ def destruir_credencial(cred_id):
         cursor.execute("DELETE FROM credenciales WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales WHERE id = ?", (cred_id,))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"Credencial ID '{cred_id}' destruida.")
+    except Exception: pass
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/restaurar_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
+@login_required
+@admin_required
+def restaurar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE comunicados SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = 'activo' WHERE id = ?", (com_id,))
+        if db_type == 'sqlite': conn.commit()
+        registrar_log(session['username'], "Restauración de Comunicado", f"Comunicado ID {com_id} restaurado.")
+    except Exception: pass
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/destruir_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
+@login_required
+@admin_required
+def destruir_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?", (com_id,))
+        if db_type == 'sqlite': conn.commit()
+        registrar_log(session['username'], "Eliminación Permanente", f"Comunicado ID {com_id} destruido.")
     except Exception: pass
     conn.close()
     return redirect(url_for('ver_papelera'))
