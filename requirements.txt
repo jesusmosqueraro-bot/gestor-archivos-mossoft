@@ -6,3 +6,4 @@ psycopg2-binary==2.9.9
 cloudinary==1.38.0
 requests==2.31.0
 cryptography==42.0.5
+tzdata>=2024.1
