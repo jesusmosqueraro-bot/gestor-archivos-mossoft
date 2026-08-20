@@ -30,10 +30,14 @@ try:
 except Exception:
     Fernet = None
 
-# PostgreSQL Driver
+# PostgreSQL Driver (Soporte psycopg v3 y psycopg2)
+try:
+    import psycopg
+except Exception:
+    psycopg = None
+
 try:
     import psycopg2
-    import psycopg2.extras
 except Exception:
     psycopg2 = None
 
@@ -162,8 +166,6 @@ def validar_instancia_y_sesion():
 def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL no está configurada")
-    if not psycopg2:
-        raise RuntimeError("El controlador psycopg2 no está instalado")
 
     url = DATABASE_URL.strip()
     if url.startswith("postgres://"):
@@ -175,8 +177,14 @@ def get_db():
     if "sslmode=" not in url:
         url += ("&" if "?" in url else "?") + "sslmode=require"
 
-    conn = psycopg2.connect(url, connect_timeout=15)
-    return conn, 'postgres'
+    if psycopg:
+        conn = psycopg.connect(url, connect_timeout=15, autocommit=True)
+        return conn, 'postgres'
+    elif psycopg2:
+        conn = psycopg2.connect(url, connect_timeout=15)
+        return conn, 'postgres'
+    else:
+        raise RuntimeError("No se encontró ningún controlador de PostgreSQL (psycopg o psycopg2).")
 
 def init_db():
     try:
