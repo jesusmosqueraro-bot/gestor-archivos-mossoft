@@ -190,7 +190,6 @@ def get_db():
             ssl_context=ssl_ctx,
             timeout=15
         )
-        conn.autocommit = True
         return conn, 'postgres'
     elif psycopg2:
         conn = psycopg2.connect(url, connect_timeout=15)
@@ -272,22 +271,15 @@ def init_db():
         for col, col_type in columnas_comunicados:
             try:
                 cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
+                conn.commit()
             except Exception:
                 pass
-
-        try:
-            conn.commit()
-        except Exception:
-            pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                            ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
-            try:
-                conn.commit()
-            except Exception:
-                pass
+            conn.commit()
 
         conn.close()
     except Exception as e:
@@ -301,10 +293,7 @@ def registrar_log(usuario, accion, detalles=""):
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
         cursor.execute("INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)", (usuario, accion, detalles, fecha_actual))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
     except Exception as e:
         print(f"⚠️ Error registrando log: {e}")
@@ -414,10 +403,7 @@ def validar_codigo():
     try:
         pass_hash = generate_password_hash(nueva_pass)
         cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s", (pass_hash, email_usuario))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
 
         session.pop('reset_code', None)
@@ -492,10 +478,7 @@ def incrementar_vista(galeria_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         cursor.execute("UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s", (galeria_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
         return jsonify({'success': True})
     except Exception:
@@ -513,10 +496,7 @@ def incrementar_descarga(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s", (galeria_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
 
         usuario_actual = session.get('username', 'Anónimo')
@@ -636,10 +616,7 @@ def crear_credencial():
         cursor = conn.cursor()
         cursor.execute("INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')", 
                        (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
         registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
         
@@ -667,10 +644,7 @@ def editar_credencial(cred_id):
         cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
                        (servicio, url, usuario, categoria, notas, cred_id))
         
-    try:
-        conn.commit()
-    except Exception:
-        pass
+    conn.commit()
     conn.close()
     registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
     return redirect(url_for('ver_credenciales'))
@@ -682,10 +656,7 @@ def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
-    try:
-        conn.commit()
-    except Exception:
-        pass
+    conn.commit()
     conn.close()
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
@@ -747,10 +718,7 @@ def restaurar_credencial(cred_id):
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("UPDATE credenciales SET estado = 'activo' WHERE id = %s", (cred_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
     except Exception:
         conn.rollback()
@@ -769,10 +737,7 @@ def destruir_credencial(cred_id):
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
     except Exception:
         conn.rollback()
@@ -791,10 +756,7 @@ def restaurar_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET estado = 'activo' WHERE id = %s", (galeria_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
     except Exception:
         conn.rollback()
@@ -814,10 +776,7 @@ def destruir_galeria(galeria_id):
 
         cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
         cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
     except Exception:
         conn.rollback()
@@ -836,10 +795,7 @@ def eliminar_imagen(galeria_id, filename):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
 
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
@@ -859,10 +815,7 @@ def restaurar_archivo(archivo_id):
         row = cursor.fetchone()
 
         cursor.execute("UPDATE archivos SET estado = 'activo' WHERE id = %s", (archivo_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
 
         if row:
             nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
@@ -880,10 +833,7 @@ def destruir_archivo(archivo_id):
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM archivos WHERE id = %s", (archivo_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
     except Exception:
         conn.rollback()
@@ -906,10 +856,7 @@ def gestion_usuarios():
             try:
                 pass_hash = generate_password_hash(nuevo_pass)
                 cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                try:
-                    conn.commit()
-                except Exception:
-                    pass
+                conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Se creó el usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
@@ -944,10 +891,7 @@ def editar_usuario(usuario_id):
             cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s", (nuevo_email, nuevo_rol, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
     except Exception:
         conn.rollback()
@@ -967,10 +911,7 @@ def eliminar_usuario(usuario_id):
         user_target = row[0] if row else f"ID {usuario_id}"
         
         cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
     except Exception:
         conn.rollback()
@@ -1062,7 +1003,7 @@ def exportar_logs_csv():
     conn.close()
 
     output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer = csv.writer(output, delimiter=';', cursor_quoting=None if not csv else csv.QUOTE_MINIMAL)
     writer.writerow(['FECHA Y HORA', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
 
     for row in rows:
@@ -1096,14 +1037,14 @@ def bienvenida():
     cursor = conn.cursor()
     comunicado_fijado = None
     try:
-        # Entrega el comunicado más relevante que esté activo (fijado o más reciente)
+        # Busca el comunicado fijado activo o el activo más reciente
         query_fij = """
             SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor, fijado 
             FROM comunicados 
-            WHERE COALESCE(estado, 'activo') = 'activo' 
+            WHERE COALESCE(estado, 'activo') = 'activo'
             ORDER BY 
-              CASE WHEN CAST(COALESCE(fijado, 0) AS TEXT) IN ('1', 'true', 't', 'TRUE') THEN 1 ELSE 0 END DESC, 
-              id DESC 
+                CASE WHEN CAST(COALESCE(fijado, 0) AS TEXT) IN ('1', 'true', 't', 'TRUE') THEN 1 ELSE 0 END DESC,
+                id DESC
             LIMIT 1
         """
         cursor.execute(query_fij)
@@ -1245,10 +1186,7 @@ def subir_archivo():
         for fname in archivos_guardados:
             cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
         
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
         registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
 
@@ -1308,10 +1246,7 @@ def editar_galeria(galeria_id):
         if archivos_agregados > 0:
             cambios.append(f"Archivos: +{archivos_agregados} nuevo(s)")
 
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios) if cambios else f"'{nuevo_titulo}' re-guardado sin cambios detectados"
         registrar_log(session['username'], "Edición de Galería", detalles_log)
     except Exception as e:
@@ -1333,10 +1268,7 @@ def eliminar_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET estado = 'eliminado' WHERE id = %s", (galeria_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         registrar_log(session['username'], "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
     except Exception:
         conn.rollback()
@@ -1452,20 +1384,11 @@ def crear_comunicado():
             conn, db_type = get_db()
             cursor = conn.cursor()
 
-            for col, col_type in [("nivel", "VARCHAR(50) DEFAULT 'info'"), ("fijado", "INTEGER DEFAULT 0"), ("imagen_url", "TEXT DEFAULT ''"), ("estado", "VARCHAR(50) DEFAULT 'activo'"), ("fecha", "VARCHAR(100) DEFAULT ''"), ("autor", "VARCHAR(100) DEFAULT 'Admin'")]:
-                try:
-                    cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
-                except Exception:
-                    pass
-
             cursor.execute(
                 "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
                 (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor)
             )
-            try:
-                conn.commit()
-            except Exception:
-                pass
+            conn.commit()
             conn.close()
             
             registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
@@ -1491,7 +1414,7 @@ def archivar_comunicado(com_id):
         row = cursor.fetchone()
         
         if row:
-            estado_actual = row[0] or 'activo'
+            estado_actual = (row[0] or 'activo').lower()
             if estado_actual == 'activo':
                 nuevo_estado = 'archivado'
                 destino_tab = 'historico'
@@ -1500,10 +1423,7 @@ def archivar_comunicado(com_id):
                 destino_tab = 'activos'
                 
             cursor.execute("UPDATE comunicados SET estado = %s WHERE id = %s", (nuevo_estado, com_id))
-            try:
-                conn.commit()
-            except Exception:
-                pass
+            conn.commit()
             registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
         conn.close()
     except Exception as e:
@@ -1523,13 +1443,11 @@ def eliminar_comunicado(com_id):
         row = cursor.fetchone()
         titulo = row[0] if row else f"ID {com_id}"
 
-        # Borrado lógico -> va a la Papelera
+        # Cambio inmediato de estado a 'eliminado' y commit directo
         cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = 0 WHERE id = %s", (com_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
+        
         registrar_log(session['username'], "Envío a Papelera (Comunicado)", f"El comunicado '{titulo}' fue movido a la papelera.")
     except Exception as e:
         print(f"❌ Error enviando comunicado a papelera: {e}")
@@ -1549,10 +1467,7 @@ def restaurar_comunicado(com_id):
         titulo = row[0] if row else f"ID {com_id}"
 
         cursor.execute("UPDATE comunicados SET estado = 'activo' WHERE id = %s", (com_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
         registrar_log(session['username'], "Restauración de Comunicado", f"Se restauró el comunicado '{titulo}' desde la papelera.")
     except Exception:
@@ -1571,10 +1486,7 @@ def destruir_comunicado(com_id):
         titulo = row[0] if row else f"ID {com_id}"
 
         cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
         conn.close()
         registrar_log(session['username'], "Eliminación Permanente (Comunicado)", f"Se destruyó definitivamente el comunicado '{titulo}'.")
     except Exception:
