@@ -217,10 +217,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
                 id SERIAL PRIMARY KEY,
-                usuario VARCHAR(100) NOT NULL,
-                accion VARCHAR(100) NOT NULL,
+                usuario VARCHAR(100),
+                accion VARCHAR(100),
                 detalles TEXT,
-                fecha VARCHAR(100) NOT NULL
+                fecha VARCHAR(100)
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id SERIAL PRIMARY KEY,
@@ -246,17 +246,10 @@ def init_db():
             )''')
             conn.commit()
 
-            # Adaptar tipo de columna fecha si existía como TIMESTAMP
-            try:
-                cursor.execute("ALTER TABLE auditoria_logs ALTER COLUMN fecha TYPE VARCHAR(100);")
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
             cursor.execute("SELECT COUNT(*) FROM usuarios")
             if cursor.fetchone()[0] == 0:
                 cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                               ('admin', generate_password_hash('1234'), 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
+                               ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
                 conn.commit()
         else:
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
@@ -290,10 +283,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario TEXT NOT NULL,
-                accion TEXT NOT NULL,
+                usuario TEXT,
+                accion TEXT,
                 detalles TEXT,
-                fecha TEXT NOT NULL
+                fecha TEXT
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -322,7 +315,7 @@ def init_db():
             cursor.execute("SELECT COUNT(*) FROM usuarios")
             if cursor.fetchone()[0] == 0:
                 cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                               ('admin', generate_password_hash('1234'), 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', 1))
+                               ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', 1))
                 conn.commit()
 
         conn.close()
@@ -341,7 +334,7 @@ def registrar_log(usuario, accion, detalles=""):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Error registrando log: {e}")
+        print(f"⚠️ Error registrando log (no crítico): {e}")
 
 def verificar_recaptcha(response_token):
     if not response_token:
@@ -468,8 +461,8 @@ def validar_codigo():
 def login():
     if request.method == 'POST':
         try:
-            username = request.form.get('usuario') or request.form.get('username') or ''
-            password = request.form.get('contrasena') or request.form.get('password') or ''
+            username = (request.form.get('usuario') or request.form.get('username') or '').strip()
+            password = (request.form.get('contrasena') or request.form.get('password') or '').strip()
             recaptcha_response = request.form.get('g-recaptcha-response')
 
             if not verificar_recaptcha(recaptcha_response):
@@ -477,19 +470,22 @@ def login():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            query = "SELECT usuario, password_hash, rol FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, password_hash, rol FROM usuarios WHERE usuario = ?"
+            query = "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
             cursor.execute(query, (username,))
             user = cursor.fetchone()
 
             if user:
-                clave_db = user[1]
+                clave_db = str(user[1] or '')
                 es_valida = check_password_hash(clave_db, password) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else (clave_db == password)
                 
                 if es_valida:
                     if not (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')):
-                        q_migr = "UPDATE usuarios SET password_hash = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE usuario = ?"
-                        cursor.execute(q_migr, (generate_password_hash(password), user[0]))
-                        conn.commit()
+                        try:
+                            q_migr = "UPDATE usuarios SET password_hash = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE usuario = ?"
+                            cursor.execute(q_migr, (generate_password_hash(password), user[0]))
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
 
                     conn.close()
                     session.permanent = True
@@ -497,14 +493,19 @@ def login():
                     session['username'] = user[0]
                     session['rol'] = user[2]
                     session['instance_id'] = SERVER_INSTANCE_ID
-                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
+                    
+                    try:
+                        registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
+                    except Exception:
+                        pass
+
                     return redirect(url_for('bienvenida'))
 
             conn.close()
             return render_template('login.html', error="Usuario o contraseña incorrectos.")
 
         except Exception as e:
-            print(f"Error en login: {e}")
+            print(f"Error crítico en login: {e}")
             traceback.print_exc()
             return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
 
@@ -901,13 +902,10 @@ def gestion_usuarios():
     conn, db_type = get_db()
     cursor = conn.cursor()
     if request.method == 'POST':
-        nuevo_user = request.form.get('username') or request.form.get('usuario') or ''
-        nuevo_pass = request.form.get('password') or request.form.get('contrasena') or ''
-        nuevo_email = request.form.get('email') or request.form.get('correo') or ''
+        nuevo_user = (request.form.get('username') or request.form.get('usuario') or '').strip()
+        nuevo_pass = (request.form.get('password') or request.form.get('contrasena') or '').strip()
+        nuevo_email = (request.form.get('email') or request.form.get('correo') or '').strip()
         nuevo_rol = request.form.get('rol', 'estandar').strip()
-        nuevo_user = nuevo_user.strip()
-        nuevo_pass = nuevo_pass.strip()
-        nuevo_email = nuevo_email.strip()
         
         if nuevo_user and nuevo_pass and nuevo_email:
             try:
