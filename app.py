@@ -143,7 +143,7 @@ cloudinary.config(
     api_secret=os.environ.get('CLOUDINARY_API_SECRET')
 )
 
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB permitidos
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
@@ -260,7 +260,6 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        # Asegurar columna tags en galerías
         try:
             cursor.execute("ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''")
         except Exception:
@@ -549,21 +548,7 @@ def index():
     busqueda_raw = request.args.get('q', '').strip()
     cat_filtro = request.args.get('cat', '').strip()
     tipo_filtro = request.args.get('tipo', '').strip()
-
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            SELECT id, titulo, tipo, area, descripcion, COALESCE(fecha_subida::text, ''), tags 
-            FROM galerias 
-            WHERE eliminado IS NOT TRUE 
-            ORDER BY id DESC
-        """)
-        rows = cursor.fetchall()
-    except Exception as e:
-        print(f"⚠️ Error leyendo galerias: {e}")
-        rows = []
+    formato_filtro = request.args.get('formato', '').strip()
 
     galerias = []
     sugerencias_titulos = []
@@ -578,37 +563,68 @@ def index():
         if not palabras_clave:
             palabras_clave = palabras_limpias
 
-    for r in rows:
-        galeria_id, titulo, tipo, area, descripcion, fecha_subida, tags = r
-        categoria = area or 'General'
-        sugerencias_titulos.append(titulo)
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, 
+                   COALESCE(titulo, 'Sin título'), 
+                   COALESCE(tipo, 'Instructivo'), 
+                   COALESCE(area, 'General'), 
+                   COALESCE(descripcion, ''), 
+                   COALESCE(fecha_subida::text, ''), 
+                   COALESCE(tags, '') 
+            FROM galerias 
+            WHERE eliminado IS NOT TRUE 
+            ORDER BY id DESC
+        """)
+        rows = cursor.fetchall()
 
-        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s", (str(galeria_id),))
-        archivos = [f[0] for f in cursor.fetchall()]
+        for r in rows:
+            galeria_id, titulo, tipo, area, descripcion, fecha_subida, tags = r
+            categoria = area or 'General'
+            sugerencias_titulos.append(titulo)
 
-        item = {
-            'id': str(galeria_id),
-            'titulo': titulo or 'Sin título',
-            'descripcion': descripcion or '',
-            'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
-            'categoria': categoria,
-            'tipo': tipo or 'Instructivo',
-            'tags': tags or '',
-            'archivos': archivos
-        }
+            cursor.execute("SELECT filename FROM archivos WHERE galeria_id::text = %s", (str(galeria_id),))
+            archivos = [f[0] for f in cursor.fetchall() if f[0]]
 
-        texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {tags} {' '.join(archivos)}")
-        coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave) if palabras_clave else True
-        coincide_cat = not cat_filtro or categoria == cat_filtro
-        coincide_tipo = not tipo_filtro or tipo == tipo_filtro
+            item = {
+                'id': str(galeria_id),
+                'titulo': titulo,
+                'descripcion': descripcion,
+                'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
+                'categoria': categoria,
+                'tipo': tipo,
+                'tags': tags,
+                'archivos': archivos
+            }
 
-        if coincide_busqueda and coincide_cat and coincide_tipo:
-            galerias.append(item)
+            texto_busqueda = normalizar(f"{titulo} {descripcion} {categoria} {tipo} {tags} {' '.join(archivos)}")
+            coincide_busqueda = any(palabra in texto_busqueda for palabra in palabras_clave) if palabras_clave else True
+            coincide_cat = not cat_filtro or categoria == cat_filtro
+            coincide_tipo = not tipo_filtro or tipo == tipo_filtro
 
-    conn.close()
-    return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
+            if coincide_busqueda and coincide_cat and coincide_tipo:
+                galerias.append(item)
 
-# 🚀 SUBIR CUALQUIER ARCHIVO (Generación de ID compatible con SERIAL / INT)
+        conn.close()
+    except Exception as e:
+        print(f"❌ Error en ruta /gestor: {e}")
+        traceback.print_exc()
+
+    return render_template(
+        'index.html', 
+        galerias=galerias, 
+        busqueda=busqueda_raw, 
+        cat_filtro=cat_filtro, 
+        tipo_filtro=tipo_filtro, 
+        formato_filtro=formato_filtro,
+        sugerencias_titulos=list(set(sugerencias_titulos)), 
+        rol=session.get('rol')
+    )
+
+# 🚀 SUBIR CUALQUIER ARCHIVO (Generación de ID compatible con SERIAL)
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -634,7 +650,7 @@ def subir_archivo():
                 elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']:
                     upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
                 else:
-                    # PDF, Office, ZIP, RAR, TXT o cualquier archivo sin restricciones
+                    # PDF, Word, Excel, ZIP, RAR, TXT, etc.
                     upload_result = cloudinary.uploader.upload(file, resource_type="raw", use_filename=True, unique_filename=True)
 
                 archivos_guardados.append(upload_result['secure_url'])
@@ -643,7 +659,6 @@ def subir_archivo():
             conn, db_type = get_db()
             cursor = conn.cursor()
             
-            # Inserción con RETURNING id para respetar el SERIAL de Neon
             cursor.execute("""
                 INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags) 
                 VALUES (%s, %s, %s, %s, %s, NOW(), FALSE, %s)
@@ -872,7 +887,6 @@ def ver_papelera():
     credenciales_eliminadas = []
     comunicados_eliminados = []
 
-    # 1. Instructivos eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -887,7 +901,6 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
-    # 2. Credenciales eliminadas
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -902,7 +915,6 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
-    # 3. Comunicados eliminados
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -967,7 +979,7 @@ def destruir_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("DELETE FROM galerias WHERE id::text = %s", (str(galeria_id),))
-        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (str(galeria_id),))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id::text = %s", (str(galeria_id),))
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
     except Exception:
         pass
@@ -1024,7 +1036,7 @@ def eliminar_imagen(galeria_id, filename):
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s AND filename = %s", (str(galeria_id), filename))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id::text = %s AND filename = %s", (str(galeria_id), filename))
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se eliminó el archivo '{nombre_limpio}' del instructivo '{titulo}'.")
     except Exception:
@@ -1483,3 +1495,4 @@ def destruir_comunicado(com_id):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+    
