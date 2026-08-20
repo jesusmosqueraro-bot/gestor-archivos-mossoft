@@ -261,7 +261,7 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        # 🔄 Migración preventiva de columnas en Neon
+        # Migraciones preventivas de columnas en Neon
         columnas_comunicados = [
             ("nivel", "VARCHAR(50) DEFAULT 'info'"),
             ("fijado", "INTEGER DEFAULT 0"),
@@ -276,13 +276,19 @@ def init_db():
             except Exception:
                 pass
 
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                            ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
-            conn.commit()
+            try:
+                conn.commit()
+            except Exception:
+                pass
 
         conn.close()
     except Exception as e:
@@ -296,7 +302,10 @@ def registrar_log(usuario, accion, detalles=""):
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
         cursor.execute("INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)", (usuario, accion, detalles, fecha_actual))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
     except Exception as e:
         print(f"⚠️ Error registrando log: {e}")
@@ -406,7 +415,10 @@ def validar_codigo():
     try:
         pass_hash = generate_password_hash(nueva_pass)
         cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s", (pass_hash, email_usuario))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
 
         session.pop('reset_code', None)
@@ -481,7 +493,10 @@ def incrementar_vista(galeria_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         cursor.execute("UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s", (galeria_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
         return jsonify({'success': True})
     except Exception:
@@ -499,7 +514,10 @@ def incrementar_descarga(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s", (galeria_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
 
         usuario_actual = session.get('username', 'Anónimo')
@@ -619,7 +637,10 @@ def crear_credencial():
         cursor = conn.cursor()
         cursor.execute("INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')", 
                        (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
         registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
         
@@ -647,19 +668,26 @@ def editar_credencial(cred_id):
         cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
                        (servicio, url, usuario, categoria, notas, cred_id))
         
-    conn.commit()
+    try:
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
     registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
     return redirect(url_for('ver_credenciales'))
 
-@app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST'])
+@app.route('/credenciales/eliminar/<int:cred_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
-    conn.commit()
+    try:
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
@@ -694,15 +722,24 @@ def ver_papelera():
     except Exception:
         credenciales_eliminadas = []
 
+    try:
+        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE estado = 'eliminado' ORDER BY id DESC")
+        comunicados_eliminados = cursor.fetchall()
+    except Exception:
+        comunicados_eliminados = []
+
     conn.close()
     return render_template(
         'papelera.html', 
         eliminados=eliminados, 
         archivos_eliminados=archivos_eliminados,
-        credenciales_eliminadas=credenciales_eliminadas
+        credenciales_eliminadas=credenciales_eliminadas,
+        comunicados_eliminados=comunicados_eliminados,
+        comunicados=comunicados_eliminados
     )
 
-@app.route('/restaurar_credencial/<int:cred_id>', methods=['POST'])
+@app.route('/restaurar_credencial/<int:cred_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_credencial(cred_id):
@@ -714,14 +751,18 @@ def restaurar_credencial(cred_id):
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("UPDATE credenciales SET estado = 'activo' WHERE id = %s", (cred_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
     except Exception:
         conn.rollback()
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-@app.route('/destruir_credencial/<int:cred_id>', methods=['POST'])
+@app.route('/destruir_credencial/<int:cred_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_credencial(cred_id):
@@ -733,14 +774,18 @@ def destruir_credencial(cred_id):
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
     except Exception:
         conn.rollback()
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-@app.route('/restaurar_galeria/<galeria_id>', methods=['POST'])
+@app.route('/restaurar_galeria/<galeria_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_galeria(galeria_id):
@@ -752,14 +797,18 @@ def restaurar_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET estado = 'activo' WHERE id = %s", (galeria_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
     except Exception:
         conn.rollback()
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-@app.route('/destruir_galeria/<galeria_id>', methods=['POST'])
+@app.route('/destruir_galeria/<galeria_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_galeria(galeria_id):
@@ -772,14 +821,18 @@ def destruir_galeria(galeria_id):
 
         cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
         cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
     except Exception:
         conn.rollback()
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-@app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
+@app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_imagen(galeria_id, filename):
@@ -791,7 +844,10 @@ def eliminar_imagen(galeria_id, filename):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Envío a Papelera (Archivo)", f"Se movió el archivo '{nombre_limpio}' del instructivo '{titulo}' a la papelera.")
@@ -800,7 +856,8 @@ def eliminar_imagen(galeria_id, filename):
     conn.close()
     return redirect(url_for('index'))
 
-@app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST'])
+@app.route('/restaurar_archivo/<int:archivo_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_archivo(archivo_id):
@@ -811,7 +868,10 @@ def restaurar_archivo(archivo_id):
         row = cursor.fetchone()
 
         cursor.execute("UPDATE archivos SET estado = 'activo' WHERE id = %s", (archivo_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
         if row:
             nombre_limpio = row[0].split('/')[-1] if 'http' in row[0] else row[0]
@@ -821,7 +881,8 @@ def restaurar_archivo(archivo_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
-@app.route('/destruir_archivo/<int:archivo_id>', methods=['POST'])
+@app.route('/destruir_archivo/<int:archivo_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_archivo(archivo_id):
@@ -829,11 +890,122 @@ def destruir_archivo(archivo_id):
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM archivos WHERE id = %s", (archivo_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
     except Exception:
         conn.rollback()
     conn.close()
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/comunicados/archivar/<int:com_id>', methods=['GET', 'POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def archivar_comunicado(com_id):
+    destino_tab = 'activos'
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            estado_actual = row[0] or 'activo'
+            if estado_actual == 'activo':
+                nuevo_estado = 'archivado'
+                destino_tab = 'historico'
+            else:
+                nuevo_estado = 'activo'
+                destino_tab = 'activos'
+                
+            cursor.execute("UPDATE comunicados SET estado = %s WHERE id = %s", (nuevo_estado, com_id))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+            flash(f"Comunicado '{row[1]}' movido a {nuevo_estado}.")
+        conn.close()
+    except Exception as e:
+        print(f"❌ Error archivando comunicado: {e}")
+        traceback.print_exc()
+        
+    return redirect(url_for('ver_comunicados', tab=destino_tab))
+
+@app.route('/comunicados/eliminar/<int:com_id>', methods=['GET', 'POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def eliminar_comunicado(com_id):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        # Envío a Papelera (borrado lógico)
+        cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = 0 WHERE id = %s", (com_id,))
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+        registrar_log(session['username'], "Envío a Papelera (Comunicado)", f"El comunicado '{titulo}' fue movido a la papelera de reciclaje.")
+        flash(f"El comunicado '{titulo}' fue movido a la papelera.")
+    except Exception as e:
+        print(f"❌ Error enviando comunicado a papelera: {e}")
+        traceback.print_exc()
+
+    return redirect(url_for('ver_comunicados'))
+
+@app.route('/restaurar_comunicado/<int:com_id>', methods=['GET', 'POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def restaurar_comunicado(com_id):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        cursor.execute("UPDATE comunicados SET estado = 'activo' WHERE id = %s", (com_id,))
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+        registrar_log(session['username'], "Restauración de Comunicado", f"Se restauró el comunicado '{titulo}' desde la papelera.")
+    except Exception:
+        pass
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/destruir_comunicado/<int:com_id>', methods=['GET', 'POST'])
+@csrf.exempt
+@login_required
+@admin_required
+def destruir_comunicado(com_id):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT titulo FROM comunicados WHERE id = %s", (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+        registrar_log(session['username'], "Eliminación Permanente (Comunicado)", f"Se destruyó definitivamente el comunicado '{titulo}'.")
+    except Exception:
+        pass
     return redirect(url_for('ver_papelera'))
 
 @app.route('/usuarios', methods=['GET', 'POST'])
@@ -852,7 +1024,10 @@ def gestion_usuarios():
             try:
                 pass_hash = generate_password_hash(nuevo_pass)
                 cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                conn.commit()
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 registrar_log(session['username'], "Creación de Usuario", f"Se creó el usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
@@ -887,7 +1062,10 @@ def editar_usuario(usuario_id):
             cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s", (nuevo_email, nuevo_rol, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
     except Exception:
         conn.rollback()
@@ -907,7 +1085,10 @@ def eliminar_usuario(usuario_id):
         user_target = row[0] if row else f"ID {usuario_id}"
         
         cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
     except Exception:
         conn.rollback()
@@ -1034,11 +1215,13 @@ def bienvenida():
     comunicado_fijado = None
     try:
         query_fij = """
-            SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor 
+            SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor, fijado 
             FROM comunicados 
-            WHERE (fijado = 1 OR fijado = '1' OR fijado = true) 
-              AND (estado = 'activo' OR estado IS NULL) 
-            ORDER BY id DESC LIMIT 1
+            WHERE COALESCE(estado, 'activo') = 'activo' 
+            ORDER BY 
+              CASE WHEN CAST(COALESCE(fijado, 0) AS TEXT) IN ('1', 'true', 't', 'TRUE') THEN 1 ELSE 0 END DESC, 
+              id DESC 
+            LIMIT 1
         """
         cursor.execute(query_fij)
         row = cursor.fetchone()
@@ -1047,10 +1230,14 @@ def bienvenida():
                 'id': row[0],
                 'titulo': row[1] or '',
                 'contenido': row[2] or '',
+                'mensaje': row[2] or '',
+                'descripcion': row[2] or '',
                 'nivel': row[3] or 'info',
                 'imagen_url': row[4] or '',
+                'imagen': row[4] or '',
                 'fecha': row[5] or '',
-                'autor': row[6] or 'Admin'
+                'autor': row[6] or 'Admin',
+                'fijado': 1 if str(row[7]).lower() in ['1', 'true', 't'] else 0
             }
     except Exception as e:
         print(f"⚠️ Error obteniendo comunicado fijado: {e}")
@@ -1058,7 +1245,14 @@ def bienvenida():
     finally:
         conn.close()
 
-    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
+    return render_template(
+        'bienvenida.html', 
+        username=session.get('username'), 
+        rol=session.get('rol'), 
+        comunicado_fijado=comunicado_fijado,
+        comunicado=comunicado_fijado,
+        noticia_fijada=comunicado_fijado
+    )
 
 @app.route('/gestor')
 @login_required
@@ -1173,7 +1367,10 @@ def subir_archivo():
         for fname in archivos_guardados:
             cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
         
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
         registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
 
@@ -1233,7 +1430,10 @@ def editar_galeria(galeria_id):
         if archivos_agregados > 0:
             cambios.append(f"Archivos: +{archivos_agregados} nuevo(s)")
 
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         detalles_log = f"'{nuevo_titulo}' :: " + " | ".join(cambios) if cambios else f"'{nuevo_titulo}' re-guardado sin cambios detectados"
         registrar_log(session['username'], "Edición de Galería", detalles_log)
     except Exception as e:
@@ -1243,7 +1443,8 @@ def editar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('index'))
 
-@app.route('/eliminar_galeria/<galeria_id>', methods=['POST'])
+@app.route('/eliminar_galeria/<galeria_id>', methods=['GET', 'POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_galeria(galeria_id):
@@ -1255,7 +1456,10 @@ def eliminar_galeria(galeria_id):
         titulo = row[0] if row else galeria_id
 
         cursor.execute("UPDATE galerias SET estado = 'eliminado' WHERE id = %s", (galeria_id,))
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
         registrar_log(session['username'], "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
     except Exception:
         conn.rollback()
@@ -1303,16 +1507,16 @@ def visor_db():
 @app.route('/comunicados')
 @login_required
 def ver_comunicados():
-    pestana = request.args.get('tab', 'activos')
+    pestana = request.args.get('tab', 'activos').strip().lower()
     q_busqueda = request.args.get('q', '').strip().lower()
     
     conn, db_type = get_db()
     cursor = conn.cursor()
     
-    estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
+    estado_filtro = 'archivado' if pestana in ['historico', 'archivados', 'archivado'] else 'activo'
     
     try:
-        cursor.execute("SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC", (estado_filtro,))
+        cursor.execute("SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE COALESCE(estado, 'activo') = %s ORDER BY fijado DESC, id DESC", (estado_filtro,))
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -1326,14 +1530,17 @@ def ver_comunicados():
         if not q_busqueda or q_busqueda in texto_full:
             comunicados.append({
                 'id': c_id,
-                'titulo': titulo,
-                'contenido': contenido,
-                'nivel': nivel,
-                'fijado': fijado,
-                'imagen_url': img_url,
-                'estado': estado,
-                'fecha': fecha,
-                'autor': autor
+                'titulo': titulo or '',
+                'contenido': contenido or '',
+                'mensaje': contenido or '',
+                'descripcion': contenido or '',
+                'nivel': nivel or 'info',
+                'fijado': 1 if str(fijado).lower() in ['1', 'true', 't'] else 0,
+                'imagen_url': img_url or '',
+                'imagen': img_url or '',
+                'estado': estado or 'activo',
+                'fecha': fecha or '',
+                'autor': autor or 'Admin'
             })
 
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
@@ -1395,52 +1602,6 @@ def crear_comunicado():
             
     except Exception as e:
         print(f"❌ Error crítico en crear_comunicado: {e}")
-        traceback.print_exc()
-
-    return redirect(url_for('ver_comunicados'))
-
-@app.route('/comunicados/archivar/<int:com_id>', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def archivar_comunicado(com_id):
-    try:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s", (com_id,))
-        row = cursor.fetchone()
-        
-        if row:
-            estado_actual = row[0] or 'activo'
-            nuevo_estado = 'archivado' if estado_actual == 'activo' else 'activo'
-            cursor.execute("UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s", (nuevo_estado, com_id))
-            conn.commit()
-            registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
-            flash(f"Comunicado '{row[1]}' movido a {nuevo_estado}.")
-        conn.close()
-    except Exception as e:
-        print(f"❌ Error archivando comunicado: {e}")
-        traceback.print_exc()
-        
-    return redirect(url_for('ver_comunicados'))
-
-@app.route('/comunicados/eliminar/<int:com_id>', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def eliminar_comunicado(com_id):
-    try:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT titulo FROM comunicados WHERE id = %s", (com_id,))
-        row = cursor.fetchone()
-        titulo = row[0] if row else f"ID {com_id}"
-
-        cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
-        conn.commit()
-        conn.close()
-        registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado '{titulo}'")
-        flash("Comunicado eliminado permanentemente.")
-    except Exception as e:
-        print(f"❌ Error eliminando comunicado: {e}")
         traceback.print_exc()
 
     return redirect(url_for('ver_comunicados'))
