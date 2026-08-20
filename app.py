@@ -650,6 +650,7 @@ def editar_credencial(cred_id):
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_credencial(cred_id):
@@ -669,7 +670,7 @@ def ver_papelera():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado ILIKE 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY fecha DESC")
         eliminados = cursor.fetchall()
     except Exception:
         eliminados = []
@@ -679,7 +680,7 @@ def ver_papelera():
             SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
             FROM archivos a 
             JOIN galerias g ON a.galeria_id = g.id 
-            WHERE a.estado ILIKE 'eliminado' AND COALESCE(g.estado, 'activo') NOT ILIKE 'eliminado'
+            WHERE LOWER(TRIM(a.estado)) = 'eliminado' AND LOWER(TRIM(COALESCE(g.estado, 'activo'))) != 'eliminado'
         """
         cursor.execute(query_arch_elim)
         archivos_eliminados = cursor.fetchall()
@@ -687,17 +688,25 @@ def ver_papelera():
         archivos_eliminados = []
 
     try:
-        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
+        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY id DESC")
         credenciales_eliminadas = cursor.fetchall()
     except Exception:
         credenciales_eliminadas = []
 
     comunicados_eliminados = []
     try:
-        cursor.execute("SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha, ''), COALESCE(autor, 'Admin') FROM comunicados WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
-        comunicados_eliminados = cursor.fetchall()
+        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE LOWER(TRIM(estado)) = 'eliminado' ORDER BY id DESC")
+        rows = cursor.fetchall()
+        for r in rows:
+            comunicados_eliminados.append({
+                'id': r[0],
+                'titulo': r[1] or 'Sin título',
+                'nivel': r[2] or 'info',
+                'fecha': r[3] or '',
+                'autor': r[4] or 'Admin'
+            })
     except Exception as e:
-        print(f"⚠️ Error consultando comunicados eliminados: {e}")
+        print(f"⚠️ Error cargando comunicados en papelera: {e}")
         comunicados_eliminados = []
 
     conn.close()
@@ -710,6 +719,7 @@ def ver_papelera():
     )
 
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_credencial(cred_id):
@@ -729,6 +739,7 @@ def restaurar_credencial(cred_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_credencial/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_credencial(cred_id):
@@ -748,6 +759,7 @@ def destruir_credencial(cred_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_galeria(galeria_id):
@@ -767,6 +779,7 @@ def restaurar_galeria(galeria_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_galeria(galeria_id):
@@ -787,6 +800,7 @@ def destruir_galeria(galeria_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_imagen(galeria_id, filename):
@@ -808,6 +822,7 @@ def eliminar_imagen(galeria_id, filename):
     return redirect(url_for('index'))
 
 @app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_archivo(archivo_id):
@@ -829,6 +844,7 @@ def restaurar_archivo(archivo_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_archivo/<int:archivo_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_archivo(archivo_id):
@@ -1259,6 +1275,7 @@ def editar_galeria(galeria_id):
     return redirect(url_for('index'))
 
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_galeria(galeria_id):
@@ -1405,6 +1422,7 @@ def crear_comunicado():
     return redirect(url_for('ver_comunicados'))
 
 @app.route('/comunicados/archivar/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def archivar_comunicado(com_id):
@@ -1435,6 +1453,7 @@ def archivar_comunicado(com_id):
     return redirect(url_for('ver_comunicados', tab=destino_tab))
 
 @app.route('/comunicados/eliminar/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_comunicado(com_id):
@@ -1445,11 +1464,12 @@ def eliminar_comunicado(com_id):
         row = cursor.fetchone()
         titulo = row[0] if row else f"ID {com_id}"
 
-        cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = FALSE WHERE id = %s", (com_id,))
+        cursor.execute("UPDATE comunicados SET estado = 'eliminado' WHERE id = %s", (com_id,))
         conn.commit()
         conn.close()
         
         registrar_log(session['username'], "Envío a Papelera (Comunicado)", f"El comunicado '{titulo}' fue movido a la papelera.")
+        flash(f"Comunicado '{titulo}' movido a la papelera.")
     except Exception as e:
         print(f"❌ Error enviando comunicado a papelera: {e}")
         traceback.print_exc()
@@ -1457,6 +1477,7 @@ def eliminar_comunicado(com_id):
     return redirect(url_for('ver_comunicados'))
 
 @app.route('/restaurar_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_comunicado(com_id):
@@ -1471,11 +1492,12 @@ def restaurar_comunicado(com_id):
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Restauración de Comunicado", f"Se restauró el comunicado '{titulo}' desde la papelera.")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"❌ Error restaurando comunicado: {e}")
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_comunicado(com_id):
@@ -1490,8 +1512,8 @@ def destruir_comunicado(com_id):
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Eliminación Permanente (Comunicado)", f"Se destruyó definitivamente el comunicado '{titulo}'.")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"❌ Error destruyendo comunicado: {e}")
     return redirect(url_for('ver_papelera'))
 
 if __name__ == '__main__':
