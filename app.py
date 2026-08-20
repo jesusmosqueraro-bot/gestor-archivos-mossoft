@@ -25,14 +25,14 @@ from flask_wtf.csrf import CSRFProtect
 
 # PostgreSQL Drivers
 try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
-try:
     import pg8000.dbapi
 except Exception:
     pg8000 = None
+
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
 
 import cloudinary
 import cloudinary.uploader
@@ -149,7 +149,7 @@ def get_db():
     conn = sqlite3.connect(DB_NAME)
     return conn, 'sqlite'
 
-# 🛡️ INICIALIZACIÓN CON ESQUEMA BLINDADO
+# 🛡️ INICIALIZACIÓN Y ESQUEMA NEON EXACTO
 def init_db():
     try:
         conn, db_type = get_db()
@@ -158,95 +158,105 @@ def init_db():
         if db_type == 'postgres':
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
-                username VARCHAR(100) UNIQUE NOT NULL,
-                password VARCHAR(200) NOT NULL,
-                email VARCHAR(200) NOT NULL,
-                rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
+                usuario VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                correo VARCHAR(200) NOT NULL,
+                rol VARCHAR(50) NOT NULL DEFAULT 'estandar',
+                nombre VARCHAR(100) DEFAULT '',
+                area VARCHAR(100) DEFAULT '',
+                activo BOOLEAN DEFAULT TRUE
             )''')
+            
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id VARCHAR(50) PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 titulo VARCHAR(200) NOT NULL,
-                descripcion TEXT,
-                fecha VARCHAR(100),
-                categoria VARCHAR(100) DEFAULT 'General',
                 tipo VARCHAR(100) DEFAULT 'Instructivo',
+                area VARCHAR(100) DEFAULT 'General',
+                descripcion TEXT,
+                subido_por VARCHAR(100) DEFAULT 'admin',
+                fecha_subida TIMESTAMP DEFAULT NOW(),
+                eliminado BOOLEAN DEFAULT FALSE,
+                fecha_eliminacion TIMESTAMP,
+                eliminado_por VARCHAR(100),
                 tags TEXT DEFAULT '',
                 vistas INTEGER DEFAULT 0,
-                descargas INTEGER DEFAULT 0,
-                estado VARCHAR(50) DEFAULT 'activo'
+                descargas INTEGER DEFAULT 0
             )''')
+            
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id SERIAL PRIMARY KEY,
-                galeria_id VARCHAR(50),
+                galeria_id VARCHAR(50) NOT NULL,
                 filename TEXT NOT NULL,
                 estado VARCHAR(50) DEFAULT 'activo'
             )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+
+            cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
                 id SERIAL PRIMARY KEY,
-                usuario VARCHAR(100) NOT NULL,
-                accion VARCHAR(100) NOT NULL,
+                usuario VARCHAR(100),
+                accion VARCHAR(100),
                 detalles TEXT,
-                fecha VARCHAR(100) NOT NULL
+                fecha VARCHAR(100)
             )''')
+
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id SERIAL PRIMARY KEY,
-                servicio VARCHAR(150) NOT NULL,
-                url TEXT,
-                usuario VARCHAR(150) NOT NULL,
-                password_enc TEXT NOT NULL,
-                categoria VARCHAR(100) DEFAULT 'General',
-                notas TEXT,
-                fecha VARCHAR(100) NOT NULL,
-                estado VARCHAR(50) DEFAULT 'activo'
+                titulo VARCHAR(150) NOT NULL,
+                usuario_acceso VARCHAR(150) NOT NULL,
+                password_cifrada TEXT NOT NULL,
+                area VARCHAR(100) DEFAULT 'General',
+                url_acceso TEXT DEFAULT '',
+                notas TEXT DEFAULT '',
+                creado_por VARCHAR(100) DEFAULT 'admin',
+                fecha_creacion TIMESTAMP DEFAULT NOW(),
+                eliminado BOOLEAN DEFAULT FALSE,
+                fecha_eliminacion TIMESTAMP,
+                eliminado_por VARCHAR(100)
             )''')
+
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY,
                 titulo VARCHAR(200) NOT NULL,
                 contenido TEXT NOT NULL,
                 nivel VARCHAR(50) DEFAULT 'info',
-                fijado INTEGER DEFAULT 0,
+                fijado BOOLEAN DEFAULT FALSE,
                 imagen_url TEXT DEFAULT '',
                 estado VARCHAR(50) DEFAULT 'activo',
-                fecha VARCHAR(100) NOT NULL,
+                fecha_publicacion TIMESTAMP DEFAULT NOW(),
                 autor VARCHAR(100) NOT NULL
             )''')
 
-            for col_query in [
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';",
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
+            for q in [
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
-                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS filename TEXT;",
-                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
-                try: cursor.execute(col_query)
+                try: cursor.execute(q)
                 except Exception: pass
         else:
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, correo TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, tipo TEXT DEFAULT 'Instructivo', area TEXT DEFAULT 'General', descripcion TEXT, subido_por TEXT DEFAULT 'admin', fecha_subida TEXT, eliminado INTEGER DEFAULT 0, tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
+            cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, accion TEXT, detalles TEXT, fecha TEXT
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, usuario_acceso TEXT NOT NULL, password_cifrada TEXT NOT NULL, area TEXT DEFAULT 'General', url_acceso TEXT DEFAULT '', notas TEXT DEFAULT '', creado_por TEXT DEFAULT 'admin', fecha_creacion TEXT, eliminado INTEGER DEFAULT 0
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha_publicacion TEXT, autor TEXT NOT NULL
             )''')
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
-            cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)",
+            cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)",
                            ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin'))
 
         conn.close()
@@ -260,7 +270,7 @@ def registrar_log(usuario, accion, detalles=""):
         conn, db_type = get_db()
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
-        query = "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
+        query = "INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
         cursor.execute(query, (usuario, accion, detalles, fecha_actual))
         if db_type == 'sqlite': conn.commit()
         conn.close()
@@ -292,7 +302,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 📧 RECUPERACIÓN DE CLAVE
+# 📧 CORREO DE RECUPERACIÓN
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
         cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
@@ -312,11 +322,10 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
 @csrf.exempt
 def recuperar_clave():
     if request.method == 'POST':
-        email_ingresado = (request.form.get('email') or '').strip().lower()
+        email_ingresado = (request.form.get('email') or request.form.get('correo') or '').strip().lower()
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?"
-        cursor.execute(query, (email_ingresado,))
+        cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = ?", (email_ingresado,))
         user = cursor.fetchone()
         conn.close()
 
@@ -337,7 +346,7 @@ def recuperar_clave():
 @csrf.exempt
 def validar_codigo():
     codigo_ingresado = (request.form.get('codigo') or '').strip()
-    nueva_pass = (request.form.get('nueva_password') or '').strip()
+    nueva_pass = (request.form.get('nueva_password') or request.form.get('password') or '').strip()
     codigo_correcto = session.get('reset_code')
     email_usuario = session.get('reset_email')
     nombre_usuario = session.get('reset_user')
@@ -351,8 +360,8 @@ def validar_codigo():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE usuarios SET password = %s WHERE LOWER(TRIM(email)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?"
-        cursor.execute(q_upd, (nueva_pass, email_usuario))
+        pass_hash = generate_password_hash(nueva_pass)
+        cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ?", (pass_hash, email_usuario))
         if db_type == 'sqlite': conn.commit()
         conn.close()
 
@@ -366,7 +375,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error=f"Error actualizando clave: {e}")
 
-# 🔑 INICIO DE SESIÓN
+# 🔑 INICIO DE SESIÓN (CONSULTA EXACTA: 'usuario', 'password_hash', 'rol')
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -380,14 +389,14 @@ def login():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            query = "SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))"
-            cursor.execute(query, (username,))
+            cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))", (username,))
             user = cursor.fetchone()
             conn.close()
 
             if user:
                 clave_db = str(user[1] or '')
                 es_valida = check_password_hash(clave_db, password) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else (clave_db == password)
+                
                 if es_valida:
                     session.permanent = True
                     session['logged_in'] = True
@@ -412,7 +421,7 @@ def incrementar_vista(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
+        q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         conn.close()
@@ -427,12 +436,12 @@ def incrementar_descarga(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_tit = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        q_tit = "SELECT titulo FROM galerias WHERE id::text = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
         cursor.execute(q_tit, (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
+        q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         conn.close()
@@ -503,9 +512,23 @@ def index():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, 
+                   COALESCE(titulo, 'Sin título'), 
+                   COALESCE(descripcion, ''), 
+                   COALESCE(fecha_subida::text, ''), 
+                   COALESCE(area, 'General'), 
+                   COALESCE(tipo, 'Instructivo'), 
+                   COALESCE(tags, ''), 
+                   COALESCE(vistas, 0), 
+                   COALESCE(descargas, 0) 
+            FROM galerias 
+            WHERE eliminado IS NOT TRUE 
+            ORDER BY id DESC
+        """)
         rows = cursor.fetchall()
-    except Exception:
+    except Exception as e:
+        print(f"Error consultando galerias: {e}")
         rows = []
 
     galerias = []
@@ -521,29 +544,23 @@ def index():
         if not palabras_clave: palabras_clave = palabras_limpias
 
     for r in rows:
-        galeria_id, titulo, descripcion, fecha = str(r[0]), r[1], r[2], r[3]
-        categoria = r[4] if len(r) > 4 and r[4] else 'General'
-        tipo = r[5] if len(r) > 5 and r[5] else 'Instructivo'
-        tags = r[6] if len(r) > 6 and r[6] else ''
-        vistas = r[7] if len(r) > 7 and r[7] is not None else 0
-        descargas = r[8] if len(r) > 8 and r[8] is not None else 0
-
+        galeria_id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas = r
         sugerencias_titulos.append(titulo)
 
         query_arch = "SELECT filename FROM archivos WHERE galeria_id::text = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
-        cursor.execute(query_arch, (galeria_id,))
+        cursor.execute(query_arch, (str(galeria_id),))
         archivos = [f[0] for f in cursor.fetchall() if f[0]]
 
         item = {
-            'id': galeria_id,
+            'id': str(galeria_id),
             'titulo': titulo,
             'descripcion': descripcion or '',
-            'fecha': fecha or fecha_defecto,
-            'categoria': categoria,
-            'tipo': tipo,
-            'tags': tags,
-            'vistas': vistas,
-            'descargas': descargas,
+            'fecha': str(fecha_subida)[:16] if fecha_subida else fecha_defecto,
+            'categoria': categoria or 'General',
+            'tipo': tipo or 'Instructivo',
+            'tags': tags or '',
+            'vistas': vistas or 0,
+            'descargas': descargas or 0,
             'archivos': archivos
         }
 
@@ -566,7 +583,7 @@ def index():
     conn.close()
     return render_template('index.html', galerias=galerias, busqueda=busqueda_raw, cat_filtro=cat_filtro, tipo_filtro=tipo_filtro, formato_filtro=formato_filtro, sugerencias_titulos=list(set(sugerencias_titulos)), rol=session.get('rol'))
 
-# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES
+# 🚀 SUBIDA DE ARCHIVOS MÚLTIPLES (CUALQUIER FORMATO)
 @app.route('/subir', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -579,10 +596,8 @@ def subir_archivo():
         categoria = (request.form.get('categoria') or 'General').strip()
         tipo = (request.form.get('tipo') or 'Instructivo').strip()
         tags = (request.form.get('tags') or '').strip()
+        autor = session.get('username', 'admin')
 
-        galeria_id = str(uuid.uuid4())[:8]
-        fecha_actual = obtener_fecha_actual()
-        
         archivos_guardados = []
         for file in archivos:
             if file and file.filename:
@@ -599,13 +614,24 @@ def subir_archivo():
         if archivos_guardados:
             conn, db_type = get_db()
             cursor = conn.cursor()
-            q_gal = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-            cursor.execute(q_gal, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
             
-            q_arch = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
+            if db_type == 'postgres':
+                cursor.execute("""
+                    INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
+                    VALUES (%s, %s, %s, %s, %s, NOW(), FALSE, %s, 0, 0)
+                    RETURNING id
+                """, (titulo, tipo, categoria, descripcion, autor, tags))
+                nuevo_id = str(cursor.fetchone()[0])
+            else:
+                cursor.execute("""
+                    INSERT INTO galerias (titulo, tipo, area, descripcion, subido_por, fecha_subida, eliminado, tags, vistas, descargas) 
+                    VALUES (?, ?, ?, ?, ?, datetime('now'), 0, ?, 0, 0)
+                """, (titulo, tipo, categoria, descripcion, autor, tags))
+                nuevo_id = str(cursor.lastrowid)
+
             for fname in archivos_guardados:
-                cursor.execute(q_arch, (galeria_id, fname))
-            
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')", (nuevo_id, fname))
+
             if db_type == 'sqlite': conn.commit()
             conn.close()
             registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] con {len(archivos_guardados)} archivo(s)")
@@ -633,8 +659,8 @@ def editar_galeria(galeria_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, str(galeria_id)))
+        q_upd = "UPDATE galerias SET titulo = %s, area = %s, tipo = %s, descripcion = %s, tags = %s WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, area = ?, tipo = ?, descripcion = ?, tags = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_cat, nuevo_tipo, nueva_desc, nuevos_tags, str(galeria_id)))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
@@ -667,13 +693,12 @@ def eliminar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM galerias WHERE id::text = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (str(galeria_id),))
+        cursor.execute("SELECT titulo FROM galerias WHERE id::text = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?", (str(galeria_id),))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE galerias SET estado = 'eliminado' WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'eliminado' WHERE id = ?"
-        cursor.execute(q_upd, (str(galeria_id),))
+        autor = session.get('username', 'admin')
+        cursor.execute("UPDATE galerias SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET eliminado = 1 WHERE id = ?", (autor, str(galeria_id)) if db_type == 'postgres' else (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Envío a Papelera", f"Instructivo '{titulo}' enviado a papelera.")
     except Exception:
@@ -692,20 +717,25 @@ def ver_credenciales():
     
     lista_credenciales = []
     try:
-        cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, COALESCE(fecha_creacion::text, '') 
+            FROM credenciales 
+            WHERE eliminado IS NOT TRUE 
+            ORDER BY id DESC
+        """)
         rows = cursor.fetchall()
         for r in rows:
-            c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r
+            c_id, titulo, url, usuario, pass_enc, area, notas, fecha = r
             pass_real = desencriptar_texto(pass_enc)
-            texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+            texto_full = f"{titulo} {usuario} {area} {notas}".lower()
             if not q_busqueda or q_busqueda in texto_full:
                 lista_credenciales.append({
                     'id': c_id,
-                    'servicio': servicio or 'Sin Nombre',
+                    'servicio': titulo or 'Sin Nombre',
                     'url': url or '',
                     'usuario': usuario or '',
                     'password': pass_real,
-                    'categoria': categoria or 'General',
+                    'categoria': area or 'General',
                     'notas': notas or '',
                     'fecha': str(fecha)[:16] if fecha else ''
                 })
@@ -723,21 +753,27 @@ def crear_credencial():
     try:
         servicio = (request.form.get('servicio') or request.form.get('nombre') or request.form.get('titulo') or '').strip()
         url = (request.form.get('url') or request.form.get('url_acceso') or '').strip()
-        usuario = (request.form.get('usuario') or request.form.get('username') or '').strip()
+        usuario = (request.form.get('usuario') or request.form.get('username') or request.form.get('usuario_acceso') or '').strip()
         password = (request.form.get('password') or request.form.get('contrasena') or '').strip()
-        categoria = (request.form.get('categoria') or 'General').strip()
+        categoria = (request.form.get('categoria') or request.form.get('area') or 'General').strip()
         notas = (request.form.get('notas') or '').strip()
+        autor = session.get('username', 'admin')
         
         if servicio and usuario and password:
             pass_cifrada = encriptar_texto(password)
-            fecha_act = obtener_fecha_actual()
             conn, db_type = get_db()
             cursor = conn.cursor()
-            q_ins = "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
-            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+            cursor.execute("""
+                INSERT INTO credenciales (titulo, usuario_acceso, password_cifrada, area, url_acceso, notas, creado_por, fecha_creacion, eliminado) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), FALSE)
+            """ if db_type == 'postgres' else """
+                INSERT INTO credenciales (titulo, usuario_acceso, password_cifrada, area, url_acceso, notas, creado_por, fecha_creacion, eliminado) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 0)
+            """, (servicio, usuario, pass_cifrada, categoria, url, notas, autor))
+            
             if db_type == 'sqlite': conn.commit()
             conn.close()
-            registrar_log(session['username'], "Guardado de Credencial", f"Acceso registrado: '{servicio}'")
+            registrar_log(autor, "Guardado de Credencial", f"Acceso registrado: '{servicio}'")
             flash(f"Credencial '{servicio}' registrada con éxito.")
     except Exception as e:
         print(f"Error creando credencial: {e}")
@@ -750,21 +786,36 @@ def crear_credencial():
 def editar_credencial(cred_id):
     try:
         servicio = (request.form.get('servicio') or request.form.get('titulo') or '').strip()
-        url = (request.form.get('url') or '').strip()
-        usuario = (request.form.get('usuario') or '').strip()
-        password = (request.form.get('password') or '').strip()
-        categoria = (request.form.get('categoria') or 'General').strip()
+        url = (request.form.get('url') or request.form.get('url_acceso') or '').strip()
+        usuario = (request.form.get('usuario') or request.form.get('usuario_acceso') or '').strip()
+        password = (request.form.get('password') or request.form.get('contrasena') or '').strip()
+        categoria = (request.form.get('categoria') or request.form.get('area') or 'General').strip()
         notas = (request.form.get('notas') or '').strip()
         
         conn, db_type = get_db()
         cursor = conn.cursor()
         if password:
             pass_cifrada = encriptar_texto(password)
-            q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, password_enc=?, categoria=?, notas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+            cursor.execute("""
+                UPDATE credenciales 
+                SET titulo=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, url_acceso=%s, notas=%s 
+                WHERE id=%s
+            """ if db_type == 'postgres' else """
+                UPDATE credenciales 
+                SET titulo=?, usuario_acceso=?, password_cifrada=?, area=?, url_acceso=?, notas=? 
+                WHERE id=?
+            """, (servicio, usuario, pass_cifrada, categoria, url, notas, cred_id))
         else:
-            q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, categoria=?, notas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
+            cursor.execute("""
+                UPDATE credenciales 
+                SET titulo=%s, usuario_acceso=%s, area=%s, url_acceso=%s, notas=%s 
+                WHERE id=%s
+            """ if db_type == 'postgres' else """
+                UPDATE credenciales 
+                SET titulo=?, usuario_acceso=?, area=?, url_acceso=?, notas=? 
+                WHERE id=?
+            """, (servicio, usuario, categoria, url, notas, cred_id))
+            
         if db_type == 'sqlite': conn.commit()
         conn.close()
         registrar_log(session['username'], "Edición de Credencial", f"Actualizada credencial ID '{cred_id}' ({servicio})")
@@ -780,8 +831,8 @@ def eliminar_credencial(cred_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_upd = "UPDATE credenciales SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'eliminado' WHERE id = ?"
-        cursor.execute(q_upd, (cred_id,))
+        autor = session.get('username', 'admin')
+        cursor.execute("UPDATE credenciales SET eliminado = TRUE, fecha_eliminacion = NOW(), eliminado_por = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET eliminado = 1 WHERE id = ?", (autor, cred_id) if db_type == 'postgres' else (cred_id,))
         if db_type == 'sqlite': conn.commit()
         conn.close()
         registrar_log(session['username'], "Eliminación de Credencial", f"Enviada a papelera credencial ID '{cred_id}'")
@@ -803,27 +854,55 @@ def ver_papelera():
         conn, db_type = get_db()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY id DESC")
+        # 1. Instructivos
+        cursor.execute("""
+            SELECT id, titulo, descripcion, COALESCE(fecha_eliminacion::text, fecha_subida::text, ''), area, tipo 
+            FROM galerias 
+            WHERE eliminado IS TRUE 
+            ORDER BY id DESC
+        """ if db_type == 'postgres' else """
+            SELECT id, titulo, descripcion, COALESCE(fecha_subida, ''), area, tipo 
+            FROM galerias 
+            WHERE eliminado = 1 
+            ORDER BY id DESC
+        """)
         eliminados = cursor.fetchall()
 
-        query_arch_elim = """
-            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+        # 2. Archivos
+        cursor.execute("""
+            SELECT a.id, a.filename, g.id, g.titulo, g.area 
             FROM archivos a 
             JOIN galerias g ON a.galeria_id::text = g.id::text 
-            WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
+            WHERE a.estado = 'eliminado' AND g.eliminado IS NOT TRUE
         """ if db_type == 'postgres' else """
-            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
+            SELECT a.id, a.filename, g.id, g.titulo, g.area 
             FROM archivos a 
             JOIN galerias g ON a.galeria_id = g.id 
-            WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
-        """
-        cursor.execute(query_arch_elim)
+            WHERE a.estado = 'eliminado' AND g.eliminado != 1
+        """)
         archivos_eliminados = cursor.fetchall()
 
-        cursor.execute("SELECT id, servicio, usuario, categoria, fecha FROM credenciales WHERE estado = 'eliminado' ORDER BY id DESC")
+        # 3. Credenciales
+        cursor.execute("""
+            SELECT id, titulo, usuario_acceso, area, COALESCE(fecha_eliminacion::text, fecha_creacion::text, '') 
+            FROM credenciales 
+            WHERE eliminado IS TRUE 
+            ORDER BY id DESC
+        """ if db_type == 'postgres' else """
+            SELECT id, titulo, usuario_acceso, area, COALESCE(fecha_creacion, '') 
+            FROM credenciales 
+            WHERE eliminado = 1 
+            ORDER BY id DESC
+        """)
         credenciales_eliminadas = cursor.fetchall()
 
-        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE estado = 'eliminado' ORDER BY id DESC")
+        # 4. Comunicados
+        cursor.execute("""
+            SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha_publicacion::text, ''), autor 
+            FROM comunicados 
+            WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) = 'eliminado' 
+            ORDER BY id DESC
+        """)
         rows_com = cursor.fetchall()
         for r in rows_com:
             comunicados_eliminados.append({
@@ -837,6 +916,7 @@ def ver_papelera():
         conn.close()
     except Exception as e:
         print(f"Error cargando papelera: {e}")
+        traceback.print_exc()
 
     return render_template(
         'papelera.html', 
@@ -854,8 +934,7 @@ def restaurar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE galerias SET estado = 'activo' WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (str(galeria_id),))
+        cursor.execute("UPDATE galerias SET eliminado = FALSE, fecha_eliminacion = NULL, eliminado_por = NULL WHERE id::text = %s" if db_type == 'postgres' else "UPDATE galerias SET eliminado = 0 WHERE id = ?", (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Restauración de Instructivo", f"Instructivo ID '{galeria_id}' restaurado.")
     except Exception: pass
@@ -870,10 +949,8 @@ def destruir_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_del1 = "DELETE FROM galerias WHERE id::text = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?"
-        q_del2 = "DELETE FROM archivos WHERE galeria_id::text = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?"
-        cursor.execute(q_del1, (str(galeria_id),))
-        cursor.execute(q_del2, (str(galeria_id),))
+        cursor.execute("DELETE FROM galerias WHERE id::text = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?", (str(galeria_id),))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id::text = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?", (str(galeria_id),))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"Instructivo ID '{galeria_id}' destruido.")
     except Exception: pass
@@ -888,8 +965,7 @@ def restaurar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE credenciales SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (cred_id,))
+        cursor.execute("UPDATE credenciales SET eliminado = FALSE, fecha_eliminacion = NULL, eliminado_por = NULL WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET eliminado = 0 WHERE id = ?", (cred_id,))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Restauración de Credencial", f"Credencial ID '{cred_id}' restaurada.")
     except Exception: pass
@@ -904,8 +980,7 @@ def destruir_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_del = "DELETE FROM credenciales WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales WHERE id = ?"
-        cursor.execute(q_del, (cred_id,))
+        cursor.execute("DELETE FROM credenciales WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales WHERE id = ?", (cred_id,))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"Credencial ID '{cred_id}' destruida.")
     except Exception: pass
@@ -920,8 +995,7 @@ def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_del = "DELETE FROM archivos WHERE galeria_id::text = %s AND filename = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ? AND filename = ?"
-        cursor.execute(q_del, (str(galeria_id), filename))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id::text = %s AND filename = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ? AND filename = ?", (str(galeria_id), filename))
         if db_type == 'sqlite': conn.commit()
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
         registrar_log(session['username'], "Eliminación de Archivo", f"Se eliminó '{nombre_limpio}' del instructivo ID '{galeria_id}'.")
@@ -929,7 +1003,7 @@ def eliminar_imagen(galeria_id, filename):
     conn.close()
     return redirect(url_for('index'))
 
-# 👥 GESTIÓN DE USUARIOS
+# 👥 USUARIOS
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -944,16 +1018,19 @@ def gestion_usuarios():
         if nuevo_user and nuevo_pass and nuevo_email:
             try:
                 pass_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (username, password, email, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)"
-                cursor.execute(q_ins, (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
+                cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
                 if db_type == 'sqlite': conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
             except Exception: pass
 
-    cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
-    lista_usuarios = cursor.fetchall()
+    try:
+        cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
+        lista_usuarios = cursor.fetchall()
+    except Exception:
+        lista_usuarios = []
+
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
@@ -961,24 +1038,23 @@ def gestion_usuarios():
 @login_required
 @admin_required
 def editar_usuario(usuario_id):
-    nuevo_email = (request.form.get('email') or '').strip()
+    nuevo_email = (request.form.get('email') or request.form.get('correo') or '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
     nueva_pass = (request.form.get('password') or '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT username FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT username FROM usuarios WHERE id = ?", (usuario_id,))
+        user_target = f"ID {usuario_id}"
+        cursor.execute("SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
         row = cursor.fetchone()
-        user_target = row[0] if row else f"ID {usuario_id}"
+        if row: user_target = row[0]
 
         if nueva_pass:
             pass_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET email = %s, rol = %s, password = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, pass_hash, usuario_id))
+            cursor.execute("UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ? WHERE id = ?", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
         else:
-            q_upd = "UPDATE usuarios SET email = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET email = ?, rol = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
+            cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ? WHERE id = ?", (nuevo_email, nuevo_rol, usuario_id))
 
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Edición de Usuario", f"Actualizado usuario '{user_target}'")
@@ -993,8 +1069,7 @@ def eliminar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_del = "DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?"
-        cursor.execute(q_del, (usuario_id,))
+        cursor.execute("DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?", (usuario_id,))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó usuario ID {usuario_id}")
     except Exception: pass
@@ -1013,12 +1088,12 @@ def ver_logs():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT DISTINCT usuario FROM logs ORDER BY usuario ASC")
+        cursor.execute("SELECT DISTINCT usuario FROM auditoria_logs ORDER BY usuario ASC")
         lista_usuarios = [u[0] for u in cursor.fetchall() if u[0]]
-        cursor.execute("SELECT DISTINCT accion FROM logs ORDER BY accion ASC")
+        cursor.execute("SELECT DISTINCT accion FROM auditoria_logs ORDER BY accion ASC")
         lista_acciones = [a[0] for a in cursor.fetchall() if a[0]]
 
-        query = "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1"
+        query = "SELECT usuario, accion, detalles, fecha FROM auditoria_logs WHERE 1=1"
         params = []
         if q_usuario:
             query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
@@ -1045,7 +1120,7 @@ def ver_logs():
 def exportar_logs_csv():
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT fecha, usuario, accion, detalles FROM logs ORDER BY id DESC")
+    cursor.execute("SELECT fecha, usuario, accion, detalles FROM auditoria_logs ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
 
@@ -1077,11 +1152,20 @@ def bienvenida():
     cursor = conn.cursor()
     comunicado_fijado = None
     try:
-        q_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
-        cursor.execute(q_fij)
+        cursor.execute("""
+            SELECT titulo, contenido, nivel, imagen_url, COALESCE(fecha_publicacion::text, ''), autor 
+            FROM comunicados 
+            WHERE fijado IS TRUE AND COALESCE(estado, 'activo') = 'activo' 
+            ORDER BY id DESC LIMIT 1
+        """ if db_type == 'postgres' else """
+            SELECT titulo, contenido, nivel, imagen_url, fecha_publicacion, autor 
+            FROM comunicados 
+            WHERE fijado = 1 AND estado = 'activo' 
+            ORDER BY id DESC LIMIT 1
+        """)
         row = cursor.fetchone()
         if row:
-            comunicado_fijado = {'titulo': row[0], 'contenido': row[1], 'nivel': row[2], 'imagen_url': row[3], 'fecha': row[4], 'autor': row[5]}
+            comunicado_fijado = {'titulo': row[0], 'contenido': row[1], 'nivel': row[2], 'imagen_url': row[3], 'fecha': str(row[4])[:16], 'autor': row[5]}
     except Exception: comunicado_fijado = None
     conn.close()
     return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
@@ -1096,8 +1180,17 @@ def ver_comunicados():
     cursor = conn.cursor()
     estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
     try:
-        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
-        cursor.execute(query, (estado_filtro,))
+        cursor.execute("""
+            SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, COALESCE(fecha_publicacion::text, ''), autor 
+            FROM comunicados 
+            WHERE COALESCE(estado, 'activo') = %s 
+            ORDER BY fijado DESC, id DESC
+        """ if db_type == 'postgres' else """
+            SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor 
+            FROM comunicados 
+            WHERE estado = ? 
+            ORDER BY fijado DESC, id DESC
+        """, (estado_filtro,))
         rows = cursor.fetchall()
     except Exception: rows = []
     conn.close()
@@ -1109,8 +1202,9 @@ def ver_comunicados():
         if not q_busqueda or q_busqueda in texto_full:
             comunicados.append({
                 'id': c_id, 'titulo': titulo, 'contenido': contenido, 'nivel': nivel,
-                'fijado': fijado, 'imagen_url': img_url, 'estado': estado,
-                'fecha': fecha, 'autor': autor
+                'fijado': True if str(fijado).lower() in ['true', 't', '1'] else False,
+                'imagen_url': img_url, 'estado': estado,
+                'fecha': str(fecha)[:16] if fecha else '', 'autor': autor
             })
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
 
@@ -1123,7 +1217,7 @@ def crear_comunicado():
         titulo = request.form.get('titulo', '').strip()
         contenido = request.form.get('contenido', '').strip()
         nivel = request.form.get('nivel', 'info').strip()
-        fijado = 1 if request.form.get('fijado') in ['on', '1', 'true', True] else 0
+        fijado = True if request.form.get('fijado') in ['on', '1', 'true', True] else False
         imagen = request.files.get('imagen')
         imagen_url = ""
         if imagen and imagen.filename:
@@ -1131,12 +1225,17 @@ def crear_comunicado():
             imagen_url = upload_result.get('secure_url', '')
 
         if titulo and contenido:
-            fecha_act = obtener_fecha_actual()
             autor = session.get('username', 'Admin')
             conn, db_type = get_db()
             cursor = conn.cursor()
-            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
-            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+            cursor.execute("""
+                INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) 
+                VALUES (%s, %s, %s, %s, %s, 'activo', NOW(), %s)
+            """ if db_type == 'postgres' else """
+                INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha_publicacion, autor) 
+                VALUES (?, ?, ?, ?, ?, 'activo', datetime('now'), ?)
+            """, (titulo, contenido, nivel, fijado, imagen_url, autor))
+            
             if db_type == 'sqlite': conn.commit()
             conn.close()
             registrar_log(autor, "Publicación de Comunicado", f"Comunicado: '{titulo}' [{nivel}]")
@@ -1153,13 +1252,11 @@ def archivar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
-        cursor.execute(q_sel, (com_id,))
+        cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?", (com_id,))
         row = cursor.fetchone()
         if row:
-            nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-            q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_estado, com_id))
+            nuevo_estado = 'archivado' if (row[0] or 'activo') == 'activo' else 'activo'
+            cursor.execute("UPDATE comunicados SET estado = %s, fijado = FALSE WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?", (nuevo_estado, com_id))
             if db_type == 'sqlite': conn.commit()
             registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
     except Exception: pass
@@ -1174,8 +1271,7 @@ def eliminar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_upd = "UPDATE comunicados SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = 'eliminado' WHERE id = ?"
-        cursor.execute(q_upd, (com_id,))
+        cursor.execute("UPDATE comunicados SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = 'eliminado' WHERE id = ?", (com_id,))
         if db_type == 'sqlite': conn.commit()
         registrar_log(session['username'], "Eliminación de Comunicado", f"Comunicado ID {com_id} movido a papelera")
     except Exception: pass
@@ -1187,7 +1283,7 @@ def eliminar_comunicado(com_id):
 @admin_required
 def visor_db():
     tabla_seleccionada = request.args.get('tabla', 'usuarios')
-    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
+    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'auditoria_logs', 'credenciales', 'comunicados']
     if tabla_seleccionada not in tablas_permitidas: tabla_seleccionada = 'usuarios'
     
     conn, db_type = get_db()
