@@ -1318,37 +1318,47 @@ def ver_comunicados():
 @login_required
 @admin_required
 def crear_comunicado():
-    titulo = request.form.get('titulo', '').strip()
-    contenido = request.form.get('contenido', '').strip()
-    nivel = request.form.get('nivel', 'info').strip()
-    fijado = 1 if request.form.get('fijado') == 'on' else 0
-    imagen = request.files.get('imagen')
-    
-    imagen_url = ""
-    if imagen and archivo_permitido(imagen.filename):
-        try:
-            upload_result = cloudinary.uploader.upload(
-                imagen, 
-                resource_type="image",
-                use_filename=True,
-                unique_filename=True
-            )
-            imagen_url = upload_result.get('secure_url', '')
-        except Exception as e:
-            print(f"Error subiendo imagen: {e}")
+    try:
+        titulo = request.form.get('titulo', '').strip()
+        contenido = request.form.get('contenido', '').strip()
+        nivel = request.form.get('nivel', 'info').strip()
+        fijado = 1 if request.form.get('fijado') == 'on' else 0
+        imagen = request.files.get('imagen')
+        
+        imagen_url = ""
+        if imagen and imagen.filename and archivo_permitido(imagen.filename):
+            try:
+                upload_result = cloudinary.uploader.upload(
+                    imagen, 
+                    resource_type="image",
+                    use_filename=True,
+                    unique_filename=True
+                )
+                imagen_url = upload_result.get('secure_url', '')
+            except Exception as e_cloud:
+                print(f"⚠️ Error subiendo imagen a Cloudinary: {e_cloud}")
+                flash("Advertencia: No se pudo procesar la imagen adjunta, pero se guardará el texto.")
 
-    if titulo and contenido:
-        fecha_act = obtener_fecha_actual()
-        autor = session.get('username', 'Admin')
-        
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
-                       (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
-        conn.commit()
-        conn.close()
-        
-        registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+        if titulo and contenido:
+            fecha_act = obtener_fecha_actual()
+            autor = session.get('username', 'Admin')
+            
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
+                (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor)
+            )
+            conn.commit()
+            conn.close()
+            
+            registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+            flash("Comunicado publicado correctamente.")
+            
+    except Exception as e:
+        print(f"❌ Error al crear comunicado: {e}")
+        traceback.print_exc()
+        flash("Ocurrió un error al guardar el comunicado en el sistema.")
 
     return redirect(url_for('ver_comunicados'))
 
