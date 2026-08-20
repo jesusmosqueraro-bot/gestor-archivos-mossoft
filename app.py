@@ -664,11 +664,15 @@ def eliminar_credencial(cred_id):
 @app.route('/papelera')
 @login_required
 @admin_required
+@app.route('/papelera')
+@login_required
+@admin_required
 def ver_papelera():
     conn, db_type = get_db()
     cursor = conn.cursor()
+    
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado ILIKE 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
         eliminados = cursor.fetchall()
     except Exception:
         eliminados = []
@@ -691,10 +695,19 @@ def ver_papelera():
     except Exception:
         credenciales_eliminadas = []
 
+    comunicados_eliminados = []
     try:
-        cursor.execute("SELECT id, titulo, COALESCE(nivel, 'info'), COALESCE(fecha, ''), COALESCE(autor, 'Admin') FROM comunicados WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
-        comunicados_eliminados = cursor.fetchall()
-    except Exception:
+        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE estado ILIKE 'eliminado' ORDER BY id DESC")
+        for r in cursor.fetchall():
+            comunicados_eliminados.append({
+                'id': r[0],
+                'titulo': r[1] or '',
+                'nivel': r[2] or 'info',
+                'fecha': r[3] or '',
+                'autor': r[4] or 'Admin'
+            })
+    except Exception as e:
+        print(f"⚠️ Error cargando comunicados en papelera: {e}")
         comunicados_eliminados = []
 
     conn.close()
