@@ -160,184 +160,97 @@ def validar_instancia_y_sesion():
             return redirect(url_for('login', expirado='1'))
 
 def get_db():
-    if DATABASE_URL and psycopg2:
-        try:
-            url = DATABASE_URL.strip()
-            if url.startswith("postgres://"):
-                url = url.replace("postgres://", "postgresql://", 1)
-            if "-pooler" in url:
-                url = url.replace("-pooler", "")
-            if "channel_binding=" in url:
-                url = url.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
-            if "sslmode=" not in url:
-                url += ("&" if "?" in url else "?") + "sslmode=require"
-            
-            conn = psycopg2.connect(url, connect_timeout=15)
-            return conn, 'postgres'
-        except Exception as e:
-            print(f"⚠️ Error conectando a PostgreSQL Neon: {e}")
-            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-            DB_NAME = os.path.join(BASE_DIR, "gestor.db")
-            conn = sqlite3.connect(DB_NAME)
-            return conn, 'sqlite'
-    else:
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        DB_NAME = os.path.join(BASE_DIR, "gestor.db")
-        conn = sqlite3.connect(DB_NAME)
-        return conn, 'sqlite'
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL no está configurada")
+    if not psycopg2:
+        raise RuntimeError("El controlador psycopg2 no está instalado")
+
+    url = DATABASE_URL.strip()
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    if "-pooler" in url:
+        url = url.replace("-pooler", "")
+    if "channel_binding=" in url:
+        url = url.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
+    if "sslmode=" not in url:
+        url += ("&" if "?" in url else "?") + "sslmode=require"
+
+    conn = psycopg2.connect(url, connect_timeout=15)
+    return conn, 'postgres'
 
 def init_db():
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        if db_type == 'postgres':
-            cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                usuario VARCHAR(100) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                correo VARCHAR(200) NOT NULL,
-                rol VARCHAR(50) NOT NULL DEFAULT 'estandar',
-                nombre VARCHAR(100) DEFAULT '',
-                area VARCHAR(100) DEFAULT '',
-                activo BOOLEAN DEFAULT TRUE
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id VARCHAR(50) PRIMARY KEY,
-                titulo VARCHAR(200) NOT NULL,
-                descripcion TEXT,
-                fecha VARCHAR(100),
-                categoria VARCHAR(100) DEFAULT 'General',
-                tipo VARCHAR(100) DEFAULT 'Instructivo',
-                tags TEXT DEFAULT '',
-                vistas INTEGER DEFAULT 0,
-                descargas INTEGER DEFAULT 0,
-                estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id SERIAL PRIMARY KEY,
-                galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE,
-                filename TEXT NOT NULL,
-                estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
-                id SERIAL PRIMARY KEY,
-                usuario VARCHAR(100),
-                accion VARCHAR(100),
-                detalles TEXT,
-                fecha VARCHAR(100)
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id SERIAL PRIMARY KEY,
-                servicio VARCHAR(150) NOT NULL,
-                url TEXT,
-                usuario VARCHAR(150) NOT NULL,
-                password_enc TEXT NOT NULL,
-                categoria VARCHAR(100) DEFAULT 'General',
-                notas TEXT,
-                fecha VARCHAR(100) NOT NULL,
-                estado VARCHAR(50) DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
-                id SERIAL PRIMARY KEY,
-                titulo VARCHAR(200) NOT NULL,
-                contenido TEXT NOT NULL,
-                nivel VARCHAR(50) DEFAULT 'info',
-                fijado INTEGER DEFAULT 0,
-                imagen_url TEXT DEFAULT '',
-                estado VARCHAR(50) DEFAULT 'activo',
-                fecha VARCHAR(100) NOT NULL,
-                autor VARCHAR(100) NOT NULL
-            )''')
+        
+        cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            usuario VARCHAR(100) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            correo VARCHAR(200) NOT NULL,
+            rol VARCHAR(50) NOT NULL DEFAULT 'estandar',
+            nombre VARCHAR(100) DEFAULT '',
+            area VARCHAR(100) DEFAULT '',
+            activo BOOLEAN DEFAULT TRUE
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
+            id VARCHAR(50) PRIMARY KEY,
+            titulo VARCHAR(200) NOT NULL,
+            descripcion TEXT,
+            fecha VARCHAR(100),
+            categoria VARCHAR(100) DEFAULT 'General',
+            tipo VARCHAR(100) DEFAULT 'Instructivo',
+            tags TEXT DEFAULT '',
+            vistas INTEGER DEFAULT 0,
+            descargas INTEGER DEFAULT 0,
+            estado VARCHAR(50) DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
+            id SERIAL PRIMARY KEY,
+            galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL,
+            estado VARCHAR(50) DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
+            id SERIAL PRIMARY KEY,
+            usuario VARCHAR(100),
+            accion VARCHAR(100),
+            detalles TEXT,
+            fecha VARCHAR(100)
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
+            id SERIAL PRIMARY KEY,
+            servicio VARCHAR(150) NOT NULL,
+            url TEXT,
+            usuario VARCHAR(150) NOT NULL,
+            password_enc TEXT NOT NULL,
+            categoria VARCHAR(100) DEFAULT 'General',
+            notas TEXT,
+            fecha VARCHAR(100) NOT NULL,
+            estado VARCHAR(50) DEFAULT 'activo'
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
+            id SERIAL PRIMARY KEY,
+            titulo VARCHAR(200) NOT NULL,
+            contenido TEXT NOT NULL,
+            nivel VARCHAR(50) DEFAULT 'info',
+            fijado INTEGER DEFAULT 0,
+            imagen_url TEXT DEFAULT '',
+            estado VARCHAR(50) DEFAULT 'activo',
+            fecha VARCHAR(100) NOT NULL,
+            autor VARCHAR(100) NOT NULL
+        )''')
+        conn.commit()
+
+        cursor.execute("SELECT COUNT(*) FROM usuarios")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                           ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
             conn.commit()
-
-            cursor.execute("SELECT COUNT(*) FROM usuarios")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                               ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', True))
-                conn.commit()
-        else:
-            cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario TEXT UNIQUE,
-                password_hash TEXT,
-                correo TEXT,
-                rol TEXT NOT NULL DEFAULT 'estandar',
-                nombre TEXT,
-                area TEXT,
-                activo BOOLEAN DEFAULT 1
-            )''')
-            
-            try:
-                cursor.execute("SELECT username FROM usuarios LIMIT 1")
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN usuario TEXT;")
-                cursor.execute("UPDATE usuarios SET usuario = username WHERE usuario IS NULL;")
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT;")
-                cursor.execute("UPDATE usuarios SET password_hash = password WHERE password_hash IS NULL;")
-                cursor.execute("ALTER TABLE usuarios ADD COLUMN correo TEXT;")
-                cursor.execute("UPDATE usuarios SET correo = email WHERE correo IS NULL;")
-                conn.commit()
-            except Exception:
-                pass
-
-            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id TEXT PRIMARY KEY,
-                titulo TEXT NOT NULL,
-                descripcion TEXT,
-                fecha TEXT,
-                categoria TEXT DEFAULT 'General',
-                tipo TEXT DEFAULT 'Instructivo',
-                tags TEXT DEFAULT '',
-                vistas INTEGER DEFAULT 0,
-                descargas INTEGER DEFAULT 0,
-                estado TEXT DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                galeria_id TEXT,
-                filename TEXT NOT NULL,
-                estado TEXT DEFAULT 'activo',
-                FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS auditoria_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario TEXT,
-                accion TEXT,
-                detalles TEXT,
-                fecha TEXT
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                servicio TEXT NOT NULL,
-                url TEXT,
-                usuario TEXT NOT NULL,
-                password_enc TEXT NOT NULL,
-                categoria TEXT DEFAULT 'General',
-                notas TEXT,
-                fecha VARCHAR(100) NOT NULL,
-                estado TEXT DEFAULT 'activo'
-            )''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                titulo TEXT NOT NULL,
-                contenido TEXT NOT NULL,
-                nivel TEXT DEFAULT 'info',
-                fijado INTEGER DEFAULT 0,
-                imagen_url TEXT DEFAULT '',
-                estado TEXT DEFAULT 'activo',
-                fecha TEXT NOT NULL,
-                autor TEXT NOT NULL
-            )''')
-            conn.commit()
-
-            cursor.execute("SELECT COUNT(*) FROM usuarios")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, area, activo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                               ('admin', '1234', 'jesus.mosqueraro@gmail.com', 'admin', 'Administrador Master', 'Sistemas', 1))
-                conn.commit()
 
         conn.close()
     except Exception as e:
-        print(f"Error inicializando base de datos: {e}")
+        print(f"Error inicializando base de datos Neon: {e}")
 
 init_db()
 
@@ -346,12 +259,11 @@ def registrar_log(usuario, accion, detalles=""):
         conn, db_type = get_db()
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
-        query = "INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
-        cursor.execute(query, (usuario, accion, detalles, fecha_actual))
+        cursor.execute("INSERT INTO auditoria_logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)", (usuario, accion, detalles, fecha_actual))
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"⚠️ Error registrando log (no crítico): {e}")
+        print(f"⚠️ Error registrando log: {e}")
 
 def verificar_recaptcha(response_token):
     if not response_token:
@@ -394,7 +306,7 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         cuerpo = f"Hola {usuario_nombre},\n\nTu código de verificación para restablecer tu contraseña en ARKIV es: {codigo}\n\nSi no solicitaste este cambio, por favor ignora este mensaje.\n---\nEquipo de Soporte - ARKIV System"
         payload = {
             "para": email_destino,
-            "asunto": f"Código de Verificación - Gestor de Archivos",
+            "asunto": "Código de Verificación - Gestor de Archivos",
             "cuerpo": cuerpo
         }
         if requests:
@@ -415,18 +327,8 @@ def recuperar_clave():
         email_ingresado = request.form.get('email', '').strip().lower()
         conn, db_type = get_db()
         cursor = conn.cursor()
-        
-        user = None
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s", (email_ingresado,))
-            user = cursor.fetchone()
-        else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = ?", (email_ingresado,))
-                user = cursor.fetchone()
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE LOWER(TRIM(email)) = ?", (email_ingresado,))
-                user = cursor.fetchone()
+        cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s", (email_ingresado,))
+        user = cursor.fetchone()
         conn.close()
 
         if user:
@@ -467,14 +369,7 @@ def validar_codigo():
     cursor = conn.cursor()
     try:
         pass_hash = generate_password_hash(nueva_pass)
-        if db_type == 'postgres':
-            cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s", (pass_hash, email_usuario))
-        else:
-            try:
-                cursor.execute("UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ?", (pass_hash, email_usuario))
-            except Exception:
-                cursor.execute("UPDATE usuarios SET password = ? WHERE LOWER(TRIM(email)) = ?", (pass_hash, email_usuario))
-                
+        cursor.execute("UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s", (pass_hash, email_usuario))
         conn.commit()
         conn.close()
 
@@ -502,21 +397,8 @@ def login():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            
-            user = None
-            if db_type == 'postgres':
-                cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))", (username,))
-                user = cursor.fetchone()
-            else:
-                try:
-                    cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))", (username,))
-                    user = cursor.fetchone()
-                except Exception:
-                    try:
-                        cursor.execute("SELECT username, password, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))", (username,))
-                        user = cursor.fetchone()
-                    except Exception:
-                        user = None
+            cursor.execute("SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))", (username,))
+            user = cursor.fetchone()
 
             if user:
                 clave_db = str(user[1] or '')
@@ -525,13 +407,7 @@ def login():
                 if es_valida:
                     if not (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')):
                         try:
-                            if db_type == 'postgres':
-                                cursor.execute("UPDATE usuarios SET password_hash = %s WHERE usuario = %s", (generate_password_hash(password), user[0]))
-                            else:
-                                try:
-                                    cursor.execute("UPDATE usuarios SET password_hash = ? WHERE usuario = ?", (generate_password_hash(password), user[0]))
-                                except Exception:
-                                    cursor.execute("UPDATE usuarios SET password = ? WHERE username = ?", (generate_password_hash(password), user[0]))
+                            cursor.execute("UPDATE usuarios SET password_hash = %s WHERE usuario = %s", (generate_password_hash(password), user[0]))
                             conn.commit()
                         except Exception:
                             conn.rollback()
@@ -556,7 +432,7 @@ def login():
         except Exception as e:
             print(f"Error crítico en login: {e}")
             traceback.print_exc()
-            return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
+            return render_template('login.html', error=f"Error en el servidor: {e}")
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
@@ -568,8 +444,7 @@ def incrementar_vista(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
-        cursor.execute(q, (galeria_id,))
+        cursor.execute("UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s", (galeria_id,))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -583,13 +458,11 @@ def incrementar_descarga(galeria_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_tit = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_tit, (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q = "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = ?"
-        cursor.execute(q, (galeria_id,))
+        cursor.execute("UPDATE galerias SET descargas = COALESCE(descargas, 0) + 1 WHERE id = %s", (galeria_id,))
         conn.commit()
         conn.close()
 
@@ -710,8 +583,8 @@ def crear_credencial():
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_ins = "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
-        cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+        cursor.execute("INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')", 
+                       (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
@@ -734,11 +607,11 @@ def editar_credencial(cred_id):
     
     if password:
         pass_cifrada = encriptar_texto(password)
-        q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, password_enc=?, categoria=?, notas=? WHERE id=?"
-        cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+        cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s", 
+                       (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
     else:
-        q_upd = "UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET servicio=?, url=?, usuario=?, categoria=?, notas=? WHERE id=?"
-        cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
+        cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
+                       (servicio, url, usuario, categoria, notas, cred_id))
         
     conn.commit()
     conn.close()
@@ -751,8 +624,7 @@ def editar_credencial(cred_id):
 def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_upd = "UPDATE credenciales SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'eliminado' WHERE id = ?"
-    cursor.execute(q_upd, (cred_id,))
+    cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
     conn.commit()
     conn.close()
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
@@ -803,13 +675,11 @@ def restaurar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT servicio FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT servicio FROM credenciales WHERE id = ?"
-        cursor.execute(q_sel, (cred_id,))
+        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
         servicio = row[0] if row else f"ID {cred_id}"
 
-        q_upd = "UPDATE credenciales SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (cred_id,))
+        cursor.execute("UPDATE credenciales SET estado = 'activo' WHERE id = %s", (cred_id,))
         conn.commit()
         registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
     except Exception:
@@ -824,13 +694,11 @@ def destruir_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT servicio FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT servicio FROM credenciales WHERE id = ?"
-        cursor.execute(q_sel, (cred_id,))
+        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
         servicio = row[0] if row else f"ID {cred_id}"
 
-        q_del = "DELETE FROM credenciales WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales WHERE id = ?"
-        cursor.execute(q_del, (cred_id,))
+        cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
     except Exception:
@@ -845,13 +713,11 @@ def restaurar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE galerias SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (galeria_id,))
+        cursor.execute("UPDATE galerias SET estado = 'activo' WHERE id = %s", (galeria_id,))
         conn.commit()
         registrar_log(session['username'], "Restauración de Instructivo", f"El instructivo '{titulo}' fue restaurado desde la papelera.")
     except Exception:
@@ -866,15 +732,12 @@ def destruir_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_del1 = "DELETE FROM galerias WHERE id = %s" if db_type == 'postgres' else "DELETE FROM galerias WHERE id = ?"
-        q_del2 = "DELETE FROM archivos WHERE galeria_id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE galeria_id = ?"
-        cursor.execute(q_del1, (galeria_id,))
-        cursor.execute(q_del2, (galeria_id,))
+        cursor.execute("DELETE FROM galerias WHERE id = %s", (galeria_id,))
+        cursor.execute("DELETE FROM archivos WHERE galeria_id = %s", (galeria_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación Permanente", f"El instructivo '{titulo}' fue eliminado definitivamente del sistema.")
     except Exception:
@@ -889,13 +752,11 @@ def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
-        cursor.execute(q_upd, (galeria_id, filename))
+        cursor.execute("UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s", (galeria_id, filename))
         conn.commit()
 
         nombre_limpio = filename.split('/')[-1] if 'http' in filename else filename
@@ -912,12 +773,10 @@ def restaurar_archivo(archivo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        query_info = "SELECT a.filename, g.titulo FROM archivos a JOIN galerias g ON a.galeria_id = g.id WHERE a.id = %s" if db_type == 'postgres' else "SELECT a.filename, g.titulo FROM archivos a JOIN galerias g ON a.galeria_id = g.id WHERE a.id = ?"
-        cursor.execute(query_info, (archivo_id,))
+        cursor.execute("SELECT a.filename, g.titulo FROM archivos a JOIN galerias g ON a.galeria_id = g.id WHERE a.id = %s", (archivo_id,))
         row = cursor.fetchone()
 
-        q_upd = "UPDATE archivos SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'activo' WHERE id = ?"
-        cursor.execute(q_upd, (archivo_id,))
+        cursor.execute("UPDATE archivos SET estado = 'activo' WHERE id = %s", (archivo_id,))
         conn.commit()
 
         if row:
@@ -935,8 +794,7 @@ def destruir_archivo(archivo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_del = "DELETE FROM archivos WHERE id = %s" if db_type == 'postgres' else "DELETE FROM archivos WHERE id = ?"
-        cursor.execute(q_del, (archivo_id,))
+        cursor.execute("DELETE FROM archivos WHERE id = %s", (archivo_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
     except Exception:
@@ -959,14 +817,7 @@ def gestion_usuarios():
         if nuevo_user and nuevo_pass and nuevo_email:
             try:
                 pass_hash = generate_password_hash(nuevo_pass)
-                if db_type == 'postgres':
-                    cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                else:
-                    try:
-                        cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (?, ?, ?, ?, 1)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                    except Exception:
-                        cursor.execute("INSERT INTO usuarios (username, password, email, rol) VALUES (?, ?, ?, ?)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
-                
+                cursor.execute("INSERT INTO usuarios (usuario, password_hash, correo, rol, activo) VALUES (%s, %s, %s, %s, TRUE)", (nuevo_user, pass_hash, nuevo_email, nuevo_rol))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Se creó el usuario '{nuevo_user}' [{nuevo_rol}]")
                 conn.close()
@@ -974,17 +825,8 @@ def gestion_usuarios():
             except Exception:
                 conn.rollback()
 
-    if db_type == 'postgres':
-        cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
-        lista_usuarios = cursor.fetchall()
-    else:
-        try:
-            cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
-            lista_usuarios = cursor.fetchall()
-        except Exception:
-            cursor.execute("SELECT id, username, email, rol FROM usuarios ORDER BY id ASC")
-            lista_usuarios = cursor.fetchall()
-            
+    cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
+    lista_usuarios = cursor.fetchall()
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
@@ -999,44 +841,17 @@ def editar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        user_target = f"ID {usuario_id}"
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
-            row = cursor.fetchone()
-            if row: user_target = row[0]
-            
-            if nueva_pass:
-                pass_hash = generate_password_hash(nueva_pass)
-                cursor.execute("UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-            else:
-                cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s", (nuevo_email, nuevo_rol, usuario_id))
-                detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
+        cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+        
+        if nueva_pass:
+            pass_hash = generate_password_hash(nueva_pass)
+            cursor.execute("UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
+            detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-                
-                if nueva_pass:
-                    pass_hash = generate_password_hash(nueva_pass)
-                    cursor.execute("UPDATE usuarios SET correo = ?, rol = ?, password_hash = ? WHERE id = ?", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                    detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-                else:
-                    cursor.execute("UPDATE usuarios SET correo = ?, rol = ? WHERE id = ?", (nuevo_email, nuevo_rol, usuario_id))
-                    detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-                
-                if nueva_pass:
-                    pass_hash = generate_password_hash(nueva_pass)
-                    cursor.execute("UPDATE usuarios SET email = ?, rol = ?, password = ? WHERE id = ?", (nuevo_email, nuevo_rol, pass_hash, usuario_id))
-                    detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
-                else:
-                    cursor.execute("UPDATE usuarios SET email = ?, rol = ? WHERE id = ?", (nuevo_email, nuevo_rol, usuario_id))
-                    detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
+            cursor.execute("UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s", (nuevo_email, nuevo_rol, usuario_id))
+            detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
@@ -1053,23 +868,11 @@ def eliminar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        user_target = f"ID {usuario_id}"
-        if db_type == 'postgres':
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
-            row = cursor.fetchone()
-            if row: user_target = row[0]
-            cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
-        else:
-            try:
-                cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-            except Exception:
-                cursor.execute("SELECT username FROM usuarios WHERE id = ?", (usuario_id,))
-                row = cursor.fetchone()
-                if row: user_target = row[0]
-            cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
-            
+        cursor.execute("SELECT usuario FROM usuarios WHERE id = %s", (usuario_id,))
+        row = cursor.fetchone()
+        user_target = row[0] if row else f"ID {usuario_id}"
+        
+        cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
         conn.commit()
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
     except Exception:
@@ -1100,21 +903,17 @@ def ver_logs():
         params = []
 
         if q_usuario:
-            query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+            query += " AND usuario = %s"
             params.append(q_usuario)
 
         if q_accion:
-            query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+            query += " AND accion = %s"
             params.append(q_accion)
 
         if q_busqueda:
             p_busq = f"%{q_busqueda}%"
-            if db_type == 'postgres':
-                query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
-                params.extend([p_busq, p_busq])
-            else:
-                query += " AND (detalles LIKE ? OR fecha LIKE ?)"
-                params.extend([p_busq, p_busq])
+            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
+            params.extend([p_busq, p_busq])
 
         query += " ORDER BY id DESC"
         cursor.execute(query, tuple(params))
@@ -1148,21 +947,17 @@ def exportar_logs_csv():
     params = []
 
     if q_usuario:
-        query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+        query += " AND usuario = %s"
         params.append(q_usuario)
 
     if q_accion:
-        query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+        query += " AND accion = %s"
         params.append(q_accion)
 
     if q_busqueda:
         p_busq = f"%{q_busqueda}%"
-        if db_type == 'postgres':
-            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
-            params.extend([p_busq, p_busq])
-        else:
-            query += " AND (detalles LIKE ? OR fecha LIKE ?)"
-            params.extend([p_busq, p_busq])
+        query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
+        params.extend([p_busq, p_busq])
 
     query += " ORDER BY id DESC"
     cursor.execute(query, tuple(params))
@@ -1261,8 +1056,7 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
-        cursor.execute(query_arch, (galeria_id,))
+        cursor.execute("SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'", (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
         item = {
@@ -1329,12 +1123,11 @@ def subir_archivo():
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
+        cursor.execute("INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')", 
+                       (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
         
-        q_archivo = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
         for fname in archivos_guardados:
-            cursor.execute(q_archivo, (galeria_id, fname))
+            cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, fname))
         
         conn.commit()
         conn.close()
@@ -1357,8 +1150,7 @@ def editar_galeria(galeria_id):
     cursor = conn.cursor()
     
     try:
-        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
+        cursor.execute("SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s", (galeria_id,))
         antiguo = cursor.fetchone()
 
         cambios = []
@@ -1375,8 +1167,8 @@ def editar_galeria(galeria_id):
             if tipo_old != nuevo_tipo: cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
             if tags_old != nuevos_tags: cambios.append(f"Tags: '{tags_old}' ➔ '{nuevos_tags}'")
 
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
+        cursor.execute("UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id = %s", 
+                       (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
@@ -1391,8 +1183,7 @@ def editar_galeria(galeria_id):
                 else:
                     upload_result = cloudinary.uploader.upload(file, resource_type="image", use_filename=True, unique_filename=True)
                 
-                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
-                cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
+                cursor.execute("INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')", (galeria_id, upload_result['secure_url']))
                 archivos_agregados += 1
 
         if archivos_agregados > 0:
@@ -1415,13 +1206,11 @@ def eliminar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
-        cursor.execute(q_sel, (galeria_id,))
+        cursor.execute("SELECT titulo FROM galerias WHERE id = %s", (galeria_id,))
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE galerias SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET estado = 'eliminado' WHERE id = ?"
-        cursor.execute(q_upd, (galeria_id,))
+        cursor.execute("UPDATE galerias SET estado = 'eliminado' WHERE id = %s", (galeria_id,))
         conn.commit()
         registrar_log(session['username'], "Envío a Papelera", f"El instructivo '{titulo}' fue movido a la papelera de reciclaje.")
     except Exception:
@@ -1479,8 +1268,7 @@ def ver_comunicados():
     estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
     
     try:
-        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
-        cursor.execute(query, (estado_filtro,))
+        cursor.execute("SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC", (estado_filtro,))
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -1535,8 +1323,8 @@ def crear_comunicado():
         
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
-        cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+        cursor.execute("INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)", 
+                       (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
         conn.commit()
         conn.close()
         
@@ -1550,14 +1338,12 @@ def crear_comunicado():
 def archivar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
-    cursor.execute(q_sel, (com_id,))
+    cursor.execute("SELECT estado, titulo FROM comunicados WHERE id = %s", (com_id,))
     row = cursor.fetchone()
     
     if row:
         nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-        q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_estado, com_id))
+        cursor.execute("UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s", (nuevo_estado, com_id))
         conn.commit()
         registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
         
@@ -1570,8 +1356,7 @@ def archivar_comunicado(com_id):
 def eliminar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
-    cursor.execute(q_del, (com_id,))
+    cursor.execute("DELETE FROM comunicados WHERE id = %s", (com_id,))
     conn.commit()
     conn.close()
     registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
