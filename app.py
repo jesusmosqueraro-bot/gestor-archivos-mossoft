@@ -149,8 +149,7 @@ app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
 
-DATABASE_URL = os.environ.get('DATABASE_URL') or "postgresql://neondb_owner:npg_tlXa1KCi7LGB@ep-young-breeze-au0z27pm-pooler.c-10.us-east-1.aws.neon.tech/neondb?sslmode=require"
-
+DATABASE_URL = os.environ.get('DATABASE_URL') or "postgresql://neondb_owner:npg_t1XaIKCi7LGB@ep-young-breeze-au0z27pm.c-10.us-east-1.aws.neon.tech/neondb?sslmode=require"
 @app.before_request
 def validar_instancia_y_sesion():
     session.permanent = True
