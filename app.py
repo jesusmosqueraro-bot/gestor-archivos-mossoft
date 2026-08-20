@@ -262,7 +262,20 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
-        # Migración preventiva para archivos
+        columnas_comunicados = [
+            ("nivel", "VARCHAR(50) DEFAULT 'info'"),
+            ("fijado", "BOOLEAN DEFAULT FALSE"),
+            ("imagen_url", "TEXT DEFAULT ''"),
+            ("estado", "VARCHAR(50) DEFAULT 'activo'"),
+            ("fecha_publicacion", "VARCHAR(100) DEFAULT ''"),
+            ("autor", "VARCHAR(100) DEFAULT 'Admin'")
+        ]
+        for col, col_type in columnas_comunicados:
+            try:
+                cursor.execute(f"ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            except Exception:
+                pass
+
         try:
             cursor.execute("ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo'")
         except Exception:
@@ -342,8 +355,6 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
             "mensaje": cuerpo
         }
         
-        print(f"📧 Enviando código a: {email_destino} [Código: {codigo}]")
-        
         data_json = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             GMAIL_SCRIPT_URL,
@@ -358,8 +369,6 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         
         with urllib.request.urlopen(req, context=ctx, timeout=15) as response:
             res_code = response.getcode()
-            res_body = response.read().decode('utf-8')
-            print(f"📬 Webhook Google Apps Script: HTTP {res_code} - {res_body}")
             return True
             
     except Exception as e:
@@ -694,23 +703,7 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando galerías eliminadas: {e}")
 
-    # 2. Archivos adjuntos eliminados (Consulta con LEFT JOIN a prueba de fallos)
-    try:
-        conn, _ = get_db()
-        cursor = conn.cursor()
-        query_arch_elim = """
-            SELECT a.id, a.filename, COALESCE(g.id, ''), COALESCE(g.titulo, 'Instructivo'), COALESCE(g.categoria, 'General') 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
-            WHERE LOWER(TRIM(COALESCE(g.estado, 'activo'))) = 'eliminado'
-        """
-        cursor.execute(query_arch_elim)
-        archivos_eliminados = cursor.fetchall()
-        conn.close()
-    except Exception as e:
-        print(f"⚠️ Error cargando archivos eliminados: {e}")
-
-    # 3. Credenciales eliminadas
+    # 2. Credenciales eliminadas
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -720,7 +713,7 @@ def ver_papelera():
     except Exception as e:
         print(f"⚠️ Error cargando credenciales eliminadas: {e}")
 
-    # 4. Comunicados eliminados (con la columna real de Neon: fecha_publicacion)
+    # 3. Comunicados eliminados (con fecha_publicacion garantizada)
     try:
         conn, _ = get_db()
         cursor = conn.cursor()
@@ -850,28 +843,6 @@ def eliminar_imagen(galeria_id, filename):
         pass
     conn.close()
     return redirect(url_for('index'))
-
-@app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST', 'GET'])
-@csrf.exempt
-@login_required
-@admin_required
-def restaurar_archivo(archivo_id):
-    return redirect(url_for('ver_papelera'))
-
-@app.route('/destruir_archivo/<int:archivo_id>', methods=['POST', 'GET'])
-@csrf.exempt
-@login_required
-@admin_required
-def destruir_archivo(archivo_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM archivos WHERE id = %s", (archivo_id,))
-        registrar_log(session['username'], "Eliminación Permanente (Archivo)", f"Se destruyó permanentemente un archivo adjunto ID '{archivo_id}'.")
-    except Exception:
-        pass
-    conn.close()
-    return redirect(url_for('ver_papelera'))
 
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
