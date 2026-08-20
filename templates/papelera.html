@@ -9,16 +9,20 @@
     <link rel="preconnect" href="https://fonts.gstatic.com">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style> body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; } </style>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
+        .tab-btn.active { background-color: #06b6d4; color: white; border-color: transparent; }
+    </style>
 </head>
-<body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-rose-500 selection:text-white">
+<body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white">
 
+    <!-- Encabezado -->
     <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-4">
                 <a href="{{ url_for('bienvenida') }}" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
                     <i class="fa-solid fa-arrow-left"></i>
-                    <span>Volver</span>
+                    <span>Inicio</span>
                 </a>
                 <div class="flex items-center gap-2.5">
                     <div class="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-sm">
@@ -31,128 +35,160 @@
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        <div class="space-y-10">
 
-            <!-- SECCIÓN 1: COMUNICADOS ELIMINADOS -->
-            <div>
-                <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <i class="fa-solid fa-bullhorn text-cyan-400"></i> Comunicados en Papelera ({{ comunicados_eliminados|length if comunicados_eliminados else 0 }})
-                </h2>
-                {% if comunicados_eliminados %}
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {% for item in comunicados_eliminados %}
-                    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-                        <div>
-                            <div class="flex items-center justify-between text-[11px] text-slate-500 mb-2">
-                                <span class="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold uppercase">{{ item.nivel or item[2] or 'info' }}</span>
-                                <span>{{ item.fecha or item[3] or '' }}</span>
-                            </div>
-                            <h3 class="text-base font-bold text-white mb-1">{{ item.titulo or item[1] or 'Sin título' }}</h3>
-                            <p class="text-xs text-slate-400">Autor: {{ item.autor or item[4] or 'Admin' }}</p>
-                        </div>
-                        <div class="pt-4 border-t border-slate-800/80 mt-4 flex items-center justify-end gap-2">
-                            <form method="POST" action="{{ url_for('restaurar_comunicado', com_id=(item.id if item.id is defined else item[0])) }}">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-rotate-left"></i> Restaurar
-                                </button>
-                            </form>
-                            <form method="POST" action="{{ url_for('destruir_comunicado', com_id=(item.id if item.id is defined else item[0])) }}" onsubmit="return confirm('¿Destruir permanentemente este comunicado?')">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-trash"></i> Destruir
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 italic bg-slate-900/30 p-4 rounded-xl border border-slate-800/50">No hay comunicados en la papelera.</p>
-                {% endif %}
-            </div>
-
-            <!-- SECCIÓN 2: INSTRUCTIVOS ELIMINADOS -->
-            <div>
-                <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <i class="fa-solid fa-folder-open text-cyan-400"></i> Instructivos Eliminados ({{ eliminados|length if eliminados else 0 }})
-                </h2>
-                {% if eliminados %}
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {% for g in eliminados %}
-                    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-                        <div>
-                            <div class="flex items-center justify-between text-[11px] text-slate-500 mb-2">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">{{ g[4] }}</span>
-                                <span>{{ g[3] }}</span>
-                            </div>
-                            <h3 class="text-base font-bold text-white mb-1">{{ g[1] }}</h3>
-                            <p class="text-xs text-slate-400 line-clamp-2">{{ g[2] }}</p>
-                        </div>
-                        <div class="pt-4 border-t border-slate-800/80 mt-4 flex items-center justify-end gap-2">
-                            <form method="POST" action="{{ url_for('restaurar_galeria', galeria_id=g[0]) }}">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-rotate-left"></i> Restaurar
-                                </button>
-                            </form>
-                            <form method="POST" action="{{ url_for('destruir_galeria', galeria_id=g[0]) }}" onsubmit="return confirm('¿Destruir permanentemente este instructivo?')">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-trash"></i> Destruir
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 italic bg-slate-900/30 p-4 rounded-xl border border-slate-800/50">No hay instructivos eliminados.</p>
-                {% endif %}
-            </div>
-
-            <!-- SECCIÓN 3: CREDENCIALES ELIMINADAS -->
-            <div>
-                <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <i class="fa-solid fa-key text-emerald-400"></i> Credenciales Eliminadas ({{ credenciales_eliminadas|length if credenciales_eliminadas else 0 }})
-                </h2>
-                {% if credenciales_eliminadas %}
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {% for c in credenciales_eliminadas %}
-                    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-                        <div>
-                            <div class="flex items-center justify-between text-[11px] text-slate-500 mb-2">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">{{ c[3] }}</span>
-                                <span>{{ c[4] }}</span>
-                            </div>
-                            <h3 class="text-base font-bold text-white mb-1">{{ c[1] }}</h3>
-                            <p class="text-xs text-slate-400">Usuario: <span class="font-mono text-slate-300">{{ c[2] }}</span></p>
-                        </div>
-                        <div class="pt-4 border-t border-slate-800/80 mt-4 flex items-center justify-end gap-2">
-                            <form method="POST" action="{{ url_for('restaurar_credencial', cred_id=c[0]) }}">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-rotate-left"></i> Restaurar
-                                </button>
-                            </form>
-                            <form method="POST" action="{{ url_for('destruir_credencial', cred_id=c[0]) }}" onsubmit="return confirm('¿Destruir permanentemente esta credencial?')">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
-                                    <i class="fa-solid fa-trash"></i> Destruir
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 italic bg-slate-900/30 p-4 rounded-xl border border-slate-800/50">No hay credenciales en la papelera.</p>
-                {% endif %}
-            </div>
-
+        <!-- Pestañas de Filtrado -->
+        <div class="flex flex-wrap items-center gap-2 mb-8 border-b border-slate-800 pb-4">
+            <button onclick="cambiarPestana('instructivos')" id="tab-instructivos" class="tab-btn active px-4 py-2 rounded-xl border border-slate-800 text-xs font-bold transition-all flex items-center gap-2">
+                <i class="fa-solid fa-folder"></i> Instructivos ({{ eliminados|length }})
+            </button>
+            <button onclick="cambiarPestana('credenciales')" id="tab-credenciales" class="tab-btn px-4 py-2 rounded-xl border border-slate-800 text-xs font-bold text-slate-400 hover:text-white transition-all flex items-center gap-2">
+                <i class="fa-solid fa-key"></i> Credenciales ({{ credenciales_eliminadas|length }})
+            </button>
+            <button onclick="cambiarPestana('comunicados')" id="tab-comunicados" class="tab-btn px-4 py-2 rounded-xl border border-slate-800 text-xs font-bold text-slate-400 hover:text-white transition-all flex items-center gap-2">
+                <i class="fa-solid fa-bullhorn"></i> Comunicados ({{ comunicados_eliminados|length }})
+            </button>
         </div>
+
+        <!-- SECCIÓN 1: INSTRUCTIVOS -->
+        <div id="seccion-instructivos" class="space-y-4">
+            {% if not eliminados %}
+            <div class="bg-slate-900/40 border border-slate-800 rounded-3xl p-16 text-center max-w-md mx-auto my-8">
+                <i class="fa-regular fa-trash-can text-4xl text-slate-600 mb-4 block"></i>
+                <h3 class="text-base font-bold text-white">No hay instructivos eliminados</h3>
+                <p class="text-xs text-slate-400 mt-1">La papelera de instructivos está vacía.</p>
+            </div>
+            {% else %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for gal in eliminados %}
+                <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold uppercase">{{ gal[4] or 'General' }}</span>
+                            <span class="text-[11px] text-slate-500">{{ gal[3] }}</span>
+                        </div>
+                        <h3 class="text-base font-bold text-white mb-1">{{ gal[1] }}</h3>
+                        <p class="text-xs text-slate-400 mb-4">{{ gal[2] or 'Sin descripción' }}</p>
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800/80">
+                        <form method="POST" action="{{ url_for('restaurar_galeria', galeria_id=gal[0]) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-rotate-left"></i> Restaurar
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('destruir_galeria', galeria_id=gal[0]) }}" onsubmit="return confirm('¿Eliminar definitivamente este instructivo? Esta acción NO se puede deshacer.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-skull"></i> Destruir
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- SECCIÓN 2: CREDENCIALES -->
+        <div id="seccion-credenciales" class="hidden space-y-4">
+            {% if not credenciales_eliminadas %}
+            <div class="bg-slate-900/40 border border-slate-800 rounded-3xl p-16 text-center max-w-md mx-auto my-8">
+                <i class="fa-regular fa-key text-4xl text-slate-600 mb-4 block"></i>
+                <h3 class="text-base font-bold text-white">No hay credenciales eliminadas</h3>
+                <p class="text-xs text-slate-400 mt-1">La papelera de accesos está vacía.</p>
+            </div>
+            {% else %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for cred in credenciales_eliminadas %}
+                <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold uppercase">{{ cred[3] or 'General' }}</span>
+                            <span class="text-[11px] text-slate-500">{{ cred[4][:16] if cred[4] else '' }}</span>
+                        </div>
+                        <h3 class="text-base font-bold text-white mb-1">{{ cred[1] }}</h3>
+                        <p class="text-xs text-slate-400 mb-4"><i class="fa-solid fa-user mr-1 text-slate-500"></i>{{ cred[2] }}</p>
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800/80">
+                        <form method="POST" action="{{ url_for('restaurar_credencial', cred_id=cred[0]) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-rotate-left"></i> Restaurar
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('destruir_credencial', cred_id=cred[0]) }}" onsubmit="return confirm('¿Destruir definitivamente esta credencial?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-skull"></i> Destruir
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- SECCIÓN 3: COMUNICADOS -->
+        <div id="seccion-comunicados" class="hidden space-y-4">
+            {% if not comunicados_eliminados %}
+            <div class="bg-slate-900/40 border border-slate-800 rounded-3xl p-16 text-center max-w-md mx-auto my-8">
+                <i class="fa-regular fa-bullhorn text-4xl text-slate-600 mb-4 block"></i>
+                <h3 class="text-base font-bold text-white">No hay comunicados eliminados</h3>
+                <p class="text-xs text-slate-400 mt-1">La papelera de comunicados está vacía.</p>
+            </div>
+            {% else %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for com in comunicados_eliminados %}
+                <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg text-[10px] font-bold uppercase">{{ com.nivel }}</span>
+                            <span class="text-[11px] text-slate-500">{{ com.fecha }}</span>
+                        </div>
+                        <h3 class="text-base font-bold text-white mb-1">{{ com.titulo }}</h3>
+                        <p class="text-xs text-slate-400 mb-4"><i class="fa-solid fa-user-pen mr-1 text-slate-500"></i>{{ com.autor }}</p>
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800/80">
+                        <form method="POST" action="{{ url_for('restaurar_comunicado', com_id=com.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-rotate-left"></i> Restaurar
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('destruir_comunicado', com_id=com.id) }}" onsubmit="return confirm('¿Destruir definitivamente este comunicado?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-skull"></i> Destruir
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
     </main>
 
+    <script>
+        function cambiarPestana(tipo) {
+            document.getElementById('seccion-instructivos').classList.add('hidden');
+            document.getElementById('seccion-credenciales').classList.add('hidden');
+            document.getElementById('seccion-comunicados').classList.add('hidden');
+
+            document.getElementById('tab-instructivos').classList.remove('active', 'text-white');
+            document.getElementById('tab-instructivos').classList.add('text-slate-400');
+            document.getElementById('tab-credenciales').classList.remove('active', 'text-white');
+            document.getElementById('tab-credenciales').classList.add('text-slate-400');
+            document.getElementById('tab-comunicados').classList.remove('active', 'text-white');
+            document.getElementById('tab-comunicados').classList.add('text-slate-400');
+
+            document.getElementById('seccion-' + tipo).classList.remove('hidden');
+            const tabActivo = document.getElementById('tab-' + tipo);
+            tabActivo.classList.add('active', 'text-white');
+            tabActivo.classList.remove('text-slate-400');
+        }
+    </script>
 </body>
 </html>
