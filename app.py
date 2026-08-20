@@ -253,7 +253,7 @@ def init_db():
             titulo VARCHAR(200) NOT NULL,
             contenido TEXT NOT NULL,
             nivel VARCHAR(50) DEFAULT 'info',
-            fijado INTEGER DEFAULT 0,
+            fijado BOOLEAN DEFAULT FALSE,
             imagen_url TEXT DEFAULT '',
             estado VARCHAR(50) DEFAULT 'activo',
             fecha VARCHAR(100) NOT NULL,
@@ -262,7 +262,7 @@ def init_db():
 
         columnas_comunicados = [
             ("nivel", "VARCHAR(50) DEFAULT 'info'"),
-            ("fijado", "INTEGER DEFAULT 0"),
+            ("fijado", "BOOLEAN DEFAULT FALSE"),
             ("imagen_url", "TEXT DEFAULT ''"),
             ("estado", "VARCHAR(50) DEFAULT 'activo'"),
             ("fecha", "VARCHAR(100) DEFAULT ''"),
@@ -703,7 +703,8 @@ def ver_papelera():
         eliminados=eliminados, 
         archivos_eliminados=archivos_eliminados,
         credenciales_eliminadas=credenciales_eliminadas,
-        comunicados_eliminados=comunicados_eliminados
+        comunicados_eliminados=comunicados_eliminados,
+        comunicados=comunicados_eliminados
     )
 
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST', 'GET'])
@@ -1003,7 +1004,7 @@ def exportar_logs_csv():
     conn.close()
 
     output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', cursor_quoting=None if not csv else csv.QUOTE_MINIMAL)
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
     writer.writerow(['FECHA Y HORA', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
 
     for row in rows:
@@ -1037,13 +1038,12 @@ def bienvenida():
     cursor = conn.cursor()
     comunicado_fijado = None
     try:
-        # Busca el comunicado fijado activo o el activo más reciente
         query_fij = """
             SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor, fijado 
             FROM comunicados 
             WHERE COALESCE(estado, 'activo') = 'activo'
             ORDER BY 
-                CASE WHEN CAST(COALESCE(fijado, 0) AS TEXT) IN ('1', 'true', 't', 'TRUE') THEN 1 ELSE 0 END DESC,
+                CASE WHEN fijado::text IN ('true', 't', '1', 'TRUE') THEN 1 ELSE 0 END DESC,
                 id DESC
             LIMIT 1
         """
@@ -1058,7 +1058,7 @@ def bienvenida():
                 'imagen_url': row[4] or '',
                 'fecha': row[5] or '',
                 'autor': row[6] or 'Admin',
-                'fijado': 1 if str(row[7]).lower() in ['1', 'true', 't'] else 0
+                'fijado': True if str(row[7]).lower() in ['true', 't', '1'] else False
             }
     except Exception as e:
         print(f"⚠️ Error obteniendo comunicado fijado: {e}")
@@ -1342,7 +1342,7 @@ def ver_comunicados():
                 'titulo': titulo or '',
                 'contenido': contenido or '',
                 'nivel': nivel or 'info',
-                'fijado': 1 if str(fijado).lower() in ['1', 'true', 't'] else 0,
+                'fijado': True if str(fijado).lower() in ['true', 't', '1'] else False,
                 'imagen_url': img_url or '',
                 'estado': estado or 'activo',
                 'fecha': fecha or '',
@@ -1359,7 +1359,7 @@ def crear_comunicado():
         titulo = (request.form.get('titulo') or request.form.get('title') or '').strip()
         contenido = (request.form.get('contenido') or request.form.get('mensaje') or request.form.get('descripcion') or request.form.get('cuerpo') or '').strip()
         nivel = (request.form.get('nivel') or 'info').strip()
-        fijado = 1 if request.form.get('fijado') in ['on', '1', 'true', 'True', True] else 0
+        fijado = True if request.form.get('fijado') in ['on', '1', 'true', 'True', True] else False
         
         imagen = request.files.get('imagen') or request.files.get('archivo') or request.files.get('foto')
         
@@ -1443,8 +1443,8 @@ def eliminar_comunicado(com_id):
         row = cursor.fetchone()
         titulo = row[0] if row else f"ID {com_id}"
 
-        # Cambio inmediato de estado a 'eliminado' y commit directo
-        cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = 0 WHERE id = %s", (com_id,))
+        # Actualiza a estado eliminado y desactiva fijado usando BOOLEAN
+        cursor.execute("UPDATE comunicados SET estado = 'eliminado', fijado = FALSE WHERE id = %s", (com_id,))
         conn.commit()
         conn.close()
         
