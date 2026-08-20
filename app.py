@@ -241,13 +241,13 @@ def init_db():
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
             id SERIAL PRIMARY KEY,
-            servicio VARCHAR(150) NOT NULL,
-            url TEXT,
-            usuario VARCHAR(150) NOT NULL,
-            password_enc TEXT NOT NULL,
+            servicio VARCHAR(150) NOT NULL DEFAULT '',
+            url TEXT DEFAULT '',
+            usuario VARCHAR(150) NOT NULL DEFAULT '',
+            password_enc TEXT NOT NULL DEFAULT '',
             categoria VARCHAR(100) DEFAULT 'General',
-            notas TEXT,
-            fecha VARCHAR(100) NOT NULL,
+            notas TEXT DEFAULT '',
+            fecha VARCHAR(100) DEFAULT '',
             estado VARCHAR(50) DEFAULT 'activo'
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
@@ -262,6 +262,24 @@ def init_db():
             autor VARCHAR(100) NOT NULL
         )''')
 
+        # Migraciones preventivas para credenciales
+        columnas_credenciales = [
+            ("servicio", "VARCHAR(150) NOT NULL DEFAULT ''"),
+            ("url", "TEXT DEFAULT ''"),
+            ("usuario", "VARCHAR(150) NOT NULL DEFAULT ''"),
+            ("password_enc", "TEXT NOT NULL DEFAULT ''"),
+            ("categoria", "VARCHAR(100) DEFAULT 'General'"),
+            ("notas", "TEXT DEFAULT ''"),
+            ("fecha", "VARCHAR(100) DEFAULT ''"),
+            ("estado", "VARCHAR(50) DEFAULT 'activo'")
+        ]
+        for col, col_type in columnas_credenciales:
+            try:
+                cursor.execute(f"ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            except Exception:
+                pass
+
+        # Migraciones preventivas para comunicados y archivos
         columnas_comunicados = [
             ("nivel", "VARCHAR(50) DEFAULT 'info'"),
             ("fijado", "BOOLEAN DEFAULT FALSE"),
@@ -595,7 +613,7 @@ def ver_credenciales():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY servicio ASC")
+        cursor.execute("SELECT id, servicio, url, usuario, password_enc, categoria, notas, fecha FROM credenciales WHERE LOWER(TRIM(COALESCE(estado, 'activo'))) != 'eliminado' ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -610,65 +628,79 @@ def ver_credenciales():
         if not q_busqueda or q_busqueda in texto_full:
             lista_credenciales.append({
                 'id': c_id,
-                'servicio': servicio,
+                'servicio': servicio or '',
                 'url': url or '',
-                'usuario': usuario,
+                'usuario': usuario or '',
                 'password': pass_real,
                 'categoria': categoria or 'General',
                 'notas': notas or '',
-                'fecha': fecha
+                'fecha': fecha or ''
             })
             
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
 
 @app.route('/credenciales/crear', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def crear_credencial():
-    servicio = request.form.get('servicio', '').strip()
-    url = request.form.get('url', '').strip()
-    usuario = request.form.get('usuario', '').strip()
-    password = request.form.get('password', '').strip()
-    categoria = request.form.get('categoria', 'General').strip()
-    notas = request.form.get('notas', '').strip()
-    
-    if servicio and usuario and password:
-        pass_cifrada = encriptar_texto(password)
-        fecha_act = obtener_fecha_actual()
+    try:
+        servicio = (request.form.get('servicio') or request.form.get('nombre') or '').strip()
+        url = (request.form.get('url') or '').strip()
+        usuario = (request.form.get('usuario') or request.form.get('username') or '').strip()
+        password = (request.form.get('password') or request.form.get('contrasena') or '').strip()
+        categoria = (request.form.get('categoria') or 'General').strip()
+        notas = (request.form.get('notas') or '').strip()
         
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')", 
-                       (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
-        conn.close()
-        registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
+        if servicio and usuario and password:
+            pass_cifrada = encriptar_texto(password)
+            fecha_act = obtener_fecha_actual()
+            
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO credenciales (servicio, url, usuario, password_enc, categoria, notas, fecha, estado) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')
+            """, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+            conn.close()
+            registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
+            flash(f"Credencial '{servicio}' registrada con éxito.")
+    except Exception as e:
+        print(f"❌ Error creando credencial: {e}")
+        traceback.print_exc()
         
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def editar_credencial(cred_id):
-    servicio = request.form.get('servicio', '').strip()
-    url = request.form.get('url', '').strip()
-    usuario = request.form.get('usuario', '').strip()
-    password = request.form.get('password', '').strip()
-    categoria = request.form.get('categoria', 'General').strip()
-    notas = request.form.get('notas', '').strip()
-    
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
-    if password:
-        pass_cifrada = encriptar_texto(password)
-        cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s", 
-                       (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
-    else:
-        cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
-                       (servicio, url, usuario, categoria, notas, cred_id))
+    try:
+        servicio = (request.form.get('servicio') or '').strip()
+        url = (request.form.get('url') or '').strip()
+        usuario = (request.form.get('usuario') or '').strip()
+        password = (request.form.get('password') or '').strip()
+        categoria = (request.form.get('categoria') or 'General').strip()
+        notas = (request.form.get('notas') or '').strip()
         
-    conn.close()
-    registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        
+        if password:
+            pass_cifrada = encriptar_texto(password)
+            cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, password_enc=%s, categoria=%s, notas=%s WHERE id=%s", 
+                           (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+        else:
+            cursor.execute("UPDATE credenciales SET servicio=%s, url=%s, usuario=%s, categoria=%s, notas=%s WHERE id=%s", 
+                           (servicio, url, usuario, categoria, notas, cred_id))
+            
+        conn.close()
+        registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
+    except Exception as e:
+        print(f"❌ Error editando credencial: {e}")
+        traceback.print_exc()
+
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST', 'GET'])
@@ -676,11 +708,21 @@ def editar_credencial(cred_id):
 @login_required
 @admin_required
 def eliminar_credencial(cred_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
-    conn.close()
-    registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
+        row = cursor.fetchone()
+        servicio = row[0] if row else f"ID {cred_id}"
+
+        cursor.execute("UPDATE credenciales SET estado = 'eliminado' WHERE id = %s", (cred_id,))
+        conn.close()
+        registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial '{servicio}'")
+        flash(f"Credencial '{servicio}' movida a la papelera.")
+    except Exception as e:
+        print(f"❌ Error eliminando credencial: {e}")
+        traceback.print_exc()
+
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/papelera')
@@ -751,18 +793,18 @@ def ver_papelera():
 @login_required
 @admin_required
 def restaurar_credencial(cred_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
     try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
         cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("UPDATE credenciales SET estado = 'activo' WHERE id = %s", (cred_id,))
+        conn.close()
         registrar_log(session['username'], "Restauración de Credencial", f"Se restauró el acceso '{servicio}' desde la papelera.")
-    except Exception:
-        pass
-    conn.close()
+    except Exception as e:
+        print(f"❌ Error restaurando credencial: {e}")
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_credencial/<int:cred_id>', methods=['POST', 'GET'])
@@ -770,18 +812,18 @@ def restaurar_credencial(cred_id):
 @login_required
 @admin_required
 def destruir_credencial(cred_id):
-    conn, db_type = get_db()
-    cursor = conn.cursor()
     try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
         cursor.execute("SELECT servicio FROM credenciales WHERE id = %s", (cred_id,))
         row = cursor.fetchone()
         servicio = row[0] if row else f"ID {cred_id}"
 
         cursor.execute("DELETE FROM credenciales WHERE id = %s", (cred_id,))
+        conn.close()
         registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente la credencial '{servicio}'.")
-    except Exception:
-        pass
-    conn.close()
+    except Exception as e:
+        print(f"❌ Error destruyendo credencial: {e}")
     return redirect(url_for('ver_papelera'))
 
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
