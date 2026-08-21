@@ -71,10 +71,14 @@ except Exception:
     ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 def obtener_fecha_actual():
+    # ⚠️ Formato ISO 8601 (AAAA-MM-DD HH:MM:SS): Postgres lo interpreta correctamente
+    # sin importar su configuración de DateStyle. El formato anterior "DD/MM/AAAA hh:mm AM/PM"
+    # (ej: "21/08/2026 05:51 PM") fallaba con "date/time field value out of range" en Neon
+    # cada vez que el día del mes era mayor a 12, porque Postgres lo interpretaba como MM/DD/AAAA.
     try:
-        return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%d/%m/%Y %I:%M %p")
+        return datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        return datetime.now().strftime("%d/%m/%Y %I:%M %p")
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def normalizar(texto):
     if not texto: return ""
