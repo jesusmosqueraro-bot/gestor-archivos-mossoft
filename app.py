@@ -200,10 +200,10 @@ def init_db():
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, correo VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
+                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha_subida VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', area VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original VARCHAR(255) NOT NULL DEFAULT '', estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
@@ -223,7 +223,10 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS area VARCHAR(100) DEFAULT 'General';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
                 try:
@@ -237,10 +240,10 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, correo TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha_subida TEXT, categoria TEXT DEFAULT 'General', area TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original TEXT NOT NULL DEFAULT '', estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
@@ -877,16 +880,16 @@ def ver_papelera():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha_subida DESC")
         eliminados = cursor.fetchall()
     except Exception:
         eliminados = []
 
     try:
         query_arch_elim = """
-            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT a.id, COALESCE(a.filename, a.url_archivo), g.id, g.titulo, g.categoria
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
         """
         cursor.execute(query_arch_elim)
@@ -1019,7 +1022,7 @@ def eliminar_imagen(galeria_id, filename):
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
+        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND COALESCE(filename, url_archivo) = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND COALESCE(filename, url_archivo) = ?"
         cursor.execute(q_upd, (galeria_id, filename))
         conn.commit()
 
@@ -1041,14 +1044,14 @@ def restaurar_archivo(archivo_id):
     cursor = conn.cursor()
     try:
         query_info = """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT COALESCE(a.filename, a.url_archivo), g.titulo
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.id = %s
         """ if db_type == 'postgres' else """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT COALESCE(a.filename, a.url_archivo), g.titulo
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.id = ?
         """
         cursor.execute(query_info, (archivo_id,))
@@ -1329,12 +1332,12 @@ def index():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
         rows = cursor.fetchall()
     except Exception:
         try:
             conn.rollback()
-            cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+            cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
             raw_rows = cursor.fetchall()
             rows = [r + (0, 0) for r in raw_rows]
         except Exception:
@@ -1363,7 +1366,7 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
+        query_arch = "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
         cursor.execute(query_arch, (galeria_id,))
         archivos = [f[0] for f in cursor.fetchall()]
 
@@ -1454,18 +1457,22 @@ def subir_archivo():
                     unique_filename=True
                 )
 
-            archivos_guardados.append(upload_result['secure_url'])
+            archivos_guardados.append((upload_result['secure_url'], file.filename))
 
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
-        
-        q_archivo = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
-        for fname in archivos_guardados:
-            cursor.execute(q_archivo, (galeria_id, fname))
-        
+        # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
+        # elegida, ya que hoy no hay un campo separado de área en el formulario.
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
+        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags))
+
+        # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
+        # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
+        q_archivo = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
+        for url_arch, nombre_orig in archivos_guardados:
+            cursor.execute(q_archivo, (galeria_id, url_arch, url_arch, nombre_orig))
+
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
@@ -1548,8 +1555,9 @@ def editar_galeria(galeria_id):
                         unique_filename=True
                     )
                 
-                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
-                cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
+                # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
+                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
+                cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url'], upload_result['secure_url'], file.filename))
                 archivos_agregados += 1
 
         if archivos_agregados > 0:
