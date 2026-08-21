@@ -480,15 +480,18 @@ def crear_comunicado():
     if titulo and contenido:
         fecha_act = obtener_fecha_actual()
         autor = session.get('username', 'Admin')
-        
+
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
-        cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
-        conn.commit()
+        try:
+            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
+            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+            conn.commit()
+            registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error creando comunicado: {e}")
         conn.close()
-        
-        registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
 
     return redirect(url_for('ver_comunicados'))
 
@@ -498,18 +501,22 @@ def crear_comunicado():
 def archivar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
-    q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
-    cursor.execute(q_sel, (com_id,))
-    row = cursor.fetchone()
-    
-    if row:
-        nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-        q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_estado, com_id))
-        conn.commit()
-        registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
-        
+
+    try:
+        q_sel = "SELECT estado, titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT estado, titulo FROM comunicados WHERE id = ?"
+        cursor.execute(q_sel, (com_id,))
+        row = cursor.fetchone()
+
+        if row:
+            nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
+            q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_estado, com_id))
+            conn.commit()
+            registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error archivando/reactivando comunicado {com_id}: {e}")
+
     conn.close()
     return redirect(url_for('ver_comunicados'))
 
@@ -890,18 +897,21 @@ def crear_credencial():
     notas = request.form.get('notas', '').strip()
     
     if servicio and usuario and password:
-        pass_cifrada = encriptar_texto(password)
-        fecha_act = obtener_fecha_actual()
-        
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
-        cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
-        conn.commit()
-        conn.close()
-        
-        registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
-        
+        try:
+            pass_cifrada = encriptar_texto(password)
+            fecha_act = obtener_fecha_actual()
+
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
+            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+            conn.commit()
+            conn.close()
+
+            registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
+        except Exception as e:
+            print(f"⚠️ Error guardando credencial '{servicio}': {e}")
+
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
@@ -917,19 +927,23 @@ def editar_credencial(cred_id):
     
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
-    if password:
-        pass_cifrada = encriptar_texto(password)
-        q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=? WHERE id=?"
-        cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
-    else:
-        q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=? WHERE id=?"
-        cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
-        
-    conn.commit()
+
+    try:
+        if password:
+            pass_cifrada = encriptar_texto(password)
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+        else:
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
+
+        conn.commit()
+        registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error editando credencial {cred_id}: {e}")
+
     conn.close()
-    
-    registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST'])
@@ -1520,57 +1534,65 @@ def subir_archivo():
     archivos_guardados = []
     for file in archivos:
         if file and archivo_permitido(file.filename):
-            ext = file.filename.rsplit('.', 1)[1].lower()
-            
-            if ext in ['mp4', 'mov', 'webm', 'avi']:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="video",
-                    use_filename=True,
-                    unique_filename=True
-                )
-            elif ext == 'pdf':
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="image",
-                    format="pdf",
-                    use_filename=True,
-                    unique_filename=True
-                )
-            elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="raw",
-                    use_filename=True,
-                    unique_filename=True
-                )
-            else:
-                upload_result = cloudinary.uploader.upload(
-                    file, 
-                    resource_type="image",
-                    use_filename=True,
-                    unique_filename=True
-                )
+            try:
+                ext = file.filename.rsplit('.', 1)[1].lower()
 
-            archivos_guardados.append((upload_result['secure_url'], file.filename))
+                if ext in ['mp4', 'mov', 'webm', 'avi']:
+                    upload_result = cloudinary.uploader.upload(
+                        file,
+                        resource_type="video",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                elif ext == 'pdf':
+                    upload_result = cloudinary.uploader.upload(
+                        file,
+                        resource_type="image",
+                        format="pdf",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
+                    upload_result = cloudinary.uploader.upload(
+                        file,
+                        resource_type="raw",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+                else:
+                    upload_result = cloudinary.uploader.upload(
+                        file,
+                        resource_type="image",
+                        use_filename=True,
+                        unique_filename=True
+                    )
+
+                archivos_guardados.append((upload_result['secure_url'], file.filename))
+            except Exception as e:
+                # No dejar que un archivo con problema (ej. Cloudinary rechazándolo,
+                # o sin credenciales configuradas) tumbe la subida completa del instructivo.
+                print(f"⚠️ Error subiendo el archivo '{file.filename}' a Cloudinary: {e}")
 
     if archivos_guardados:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
-        # elegida, ya que hoy no hay un campo separado de área en el formulario.
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags))
+        try:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
+            # elegida, ya que hoy no hay un campo separado de área en el formulario.
+            q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
+            cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags))
 
-        # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
-        # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
-        q_archivo = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
-        for url_arch, nombre_orig in archivos_guardados:
-            cursor.execute(q_archivo, (galeria_id, url_arch, url_arch, nombre_orig))
+            # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
+            # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
+            q_archivo = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
+            for url_arch, nombre_orig in archivos_guardados:
+                cursor.execute(q_archivo, (galeria_id, url_arch, url_arch, nombre_orig))
 
-        conn.commit()
-        conn.close()
-        registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
+            conn.commit()
+            conn.close()
+            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
+        except Exception as e:
+            print(f"⚠️ Error guardando el instructivo '{titulo}' en la base de datos: {e}")
 
     return redirect(url_for('index'))
 
