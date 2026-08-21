@@ -116,8 +116,9 @@
                             <div class="space-y-2 mb-4">
                                 {% for arch in item.archivos %}
                                     {% set is_raw = '/raw/upload/' in arch %}
-                                    {% set fname_base = arch.split('/')[-1] %}
-                                    {% set fname = fname_base + '.zip' if (is_raw and not (fname_base.endswith('.zip') or fname_base.endswith('.rar') or fname_base.endswith('.7z'))) else fname_base %}
+                                    {# Cloudinary ya conserva la extensión real del archivo en la URL (raw/upload/.../archivo.docx,
+                                       .txt, .xlsx, etc.), así que usamos el nombre tal cual viene en vez de forzar ".zip". #}
+                                    {% set fname = arch.split('/')[-1] %}
                                     
                                     <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 flex items-center justify-between text-xs">
                                         <div class="flex items-center gap-2 truncate">
@@ -342,10 +343,9 @@
             const isRaw = url.includes('/raw/upload/');
             const visorContenido = document.getElementById('visor-contenido');
 
-            if (isRaw && !fname.endsWith('.zip') && !fname.endsWith('.rar')) {
-                fname += '.zip';
-            }
-            
+            // Cloudinary ya conserva la extensión real del archivo (docx, txt, xlsx, etc.)
+            // en la URL de tipo raw, así que no forzamos ".zip" aquí.
+
             document.getElementById('visor-titulo').innerText = fname;
 
             if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) && !isRaw) {
