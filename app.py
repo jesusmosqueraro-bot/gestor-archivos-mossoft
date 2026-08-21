@@ -41,10 +41,28 @@ except Exception:
     requests = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura')
+# 🔐 SECRET_KEY: nunca debe tener un valor real escrito en el código (quedaría expuesto en GitHub).
+# Si no está seteada en las variables de entorno de Render, se genera una aleatoria en cada arranque.
+# Esto no causa fricción extra: las sesiones ya se invalidan en cada reinicio por SERVER_INSTANCE_ID (ver abajo).
+_SECRET_KEY_ENV = os.environ.get('SECRET_KEY')
+if not _SECRET_KEY_ENV:
+    print("⚠️ SECRET_KEY no configurada en variables de entorno de Render: se generó una aleatoria solo para esta instancia. Agrega SECRET_KEY en Render para persistirla.")
+app.secret_key = _SECRET_KEY_ENV or base64.urlsafe_b64encode(os.urandom(32)).decode('utf-8')
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
+
+# 🛡️ Varias plantillas (index.html, credenciales.html, papelera.html, comunicados.html,
+# usuarios.html, recuperar.html) ya traen un campo oculto csrf_token() en sus formularios,
+# preparado para cuando se active protección CSRF real con Flask-WTF. Mientras esa
+# integración completa no esté lista (requeriría auditar cada endpoint POST/AJAX para que
+# envíe el token, incluidas llamadas fetch() existentes que hoy no lo hacen), se registra
+# aquí un csrf_token() "inofensivo" para que esas plantillas no truenen con
+# `jinja2.exceptions.UndefinedError: 'csrf_token' is undefined`. No reemplaza una
+# protección CSRF real; es solo para que la app no se caiga con 500 en producción.
+@app.context_processor
+def _inyectar_csrf_token_placeholder():
+    return dict(csrf_token=lambda: '')
 
 # 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
 try:
@@ -101,7 +119,29 @@ def encriptar_texto(texto):
         raise RuntimeError("ENCRYPTION_KEY no configurada en las variables de entorno de Render.")
     return _fernet.encrypt(texto.encode('utf-8')).decode('utf-8')
 
-def desencriptar_texto(texto_cifrado):
+def _migrar_credencial_a_fernet(credencial_id, password_plano):
+    """Re-guarda con Fernet (AES real) una credencial de la bóveda que todavía
+    estaba cifrada con el XOR viejo. Migra de forma transparente, un registro
+    a la vez, cada vez que alguien la lee — igual que ya se hace con los
+    passwords de usuarios en texto plano."""
+    if not _fernet or credencial_id is None:
+        return
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        nueva_cifrada = encriptar_texto(password_plano)
+        query = "UPDATE credenciales SET password_cifrada = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET password_cifrada = ? WHERE id = ?"
+        cursor.execute(query, (nueva_cifrada, credencial_id))
+        conn.commit()
+        conn.close()
+        print(f"🔐 Credencial ID {credencial_id} migrada de cifrado XOR (débil) a Fernet/AES.")
+    except Exception as e:
+        print(f"Error migrando credencial {credencial_id} a Fernet: {e}")
+
+def desencriptar_texto(texto_cifrado, credencial_id=None):
+    """Descifra un valor de la bóveda. Si se pasa credencial_id y el valor
+    resulta estar todavía en el XOR viejo (no es un token Fernet válido),
+    se re-cifra con Fernet y se re-guarda de una vez en la base de datos."""
     if not texto_cifrado:
         return ""
     if _fernet:
@@ -111,6 +151,7 @@ def desencriptar_texto(texto_cifrado):
             # No es un token Fernet válido: puede ser un valor viejo cifrado con XOR.
             legacy = desencriptar_texto_legacy_xor(texto_cifrado)
             if legacy:
+                _migrar_credencial_a_fernet(credencial_id, legacy)
                 return legacy
     return "⚠️ No se pudo descifrar (revisa ENCRYPTION_KEY)"
 
@@ -135,7 +176,11 @@ app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
-RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', "6LcU0mAtAAAAANT3I4V9q0k5LaBA0B8rEFfvhspC")
+# Nunca debe tener un valor real escrito en el código. Debe venir SIEMPRE de la variable
+# de entorno RECAPTCHA_SECRET_KEY en Render (usa el valor que ya tenías funcionando).
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', '')
+if not RECAPTCHA_SECRET_KEY:
+    print("⚠️ RECAPTCHA_SECRET_KEY no configurada en variables de entorno de Render: el login fallará hasta que la agregues.")
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -167,16 +212,16 @@ def init_db():
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, correo VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
+                id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha_subida VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', area VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original VARCHAR(255) NOT NULL DEFAULT '', estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id SERIAL PRIMARY KEY, servicio VARCHAR(150) NOT NULL, url TEXT, usuario VARCHAR(150) NOT NULL, password_enc TEXT NOT NULL, categoria VARCHAR(100) DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+                id SERIAL PRIMARY KEY, titulo VARCHAR(150) NOT NULL, url_acceso TEXT, usuario_acceso VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, area VARCHAR(100) DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
@@ -190,7 +235,10 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS vistas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS area VARCHAR(100) DEFAULT 'General';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
+                "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
             ]:
                 try:
@@ -204,16 +252,16 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, correo TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
-                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha TEXT, categoria TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+                id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha_subida TEXT, categoria TEXT DEFAULT 'General', area TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT NOT NULL, estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original TEXT NOT NULL DEFAULT '', estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, servicio TEXT NOT NULL, url TEXT, usuario TEXT NOT NULL, password_enc TEXT NOT NULL, categoria TEXT DEFAULT 'General', notas TEXT, fecha VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, url_acceso TEXT, usuario_acceso TEXT NOT NULL, password_cifrada TEXT NOT NULL, area TEXT DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
@@ -469,14 +517,73 @@ def archivar_comunicado(com_id):
 @login_required
 @admin_required
 def eliminar_comunicado(com_id):
+    # El propio botón en comunicados.html pregunta "¿Enviar este comunicado a la papelera?",
+    # así que esto debe ser un envío a la papelera (estado='eliminado'), no un borrado
+    # permanente inmediato — igual que ya se hace con instructivos y credenciales.
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
-    cursor.execute(q_del, (com_id,))
-    conn.commit()
+    try:
+        q_sel = "SELECT titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM comunicados WHERE id = ?"
+        cursor.execute(q_sel, (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        q_upd = "UPDATE comunicados SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = 'eliminado' WHERE id = ?"
+        cursor.execute(q_upd, (com_id,))
+        conn.commit()
+        registrar_log(session['username'], "Eliminación de Comunicado", f"Se envió a la papelera el comunicado '{titulo}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error enviando comunicado {com_id} a la papelera: {e}")
+
     conn.close()
-    registrar_log(session['username'], "Eliminación de Comunicado", f"Se eliminó permanentemente el comunicado ID {com_id}")
     return redirect(url_for('ver_comunicados'))
+
+@app.route('/restaurar_comunicado/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def restaurar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM comunicados WHERE id = ?"
+        cursor.execute(q_sel, (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        q_upd = "UPDATE comunicados SET estado = 'activo' WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = 'activo' WHERE id = ?"
+        cursor.execute(q_upd, (com_id,))
+        conn.commit()
+        registrar_log(session['username'], "Restauración de Comunicado", f"Se restauró el comunicado '{titulo}' desde la papelera.")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error restaurando comunicado {com_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
+
+@app.route('/destruir_comunicado/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def destruir_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM comunicados WHERE id = ?"
+        cursor.execute(q_sel, (com_id,))
+        row = cursor.fetchone()
+        titulo = row[0] if row else f"ID {com_id}"
+
+        q_del = "DELETE FROM comunicados WHERE id = %s" if db_type == 'postgres' else "DELETE FROM comunicados WHERE id = ?"
+        cursor.execute(q_del, (com_id,))
+        conn.commit()
+        registrar_log(session['username'], "Eliminación Permanente", f"Se destruyó permanentemente el comunicado '{titulo}'.")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error destruyendo comunicado {com_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_papelera'))
 
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
@@ -748,21 +855,26 @@ def ver_credenciales():
     
     lista_credenciales = []
     for r in rows:
-        c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
-        pass_real = desencriptar_texto(pass_enc)
-        
-        texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
-        if not q_busqueda or q_busqueda in texto_full:
-            lista_credenciales.append({
-                'id': c_id,
-                'servicio': servicio,
-                'url': url or '',
-                'usuario': usuario,
-                'password': pass_real,
-                'categoria': categoria or 'General',
-                'notas': notas or '',
-                'fecha': fecha
-            })
+        try:
+            c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
+            pass_real = desencriptar_texto(pass_enc, c_id)
+
+            texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+            if not q_busqueda or q_busqueda in texto_full:
+                lista_credenciales.append({
+                    'id': c_id,
+                    'servicio': servicio,
+                    'url': url or '',
+                    'usuario': usuario,
+                    'password': pass_real,
+                    'categoria': categoria or 'General',
+                    'notas': notas or '',
+                    'fecha': fecha
+                })
+        except Exception as e_row:
+            # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
+            print(f"⚠️ Error procesando credencial {r[0] if r else '?'}: {e_row}")
+            continue
             
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
 
@@ -844,16 +956,16 @@ def ver_papelera():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha DESC")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo FROM galerias WHERE estado = 'eliminado' ORDER BY fecha_subida DESC")
         eliminados = cursor.fetchall()
     except Exception:
         eliminados = []
 
     try:
         query_arch_elim = """
-            SELECT a.id, a.filename, g.id, g.titulo, g.categoria 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT a.id, COALESCE(a.filename, a.url_archivo), g.id, g.titulo, g.categoria
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.estado = 'eliminado' AND COALESCE(g.estado, 'activo') != 'eliminado'
         """
         cursor.execute(query_arch_elim)
@@ -867,12 +979,23 @@ def ver_papelera():
     except Exception:
         credenciales_eliminadas = []
 
+    try:
+        cursor.execute("SELECT id, titulo, nivel, fecha, autor FROM comunicados WHERE estado = 'eliminado' ORDER BY id DESC")
+        rows_com = cursor.fetchall()
+    except Exception:
+        rows_com = []
+
+    comunicados_eliminados = [
+        {'id': r[0], 'titulo': r[1], 'nivel': r[2], 'fecha': r[3], 'autor': r[4]} for r in rows_com
+    ]
+
     conn.close()
     return render_template(
-        'papelera.html', 
-        eliminados=eliminados, 
+        'papelera.html',
+        eliminados=eliminados,
         archivos_eliminados=archivos_eliminados,
-        credenciales_eliminadas=credenciales_eliminadas
+        credenciales_eliminadas=credenciales_eliminadas,
+        comunicados_eliminados=comunicados_eliminados
     )
 
 # 🔄 RESTAURAR CREDENCIAL
@@ -986,7 +1109,7 @@ def eliminar_imagen(galeria_id, filename):
         row = cursor.fetchone()
         titulo = row[0] if row else galeria_id
 
-        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND filename = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND filename = ?"
+        q_upd = "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = %s AND COALESCE(filename, url_archivo) = %s" if db_type == 'postgres' else "UPDATE archivos SET estado = 'eliminado' WHERE galeria_id = ? AND COALESCE(filename, url_archivo) = ?"
         cursor.execute(q_upd, (galeria_id, filename))
         conn.commit()
 
@@ -1008,14 +1131,14 @@ def restaurar_archivo(archivo_id):
     cursor = conn.cursor()
     try:
         query_info = """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT COALESCE(a.filename, a.url_archivo), g.titulo
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.id = %s
         """ if db_type == 'postgres' else """
-            SELECT a.filename, g.titulo 
-            FROM archivos a 
-            JOIN galerias g ON a.galeria_id = g.id 
+            SELECT COALESCE(a.filename, a.url_archivo), g.titulo
+            FROM archivos a
+            JOIN galerias g ON a.galeria_id = g.id
             WHERE a.id = ?
         """
         cursor.execute(query_info, (archivo_id,))
@@ -1296,12 +1419,12 @@ def index():
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
         rows = cursor.fetchall()
     except Exception:
         try:
             conn.rollback()
-            cursor.execute("SELECT id, titulo, descripcion, fecha, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+            cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
             raw_rows = cursor.fetchall()
             rows = [r + (0, 0) for r in raw_rows]
         except Exception:
@@ -1330,9 +1453,17 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT filename FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT filename FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
-        cursor.execute(query_arch, (galeria_id,))
-        archivos = [f[0] for f in cursor.fetchall()]
+        try:
+            query_arch = "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
+            cursor.execute(query_arch, (galeria_id,))
+            archivos = [f[0] for f in cursor.fetchall()]
+        except Exception as e_arch:
+            # No dejar que un problema puntual (ej. tipos de dato inconsistentes
+            # en galeria_id) tumbe toda la página de instructivos.
+            print(f"⚠️ Error leyendo archivos de la galería {galeria_id}: {e_arch}")
+            if db_type == 'postgres':
+                conn.rollback()
+            archivos = []
 
         item = {
             'id': galeria_id,
@@ -1421,18 +1552,22 @@ def subir_archivo():
                     unique_filename=True
                 )
 
-            archivos_guardados.append(upload_result['secure_url'])
+            archivos_guardados.append((upload_result['secure_url'], file.filename))
 
     if archivos_guardados:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha, categoria, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, tipo, tags))
-        
-        q_archivo = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
-        for fname in archivos_guardados:
-            cursor.execute(q_archivo, (galeria_id, fname))
-        
+        # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
+        # elegida, ya que hoy no hay un campo separado de área en el formulario.
+        q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
+        cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags))
+
+        # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
+        # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
+        q_archivo = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
+        for url_arch, nombre_orig in archivos_guardados:
+            cursor.execute(q_archivo, (galeria_id, url_arch, url_arch, nombre_orig))
+
         conn.commit()
         conn.close()
         registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
@@ -1515,8 +1650,9 @@ def editar_galeria(galeria_id):
                         unique_filename=True
                     )
                 
-                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, estado) VALUES (%s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, estado) VALUES (?, ?, 'activo')"
-                cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url']))
+                # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
+                q_ins_arch = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
+                cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url'], upload_result['secure_url'], file.filename))
                 archivos_agregados += 1
 
         if archivos_agregados > 0:
