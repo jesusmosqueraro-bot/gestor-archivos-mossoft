@@ -107,7 +107,29 @@ def encriptar_texto(texto):
         raise RuntimeError("ENCRYPTION_KEY no configurada en las variables de entorno de Render.")
     return _fernet.encrypt(texto.encode('utf-8')).decode('utf-8')
 
-def desencriptar_texto(texto_cifrado):
+def _migrar_credencial_a_fernet(credencial_id, password_plano):
+    """Re-guarda con Fernet (AES real) una credencial de la bóveda que todavía
+    estaba cifrada con el XOR viejo. Migra de forma transparente, un registro
+    a la vez, cada vez que alguien la lee — igual que ya se hace con los
+    passwords de usuarios en texto plano."""
+    if not _fernet or credencial_id is None:
+        return
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        nueva_cifrada = encriptar_texto(password_plano)
+        query = "UPDATE credenciales SET password_cifrada = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET password_cifrada = ? WHERE id = ?"
+        cursor.execute(query, (nueva_cifrada, credencial_id))
+        conn.commit()
+        conn.close()
+        print(f"🔐 Credencial ID {credencial_id} migrada de cifrado XOR (débil) a Fernet/AES.")
+    except Exception as e:
+        print(f"Error migrando credencial {credencial_id} a Fernet: {e}")
+
+def desencriptar_texto(texto_cifrado, credencial_id=None):
+    """Descifra un valor de la bóveda. Si se pasa credencial_id y el valor
+    resulta estar todavía en el XOR viejo (no es un token Fernet válido),
+    se re-cifra con Fernet y se re-guarda de una vez en la base de datos."""
     if not texto_cifrado:
         return ""
     if _fernet:
@@ -117,6 +139,7 @@ def desencriptar_texto(texto_cifrado):
             # No es un token Fernet válido: puede ser un valor viejo cifrado con XOR.
             legacy = desencriptar_texto_legacy_xor(texto_cifrado)
             if legacy:
+                _migrar_credencial_a_fernet(credencial_id, legacy)
                 return legacy
     return "⚠️ No se pudo descifrar (revisa ENCRYPTION_KEY)"
 
@@ -759,7 +782,7 @@ def ver_credenciales():
     lista_credenciales = []
     for r in rows:
         c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
-        pass_real = desencriptar_texto(pass_enc)
+        pass_real = desencriptar_texto(pass_enc, c_id)
         
         texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
         if not q_busqueda or q_busqueda in texto_full:
