@@ -15,7 +15,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # psycopg2 seguro para Render
@@ -798,26 +798,13 @@ def pdf_proxy():
             filename_custom = url_target.split('/')[-1]
 
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
-        
-        if requests:
-            res = requests.get(clean_url, timeout=15)
-            if res.status_code == 401:
-                api_key = os.environ.get('CLOUDINARY_API_KEY')
-                api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-                if api_key and api_secret:
-                    res = requests.get(clean_url, auth=(api_key, api_secret), timeout=15)
-            content_data = res.content
-        else:
-            req = urllib.request.Request(clean_url)
-            with urllib.request.urlopen(req) as response:
-                content_data = response.read()
 
         if download_flag == '1':
             usuario_actual = session.get('username', 'Anónimo')
             registrar_log(usuario_actual, "Descarga de Documento", f"Archivo: '{filename_custom}'")
 
         disposition = 'attachment' if download_flag == '1' else 'inline'
-        
+
         fname_lower = filename_custom.lower()
         if fname_lower.endswith('.png'):
             content_type = 'image/png'
@@ -838,7 +825,40 @@ def pdf_proxy():
             'Content-Type': content_type,
             'Content-Disposition': f'{disposition}; filename="{filename_custom}"'
         }
-        return Response(content_data, headers=headers, status=200)
+
+        # 🚿 STREAMING: para videos/PDFs grandes, no cargamos el archivo completo en
+        # memoria (eso podía colgar el worker o agotar la RAM en Render con archivos
+        # pesados, dejando la previsualización/descarga en blanco o con error).
+        # Se transmite en bloques directamente desde Cloudinary hacia el navegador.
+        if requests:
+            upstream = requests.get(clean_url, timeout=(10, 60), stream=True)
+            if upstream.status_code == 401:
+                api_key = os.environ.get('CLOUDINARY_API_KEY')
+                api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+                if api_key and api_secret:
+                    upstream = requests.get(clean_url, auth=(api_key, api_secret), timeout=(10, 60), stream=True)
+
+            if upstream.status_code >= 400:
+                return f"Error obteniendo documento: el origen respondió {upstream.status_code}", 502
+
+            content_length = upstream.headers.get('Content-Length')
+            if content_length:
+                headers['Content-Length'] = content_length
+
+            def _generar():
+                try:
+                    for chunk in upstream.iter_content(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                finally:
+                    upstream.close()
+
+            return Response(stream_with_context(_generar()), headers=headers, status=200)
+        else:
+            req = urllib.request.Request(clean_url)
+            with urllib.request.urlopen(req) as response:
+                content_data = response.read()
+            return Response(content_data, headers=headers, status=200)
     except Exception as e:
         return f"Error obteniendo documento: {e}", 500
 
@@ -1542,7 +1562,8 @@ def subir_archivo():
                         file,
                         resource_type="video",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 elif ext == 'pdf':
                     upload_result = cloudinary.uploader.upload(
@@ -1550,21 +1571,24 @@ def subir_archivo():
                         resource_type="image",
                         format="pdf",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
                     upload_result = cloudinary.uploader.upload(
                         file,
                         resource_type="raw",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 else:
                     upload_result = cloudinary.uploader.upload(
                         file,
                         resource_type="image",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
 
                 archivos_guardados.append((upload_result['secure_url'], file.filename))
@@ -1647,7 +1671,8 @@ def editar_galeria(galeria_id):
                         file, 
                         resource_type="video",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 elif ext == 'pdf':
                     upload_result = cloudinary.uploader.upload(
@@ -1655,21 +1680,24 @@ def editar_galeria(galeria_id):
                         resource_type="image",
                         format="pdf",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
                     upload_result = cloudinary.uploader.upload(
                         file, 
                         resource_type="raw",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 else:
                     upload_result = cloudinary.uploader.upload(
                         file, 
                         resource_type="image",
                         use_filename=True,
-                        unique_filename=True
+                        unique_filename=True,
+                        timeout=60
                     )
                 
                 # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
