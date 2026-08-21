@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf.csrf import CSRFProtect
 
 # PostgreSQL Driver
 try:
@@ -41,6 +42,8 @@ except Exception:
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura_2026_prod')
+
+csrf = CSRFProtect(app)
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
@@ -336,6 +339,7 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         return False
 
 @app.route('/recuperar', methods=['GET', 'POST'])
+@csrf.exempt
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = (request.form.get('email') or request.form.get('correo') or '').strip().lower()
@@ -360,6 +364,7 @@ def recuperar_clave():
     return render_template('recuperar.html', paso=1)
 
 @app.route('/validar_codigo', methods=['POST'])
+@csrf.exempt
 def validar_codigo():
     codigo_ingresado = (request.form.get('codigo') or '').strip()
     nueva_pass = (request.form.get('nueva_password') or request.form.get('password') or '').strip()
@@ -392,7 +397,7 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error=f"Error actualizando clave: {e}")
 
-# 🔑 LOGIN SEGURO (SIN BYPASS ADMIN/1234)
+# 🔑 LOGIN
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -439,6 +444,7 @@ def login():
 
 # 📊 MÉTRICAS
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_vista(galeria_id):
     try:
@@ -453,6 +459,7 @@ def incrementar_vista(galeria_id):
         return jsonify({'success': False, 'error': str(e)}), 200
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_descarga(galeria_id):
     try:
@@ -593,6 +600,7 @@ def index():
 
 # 🚀 SUBIDA DE ARCHIVOS Y CARPETAS
 @app.route('/subir', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def subir_archivo():
@@ -646,6 +654,7 @@ def subir_archivo():
     return redirect(url_for('index'))
 
 @app.route('/editar_galeria/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def editar_galeria(galeria_id):
@@ -691,6 +700,7 @@ def editar_galeria(galeria_id):
     return redirect(url_for('index'))
 
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_galeria(galeria_id):
@@ -712,7 +722,7 @@ def eliminar_galeria(galeria_id):
     conn.close()
     return redirect(url_for('index'))
 
-# 🔑 BÓVEDA DE CREDENCIALES (COLUMNAS NEON: titulo, url, usuario, password_enc, categoria, notas, fecha_creacion)
+# 🔑 BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
 @admin_required
@@ -747,6 +757,7 @@ def ver_credenciales():
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
 
 @app.route('/credenciales/crear', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def crear_credencial():
@@ -774,6 +785,7 @@ def crear_credencial():
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def editar_credencial(cred_id):
@@ -803,6 +815,7 @@ def editar_credencial(cred_id):
     return redirect(url_for('ver_credenciales'))
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_credencial(cred_id):
@@ -866,6 +879,7 @@ def ver_papelera():
 
 # 🔄 RUTAS DE RESTAURACIÓN Y DESTRUCCIÓN
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_galeria(galeria_id):
@@ -881,6 +895,7 @@ def restaurar_galeria(galeria_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_galeria/<galeria_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_galeria(galeria_id):
@@ -898,6 +913,7 @@ def destruir_galeria(galeria_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_credencial(cred_id):
@@ -913,6 +929,7 @@ def restaurar_credencial(cred_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_credencial/<int:cred_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_credencial(cred_id):
@@ -928,6 +945,7 @@ def destruir_credencial(cred_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/restaurar_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def restaurar_comunicado(com_id):
@@ -943,6 +961,7 @@ def restaurar_comunicado(com_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/destruir_comunicado/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def destruir_comunicado(com_id):
@@ -958,6 +977,7 @@ def destruir_comunicado(com_id):
     return redirect(url_for('ver_papelera'))
 
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_imagen(galeria_id, filename):
@@ -1002,6 +1022,7 @@ def gestion_usuarios():
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
 
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def editar_usuario(usuario_id):
@@ -1032,6 +1053,7 @@ def editar_usuario(usuario_id):
     return redirect(url_for('gestion_usuarios'))
 
 @app.route('/eliminar_usuario/<int:usuario_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_usuario(usuario_id):
@@ -1163,6 +1185,7 @@ def ver_comunicados():
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
 
 @app.route('/comunicados/crear', methods=['POST'])
+@csrf.exempt
 @login_required
 @admin_required
 def crear_comunicado():
@@ -1192,6 +1215,7 @@ def crear_comunicado():
     return redirect(url_for('ver_comunicados'))
 
 @app.route('/comunicados/archivar/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def archivar_comunicado(com_id):
@@ -1212,6 +1236,7 @@ def archivar_comunicado(com_id):
     return redirect(url_for('ver_comunicados'))
 
 @app.route('/comunicados/eliminar/<int:com_id>', methods=['POST', 'GET'])
+@csrf.exempt
 @login_required
 @admin_required
 def eliminar_comunicado(com_id):
