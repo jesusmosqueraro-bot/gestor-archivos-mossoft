@@ -784,21 +784,26 @@ def ver_credenciales():
     
     lista_credenciales = []
     for r in rows:
-        c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
-        pass_real = desencriptar_texto(pass_enc, c_id)
-        
-        texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
-        if not q_busqueda or q_busqueda in texto_full:
-            lista_credenciales.append({
-                'id': c_id,
-                'servicio': servicio,
-                'url': url or '',
-                'usuario': usuario,
-                'password': pass_real,
-                'categoria': categoria or 'General',
-                'notas': notas or '',
-                'fecha': fecha
-            })
+        try:
+            c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
+            pass_real = desencriptar_texto(pass_enc, c_id)
+
+            texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+            if not q_busqueda or q_busqueda in texto_full:
+                lista_credenciales.append({
+                    'id': c_id,
+                    'servicio': servicio,
+                    'url': url or '',
+                    'usuario': usuario,
+                    'password': pass_real,
+                    'categoria': categoria or 'General',
+                    'notas': notas or '',
+                    'fecha': fecha
+                })
+        except Exception as e_row:
+            # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
+            print(f"⚠️ Error procesando credencial {r[0] if r else '?'}: {e_row}")
+            continue
             
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
 
@@ -1366,9 +1371,17 @@ def index():
 
         sugerencias_titulos.append(titulo)
 
-        query_arch = "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
-        cursor.execute(query_arch, (galeria_id,))
-        archivos = [f[0] for f in cursor.fetchall()]
+        try:
+            query_arch = "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = %s AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres' else "SELECT COALESCE(filename, url_archivo) FROM archivos WHERE galeria_id = ? AND COALESCE(estado, 'activo') != 'eliminado'"
+            cursor.execute(query_arch, (galeria_id,))
+            archivos = [f[0] for f in cursor.fetchall()]
+        except Exception as e_arch:
+            # No dejar que un problema puntual (ej. tipos de dato inconsistentes
+            # en galeria_id) tumbe toda la página de instructivos.
+            print(f"⚠️ Error leyendo archivos de la galería {galeria_id}: {e_arch}")
+            if db_type == 'postgres':
+                conn.rollback()
+            archivos = []
 
         item = {
             'id': galeria_id,
