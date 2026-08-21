@@ -43,6 +43,7 @@ except Exception:
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_gestor_archivos_ultra_segura_2026_prod')
 
+# Inicialización CSRF para habilitar {{ csrf_token() }} en las plantillas HTML
 csrf = CSRFProtect(app)
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
