@@ -148,6 +148,7 @@
 
                                             {% if rol == 'admin' %}
                                                 <form action="/eliminar_imagen/{{ item.id }}/{{ arch | urlencode }}" method="POST" onsubmit="return confirm('¿Mover este archivo a la papelera?')">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                     <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar archivo">
                                                         <i class="fa-solid fa-xmark"></i>
                                                     </button>
@@ -170,6 +171,7 @@
                                 </button>
                                 
                                 <form action="/eliminar_galeria/{{ item.id }}" method="POST" onsubmit="return confirm('¿Mover todo este instructivo a la papelera?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-rose-400 rounded-lg transition-colors" title="Eliminar Instructivo">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
@@ -212,6 +214,7 @@
             </div>
 
             <form method="POST" action="/subir" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título del Instructivo *</label>
                     <input type="text" name="titulo" required placeholder="Ej: Manual de usuario SOLVYX" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -270,6 +273,7 @@
             </div>
 
             <form id="form-editar" method="POST" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
                     <input type="text" name="titulo" id="edit-titulo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
