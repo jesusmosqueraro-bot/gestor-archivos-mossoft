@@ -106,6 +106,10 @@
 
                             {% if rol == 'admin' %}
                                 <div class="flex items-center gap-2">
+                                    <button type="button" onclick='abrirModalEditar({{ c | tojson }})' class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
+                                        <i class="fa-solid fa-pen text-sky-400"></i> Editar
+                                    </button>
+
                                     <form action="/comunicados/archivar/{{ c.id }}" method="POST">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
@@ -187,6 +191,59 @@
         </div>
     </div>
 
+    <!-- MODAL EDITAR COMUNICADO -->
+    <div id="modal-editar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white"><i class="fa-solid fa-pen text-sky-400 mr-2"></i> Editar Comunicado / Noticia</h3>
+                <button onclick="cerrarModalEditar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-editar-comunicado" method="POST" action="" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
+                    <input type="text" id="editar-titulo" name="titulo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nivel de Prioridad</label>
+                    <select id="editar-nivel" name="nivel" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        <option value="info">🟢 Informativo (Novedad general)</option>
+                        <option value="importante">🟧 Importante (Cambio de procesos)</option>
+                        <option value="urgente">🔴 Urgente (Alerta crítica)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Detalle / Mensaje *</label>
+                    <textarea id="editar-contenido" name="contenido" rows="4" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Imagen Actual</label>
+                    <div class="rounded-xl overflow-hidden border border-slate-700 bg-slate-900/50 mb-2">
+                        <img id="editar-imagen-actual" src="" alt="Imagen actual" class="hidden max-h-40 w-auto mx-auto object-contain">
+                        <p id="editar-sin-imagen" class="text-slate-500 text-center py-3">Este comunicado no tiene imagen adjunta.</p>
+                    </div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Reemplazar Imagen (Opcional)</label>
+                    <input type="file" name="imagen" accept="image/*" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                    <p class="text-slate-500 mt-1">Si no seleccionas un archivo nuevo, se conserva la imagen actual.</p>
+                </div>
+
+                <div class="flex items-center gap-2 py-1">
+                    <input type="checkbox" id="editar-fijado" name="fijado" class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500">
+                    <label for="editar-fijado" class="text-slate-300 font-bold cursor-pointer">Fijar destacado en Inicio</label>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalEditar()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-500/20">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         function abrirModalCrear() {
             document.getElementById('modal-crear').classList.remove('hidden');
@@ -196,6 +253,34 @@
         function cerrarModalCrear() {
             document.getElementById('modal-crear').classList.add('hidden');
             document.getElementById('modal-crear').classList.remove('flex');
+        }
+
+        function abrirModalEditar(c) {
+            document.getElementById('form-editar-comunicado').action = '/comunicados/editar/' + c.id;
+            document.getElementById('editar-titulo').value = c.titulo || '';
+            document.getElementById('editar-nivel').value = c.nivel || 'info';
+            document.getElementById('editar-contenido').value = c.contenido || '';
+            document.getElementById('editar-fijado').checked = !!c.fijado;
+
+            const imgPreview = document.getElementById('editar-imagen-actual');
+            const sinImagen = document.getElementById('editar-sin-imagen');
+            if (c.imagen_url) {
+                imgPreview.src = c.imagen_url;
+                imgPreview.classList.remove('hidden');
+                sinImagen.classList.add('hidden');
+            } else {
+                imgPreview.src = '';
+                imgPreview.classList.add('hidden');
+                sinImagen.classList.remove('hidden');
+            }
+
+            document.getElementById('modal-editar').classList.remove('hidden');
+            document.getElementById('modal-editar').classList.add('flex');
+        }
+
+        function cerrarModalEditar() {
+            document.getElementById('modal-editar').classList.add('hidden');
+            document.getElementById('modal-editar').classList.remove('flex');
         }
     </script>
 </body>
