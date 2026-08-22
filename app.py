@@ -18,6 +18,14 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# flask_wtf seguro (protección CSRF real)
+try:
+    from flask_wtf import CSRFProtect
+    from flask_wtf.csrf import CSRFError
+except Exception:
+    CSRFProtect = None
+    CSRFError = Exception
+
 # psycopg2 seguro para Render
 try:
     import psycopg2
@@ -52,17 +60,31 @@ app.secret_key = _SECRET_KEY_ENV or base64.urlsafe_b64encode(os.urandom(32)).dec
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
 
-# 🛡️ Varias plantillas (index.html, credenciales.html, papelera.html, comunicados.html,
-# usuarios.html, recuperar.html) ya traen un campo oculto csrf_token() en sus formularios,
-# preparado para cuando se active protección CSRF real con Flask-WTF. Mientras esa
-# integración completa no esté lista (requeriría auditar cada endpoint POST/AJAX para que
-# envíe el token, incluidas llamadas fetch() existentes que hoy no lo hacen), se registra
-# aquí un csrf_token() "inofensivo" para que esas plantillas no truenen con
-# `jinja2.exceptions.UndefinedError: 'csrf_token' is undefined`. No reemplaza una
-# protección CSRF real; es solo para que la app no se caiga con 500 en producción.
-@app.context_processor
-def _inyectar_csrf_token_placeholder():
-    return dict(csrf_token=lambda: '')
+# 🛡️ Protección CSRF real vía Flask-WTF. Todas las plantillas con formularios POST ya
+# incluyen (o se les agregó) el campo oculto csrf_token(); CSRFProtect valida ese token en
+# cada POST/PUT/PATCH/DELETE y registra csrf_token() como global de Jinja automáticamente.
+# Las dos únicas llamadas fetch() que no envían el token (incrementar_vista/descarga, meros
+# contadores de vistas/descargas sin impacto sensible) quedan exentas explícitamente donde
+# están definidas más abajo.
+if CSRFProtect:
+    csrf = CSRFProtect(app)
+
+    @app.errorhandler(CSRFError)
+    def _manejar_csrf_invalido(e):
+        print(f"⚠️ CSRF inválido/expirado: {getattr(e, 'description', e)}")
+        return redirect(request.referrer or url_for('index'))
+else:
+    # Si por alguna razón flask_wtf no está instalado, no tumbamos la app: se cae de vuelta
+    # al placeholder inofensivo (sin protección CSRF real) en lugar de un 500 en cada página.
+    print("⚠️ flask_wtf no está instalado: la protección CSRF real está desactivada. Agrega Flask-WTF a requirements.txt.")
+    class _CsrfExemptDummy:
+        def exempt(self, f):
+            return f
+    csrf = _CsrfExemptDummy()
+
+    @app.context_processor
+    def _inyectar_csrf_token_placeholder():
+        return dict(csrf_token=lambda: '')
 
 # 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
 try:
@@ -657,17 +679,24 @@ def recuperar_clave():
         if user:
             usuario_nombre = user[0]
             codigo_verificacion = str(random.randint(100000, 999999))
-            
+
             session['reset_email'] = email_ingresado
             session['reset_user'] = usuario_nombre
             session['reset_code'] = codigo_verificacion
+            # 🛡️ El código expira a los 10 minutos y se limita el número de intentos de
+            # adivinarlo, para que no quede indefinidamente válido ni sea adivinable por fuerza bruta.
+            session['reset_code_expira'] = datetime.now(timezone.utc).timestamp() + 600
+            session['reset_intentos'] = 0
 
             threading.Thread(
-                target=enviar_correo_recuperacion, 
+                target=enviar_correo_recuperacion,
                 args=(email_ingresado, usuario_nombre, codigo_verificacion)
             ).start()
 
-            registrar_log(usuario_nombre, "Solicitud de Código", f"Código ({codigo_verificacion}) generado para: {email_ingresado}")
+            # 🛡️ El código NUNCA se escribe en el log: la tabla logs es visible para
+            # cualquier admin en /logs, y dejarlo en texto plano permitiría a otro admin
+            # secuestrar la recuperación de un tercero. Solo se envía por correo.
+            registrar_log(usuario_nombre, "Solicitud de Código", f"Se generó un código de verificación para: {email_ingresado}")
             return render_template('recuperar.html', paso=2, email=email_ingresado)
         else:
             return render_template('recuperar.html', paso=1, error="El correo ingresado no está registrado en el sistema.")
@@ -683,25 +712,51 @@ def validar_codigo():
     codigo_correcto = session.get('reset_code')
     email_usuario = session.get('reset_email')
     nombre_usuario = session.get('reset_user')
+    expira = session.get('reset_code_expira')
 
     if not codigo_correcto or not email_usuario:
         return render_template('recuperar.html', paso=1, error="La sesión expiró. Por favor solicita un nuevo código.")
 
+    # 🛡️ Código vencido (10 minutos desde que se generó): obliga a pedir uno nuevo.
+    if not expira or datetime.now(timezone.utc).timestamp() > expira:
+        session.pop('reset_code', None)
+        session.pop('reset_email', None)
+        session.pop('reset_user', None)
+        session.pop('reset_code_expira', None)
+        session.pop('reset_intentos', None)
+        return render_template('recuperar.html', paso=1, error="El código de verificación expiró. Solicita uno nuevo.")
+
     if codigo_ingresado != codigo_correcto:
+        # 🛡️ Límite de intentos: tras 5 códigos incorrectos se invalida y hay que pedir uno nuevo,
+        # para que un código de 6 dígitos no quede expuesto a fuerza bruta ilimitada.
+        intentos = session.get('reset_intentos', 0) + 1
+        session['reset_intentos'] = intentos
+        if intentos >= 5:
+            session.pop('reset_code', None)
+            session.pop('reset_email', None)
+            session.pop('reset_user', None)
+            session.pop('reset_code_expira', None)
+            session.pop('reset_intentos', None)
+            return render_template('recuperar.html', paso=1, error="Demasiados intentos fallidos. Solicita un nuevo código.")
         return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         nuevo_hash = generate_password_hash(nueva_pass)
-        q_upd = "UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ?"
-        cursor.execute(q_upd, (nuevo_hash, email_usuario))
+        # 🛡️ Se filtra por correo Y por el usuario que resolvió el paso 1: si en el futuro
+        # dos cuentas volvieran a compartir el mismo correo, esto evita que una sola
+        # recuperación cambie la clave de todas a la vez.
+        q_upd = "UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ? AND usuario = ?"
+        cursor.execute(q_upd, (nuevo_hash, email_usuario, nombre_usuario))
         conn.commit()
         conn.close()
 
         session.pop('reset_code', None)
         session.pop('reset_email', None)
         session.pop('reset_user', None)
+        session.pop('reset_code_expira', None)
+        session.pop('reset_intentos', None)
 
         registrar_log(nombre_usuario, "Cambio Exitoso de Clave", "Se actualizó la clave vía código de verificación.")
         return render_template('recuperar.html', paso=1, exito="¡Contraseña actualizada con éxito! Ya puedes iniciar sesión.")
@@ -770,6 +825,7 @@ def login():
 
 # 📊 RUTAS DE MÉTRICAS
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_vista(galeria_id):
     try:
@@ -784,6 +840,7 @@ def incrementar_vista(galeria_id):
         return jsonify({'success': False, 'error': str(e)}), 200
 
 @app.route('/incrementar_descarga/<galeria_id>', methods=['POST'])
+@csrf.exempt
 @login_required
 def incrementar_descarga(galeria_id):
     try:
