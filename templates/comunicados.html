@@ -107,6 +107,7 @@
                             {% if rol == 'admin' %}
                                 <div class="flex items-center gap-2">
                                     <form action="/comunicados/archivar/{{ c.id }}" method="POST">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
                                             {% if c.estado == 'activo' %}
                                                 <i class="fa-solid fa-box-archive text-amber-400"></i> Archivar
@@ -117,6 +118,7 @@
                                     </form>
 
                                     <form action="/comunicados/eliminar/{{ c.id }}" method="POST" onsubmit="return confirm('¿Enviar este comunicado a la papelera?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg transition-colors" title="Enviar a la papelera">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
@@ -147,6 +149,7 @@
             </div>
 
             <form method="POST" action="/comunicados/crear" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
                     <input type="text" name="titulo" required placeholder="Ej: Mantenimiento Programado Servidores" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
