@@ -152,11 +152,16 @@ def desencriptar_texto(texto_cifrado, credencial_id=None):
         try:
             return _fernet.decrypt(texto_cifrado.encode('utf-8')).decode('utf-8')
         except (InvalidToken, Exception):
-            # No es un token Fernet válido: puede ser un valor viejo cifrado con XOR.
-            legacy = desencriptar_texto_legacy_xor(texto_cifrado)
-            if legacy:
-                _migrar_credencial_a_fernet(credencial_id, legacy)
-                return legacy
+            pass  # No es un token Fernet válido: puede ser un valor viejo cifrado con XOR. Seguimos abajo.
+    # Sin ENCRYPTION_KEY configurada (o el valor no era un token Fernet válido): intentamos
+    # el XOR viejo de todas formas, ya que ese cifrado no depende de _fernet en absoluto.
+    # Antes esta rama solo se intentaba cuando _fernet SÍ existía, dejando sin poder leerse
+    # cualquier valor viejo si ENCRYPTION_KEY no estaba configurada.
+    legacy = desencriptar_texto_legacy_xor(texto_cifrado)
+    if legacy:
+        if _fernet:
+            _migrar_credencial_a_fernet(credencial_id, legacy)
+        return legacy
     return "⚠️ No se pudo descifrar (revisa ENCRYPTION_KEY)"
 
 # ☁️ CLOUDINARY
@@ -465,7 +470,11 @@ def crear_comunicado():
     titulo = request.form.get('titulo', '').strip()
     contenido = request.form.get('contenido', '').strip()
     nivel = request.form.get('nivel', 'info').strip()
-    fijado = 1 if request.form.get('fijado') == 'on' else 0
+    # ⚠️ Usar un bool nativo de Python (no 0/1 literal): la columna "fijado" en Neon
+    # es de tipo BOOLEAN, y Postgres rechaza "column is of type boolean but expression
+    # is of type integer" si se le pasa un entero. psycopg2 adapta True/False
+    # correctamente a boolean, y sqlite3 los guarda igual de bien como 0/1.
+    fijado = (request.form.get('fijado') == 'on')
     imagen = request.files.get('imagen')
     
     imagen_url = ""
@@ -513,7 +522,8 @@ def archivar_comunicado(com_id):
 
         if row:
             nuevo_estado = 'archivado' if row[0] == 'activo' else 'activo'
-            q_upd = "UPDATE comunicados SET estado = %s, fijado = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = 0 WHERE id = ?"
+            # "fijado = 0" literal fallaba en Postgres contra la columna BOOLEAN real; "false" funciona en ambos motores.
+            q_upd = "UPDATE comunicados SET estado = %s, fijado = false WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET estado = ?, fijado = false WHERE id = ?"
             cursor.execute(q_upd, (nuevo_estado, com_id))
             conn.commit()
             registrar_log(session['username'], "Cambio Estado Comunicado", f"Comunicado '{row[1]}' movido a {nuevo_estado}")
@@ -1427,7 +1437,8 @@ def bienvenida():
     cursor = conn.cursor()
     comunicado_fijado = None
     try:
-        query_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
+        # "fijado = 1" literal fallaba en Postgres contra la columna BOOLEAN real; "true" funciona en ambos motores.
+        query_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = true AND estado = 'activo' ORDER BY id DESC LIMIT 1" if db_type == 'postgres' else "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
         cursor.execute(query_fij)
         row = cursor.fetchone()
         if row:
