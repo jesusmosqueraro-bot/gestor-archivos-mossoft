@@ -1361,6 +1361,11 @@ def gestion_usuarios():
         nuevo_pass = request.form.get('password') or ''
         nuevo_email = (request.form.get('email') or '').strip()
         nuevo_rol = request.form.get('rol', 'estandar')
+        # 🛡️ Solo la cuenta 'admin' (super-admin) puede otorgar el rol 'admin' a un usuario
+        # nuevo. Esto evita que cualquier otro admin se cree una cuenta admin "aliada" para
+        # sortear las protecciones entre administradores.
+        if nuevo_rol == 'admin' and session.get('username') != 'admin':
+            nuevo_rol = 'estandar'
         form_data = {'username': nuevo_user, 'email': nuevo_email, 'rol': nuevo_rol}
 
         if not nuevo_user or not nuevo_pass or not nuevo_email:
@@ -1410,21 +1415,32 @@ def editar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
+        rol_target = row[1] if row else None
 
-        # 🛡️ La cuenta 'admin' está oculta para el resto de administradores en el listado;
-        # esto la protege también a nivel de servidor para que nadie más pueda editarla
-        # (ni su correo, ni su rol, ni su clave) aunque adivine o pruebe su ID directamente.
         if user_target is None:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
-        if user_target == 'admin' and session.get('username') != 'admin':
+        es_superadmin = (session.get('username') == 'admin')
+        es_propio = (user_target == session.get('username'))
+
+        # 🛡️ Solo la cuenta 'admin' (super-admin) puede editar los datos (correo, rol o
+        # contraseña) de OTRA cuenta con rol 'admin'. Esto protege tanto a la cuenta literal
+        # 'admin' como a cualquier otro admin frente a sus pares — un admin comprometido o
+        # malicioso ya no puede tomar control de otra cuenta admin. Cada admin conserva la
+        # posibilidad de editar sus propios datos.
+        if rol_target == 'admin' and not es_superadmin and not es_propio:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
+
+        # 🛡️ Solo el super-admin puede ASCENDER a alguien a rol 'admin'. Sin esto, un admin
+        # podría evadir la protección anterior ascendiendo a un usuario estándar a admin.
+        if nuevo_rol == 'admin' and not es_superadmin:
+            nuevo_rol = rol_target or 'estandar'
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
@@ -1452,7 +1468,7 @@ def eliminar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
 
@@ -1460,11 +1476,16 @@ def eliminar_usuario(usuario_id):
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
-        user_target = row[0]
+        user_target, rol_target = row[0], row[1]
 
         # 🛡️ Nunca permitir eliminar la cuenta 'admin' (dejaría a todos sin acceso) ni la
         # propia cuenta con la que se inició sesión (evita un auto-eliminado accidental).
         if user_target == 'admin' or user_target == session.get('username'):
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+
+        # 🛡️ Solo la cuenta 'admin' (super-admin) puede eliminar a OTRA cuenta con rol 'admin'.
+        if rol_target == 'admin' and session.get('username') != 'admin':
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
@@ -1487,15 +1508,21 @@ def toggle_estado_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, estado FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, estado FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, estado, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, estado, rol FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
 
         if row:
-            user_target, estado_actual = row[0], (row[1] or 'activo')
+            user_target, estado_actual, rol_target = row[0], (row[1] or 'activo'), row[2]
             # 🛡️ Nunca permitir bloquear la cuenta 'admin' (dejaría a todos sin acceso) ni la
             # propia cuenta con la que se inició sesión (evita un auto-bloqueo accidental).
             if user_target == 'admin' or user_target == session.get('username'):
+                conn.close()
+                return redirect(url_for('gestion_usuarios'))
+
+            # 🛡️ Solo la cuenta 'admin' (super-admin) puede bloquear/desbloquear a OTRA
+            # cuenta con rol 'admin'.
+            if rol_target == 'admin' and session.get('username') != 'admin':
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
 
