@@ -1333,7 +1333,12 @@ def gestion_usuarios():
                 conn.rollback()
                 error = "No se pudo crear el usuario. Verifica los datos e intenta de nuevo."
 
-    cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios ORDER BY id ASC")
+    # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
+    # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
+    if session.get('username') == 'admin':
+        cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios ORDER BY id ASC")
+    else:
+        cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data)
@@ -1353,7 +1358,18 @@ def editar_usuario(usuario_id):
         q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
-        user_target = row[0] if row else f"ID {usuario_id}"
+        user_target = row[0] if row else None
+
+        # 🛡️ La cuenta 'admin' está oculta para el resto de administradores en el listado;
+        # esto la protege también a nivel de servidor para que nadie más pueda editarla
+        # (ni su correo, ni su rol, ni su clave) aunque adivine o pruebe su ID directamente.
+        if user_target is None:
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+
+        if user_target == 'admin' and session.get('username') != 'admin':
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
