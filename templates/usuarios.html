@@ -80,7 +80,7 @@
                                     </form>
                                     {% endif %}
 
-                                    {% if u[1] != 'admin' %}
+                                    {% if u[1] != 'admin' and u[1] != session.get('username') %}
                                     <form method="POST" action="{{ url_for('eliminar_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('¿Eliminar al usuario {{ u[1] }}?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar">
