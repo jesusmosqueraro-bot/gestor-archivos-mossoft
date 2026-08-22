@@ -200,8 +200,10 @@ ALLOWED_EXTENSIONS = {
     'mp4', 'mov', 'webm', 'avi',
     'zip', 'rar', '7z', 'tar', 'gz'
 }
-# 📦 LÍMITE AMPLIADO A 100 MB PARA VIDEOS DE HASTA 5-10 MINUTOS
-app.config['MAX_CONTENT_LENGTH'] = 350 * 1024 * 1024
+# 📦 LÍMITE DE TAMAÑO DE SUBIDA: 500 MB, con margen para videos de 4-10 minutos en buena
+# calidad (un video de 4 min en 1080p suele pesar 100-300 MB según la compresión). Esto es
+# el tope del lado de Flask/Render; el otro tope posible es el plan de Cloudinary (ver abajo).
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 # 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
 GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
@@ -1727,9 +1729,14 @@ def subir_archivo():
                     # endpoint normal de Cloudinary (upload) rechaza con 413 "Request Entity
                     # Too Large" cualquier archivo que pase de ~100 MB, sin importar el plan
                     # de la cuenta. upload_large sube el archivo en pedazos y evita ese límite.
+                    # ⚠️ Se le pasa file.stream (no el FileStorage de Flask/Werkzeug): upload_large
+                    # hace "with file_io:" internamente, y FileStorage no implementa el protocolo
+                    # de gestor de contexto (__enter__/__exit__) — el stream real sí. "filename"
+                    # se pasa explícito porque el stream no trae el nombre original del archivo.
                     upload_result = cloudinary.uploader.upload_large(
-                        file,
+                        file.stream,
                         resource_type="video",
+                        filename=file.filename,
                         use_filename=True,
                         unique_filename=True,
                         chunk_size=6000000,
@@ -1748,8 +1755,9 @@ def subir_archivo():
                     # 🛡️ Mismo límite de ~100 MB aplica a archivos "raw" (zip, comprimidos, etc.):
                     # se sube por chunks para evitar el mismo 413 con paquetes grandes.
                     upload_result = cloudinary.uploader.upload_large(
-                        file,
+                        file.stream,
                         resource_type="raw",
+                        filename=file.filename,
                         use_filename=True,
                         unique_filename=True,
                         chunk_size=6000000,
@@ -1841,10 +1849,14 @@ def editar_galeria(galeria_id):
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
                     # 🛡️ Igual que en /subir: upload_large evita el 413 de Cloudinary en
-                    # archivos de más de ~100 MB, subiéndolos en fragmentos.
+                    # archivos de más de ~100 MB, subiéndolos en fragmentos. Se pasa file.stream
+                    # (no el FileStorage) porque upload_large necesita un objeto que soporte
+                    # "with ... :", y FileStorage no lo soporta; "filename" se pasa explícito
+                    # porque el stream no trae el nombre original del archivo.
                     upload_result = cloudinary.uploader.upload_large(
-                        file,
+                        file.stream,
                         resource_type="video",
+                        filename=file.filename,
                         use_filename=True,
                         unique_filename=True,
                         chunk_size=6000000,
@@ -1861,8 +1873,9 @@ def editar_galeria(galeria_id):
                     )
                 elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
                     upload_result = cloudinary.uploader.upload_large(
-                        file,
+                        file.stream,
                         resource_type="raw",
+                        filename=file.filename,
                         use_filename=True,
                         unique_filename=True,
                         chunk_size=6000000,
