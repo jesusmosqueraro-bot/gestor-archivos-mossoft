@@ -538,6 +538,59 @@ def crear_comunicado():
 
     return redirect(url_for('ver_comunicados'))
 
+@app.route('/comunicados/editar/<int:com_id>', methods=['POST'])
+@login_required
+@admin_required
+def editar_comunicado(com_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    try:
+        q_sel = "SELECT imagen_url FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT imagen_url FROM comunicados WHERE id = ?"
+        cursor.execute(q_sel, (com_id,))
+        row = cursor.fetchone()
+
+        if not row:
+            conn.close()
+            return redirect(url_for('ver_comunicados'))
+
+        imagen_url_actual = row[0] or ""
+
+        titulo = request.form.get('titulo', '').strip()
+        contenido = request.form.get('contenido', '').strip()
+        nivel = request.form.get('nivel', 'info').strip()
+        fijado = (request.form.get('fijado') == 'on')
+        imagen = request.files.get('imagen')
+
+        if not titulo or not contenido:
+            conn.close()
+            return redirect(url_for('ver_comunicados'))
+
+        # Si se adjunta una nueva imagen válida, se reemplaza; si no, se conserva la actual.
+        imagen_url = imagen_url_actual
+        if imagen and imagen.filename and archivo_permitido(imagen.filename):
+            try:
+                upload_result = cloudinary.uploader.upload(
+                    imagen,
+                    resource_type="image",
+                    use_filename=True,
+                    unique_filename=True
+                )
+                imagen_url = upload_result.get('secure_url', imagen_url_actual)
+            except Exception as e:
+                print(f"Error subiendo nueva imagen de comunicado {com_id}: {e}")
+
+        q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ? WHERE id = ?"
+        cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, com_id))
+        conn.commit()
+        registrar_log(session.get('username'), "Edición de Comunicado", f"Comunicado '{titulo}' (ID {com_id}) actualizado")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error editando comunicado {com_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_comunicados'))
+
 @app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
 @login_required
 @admin_required
