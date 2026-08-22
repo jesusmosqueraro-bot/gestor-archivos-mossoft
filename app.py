@@ -1723,12 +1723,17 @@ def subir_archivo():
                 ext = file.filename.rsplit('.', 1)[1].lower()
 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
-                    upload_result = cloudinary.uploader.upload(
+                    # 🛡️ Los videos van por upload_large (subida en fragmentos/"chunks"): el
+                    # endpoint normal de Cloudinary (upload) rechaza con 413 "Request Entity
+                    # Too Large" cualquier archivo que pase de ~100 MB, sin importar el plan
+                    # de la cuenta. upload_large sube el archivo en pedazos y evita ese límite.
+                    upload_result = cloudinary.uploader.upload_large(
                         file,
                         resource_type="video",
                         use_filename=True,
                         unique_filename=True,
-                        timeout=60
+                        chunk_size=6000000,
+                        timeout=600
                     )
                 elif ext == 'pdf':
                     upload_result = cloudinary.uploader.upload(
@@ -1740,12 +1745,15 @@ def subir_archivo():
                         timeout=60
                     )
                 elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
-                    upload_result = cloudinary.uploader.upload(
+                    # 🛡️ Mismo límite de ~100 MB aplica a archivos "raw" (zip, comprimidos, etc.):
+                    # se sube por chunks para evitar el mismo 413 con paquetes grandes.
+                    upload_result = cloudinary.uploader.upload_large(
                         file,
                         resource_type="raw",
                         use_filename=True,
                         unique_filename=True,
-                        timeout=60
+                        chunk_size=6000000,
+                        timeout=600
                     )
                 else:
                     upload_result = cloudinary.uploader.upload(
@@ -1832,16 +1840,19 @@ def editar_galeria(galeria_id):
                 ext = file.filename.rsplit('.', 1)[1].lower()
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
+                    # 🛡️ Igual que en /subir: upload_large evita el 413 de Cloudinary en
+                    # archivos de más de ~100 MB, subiéndolos en fragmentos.
+                    upload_result = cloudinary.uploader.upload_large(
+                        file,
                         resource_type="video",
                         use_filename=True,
                         unique_filename=True,
-                        timeout=60
+                        chunk_size=6000000,
+                        timeout=600
                     )
                 elif ext == 'pdf':
                     upload_result = cloudinary.uploader.upload(
-                        file, 
+                        file,
                         resource_type="image",
                         format="pdf",
                         use_filename=True,
@@ -1849,22 +1860,23 @@ def editar_galeria(galeria_id):
                         timeout=60
                     )
                 elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
-                    upload_result = cloudinary.uploader.upload(
-                        file, 
+                    upload_result = cloudinary.uploader.upload_large(
+                        file,
                         resource_type="raw",
                         use_filename=True,
                         unique_filename=True,
-                        timeout=60
+                        chunk_size=6000000,
+                        timeout=600
                     )
                 else:
                     upload_result = cloudinary.uploader.upload(
-                        file, 
+                        file,
                         resource_type="image",
                         use_filename=True,
                         unique_filename=True,
                         timeout=60
                     )
-                
+
                 # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
                 q_ins_arch = "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO archivos (galeria_id, filename, url_archivo, nombre_original, estado) VALUES (?, ?, ?, ?, 'activo')"
                 cursor.execute(q_ins_arch, (galeria_id, upload_result['secure_url'], upload_result['secure_url'], file.filename))
