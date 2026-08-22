@@ -26,9 +26,25 @@
             <!-- Logo Oficial "A" -->
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-2xl bg-[#1e293b] flex items-center justify-center shadow-lg shadow-slate-900/40 border border-slate-700/50">
-                    <svg class="w-6 h-6" viewBox="0 0 100 100">
-                        <path d="M50 18 L22 78 L34 78 L42 60 L58 60 L66 78 L78 78 Z M50 36 L55 48 L45 48 Z" fill="#ffffff"/>
-                        <circle cx="50" cy="42" r="4" fill="#06b6d4"/>
+                    <!-- ISOTIPO VECTORIAL ARKIV (mismo diseño del Login) -->
+                    <svg class="w-7 h-7" viewBox="0 0 100 100">
+                        <defs>
+                            <linearGradient id="platLightBienvenida" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
+                            </linearGradient>
+                            <linearGradient id="steelGBienvenida" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
+                            </linearGradient>
+                        </defs>
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLightBienvenida)" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelGBienvenida)" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLightBienvenida)" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
                     </svg>
                 </div>
                 <div>
