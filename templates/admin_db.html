@@ -38,6 +38,7 @@
 
         <!-- CONSOLA SQL PERSONALIZADA -->
         <form method="POST" action="/admin/db?tabla={{ tabla }}" class="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60 space-y-3 shadow-lg">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider">Ejecutar Consulta SQL Personalizada (SELECT, UPDATE, DELETE, INSERT)</label>
             <div class="flex flex-col sm:flex-row gap-2">
                 <input type="text" name="sql" value="{{ sql }}" placeholder="Ej: UPDATE usuarios SET rol = 'admin' WHERE id = 5" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500">
