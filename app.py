@@ -218,7 +218,7 @@ def init_db():
         cursor = conn.cursor()
         if db_type == 'postgres':
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY, usuario VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, correo VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar'
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, correo VARCHAR(200) NOT NULL, rol VARCHAR(50) NOT NULL DEFAULT 'estandar', estado VARCHAR(20) NOT NULL DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha_subida VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', area VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
@@ -248,7 +248,8 @@ def init_db():
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
-                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';"
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -258,7 +259,7 @@ def init_db():
 
         else:
             cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, correo TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar'
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, correo TEXT NOT NULL, rol TEXT NOT NULL DEFAULT 'estandar', estado TEXT NOT NULL DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha_subida TEXT, categoria TEXT DEFAULT 'General', area TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
@@ -289,6 +290,11 @@ def init_db():
                 pass
             try:
                 cursor.execute("ALTER TABLE credenciales ADD COLUMN estado TEXT DEFAULT 'activo';")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN estado TEXT DEFAULT 'activo';")
                 conn.commit()
             except Exception:
                 pass
@@ -720,7 +726,7 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                query = "SELECT usuario, password_hash, rol, estado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -738,6 +744,11 @@ def login():
                             _migrar_password_a_hash(user[0], password)
 
                 if es_valida:
+                    # ⚠️ user[3] es la columna "estado" (activo/inactivo). Un usuario bloqueado
+                    # por un administrador no debe poder iniciar sesión aunque su clave sea correcta.
+                    if (user[3] or 'activo') == 'inactivo':
+                        registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso de una cuenta desactivada.")
+                        return render_template('login.html', error="Tu cuenta ha sido desactivada. Contacta a un administrador.")
                     session.permanent = True
                     session['logged_in'] = True
                     session['username'] = user[0]
@@ -1230,24 +1241,45 @@ def destruir_archivo(archivo_id):
 def gestion_usuarios():
     conn, db_type = get_db()
     cursor = conn.cursor()
-    if request.method == 'POST':
-        nuevo_user = request.form.get('username')
-        nuevo_pass = request.form.get('password')
-        nuevo_email = request.form.get('email')
-        nuevo_rol = request.form.get('rol', 'estandar')
-        try:
-            nuevo_hash = generate_password_hash(nuevo_pass)
-            q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol))
-            conn.commit()
-            return redirect(url_for('gestion_usuarios'))
-        except Exception as e:
-            conn.rollback()
+    error = None
+    form_data = None
 
-    cursor.execute("SELECT id, usuario, correo, rol FROM usuarios ORDER BY id ASC")
+    if request.method == 'POST':
+        nuevo_user = (request.form.get('username') or '').strip()
+        nuevo_pass = request.form.get('password') or ''
+        nuevo_email = (request.form.get('email') or '').strip()
+        nuevo_rol = request.form.get('rol', 'estandar')
+        form_data = {'username': nuevo_user, 'email': nuevo_email, 'rol': nuevo_rol}
+
+        if not nuevo_user or not nuevo_pass or not nuevo_email:
+            error = "Todos los campos son obligatorios para crear un usuario."
+        else:
+            # 🛡️ Antes de insertar, verificamos si ya existe un usuario con ese nombre
+            # (sin distinguir mayúsculas/minúsculas). Antes de este fix, un nombre duplicado
+            # violaba la restricción UNIQUE de la BD y el error se descartaba en silencio:
+            # el admin creía haber creado el usuario, pero nada pasaba.
+            q_check = "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(%s)" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(?)"
+            cursor.execute(q_check, (nuevo_user,))
+            if cursor.fetchone():
+                error = f"Ya existe un usuario con el nombre '{nuevo_user}'. Elige otro nombre."
+
+        if not error:
+            try:
+                nuevo_hash = generate_password_hash(nuevo_pass)
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado) VALUES (?, ?, ?, ?, 'activo')"
+                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol))
+                conn.commit()
+                registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' [{nuevo_rol}]")
+                conn.close()
+                return redirect(url_for('gestion_usuarios'))
+            except Exception as e:
+                conn.rollback()
+                error = "No se pudo crear el usuario. Verifica los datos e intenta de nuevo."
+
+    cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
-    return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="")
+    return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data)
 
 # ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
@@ -1304,6 +1336,40 @@ def eliminar_usuario(usuario_id):
         registrar_log(session['username'], "Eliminación de Usuario", f"Se eliminó el usuario '{user_target}' del sistema")
     except Exception as e:
         conn.rollback()
+
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
+# 🔒 BLOQUEAR / DESBLOQUEAR USUARIO
+@app.route('/usuarios/toggle_estado/<int:usuario_id>', methods=['POST'])
+@login_required
+@admin_required
+def toggle_estado_usuario(usuario_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT usuario, estado FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, estado FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+
+        if row:
+            user_target, estado_actual = row[0], (row[1] or 'activo')
+            # 🛡️ Nunca permitir bloquear la cuenta 'admin' (dejaría a todos sin acceso) ni la
+            # propia cuenta con la que se inició sesión (evita un auto-bloqueo accidental).
+            if user_target == 'admin' or user_target == session.get('username'):
+                conn.close()
+                return redirect(url_for('gestion_usuarios'))
+
+            nuevo_estado = 'inactivo' if estado_actual == 'activo' else 'activo'
+            q_upd = "UPDATE usuarios SET estado = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET estado = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_estado, usuario_id))
+            conn.commit()
+
+            accion = "Bloqueo de Usuario" if nuevo_estado == 'inactivo' else "Desbloqueo de Usuario"
+            registrar_log(session['username'], accion, f"El usuario '{user_target}' fue marcado como '{nuevo_estado}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error cambiando estado del usuario {usuario_id}: {e}")
 
     conn.close()
     return redirect(url_for('gestion_usuarios'))
