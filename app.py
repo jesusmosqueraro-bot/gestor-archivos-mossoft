@@ -1327,7 +1327,18 @@ def eliminar_usuario(usuario_id):
         q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
-        user_target = row[0] if row else f"ID {usuario_id}"
+
+        if not row:
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+
+        user_target = row[0]
+
+        # 🛡️ Nunca permitir eliminar la cuenta 'admin' (dejaría a todos sin acceso) ni la
+        # propia cuenta con la que se inició sesión (evita un auto-eliminado accidental).
+        if user_target == 'admin' or user_target == session.get('username'):
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
 
         q_del = "DELETE FROM usuarios WHERE id = %s" if db_type == 'postgres' else "DELETE FROM usuarios WHERE id = ?"
         cursor.execute(q_del, (usuario_id,))
