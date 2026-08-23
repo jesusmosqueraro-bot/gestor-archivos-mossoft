@@ -378,6 +378,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
                 id SERIAL PRIMARY KEY, nombre VARCHAR(200) NOT NULL, tipo_activo VARCHAR(100) DEFAULT 'Otro', marca VARCHAR(100), modelo VARCHAR(100), numero_serie VARCHAR(150), estado VARCHAR(30) DEFAULT 'Disponible', asignado_a VARCHAR(100), sede VARCHAR(100), observaciones TEXT, fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL, eliminado INTEGER DEFAULT 0
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
+                id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -388,6 +391,10 @@ def init_db():
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS descargas INTEGER DEFAULT 0;",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS area VARCHAR(100) DEFAULT 'General';",
+                # 👁️ Visibilidad del instructivo: 'todos' (lo ve cualquier usuario logueado) o
+                # 'admin' (solo lo ven las cuentas Admin/Agente). Por defecto 'todos', para no
+                # ocultar de golpe instructivos que ya existían antes de esta función.
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS visibilidad VARCHAR(20) DEFAULT 'todos';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
@@ -403,7 +410,11 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion INTEGER;",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion_fecha VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS area VARCHAR(100);",
-                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sede VARCHAR(100);"
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sede VARCHAR(100);",
+                # 📍 Dirección física y usuario responsable de cada Sede (solo aplican cuando
+                # tipo = 'sede'; para 'area'/'categoria' quedan en NULL sin usarse).
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS direccion TEXT;",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS responsable VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -448,6 +459,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo_activo TEXT DEFAULT 'Otro', marca TEXT, modelo TEXT, numero_serie TEXT, estado TEXT DEFAULT 'Disponible', asignado_a TEXT, sede TEXT, observaciones TEXT, fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL, eliminado INTEGER DEFAULT 0
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
@@ -489,6 +503,20 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            try:
+                cursor.execute("ALTER TABLE galerias ADD COLUMN visibilidad TEXT DEFAULT 'todos';")
+                conn.commit()
+            except Exception:
+                pass
+            for col_config_sql in [
+                "ALTER TABLE ticket_configuraciones ADD COLUMN direccion TEXT;",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN responsable TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_config_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -574,6 +602,20 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if session.get('rol') != 'admin': return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# 🧑‍💼 Rol "Agente": analista de soporte TI que resuelve PQRS/Tickets. Tiene el mismo nivel
+# de acceso operativo que Admin en (casi) todos los módulos — Gestor de Archivos, Comunicados,
+# Tickets/Soporte TI completo, Bóveda de Accesos, Papelera y Auditoría — con DOS excepciones
+# que quedan exclusivas del rol 'admin': Gestión de Usuarios y el Gestor de Base de Datos
+# (ambas siguen usando @admin_required, no este decorador).
+ROLES_CON_ACCESO_OPERATIVO = ('admin', 'agente')
+
+def agente_o_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('rol') not in ROLES_CON_ACCESO_OPERATIVO: return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -693,7 +735,7 @@ def ver_comunicados():
 
 @app.route('/comunicados/crear', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def crear_comunicado():
     titulo = request.form.get('titulo', '').strip()
     contenido = request.form.get('contenido', '').strip()
@@ -738,7 +780,7 @@ def crear_comunicado():
 
 @app.route('/comunicados/editar/<int:com_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -791,7 +833,7 @@ def editar_comunicado(com_id):
 
 @app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def archivar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -817,7 +859,7 @@ def archivar_comunicado(com_id):
 
 @app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_comunicado(com_id):
     # El propio botón en comunicados.html pregunta "¿Enviar este comunicado a la papelera?",
     # así que esto debe ser un envío a la papelera (estado='eliminado'), no un borrado
@@ -843,7 +885,7 @@ def eliminar_comunicado(com_id):
 
 @app.route('/restaurar_comunicado/<int:com_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def restaurar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -866,7 +908,7 @@ def restaurar_comunicado(com_id):
 
 @app.route('/destruir_comunicado/<int:com_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def destruir_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -938,7 +980,7 @@ UMBRAL_PROXIMO_A_VENCER_HORAS_MIN = 4
 
 def _puede_ver_ticket(creado_por):
     """Un ticket solo lo puede ver quien lo creó o cualquier cuenta con rol admin (equipo de soporte TI)."""
-    return session.get('rol') == 'admin' or session.get('username') == creado_por
+    return session.get('rol') in ROLES_CON_ACCESO_OPERATIVO or session.get('username') == creado_por
 
 
 def _parsear_fecha_ticket(fecha_str):
@@ -1032,16 +1074,18 @@ def _progreso_ticket(ticket):
 
 
 def _config_ticket_lista(tipo_config):
-    """Devuelve [{'id', 'nombre'}] de las Áreas, Sedes o Categorías activas configuradas por
-    el equipo de soporte en /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria').
+    """Devuelve [{'id', 'nombre', 'direccion', 'responsable'}] de las Áreas, Sedes o
+    Categorías activas configuradas por el equipo de soporte en /tickets/configuracion
+    (tipo_config: 'area' | 'sede' | 'categoria'). 'direccion' y 'responsable' solo tienen
+    contenido real para tipo_config == 'sede'; para área/categoría quedan en None.
     Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
     romper la página que la llama."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT id, nombre FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        q = "SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
         cursor.execute(q, (tipo_config,))
-        filas = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+        filas = [{'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3]} for r in cursor.fetchall()]
         conn.close()
         return filas
     except Exception as e:
@@ -1119,6 +1163,14 @@ def _guardar_adjuntos_ticket(cursor, db_type, ticket_id, comentario_id, subidos,
         cursor.execute(q, (ticket_id, comentario_id, url, nombre, usuario, fecha))
 
 
+def _guardar_adjuntos_inventario(cursor, db_type, activo_id, subidos, usuario, fecha):
+    """Guarda en 'inventario_adjuntos' los archivos ya subidos a Cloudinary (mismo patrón que
+    los adjuntos de tickets) para un activo del Inventario."""
+    q = "INSERT INTO inventario_adjuntos (activo_id, url, nombre_original, subido_por, fecha) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO inventario_adjuntos (activo_id, url, nombre_original, subido_por, fecha) VALUES (?, ?, ?, ?, ?)"
+    for url, nombre in subidos:
+        cursor.execute(q, (activo_id, url, nombre, usuario, fecha))
+
+
 @app.route('/tickets')
 @login_required
 def ver_tickets():
@@ -1134,7 +1186,7 @@ def ver_tickets():
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    es_soporte = (session.get('rol') == 'admin')
+    es_soporte = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
 
     categorias_config = _config_ticket_lista('categoria')
     areas_config = _config_ticket_lista('area')
@@ -1297,7 +1349,7 @@ def ver_ticket(ticket_id):
         conn.close()
         return redirect(url_for('ver_tickets'))
 
-    es_soporte = (session.get('rol') == 'admin')
+    es_soporte = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
     tipo_t = row[3] or 'Incidente'
 
     ticket = {
@@ -1341,7 +1393,7 @@ def ver_ticket(ticket_id):
 
     agentes = []
     if es_soporte:
-        q_ag = "SELECT usuario FROM usuarios WHERE rol = 'admin' AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
+        q_ag = "SELECT usuario FROM usuarios WHERE rol IN ('admin', 'agente') AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
         cursor.execute(q_ag)
         agentes = [a[0] for a in cursor.fetchall()]
 
@@ -1360,7 +1412,7 @@ def ver_ticket(ticket_id):
 @login_required
 def comentar_ticket(ticket_id):
     mensaje = request.form.get('mensaje', '').strip()
-    es_admin = (session.get('rol') == 'admin')
+    es_admin = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
     es_interno = es_admin and request.form.get('interno') == 'on'
 
     conn, db_type = get_db()
@@ -1430,7 +1482,7 @@ def comentar_ticket(ticket_id):
 
 @app.route('/tickets/<int:ticket_id>/actualizar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def actualizar_ticket(ticket_id):
     nuevo_estado = request.form.get('estado', '').strip()
     nueva_prioridad = request.form.get('prioridad', '').strip()
@@ -1512,7 +1564,7 @@ def actualizar_ticket(ticket_id):
 
 @app.route('/tickets/<int:ticket_id>/modificar_sla', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def modificar_sla_ticket(ticket_id):
     """Permite al equipo de soporte correr la fecha límite de SOLUCIÓN de un ticket (el
     'compromiso con el usuario'), siempre con un motivo y un tope de MAX_MODIFICACIONES_SLA
@@ -1609,7 +1661,7 @@ def inicio_tickets():
     Arkiv): un resumen rápido distinto según el rol, más los tickets más recientes."""
     conn, db_type = get_db()
     cursor = conn.cursor()
-    es_soporte = (session.get('rol') == 'admin')
+    es_soporte = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
     usuario = session.get('username')
     ph = '%s' if db_type == 'postgres' else '?'
 
@@ -1680,13 +1732,13 @@ def ver_conocimiento():
                 'nombre_archivo': r[4], 'vistas': r[5] or 0, 'fecha_creacion': r[6]
             })
 
-    es_soporte = (session.get('rol') == 'admin')
+    es_soporte = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
     return render_template('conocimiento.html', articulos=articulos, es_soporte=es_soporte, q_busqueda=q_busqueda)
 
 
 @app.route('/tickets/conocimiento/nuevo', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def crear_conocimiento():
     titulo = request.form.get('titulo', '').strip()
     descripcion = request.form.get('descripcion', '').strip()
@@ -1715,7 +1767,7 @@ def crear_conocimiento():
 
 @app.route('/tickets/conocimiento/<int:articulo_id>/editar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_conocimiento(articulo_id):
     titulo = request.form.get('titulo', '').strip()
     descripcion = request.form.get('descripcion', '').strip()
@@ -1750,7 +1802,7 @@ def editar_conocimiento(articulo_id):
 
 @app.route('/tickets/conocimiento/<int:articulo_id>/eliminar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_conocimiento(articulo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1796,28 +1848,47 @@ def abrir_conocimiento(articulo_id):
 # alimentan los desplegables al crear una solicitud y los filtros de la lista de tickets.
 @app.route('/tickets/configuracion')
 @login_required
-@admin_required
+@agente_o_admin_required
 def configuracion_tickets():
     areas = _config_ticket_lista('area')
     sedes = _config_ticket_lista('sede')
     categorias = _config_ticket_lista('categoria')
-    return render_template('tickets_configuracion.html', es_soporte=True, areas=areas, sedes=sedes, categorias=categorias)
+
+    # 👤 Lista de usuarios activos para elegir el "responsable" de cada sede desde un
+    # desplegable (en vez de escribir un nombre libre que podría no corresponder a
+    # ninguna cuenta real del sistema).
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT usuario, nombre FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC")
+    usuarios_disponibles = [{'usuario': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+    conn.close()
+
+    return render_template('tickets_configuracion.html', es_soporte=True, areas=areas, sedes=sedes, categorias=categorias, usuarios_disponibles=usuarios_disponibles)
 
 
 @app.route('/tickets/configuracion/nuevo', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def crear_configuracion_ticket():
     tipo = request.form.get('tipo', '').strip()
     nombre = request.form.get('nombre', '').strip()
+    # 📍 Dirección y responsable solo aplican (y solo se guardan) cuando tipo == 'sede'.
+    direccion = request.form.get('direccion', '').strip() or None
+    responsable = request.form.get('responsable', '').strip() or None
+    if tipo != 'sede':
+        direccion = None
+        responsable = None
     if tipo in ('area', 'sede', 'categoria') and nombre:
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q = "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (?, ?)"
-            cursor.execute(q, (tipo, nombre))
+            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable) VALUES (?, ?, ?, ?)"
+            cursor.execute(q, (tipo, nombre, direccion, responsable))
             conn.commit()
-            registrar_log(session.get('username'), "Configuración de Tickets", f"Se agregó {tipo} '{nombre}'")
+            detalle = f"Se agregó {tipo} '{nombre}'"
+            if tipo == 'sede' and (direccion or responsable):
+                detalle += f" (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
+            registrar_log(session.get('username'), "Configuración de Tickets", detalle)
         except Exception as e:
             conn.rollback()
             print(f"Error creando configuración de ticket: {e}")
@@ -1827,17 +1898,33 @@ def crear_configuracion_ticket():
 
 @app.route('/tickets/configuracion/<int:config_id>/editar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_configuracion_ticket(config_id):
     nombre = request.form.get('nombre', '').strip()
     if nombre:
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
-            cursor.execute(q, (nombre, config_id))
+            q_sel = "SELECT tipo FROM ticket_configuraciones WHERE id = %s" if db_type == 'postgres' else "SELECT tipo FROM ticket_configuraciones WHERE id = ?"
+            cursor.execute(q_sel, (config_id,))
+            fila = cursor.fetchone()
+            tipo_actual = fila[0] if fila else None
+
+            if tipo_actual == 'sede':
+                # 📍 Solo las Sedes tienen dirección y responsable; el formulario de Sedes
+                # envía estos dos campos junto con el nombre.
+                direccion = request.form.get('direccion', '').strip() or None
+                responsable = request.form.get('responsable', '').strip() or None
+                q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
+                cursor.execute(q, (nombre, direccion, responsable, config_id))
+                detalle = f"Se editó la sede '{nombre}' (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
+            else:
+                q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
+                cursor.execute(q, (nombre, config_id))
+                detalle = f"Se renombró configuración #{config_id} a '{nombre}'"
+
             conn.commit()
-            registrar_log(session.get('username'), "Configuración de Tickets", f"Se renombró configuración #{config_id} a '{nombre}'")
+            registrar_log(session.get('username'), "Configuración de Tickets", detalle)
         except Exception as e:
             conn.rollback()
             print(f"Error editando configuración de ticket: {e}")
@@ -1847,7 +1934,7 @@ def editar_configuracion_ticket(config_id):
 
 @app.route('/tickets/configuracion/<int:config_id>/eliminar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_configuracion_ticket(config_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1868,7 +1955,7 @@ def eliminar_configuracion_ticket(config_id):
 # solicitantes y tendencia de solicitudes de los últimos 14 días — más exportación a Excel.
 @app.route('/tickets/indicadores')
 @login_required
-@admin_required
+@agente_o_admin_required
 def indicadores_tickets():
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1944,7 +2031,7 @@ def indicadores_tickets():
 
 @app.route('/tickets/indicadores/exportar_csv')
 @login_required
-@admin_required
+@agente_o_admin_required
 def exportar_indicadores_tickets():
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1977,7 +2064,7 @@ def exportar_indicadores_tickets():
 # quién/qué sede están asignados. Reutiliza las Sedes configuradas en /tickets/configuracion.
 @app.route('/tickets/inventario')
 @login_required
-@admin_required
+@agente_o_admin_required
 def ver_inventario():
     q_estado = request.args.get('estado', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
@@ -1991,12 +2078,23 @@ def ver_inventario():
     except Exception as e:
         print(f"Error consultando inventario: {e}")
         rows = []
+
+    # 📎 Adjuntos de todos los activos, agrupados por activo_id, en una sola consulta (en vez
+    # de una consulta por activo dentro del ciclo).
+    adjuntos_por_activo = {}
+    try:
+        cursor.execute("SELECT id, activo_id, url, nombre_original FROM inventario_adjuntos ORDER BY id ASC")
+        for adj_id, activo_id, url, nombre_original in cursor.fetchall():
+            adjuntos_por_activo.setdefault(activo_id, []).append({'id': adj_id, 'url': url, 'nombre_original': nombre_original})
+    except Exception as e:
+        print(f"Error consultando adjuntos de inventario: {e}")
     conn.close()
 
     activos_todos = [{
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8],
-        'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11]
+        'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11],
+        'adjuntos': adjuntos_por_activo.get(r[0], [])
     } for r in rows]
 
     conteos_estado = {e: 0 for e in ESTADOS_ACTIVO}
@@ -2023,7 +2121,7 @@ def ver_inventario():
 
 @app.route('/tickets/inventario/nuevo', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def crear_activo():
     nombre = request.form.get('nombre', '').strip()
     tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
@@ -2061,7 +2159,7 @@ def crear_activo():
 
 @app.route('/tickets/inventario/<int:activo_id>/editar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_activo(activo_id):
     nombre = request.form.get('nombre', '').strip()
     tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
@@ -2097,7 +2195,7 @@ def editar_activo(activo_id):
 
 @app.route('/tickets/inventario/<int:activo_id>/eliminar', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_activo(activo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2109,6 +2207,49 @@ def eliminar_activo(activo_id):
     except Exception as e:
         conn.rollback()
         print(f"Error eliminando activo {activo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+# 📎 ADJUNTAR ARCHIVOS A UN ACTIVO DEL INVENTARIO (facturas, fotos, garantías, manuales...).
+# Reutiliza el mismo subidor de Cloudinary que ya usan los adjuntos de tickets.
+@app.route('/tickets/inventario/<int:activo_id>/adjuntar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def adjuntar_archivo_inventario(activo_id):
+    archivos = request.files.getlist('adjuntos')
+    subidos = _subir_adjuntos_ticket(archivos)
+
+    if subidos:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            fecha_act = obtener_fecha_actual()
+            usuario = session.get('username')
+            _guardar_adjuntos_inventario(cursor, db_type, activo_id, subidos, usuario, fecha_act)
+            conn.commit()
+            registrar_log(usuario, "Inventario de Activos", f"Se adjuntaron {len(subidos)} archivo(s) al activo #{activo_id}")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error adjuntando archivos al activo {activo_id}: {e}")
+        conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/adjunto/<int:adjunto_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_adjunto_inventario(adjunto_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "DELETE FROM inventario_adjuntos WHERE id = %s" if db_type == 'postgres' else "DELETE FROM inventario_adjuntos WHERE id = ?"
+        cursor.execute(q, (adjunto_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Inventario de Activos", f"Se eliminó el adjunto #{adjunto_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando adjunto de inventario {adjunto_id}: {e}")
     conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -2478,7 +2619,7 @@ def pdf_proxy():
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
-@admin_required
+@agente_o_admin_required
 def ver_credenciales():
     q_busqueda = request.args.get('q', '').strip().lower()
     
@@ -2520,7 +2661,7 @@ def ver_credenciales():
 
 @app.route('/credenciales/crear', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def crear_credencial():
     servicio = request.form.get('servicio', '').strip()
     url = request.form.get('url', '').strip()
@@ -2549,7 +2690,7 @@ def crear_credencial():
 
 @app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_credencial(cred_id):
     servicio = request.form.get('servicio', '').strip()
     url = request.form.get('url', '').strip()
@@ -2581,7 +2722,7 @@ def editar_credencial(cred_id):
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2597,7 +2738,7 @@ def eliminar_credencial(cred_id):
 # ♻️ MÓDULO PAPELERA DE RECICLAJE
 @app.route('/papelera')
 @login_required
-@admin_required
+@agente_o_admin_required
 def ver_papelera():
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2648,7 +2789,7 @@ def ver_papelera():
 # 🔄 RESTAURAR CREDENCIAL
 @app.route('/restaurar_credencial/<int:cred_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def restaurar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2672,7 +2813,7 @@ def restaurar_credencial(cred_id):
 # 💥 DESTRUIR CREDENCIAL
 @app.route('/destruir_credencial/<int:cred_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def destruir_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2696,7 +2837,7 @@ def destruir_credencial(cred_id):
 # 🔄 RESTAURAR INSTRUCTIVO COMPLETO
 @app.route('/restaurar_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def restaurar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2720,7 +2861,7 @@ def restaurar_galeria(galeria_id):
 # 💥 BORRADO DEFINITIVO DE INSTRUCTIVO
 @app.route('/destruir_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def destruir_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2746,7 +2887,7 @@ def destruir_galeria(galeria_id):
 # 🗑️ BORRADO LÓGICO DE ARCHIVO INDIVIDUAL
 @app.route('/eliminar_imagen/<galeria_id>/<path:filename>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_imagen(galeria_id, filename):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2772,7 +2913,7 @@ def eliminar_imagen(galeria_id, filename):
 # 🔄 RESTAURAR ARCHIVO INDIVIDUAL
 @app.route('/restaurar_archivo/<int:archivo_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def restaurar_archivo(archivo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2808,7 +2949,7 @@ def restaurar_archivo(archivo_id):
 # 💥 DESTRUIR ARCHIVO INDIVIDUAL PERMANENTEMENTE
 @app.route('/destruir_archivo/<int:archivo_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def destruir_archivo(archivo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -2840,9 +2981,15 @@ def gestion_usuarios():
         nuevo_pass = request.form.get('password') or ''
         nuevo_email = (request.form.get('email') or '').strip()
         nuevo_rol = request.form.get('rol', 'estandar')
+        # 🛡️ Solo se aceptan los 3 roles válidos del sistema; cualquier otro valor (enviado a
+        # mano, no desde el formulario) cae a 'estandar' por seguridad.
+        if nuevo_rol not in ('admin', 'agente', 'estandar'):
+            nuevo_rol = 'estandar'
         # 🛡️ Solo la cuenta 'admin' (super-admin) puede otorgar el rol 'admin' a un usuario
-        # nuevo. Esto evita que cualquier otro admin se cree una cuenta admin "aliada" para
-        # sortear las protecciones entre administradores.
+        # nuevo. Cualquier otro admin sí puede crear cuentas 'agente' (analistas de soporte
+        # TI) libremente, igual que ya podía crear cuentas 'estandar'. Esto evita que un admin
+        # cualquiera se cree una cuenta admin "aliada" para sortear las protecciones entre
+        # administradores.
         if nuevo_rol == 'admin' and session.get('username') != 'admin':
             nuevo_rol = 'estandar'
         form_data = {
@@ -2893,6 +3040,8 @@ def gestion_usuarios():
 def editar_usuario(usuario_id):
     nuevo_email = request.form.get('email', '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
+    if nuevo_rol not in ('admin', 'agente', 'estandar'):
+        nuevo_rol = 'estandar'
     nueva_pass = request.form.get('password', '').strip()
     nuevo_nombre = request.form.get('nombre', '').strip()
 
@@ -3030,7 +3179,7 @@ def toggle_estado_usuario(usuario_id):
 # 📑 RUTA /LOGS CON FILTROS
 @app.route('/logs')
 @login_required
-@admin_required
+@agente_o_admin_required
 def ver_logs():
     q_usuario = request.args.get('usuario', '').strip()
     q_accion = request.args.get('accion', '').strip()
@@ -3084,7 +3233,7 @@ def ver_logs():
 # 📊 EXPORTAR AUDITORÍA A EXCEL / CSV
 @app.route('/exportar_logs_csv')
 @login_required
-@admin_required
+@agente_o_admin_required
 def exportar_logs_csv():
     q_usuario = request.args.get('usuario', '').strip()
     q_accion = request.args.get('accion', '').strip()
@@ -3186,15 +3335,19 @@ def index():
     conn, db_type = get_db()
     cursor = conn.cursor()
     
+    # 👁️ Un usuario Estándar solo debe ver instructivos marcados como 'todos'; Admin y Agente
+    # ven absolutamente todo (incluidos los marcados 'admin'), sin filtrar por visibilidad.
+    puede_ver_todo = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
+
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas, visibilidad FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
         rows = cursor.fetchall()
     except Exception:
         try:
             conn.rollback()
             cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
             raw_rows = cursor.fetchall()
-            rows = [r + (0, 0) for r in raw_rows]
+            rows = [r + (0, 0, 'todos') for r in raw_rows]
         except Exception:
             rows = []
 
@@ -3218,6 +3371,13 @@ def index():
         tags = r[6] if len(r) > 6 and r[6] else ''
         vistas = r[7] if len(r) > 7 and r[7] is not None else 0
         descargas = r[8] if len(r) > 8 and r[8] is not None else 0
+        visibilidad = r[9] if len(r) > 9 and r[9] else 'todos'
+
+        # 👁️ Si es un usuario Estándar y este instructivo quedó marcado "Solo Admin", ni
+        # siquiera entra a construir el item: no debe aparecer en su listado ni en las
+        # sugerencias de búsqueda.
+        if visibilidad == 'admin' and not puede_ver_todo:
+            continue
 
         sugerencias_titulos.append(titulo)
 
@@ -3243,6 +3403,7 @@ def index():
             'tags': tags,
             'vistas': vistas,
             'descargas': descargas,
+            'visibilidad': visibilidad,
             'archivos': archivos
         }
 
@@ -3273,7 +3434,7 @@ def index():
 # 📦 SUBIDA DE ARCHIVOS (IMÁGENES, VIDEOS, DOCUMENTOS Y COMPRIMIDOS .ZIP/.RAR)
 @app.route('/subir', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def subir_archivo():
     archivos = request.files.getlist('archivo')
     titulo = request.form.get('titulo', 'Sin título')
@@ -3281,6 +3442,11 @@ def subir_archivo():
     categoria = request.form.get('categoria', 'General')
     tipo = request.form.get('tipo', 'Instructivo')
     tags = request.form.get('tags', '')
+    # 👁️ Visibilidad del instructivo: 'todos' (cualquier usuario logueado) o 'admin' (solo
+    # Admin/Agente). Cualquier otro valor recibido se descarta a favor de 'todos'.
+    visibilidad = request.form.get('visibilidad', 'todos').strip()
+    if visibilidad not in ('todos', 'admin'):
+        visibilidad = 'todos'
 
     galeria_id = str(uuid.uuid4())[:8]
     fecha_actual = obtener_fecha_actual()
@@ -3351,8 +3517,8 @@ def subir_archivo():
             cursor = conn.cursor()
             # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
             # elegida, ya que hoy no hay un campo separado de área en el formulario.
-            q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo')" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo')"
-            cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags))
+            q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo', %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo', ?)"
+            cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags, visibilidad))
 
             # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
             # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
@@ -3362,7 +3528,7 @@ def subir_archivo():
 
             conn.commit()
             conn.close()
-            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}]")
+            registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] (visibilidad: {'solo Admin/Agente' if visibilidad == 'admin' else 'todos los usuarios'})")
         except Exception as e:
             print(f"⚠️ Error guardando el instructivo '{titulo}' en la base de datos: {e}")
 
@@ -3370,20 +3536,23 @@ def subir_archivo():
 
 @app.route('/editar_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def editar_galeria(galeria_id):
     nuevo_titulo = (request.form.get('titulo') or '').strip()
     nueva_desc = (request.form.get('descripcion') or '').strip()
     nueva_cat = (request.form.get('categoria') or 'General').strip()
     nuevo_tipo = (request.form.get('tipo') or 'Instructivo').strip()
     nuevos_tags = (request.form.get('tags') or '').strip()
+    nueva_visibilidad = (request.form.get('visibilidad') or 'todos').strip()
+    if nueva_visibilidad not in ('todos', 'admin'):
+        nueva_visibilidad = 'todos'
     nuevos_archivos = request.files.getlist('nuevos_archivos')
-    
+
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
+
     try:
-        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags FROM galerias WHERE id = ?"
+        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad FROM galerias WHERE id = ?"
         cursor.execute(q_sel, (galeria_id,))
         antiguo = cursor.fetchone()
 
@@ -3394,6 +3563,7 @@ def editar_galeria(galeria_id):
             cat_old = (antiguo[2] or 'General').strip()
             tipo_old = (antiguo[3] or 'Instructivo').strip()
             tags_old = (antiguo[4] or '').strip()
+            visibilidad_old = (antiguo[5] or 'todos').strip()
 
             if tit_old != nuevo_titulo:
                 cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
@@ -3405,9 +3575,11 @@ def editar_galeria(galeria_id):
                 cambios.append(f"Tipo: '{tipo_old}' ➔ '{nuevo_tipo}'")
             if tags_old != nuevos_tags:
                 cambios.append(f"Tags: '{tags_old}' ➔ '{nuevos_tags}'")
+            if visibilidad_old != nueva_visibilidad:
+                cambios.append(f"Visibilidad: '{visibilidad_old}' ➔ '{nueva_visibilidad}'")
 
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, galeria_id))
+        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s, visibilidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ?, visibilidad = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, nueva_visibilidad, galeria_id))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
@@ -3484,7 +3656,7 @@ def editar_galeria(galeria_id):
 # 🗑️ BORRADO LÓGICO DE INSTRUCTIVO
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def eliminar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
