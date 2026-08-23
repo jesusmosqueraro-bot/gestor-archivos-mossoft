@@ -49,7 +49,7 @@
 
             <!-- ÁREAS -->
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
-                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-building text-indigo-400"></i> Áreas</h3>
+                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-building text-indigo-400"></i> Áreas <span class="text-slate-500 font-normal">({{ areas|length }})</span></h3>
                 <form method="POST" action="/tickets/configuracion/nuevo" class="flex flex-col gap-2 mb-4">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="tipo" value="area"/>
@@ -61,35 +61,51 @@
                     </select>
                     <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar área</button>
                 </form>
-                <div class="space-y-2">
+
+                {% if areas %}
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]"></i>
+                    <input type="text" oninput="filtrarConfigLista(this, 'lista-areas')" placeholder="Buscar área por nombre..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-8 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="button" onclick="filtrarConfigLista(this.previousElementSibling, 'lista-areas')" title="Buscar" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-orange-400 text-[11px]"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+                {% endif %}
+
+                <div class="space-y-2" id="lista-areas">
                     {% for a in areas %}
-                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5">
-                        <form method="POST" action="/tickets/configuracion/{{ a.id }}/editar" class="flex flex-col gap-1.5">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <div class="flex items-center gap-2">
-                                <input type="text" name="nombre" value="{{ a.nombre }}" placeholder="Nombre" class="flex-1 bg-transparent text-xs font-bold text-slate-200 focus:outline-none focus:bg-slate-800 rounded px-1">
-                                <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
-                            </div>
-                            <input type="text" name="direccion" value="{{ a.direccion or '' }}" placeholder="Dirección física" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
-                            <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
-                                <option value="" {% if not a.responsable %}selected{% endif %}>Sin responsable asignado</option>
-                                {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == a.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
-                            </select>
-                        </form>
-                        <form method="POST" action="/tickets/configuracion/{{ a.id }}/eliminar" onsubmit="return confirm('¿Eliminar el área {{ a.nombre }}?');" class="mt-1.5 text-right">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar área</button>
-                        </form>
+                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl overflow-hidden" data-nombre-config="{{ a.nombre|lower }}">
+                        <button type="button" onclick="toggleConfigItem(this)" class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left">
+                            <span class="text-xs font-bold text-slate-200 truncate"><i class="fa-solid fa-building text-indigo-400/70 text-[10px] mr-1.5"></i>{{ a.nombre }}</span>
+                            <i class="fa-solid fa-chevron-down text-slate-500 text-[10px] flex-none transition-transform"></i>
+                        </button>
+                        <div class="hidden px-3 pb-3">
+                            <form method="POST" action="/tickets/configuracion/{{ a.id }}/editar" class="flex flex-col gap-1.5">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" name="nombre" value="{{ a.nombre }}" placeholder="Nombre" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                                </div>
+                                <input type="text" name="direccion" value="{{ a.direccion or '' }}" placeholder="Dirección física" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <option value="" {% if not a.responsable %}selected{% endif %}>Sin responsable asignado</option>
+                                    {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == a.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
+                                </select>
+                            </form>
+                            <form method="POST" action="/tickets/configuracion/{{ a.id }}/eliminar" onsubmit="return confirm('¿Eliminar el área {{ a.nombre }}?');" class="mt-1.5 text-right">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar área</button>
+                            </form>
+                        </div>
                     </div>
                     {% else %}
                     <p class="text-[11px] text-slate-500 text-center py-3">Sin áreas configuradas todavía.</p>
                     {% endfor %}
+                    <p class="config-sin-resultados hidden text-[11px] text-slate-500 text-center py-3">Ningún área coincide con la búsqueda.</p>
                 </div>
             </div>
 
             <!-- SEDES -->
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
-                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-location-dot text-teal-400"></i> Sedes</h3>
+                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-location-dot text-teal-400"></i> Sedes <span class="text-slate-500 font-normal">({{ sedes|length }})</span></h3>
                 <form method="POST" action="/tickets/configuracion/nuevo" class="flex flex-col gap-2 mb-4">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="tipo" value="sede"/>
@@ -101,44 +117,69 @@
                     </select>
                     <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar sede</button>
                 </form>
-                <div class="space-y-2">
+
+                {% if sedes %}
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]"></i>
+                    <input type="text" oninput="filtrarConfigLista(this, 'lista-sedes')" placeholder="Buscar sede por nombre..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-8 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="button" onclick="filtrarConfigLista(this.previousElementSibling, 'lista-sedes')" title="Buscar" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-orange-400 text-[11px]"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+                {% endif %}
+
+                <div class="space-y-2" id="lista-sedes">
                     {% for s in sedes %}
-                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5">
-                        <form method="POST" action="/tickets/configuracion/{{ s.id }}/editar" class="flex flex-col gap-1.5">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <div class="flex items-center gap-2">
-                                <input type="text" name="nombre" value="{{ s.nombre }}" placeholder="Nombre" class="flex-1 bg-transparent text-xs font-bold text-slate-200 focus:outline-none focus:bg-slate-800 rounded px-1">
-                                <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
-                            </div>
-                            <input type="text" name="direccion" value="{{ s.direccion or '' }}" placeholder="Dirección física" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
-                            <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
-                                <option value="" {% if not s.responsable %}selected{% endif %}>Sin responsable asignado</option>
-                                {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == s.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
-                            </select>
-                        </form>
-                        <form method="POST" action="/tickets/configuracion/{{ s.id }}/eliminar" onsubmit="return confirm('¿Eliminar la sede {{ s.nombre }}?');" class="mt-1.5 text-right">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar sede</button>
-                        </form>
+                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl overflow-hidden" data-nombre-config="{{ s.nombre|lower }}">
+                        <button type="button" onclick="toggleConfigItem(this)" class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left">
+                            <span class="text-xs font-bold text-slate-200 truncate"><i class="fa-solid fa-location-dot text-teal-400/70 text-[10px] mr-1.5"></i>{{ s.nombre }}</span>
+                            <i class="fa-solid fa-chevron-down text-slate-500 text-[10px] flex-none transition-transform"></i>
+                        </button>
+                        <div class="hidden px-3 pb-3">
+                            <form method="POST" action="/tickets/configuracion/{{ s.id }}/editar" class="flex flex-col gap-1.5">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" name="nombre" value="{{ s.nombre }}" placeholder="Nombre" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                                </div>
+                                <input type="text" name="direccion" value="{{ s.direccion or '' }}" placeholder="Dirección física" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <option value="" {% if not s.responsable %}selected{% endif %}>Sin responsable asignado</option>
+                                    {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == s.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
+                                </select>
+                            </form>
+                            <form method="POST" action="/tickets/configuracion/{{ s.id }}/eliminar" onsubmit="return confirm('¿Eliminar la sede {{ s.nombre }}?');" class="mt-1.5 text-right">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar sede</button>
+                            </form>
+                        </div>
                     </div>
                     {% else %}
                     <p class="text-[11px] text-slate-500 text-center py-3">Sin sedes configuradas todavía.</p>
                     {% endfor %}
+                    <p class="config-sin-resultados hidden text-[11px] text-slate-500 text-center py-3">Ninguna sede coincide con la búsqueda.</p>
                 </div>
             </div>
 
             <!-- CATEGORÍAS -->
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
-                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-tags text-amber-400"></i> Categorías</h3>
+                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-tags text-amber-400"></i> Categorías <span class="text-slate-500 font-normal">({{ categorias|length }})</span></h3>
                 <form method="POST" action="/tickets/configuracion/nuevo" class="flex gap-2 mb-4">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="tipo" value="categoria"/>
                     <input type="text" name="nombre" required maxlength="150" placeholder="Ej: Impresoras" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold px-3 rounded-xl text-xs"><i class="fa-solid fa-plus"></i></button>
                 </form>
-                <div class="space-y-2">
+
+                {% if categorias %}
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]"></i>
+                    <input type="text" oninput="filtrarConfigLista(this, 'lista-categorias')" placeholder="Buscar categoría por nombre..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-8 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="button" onclick="filtrarConfigLista(this.previousElementSibling, 'lista-categorias')" title="Buscar" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-orange-400 text-[11px]"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+                {% endif %}
+
+                <div class="space-y-2" id="lista-categorias">
                     {% for c in categorias %}
-                    <div class="flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2">
+                    <div class="flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2" data-nombre-config="{{ c.nombre|lower }}">
                         <form method="POST" action="/tickets/configuracion/{{ c.id }}/editar" class="flex-1 flex items-center gap-2">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="text" name="nombre" value="{{ c.nombre }}" class="flex-1 bg-transparent text-xs text-slate-200 focus:outline-none focus:bg-slate-800 rounded px-1">
@@ -152,11 +193,47 @@
                     {% else %}
                     <p class="text-[11px] text-slate-500 text-center py-3">Sin categorías configuradas todavía.</p>
                     {% endfor %}
+                    <p class="config-sin-resultados hidden text-[11px] text-slate-500 text-center py-3">Ninguna categoría coincide con la búsqueda.</p>
                 </div>
             </div>
 
         </div>
 
     </main>
+
+    <script>
+        // 📂 Cada Área/Sede se muestra colapsada (solo el nombre) para que la lista no ocupe
+        // tanto espacio cuando hay muchas configuradas. Al hacer clic se despliega el resto de
+        // opciones (dirección, responsable, guardar, eliminar). Categorías no necesita esto:
+        // no tiene campos adicionales, así que se queda como lista simple.
+        function toggleConfigItem(boton) {
+            const cuerpo = boton.nextElementSibling;
+            const icono = boton.querySelector('.fa-chevron-down, .fa-chevron-up');
+            cuerpo.classList.toggle('hidden');
+            if (icono) {
+                icono.classList.toggle('fa-chevron-down');
+                icono.classList.toggle('fa-chevron-up');
+            }
+        }
+
+        // 🔎 Filtro de búsqueda por nombre dentro de cada columna (Áreas, Sedes, Categorías).
+        // Es 100% del lado del cliente: no recarga la página, solo oculta/muestra filas ya
+        // cargadas — útil en cuanto la lista crece y hay que encontrar una en particular.
+        function filtrarConfigLista(input, listaId) {
+            const termino = (input.value || '').trim().toLowerCase();
+            const contenedor = document.getElementById(listaId);
+            if (!contenedor) return;
+            let algunoVisible = false;
+            contenedor.querySelectorAll('[data-nombre-config]').forEach(function (item) {
+                const coincide = !termino || item.getAttribute('data-nombre-config').includes(termino);
+                item.style.display = coincide ? '' : 'none';
+                if (coincide) algunoVisible = true;
+            });
+            const sinResultados = contenedor.querySelector('.config-sin-resultados');
+            if (sinResultados) {
+                sinResultados.classList.toggle('hidden', algunoVisible || !termino);
+            }
+        }
+    </script>
 </body>
 </html>
