@@ -6,6 +6,7 @@ import urllib.request
 import urllib.parse
 import json
 import unicodedata
+import re
 import io
 import csv
 import threading
@@ -151,6 +152,62 @@ def normalizar(texto):
     texto = unicodedata.normalize('NFD', str(texto))
     texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     return texto.lower().strip()
+
+def _usuario_desde_nombre(texto):
+    """Deja un nombre/apellido apto para nombre de usuario: sin tildes, minúsculas, solo
+    letras y números (usa el mismo criterio de `normalizar` y además quita espacios/guiones,
+    para apellidos compuestos como 'De la Cruz')."""
+    return re.sub(r'[^a-z0-9]', '', normalizar(texto))
+
+def _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre='', segundo_apellido=''):
+    """Genera un nombre de usuario a partir del nombre real de la persona, con la estructura
+    pedida: primer nombre + primer apellido. Si ya existe, prueba estructuras alternativas
+    (agregando la inicial del segundo apellido, la inicial del segundo nombre, o solo la
+    inicial del primer nombre) y, como último recurso, agrega un número — hasta encontrar
+    una que esté libre."""
+    pn = _usuario_desde_nombre(primer_nombre)
+    sn = _usuario_desde_nombre(segundo_nombre)
+    pa = _usuario_desde_nombre(primer_apellido)
+    sa = _usuario_desde_nombre(segundo_apellido)
+
+    candidatos = []
+    if pn and pa:
+        candidatos.append(pn + pa)
+        if sa:
+            candidatos.append(pn + pa + sa[0])
+        if sn:
+            candidatos.append(pn + sn[0] + pa)
+        candidatos.append(pn[0] + pa)
+
+    vistos = set()
+    candidatos_unicos = []
+    for c in candidatos:
+        if c and c not in vistos:
+            vistos.add(c)
+            candidatos_unicos.append(c)
+    if not candidatos_unicos:
+        candidatos_unicos = ['usuario']
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(%s)" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(?)"
+        for candidato in candidatos_unicos:
+            cursor.execute(q, (candidato,))
+            if not cursor.fetchone():
+                return candidato
+        # Todas las estructuras anteriores ya existen: se agrega un número incremental a la
+        # primera opción hasta encontrar una libre.
+        base = candidatos_unicos[0]
+        for n in range(2, 1000):
+            candidato = f"{base}{n}"
+            cursor.execute(q, (candidato,))
+            if not cursor.fetchone():
+                return candidato
+    finally:
+        conn.close()
+    # Fallback extremo (no debería alcanzarse en la práctica).
+    return f"{candidatos_unicos[0]}{int(datetime.now(ZONA_HORARIA_COLOMBIA).timestamp())}"
 
 # 🔐 CIFRADO REAL DE LA BÓVEDA (Fernet / AES-128-CBC + HMAC)
 # La clave SOLO debe vivir en la variable de entorno ENCRYPTION_KEY de Render.
@@ -336,6 +393,7 @@ def init_db():
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -409,6 +467,11 @@ def init_db():
                 pass
             try:
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN estado TEXT DEFAULT 'activo';")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN nombre TEXT;")
                 conn.commit()
             except Exception:
                 pass
@@ -522,7 +585,11 @@ def visor_db():
     tabla_seleccionada = request.args.get('tabla', 'usuarios')
     q_sql = request.form.get('sql', '').strip() or request.args.get('sql', '').strip()
     
-    tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
+    tablas_permitidas = [
+        'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
+        'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
+        'ticket_configuraciones', 'activos_inventario'
+    ]
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
 
@@ -2766,7 +2833,10 @@ def gestion_usuarios():
     form_data = None
 
     if request.method == 'POST':
-        nuevo_user = (request.form.get('username') or '').strip()
+        primer_nombre = (request.form.get('primer_nombre') or '').strip()
+        segundo_nombre = (request.form.get('segundo_nombre') or '').strip()
+        primer_apellido = (request.form.get('primer_apellido') or '').strip()
+        segundo_apellido = (request.form.get('segundo_apellido') or '').strip()
         nuevo_pass = request.form.get('password') or ''
         nuevo_email = (request.form.get('email') or '').strip()
         nuevo_rol = request.form.get('rol', 'estandar')
@@ -2775,29 +2845,32 @@ def gestion_usuarios():
         # sortear las protecciones entre administradores.
         if nuevo_rol == 'admin' and session.get('username') != 'admin':
             nuevo_rol = 'estandar'
-        form_data = {'username': nuevo_user, 'email': nuevo_email, 'rol': nuevo_rol}
+        form_data = {
+            'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
+            'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
+            'email': nuevo_email, 'rol': nuevo_rol
+        }
 
-        if not nuevo_user or not nuevo_pass or not nuevo_email:
-            error = "Todos los campos son obligatorios para crear un usuario."
-        else:
-            # 🛡️ Antes de insertar, verificamos si ya existe un usuario con ese nombre
-            # (sin distinguir mayúsculas/minúsculas). Antes de este fix, un nombre duplicado
-            # violaba la restricción UNIQUE de la BD y el error se descartaba en silencio:
-            # el admin creía haber creado el usuario, pero nada pasaba.
-            q_check = "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(%s)" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE LOWER(usuario) = LOWER(?)"
-            cursor.execute(q_check, (nuevo_user,))
-            if cursor.fetchone():
-                error = f"Ya existe un usuario con el nombre '{nuevo_user}'. Elige otro nombre."
+        if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email:
+            error = "Nombre, primer apellido, correo y contraseña son obligatorios para crear un usuario."
 
         if not error:
             try:
+                # 🧑 El nombre de usuario (login) ya NO lo escribe el admin a mano: se genera
+                # automáticamente con la estructura "primer nombre + primer apellido" y, si ya
+                # existe, se prueban estructuras alternativas hasta encontrar una libre (ver
+                # _generar_username_unico). El nombre completo sí se guarda tal cual para
+                # mostrarlo en pantalla — antes quedaba vacío ("None") porque este formulario
+                # nunca lo pedía.
+                nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
+                nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
                 nuevo_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado) VALUES (%s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado) VALUES (?, ?, ?, ?, 'activo')"
-                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol))
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre) VALUES (%s, %s, %s, %s, 'activo', %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre) VALUES (?, ?, ?, ?, 'activo', ?)"
+                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo))
                 conn.commit()
-                registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' [{nuevo_rol}]")
+                registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
                 conn.close()
-                return redirect(url_for('gestion_usuarios'))
+                return redirect(url_for('gestion_usuarios', creado=nuevo_user))
             except Exception as e:
                 conn.rollback()
                 error = "No se pudo crear el usuario. Verifica los datos e intenta de nuevo."
@@ -2805,12 +2878,13 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
-    return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data)
+    usuario_creado = request.args.get('creado', '').strip()
+    return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data, usuario_creado=usuario_creado)
 
 # ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
@@ -2820,15 +2894,19 @@ def editar_usuario(usuario_id):
     nuevo_email = request.form.get('email', '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
     nueva_pass = request.form.get('password', '').strip()
+    nuevo_nombre = request.form.get('nombre', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
         rol_target = row[1] if row else None
+        # Si el admin deja el campo Nombre vacío en el formulario de edición, se conserva el
+        # valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar el nombre).
+        nombre_final = nuevo_nombre or (row[2] if row else None)
 
         if user_target is None:
             conn.close()
@@ -2853,12 +2931,12 @@ def editar_usuario(usuario_id):
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
