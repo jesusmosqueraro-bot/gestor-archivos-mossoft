@@ -204,8 +204,8 @@
                                 </div>
                             </td>
                             {% if es_soporte %}
-                            <td class="py-3.5 px-3 text-slate-300">{{ t.creado_por }}</td>
-                            <td class="py-3.5 px-3 text-slate-400 italic">{{ t.asignado_a or 'Sin asignar' }}</td>
+                            <td class="py-3.5 px-3 text-slate-300">{{ t.creado_por_nombre or t.creado_por }}</td>
+                            <td class="py-3.5 px-3 text-slate-400 italic">{{ t.asignado_a_nombre or 'Sin asignar' }}</td>
                             {% endif %}
                             <td class="py-3.5 px-3 font-mono text-slate-500 whitespace-nowrap">{{ t.fecha_actualizacion }}</td>
                         </tr>
@@ -288,6 +288,12 @@
                     </div>
                 </div>
                 {% endif %}
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-phone mr-1"></i>Número de contacto</label>
+                    <input type="text" name="telefono_contacto" value="{{ telefono_usuario_actual or '' }}" placeholder="Ej: 3001234567" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <p class="text-slate-500 text-[10px] mt-1">Se usa este número para que el equipo de soporte se comunique contigo sobre esta solicitud. Puedes cambiarlo si para este caso hay que contactar a otra persona.</p>
+                </div>
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción *</label>

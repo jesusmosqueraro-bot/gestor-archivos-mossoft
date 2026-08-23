@@ -107,11 +107,11 @@
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px] border-t border-slate-700/50 pt-4">
                 <div>
                     <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px]">Creado por</span>
-                    <span class="text-slate-200 font-semibold">{{ ticket.creado_por }}</span>
+                    <span class="text-slate-200 font-semibold">{{ creador_info.nombre or ticket.creado_por }}</span>
                 </div>
                 <div>
                     <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px]">Asignado a</span>
-                    <span class="text-slate-200 font-semibold">{{ ticket.asignado_a or 'Sin asignar' }}</span>
+                    <span class="text-slate-200 font-semibold">{{ ticket.asignado_a_nombre or 'Sin asignar' }}</span>
                 </div>
                 <div>
                     <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px]">Creado</span>
@@ -120,6 +120,39 @@
                 <div>
                     <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px]">Actualizado</span>
                     <span class="text-slate-200 font-mono">{{ ticket.fecha_actualizacion }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- INFORMACIÓN DEL SOLICITANTE -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-id-card text-orange-400"></i> Información del Solicitante
+            </h3>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[11px]">
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5">Nombre completo</span>
+                    <span class="text-slate-200 font-semibold">{{ creador_info.nombre or 'Sin nombre registrado' }}</span>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5">Usuario</span>
+                    <span class="text-slate-200 font-mono">{{ ticket.creado_por }}</span>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5">Correo</span>
+                    <span class="text-slate-200 break-all">{{ creador_info.correo or 'Sin registrar' }}</span>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5"><i class="fa-solid fa-phone mr-1"></i>Teléfono de contacto</span>
+                    <span class="text-slate-200 font-mono">{{ ticket.telefono_contacto or 'Sin registrar' }}</span>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5"><i class="fa-solid fa-building mr-1"></i>Área</span>
+                    <span class="text-slate-200">{{ ticket.area or 'Sin especificar' }}</span>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5"><i class="fa-solid fa-location-dot mr-1"></i>Sede</span>
+                    <span class="text-slate-200">{{ ticket.sede or 'Sin especificar' }}</span>
                 </div>
             </div>
         </div>
@@ -264,7 +297,7 @@
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignar a</label>
                     <select name="asignado_a" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                         <option value="">Sin asignar</option>
-                        {% for a in agentes %}<option value="{{ a }}" {% if a == ticket.asignado_a %}selected{% endif %}>{{ a }}</option>{% endfor %}
+                        {% for a in agentes %}<option value="{{ a.usuario }}" {% if a.usuario == ticket.asignado_a %}selected{% endif %}>{{ a.nombre }}</option>{% endfor %}
                     </select>
                 </div>
                 <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-orange-500/20 transition-all active:scale-95">
@@ -371,7 +404,14 @@
                     <input type="datetime-local" name="nueva_fecha" required value="{{ (ticket.sla_resolucion_limite[:16] | replace(' ', 'T')) if ticket.sla_resolucion_limite else '' }}" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 </div>
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Motivo del cambio *</label>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Motivo *</label>
+                    <select name="motivo_categoria" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        {% for m in motivos_sla %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                    </select>
+                    <p class="text-slate-500 text-[10px] mt-1">El atraso no siempre depende del analista o agente asignado — indica aquí la causa real (p. ej. un proveedor o tercero externo).</p>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Detalle del motivo *</label>
                     <textarea name="motivo" required minlength="10" rows="3" placeholder="Ej: se requiere soporte del proveedor externo, se amplía el plazo 2 días." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
                     <p class="text-slate-500 text-[10px] mt-1">Mínimo 10 caracteres.</p>
                 </div>

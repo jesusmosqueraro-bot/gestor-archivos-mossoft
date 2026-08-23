@@ -51,6 +51,7 @@
                             <th class="px-6 py-4">Usuario</th>
                             <th class="px-6 py-4">Nombre</th>
                             <th class="px-6 py-4">Correo Electrónico</th>
+                            <th class="px-6 py-4">Teléfono</th>
                             <th class="px-6 py-4">Rol</th>
                             <th class="px-6 py-4">Estado</th>
                             <th class="px-6 py-4 text-right">Acciones</th>
@@ -64,6 +65,7 @@
                             </td>
                             <td class="px-6 py-4 {% if not u[5] %}text-slate-600 italic{% endif %}">{{ u[5] or 'Sin nombre registrado' }}</td>
                             <td class="px-6 py-4">{{ u[2] }}</td>
+                            <td class="px-6 py-4 {% if not u[6] %}text-slate-600 italic{% endif %}">{{ u[6] or 'Sin registrar' }}</td>
                             <td class="px-6 py-4">
                                 <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[3] == 'admin' %}bg-cyan-500/10 text-cyan-400 border border-cyan-500/20{% elif u[3] == 'agente' %}bg-orange-500/10 text-orange-400 border border-orange-500/20{% else %}bg-slate-800 text-slate-400{% endif %}">
                                     {{ u[3] }}
@@ -87,7 +89,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% else %}
@@ -173,6 +175,11 @@
                 </div>
 
                 <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Teléfono de Contacto</label>
+                    <input type="text" name="telefono" placeholder="Ej: 3001234567" autocomplete="off" value="{{ form_data.telefono if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
                     <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Contraseña *</label>
                     <input type="password" name="password" required autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
@@ -225,6 +232,11 @@
                 </div>
 
                 <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Teléfono de Contacto</label>
+                    <input type="text" id="edit_telefono" name="telefono" placeholder="Ej: 3001234567" autocomplete="off" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
                     <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Nueva Contraseña (Opcional)</label>
                     <input type="password" name="password" placeholder="Dejar vacío si no se desea cambiar" autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
@@ -250,11 +262,12 @@
         function abrirModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.remove('hidden'); }
         function cerrarModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.add('hidden'); }
         
-        function abrirModalEditarUsuario(id, username, email, rol, nombre) {
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
             document.getElementById('edit_nombre').value = nombre || '';
+            document.getElementById('edit_telefono').value = telefono || '';
             document.getElementById('modalEditarUsuario').classList.remove('hidden');
         }
         function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
