@@ -25,6 +25,15 @@
         </div>
     </nav>
 
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-4xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>{% if es_soporte %}Todas las Solicitudes{% else %}Mis Solicitudes{% endif %}</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+        </div>
+    </div>
+
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
@@ -161,6 +170,64 @@
             </div>
             {% endif %}
         </div>
+
+        <!-- CALIFICACIÓN DE SATISFACCIÓN -->
+        {% if ticket.estado in ['Resuelto', 'Cerrado'] and (ticket.calificacion or session_username == ticket.creado_por) %}
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-star text-amber-400"></i> Calificación de Satisfacción
+            </h3>
+            {% if ticket.calificacion %}
+                <div class="flex items-center gap-2">
+                    <span class="text-amber-400 text-lg tracking-wider">
+                        {% for i in range(1, calificacion_max + 1) %}{% if i <= ticket.calificacion %}★{% else %}<span class="text-slate-600">★</span>{% endif %}{% endfor %}
+                    </span>
+                    <span class="text-xs text-slate-400">{{ ticket.calificacion }}/{{ calificacion_max }}</span>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1">{% if session_username == ticket.creado_por %}Calificaste este servicio{% else %}El solicitante calificó este servicio{% endif %}{% if ticket.calificacion_fecha %} el {{ ticket.calificacion_fecha }}{% endif %}.</p>
+            {% else %}
+                <p class="text-xs text-slate-400 mb-3">¿Cómo fue tu experiencia con esta solicitud? Tu calificación ayuda al equipo de soporte a mejorar.</p>
+                <form method="POST" action="/tickets/{{ ticket.id }}/calificar" id="form-calificacion" class="flex items-center gap-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="calificacion" id="input-calificacion" value="0">
+                    <div id="estrellas-calificacion" class="flex items-center gap-1 text-2xl text-slate-600 cursor-pointer">
+                        {% for i in range(1, calificacion_max + 1) %}<span data-valor="{{ i }}" class="estrella transition-all hover:scale-110">★</span>{% endfor %}
+                    </div>
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all active:scale-95">
+                        Enviar
+                    </button>
+                </form>
+                <script>
+                    (function () {
+                        var estrellas = document.querySelectorAll('#estrellas-calificacion .estrella');
+                        var input = document.getElementById('input-calificacion');
+                        function pintar(valor) {
+                            estrellas.forEach(function (e) {
+                                e.classList.toggle('text-amber-400', parseInt(e.dataset.valor) <= valor);
+                                e.classList.toggle('text-slate-600', parseInt(e.dataset.valor) > valor);
+                            });
+                        }
+                        estrellas.forEach(function (e) {
+                            e.addEventListener('click', function () {
+                                input.value = e.dataset.valor;
+                                pintar(parseInt(e.dataset.valor));
+                            });
+                            e.addEventListener('mouseenter', function () { pintar(parseInt(e.dataset.valor)); });
+                        });
+                        document.getElementById('estrellas-calificacion').addEventListener('mouseleave', function () {
+                            pintar(parseInt(input.value));
+                        });
+                        document.getElementById('form-calificacion').addEventListener('submit', function (ev) {
+                            if (parseInt(input.value) < 1) {
+                                ev.preventDefault();
+                                alert('Selecciona al menos una estrella antes de enviar.');
+                            }
+                        });
+                    })();
+                </script>
+            {% endif %}
+        </div>
+        {% endif %}
 
         {% if es_soporte %}
         <!-- PANEL DE GESTIÓN (SOLO SOPORTE TI) -->
