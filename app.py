@@ -312,6 +312,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
                 id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, comentario_id INTEGER REFERENCES tickets_comentarios(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
+                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo VARCHAR(255) NOT NULL, vistas INTEGER DEFAULT 0, creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
             conn.commit()
 
             for col_query in [
@@ -332,7 +335,9 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_cumplida VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_cumplida VARCHAR(100);",
-                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_modificaciones INTEGER DEFAULT 0;"
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_modificaciones INTEGER DEFAULT 0;",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion INTEGER;",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion_fecha VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -368,6 +373,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, comentario_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE, FOREIGN KEY(comentario_id) REFERENCES tickets_comentarios(id) ON DELETE CASCADE
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo TEXT NOT NULL, vistas INTEGER DEFAULT 0, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+            )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
@@ -396,7 +404,9 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN sla_resolucion_limite TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sla_respuesta_cumplida TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sla_resolucion_cumplida TEXT;",
-                "ALTER TABLE tickets ADD COLUMN sla_modificaciones INTEGER DEFAULT 0;"
+                "ALTER TABLE tickets ADD COLUMN sla_modificaciones INTEGER DEFAULT 0;",
+                "ALTER TABLE tickets ADD COLUMN calificacion INTEGER;",
+                "ALTER TABLE tickets ADD COLUMN calificacion_fecha TEXT;"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
@@ -815,6 +825,17 @@ SLA_HORAS_POR_PRIORIDAD = {
 MAX_MODIFICACIONES_SLA = 2
 FORMATO_FECHA_TICKET = "%Y-%m-%d %H:%M:%S"
 
+# 🙂 Calificación de satisfacción (1 a 5 estrellas) que el solicitante puede dejar una sola
+# vez, cuando su ticket ya está Resuelto o Cerrado — igual que en la mesa de ayuda externa.
+CALIFICACION_MIN = 1
+CALIFICACION_MAX = 5
+
+# ⏳ Umbral para distinguir "Vigente" de "Próximo a vencer" en los filtros de la lista: si
+# queda menos del 20% del tiempo total de resolución (o menos de 4 horas, lo que sea mayor),
+# se considera que el ticket está por vencer.
+UMBRAL_PROXIMO_A_VENCER_PORCENTAJE = 0.2
+UMBRAL_PROXIMO_A_VENCER_HORAS_MIN = 4
+
 
 def _puede_ver_ticket(creado_por):
     """Un ticket solo lo puede ver quien lo creó o cualquier cuenta con rol admin (equipo de soporte TI)."""
@@ -867,6 +888,66 @@ def _calcular_sla_ticket(ticket):
         horas_restantes = max(1, restante.seconds // 3600)
         texto = f"Quedan ~{horas_restantes} hora(s)"
     return {'estado': 'en_tiempo', 'texto': texto, 'color': 'cyan'}
+
+
+def _bucket_cumplimiento_ticket(ticket):
+    """Agrupa el ticket en una de las categorías que se muestran como pestañas filtrables en
+    la lista (inspirado en la mesa de ayuda externa): 'cerrado' (ya Resuelto/Cerrado, sin
+    importar si llegó a tiempo o no), 'vencido' (abierto y ya pasó la fecha límite),
+    'proximo_a_vencer' (abierto y le queda poco tiempo) o 'vigente' (abierto, con margen)."""
+    if ticket.get('estado') in ('Resuelto', 'Cerrado'):
+        return 'cerrado'
+
+    sla = ticket.get('sla') or _calcular_sla_ticket(ticket)
+    if sla.get('estado') == 'vencido':
+        return 'vencido'
+    if sla.get('estado') != 'en_tiempo':
+        # 'sin_datos' (no debería pasar para un ticket abierto, pero por seguridad) se trata
+        # como vigente en vez de ocultarlo de todas las pestañas.
+        return 'vigente'
+
+    limite = _parsear_fecha_ticket(ticket.get('sla_resolucion_limite'))
+    ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    horas_totales = SLA_HORAS_POR_PRIORIDAD.get(ticket.get('prioridad'), SLA_HORAS_POR_PRIORIDAD['Media'])['resolucion']
+    umbral_horas = max(UMBRAL_PROXIMO_A_VENCER_HORAS_MIN, horas_totales * UMBRAL_PROXIMO_A_VENCER_PORCENTAJE)
+    horas_restantes = (limite - ahora).total_seconds() / 3600 if limite else 0
+    return 'proximo_a_vencer' if horas_restantes <= umbral_horas else 'vigente'
+
+
+def _progreso_ticket(ticket):
+    """Calcula qué porcentaje del tiempo total de SLA de resolución ya transcurrió (o
+    transcurrió hasta que se resolvió), como una barra de avance visual en la lista de
+    tickets. No depende de nueva información en la BD: se deriva de fechas ya existentes."""
+    creado = _parsear_fecha_ticket(ticket.get('fecha_creacion'))
+    if not creado:
+        return 0
+    horas_totales = SLA_HORAS_POR_PRIORIDAD.get(ticket.get('prioridad'), SLA_HORAS_POR_PRIORIDAD['Media'])['resolucion']
+    if horas_totales <= 0:
+        return 0
+
+    cumplida = _parsear_fecha_ticket(ticket.get('sla_resolucion_cumplida'))
+    fin = cumplida if (ticket.get('estado') in ('Resuelto', 'Cerrado') and cumplida) else datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+
+    horas_transcurridas = (fin - creado).total_seconds() / 3600
+    return max(0, min(100, round(horas_transcurridas / horas_totales * 100)))
+
+
+def _correo_de_usuario(username):
+    """Busca el correo registrado de un usuario por su nombre de cuenta. Devuelve None si no
+    existe o si algo falla (nunca debe tumbar el flujo del ticket que lo llama)."""
+    if not username:
+        return None
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT correo FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT correo FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (username,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        print(f"⚠️ Error buscando correo de '{username}': {e}")
+        return None
 
 
 def _codigo_ticket(tipo, id_ticket, fecha_creacion):
@@ -929,6 +1010,7 @@ def ver_tickets():
     q_categoria = request.args.get('categoria', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
+    q_cumplimiento = request.args.get('cumplimiento', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -979,13 +1061,27 @@ def ver_tickets():
                 'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12]
             }
             t['sla'] = _calcular_sla_ticket(t)
+            t['cumplimiento'] = _bucket_cumplimiento_ticket(t)
+            t['progreso'] = _progreso_ticket(t)
             tickets.append(t)
+
+    # Conteos para las pestañas de cumplimiento de SLA (Vigentes/Próximos a vencer/Vencidos/
+    # Cerrados), calculados ANTES de aplicar el filtro de pestaña, para que cada pestaña
+    # muestre cuántos tickets hay en las demás sin perder los otros filtros ya aplicados.
+    conteos_cumplimiento = {'vigente': 0, 'proximo_a_vencer': 0, 'vencido': 0, 'cerrado': 0}
+    for t in tickets:
+        conteos_cumplimiento[t['cumplimiento']] = conteos_cumplimiento.get(t['cumplimiento'], 0) + 1
+    total_tickets = len(tickets)
+
+    if q_cumplimiento in conteos_cumplimiento:
+        tickets = [t for t in tickets if t['cumplimiento'] == q_cumplimiento]
 
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
         categorias=CATEGORIAS_TICKET, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
         tipos=TIPOS_TICKET, tipos_info=TIPOS_TICKET_INFO,
-        q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda
+        q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
+        q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets
     )
 
 
@@ -1048,7 +1144,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -1066,7 +1162,8 @@ def ver_ticket(ticket_id):
         'codigo': _codigo_ticket(tipo_t, row[0], row[9]),
         'sla_respuesta_limite': row[11], 'sla_resolucion_limite': row[12],
         'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
-        'sla_modificaciones': row[15] or 0
+        'sla_modificaciones': row[15] or 0,
+        'calificacion': row[16], 'calificacion_fecha': row[17]
     }
     ticket['sla'] = _calcular_sla_ticket(ticket)
 
@@ -1108,7 +1205,8 @@ def ver_ticket(ticket_id):
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
         es_soporte=es_soporte, agentes=agentes,
         estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
-        max_modificaciones_sla=MAX_MODIFICACIONES_SLA
+        max_modificaciones_sla=MAX_MODIFICACIONES_SLA,
+        calificacion_max=CALIFICACION_MAX, session_username=session.get('username')
     )
 
 
@@ -1121,17 +1219,18 @@ def comentar_ticket(ticket_id):
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_sel = "SELECT creado_por, estado FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado FROM tickets WHERE id = ?"
+    q_sel = "SELECT creado_por, estado, titulo, tipo, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, titulo, tipo, fecha_creacion FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
     if not row or not _puede_ver_ticket(row[0]):
         conn.close()
         return redirect(url_for('ver_tickets'))
+    creado_por, estado_actual, titulo_ticket, tipo_ticket, fecha_creacion_ticket = row
 
     # Un ticket cerrado ya no admite comentarios de quien lo creó (solo soporte TI podría
     # necesitar dejar una nota adicional sobre uno ya cerrado).
-    if row[1] == 'Cerrado' and not es_admin:
+    if estado_actual == 'Cerrado' and not es_admin:
         conn.close()
         return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
@@ -1160,6 +1259,21 @@ def comentar_ticket(ticket_id):
             conn.commit()
             etiqueta = "Comentario interno" if es_interno else "Comentario"
             registrar_log(usuario, "Comentario en Ticket", f"{etiqueta} agregado al ticket #{ticket_id}" + (f" ({len(archivos_subidos)} adjunto(s))" if archivos_subidos else ""))
+
+            # 📧 Avisamos por correo al solicitante cuando alguien más (típicamente soporte TI)
+            # responde su ticket. Las notas internas nunca generan este correo: son solo
+            # para coordinación entre el equipo de soporte.
+            if not es_interno and usuario != creado_por:
+                correo_solicitante = _correo_de_usuario(creado_por)
+                if correo_solicitante:
+                    codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
+                    asunto = f"[Arkiv] Nueva respuesta en tu solicitud {codigo}"
+                    cuerpo = (
+                        f"Hola,\n\nTu solicitud de soporte {codigo} ('{titulo_ticket}') tiene una respuesta nueva "
+                        f"de {usuario}.\n\nPuedes verla ingresando a Arkiv, módulo Solicitudes TI.\n\n---\n"
+                        f"Equipo de Soporte TI - Arkiv"
+                    )
+                    threading.Thread(target=enviar_correo_ticket, args=(correo_solicitante, asunto, cuerpo)).start()
         except Exception as e:
             conn.rollback()
             print(f"Error comentando ticket {ticket_id}: {e}")
@@ -1179,14 +1293,15 @@ def actualizar_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida FROM tickets WHERE id = ?"
+        q_sel = "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = ?"
         cursor.execute(q_sel, (ticket_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
             return redirect(url_for('ver_tickets'))
 
-        estado_old, prioridad_old, asignado_old, respuesta_cumplida_old, resolucion_cumplida_old = row
+        (estado_old, prioridad_old, asignado_old, respuesta_cumplida_old, resolucion_cumplida_old,
+         creado_por, titulo_ticket, tipo_ticket, fecha_creacion_ticket) = row
         estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
@@ -1227,6 +1342,20 @@ def actualizar_ticket(ticket_id):
 
         if cambios:
             registrar_log(usuario, "Actualización de Ticket", f"Ticket #{ticket_id}: {'; '.join(cambios)}")
+
+        # 📧 Avisamos por correo al solicitante cuando su ticket cambia de ESTADO (no en cada
+        # cambio de prioridad/asignación, que es más una gestión interna del equipo de TI).
+        if estado_final != estado_old and creado_por != usuario:
+            correo_solicitante = _correo_de_usuario(creado_por)
+            if correo_solicitante:
+                codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
+                asunto = f"[Arkiv] Tu solicitud {codigo} cambió a '{estado_final}'"
+                cuerpo = (
+                    f"Hola,\n\nTu solicitud de soporte {codigo} ('{titulo_ticket}') cambió de estado: "
+                    f"'{estado_old}' → '{estado_final}'.\n\nPuedes ver el detalle completo ingresando a Arkiv, "
+                    f"módulo Solicitudes TI.\n\n---\nEquipo de Soporte TI - Arkiv"
+                )
+                threading.Thread(target=enviar_correo_ticket, args=(correo_solicitante, asunto, cuerpo)).start()
     except Exception as e:
         conn.rollback()
         print(f"Error actualizando ticket {ticket_id}: {e}")
@@ -1286,6 +1415,237 @@ def modificar_sla_ticket(ticket_id):
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
 
+@app.route('/tickets/<int:ticket_id>/calificar', methods=['POST'])
+@login_required
+def calificar_ticket(ticket_id):
+    """El propio solicitante puede calificar de 1 a 5 estrellas su experiencia, una sola vez,
+    y solo cuando el ticket ya está Resuelto o Cerrado — igual que en la mesa de ayuda externa."""
+    try:
+        calificacion = int(request.form.get('calificacion', '0'))
+    except (TypeError, ValueError):
+        calificacion = 0
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT creado_por, estado, calificacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, calificacion FROM tickets WHERE id = ?"
+        cursor.execute(q_sel, (ticket_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return redirect(url_for('ver_tickets'))
+
+        creado_por, estado_actual, calificacion_previa = row
+        puede_calificar = (
+            session.get('username') == creado_por and
+            estado_actual in ('Resuelto', 'Cerrado') and
+            not calificacion_previa and
+            CALIFICACION_MIN <= calificacion <= CALIFICACION_MAX
+        )
+        if puede_calificar:
+            fecha_act = obtener_fecha_actual()
+            q_upd = "UPDATE tickets SET calificacion = %s, calificacion_fecha = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET calificacion = ?, calificacion_fecha = ? WHERE id = ?"
+            cursor.execute(q_upd, (calificacion, fecha_act, ticket_id))
+            conn.commit()
+            registrar_log(session.get('username'), "Calificación de Ticket", f"Ticket #{ticket_id} calificado con {calificacion}/{CALIFICACION_MAX} estrellas")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error calificando ticket {ticket_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/inicio')
+@login_required
+def inicio_tickets():
+    """Página de aterrizaje propia del módulo Solicitudes TI (no la Bienvenida general de
+    Arkiv): un resumen rápido distinto según el rol, más los tickets más recientes."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    es_soporte = (session.get('rol') == 'admin')
+    usuario = session.get('username')
+    ph = '%s' if db_type == 'postgres' else '?'
+
+    resumen = {}
+    try:
+        if es_soporte:
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Abierto', 'En Proceso')", (usuario,))
+            resumen['asignados_abiertos'] = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM tickets WHERE (asignado_a IS NULL OR asignado_a = '') AND estado IN ('Abierto', 'En Proceso')")
+            resumen['sin_asignar'] = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Resuelto', 'Cerrado')", (usuario,))
+            resumen['resueltos_por_mi'] = cursor.fetchone()[0]
+        else:
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Abierto', 'En Proceso')", (usuario,))
+            resumen['mis_abiertos'] = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Resuelto', 'Cerrado')", (usuario,))
+            resumen['mis_resueltos'] = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph}", (usuario,))
+            resumen['mis_total'] = cursor.fetchone()[0]
+    except Exception as e:
+        print(f"Error calculando resumen de inicio de tickets: {e}")
+
+    query = "SELECT id, titulo, tipo, categoria, prioridad, estado, creado_por, fecha_creacion FROM tickets WHERE 1=1"
+    params = []
+    if not es_soporte:
+        query += f" AND creado_por = {ph}"
+        params.append(usuario)
+    query += " ORDER BY id DESC LIMIT 5"
+
+    recientes = []
+    try:
+        cursor.execute(query, tuple(params))
+        for r in cursor.fetchall():
+            tipo_t = r[2] or 'Incidente'
+            recientes.append({
+                'id': r[0], 'titulo': r[1], 'tipo': tipo_t, 'categoria': r[3], 'prioridad': r[4],
+                'estado': r[5], 'creado_por': r[6], 'codigo': _codigo_ticket(tipo_t, r[0], r[7])
+            })
+    except Exception as e:
+        print(f"Error consultando recientes de inicio de tickets: {e}")
+
+    conn.close()
+    return render_template('tickets_inicio.html', es_soporte=es_soporte, resumen=resumen, recientes=recientes)
+
+
+# 📚 BASE DE CONOCIMIENTO (artículos con un documento adjunto, visibles para todos los
+# roles del módulo de Tickets; solo el equipo de soporte TI los crea/edita/elimina).
+@app.route('/tickets/conocimiento')
+@login_required
+def ver_conocimiento():
+    q_busqueda = request.args.get('q', '').strip().lower()
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, url_documento, nombre_archivo, vistas, fecha_creacion FROM conocimiento_articulos WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC")
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando base de conocimiento: {e}")
+        rows = []
+    conn.close()
+
+    articulos = []
+    for r in rows:
+        texto_full = f"{r[1]} {r[2] or ''}".lower()
+        if not q_busqueda or q_busqueda in texto_full:
+            articulos.append({
+                'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'url_documento': r[3],
+                'nombre_archivo': r[4], 'vistas': r[5] or 0, 'fecha_creacion': r[6]
+            })
+
+    es_soporte = (session.get('rol') == 'admin')
+    return render_template('conocimiento.html', articulos=articulos, es_soporte=es_soporte, q_busqueda=q_busqueda)
+
+
+@app.route('/tickets/conocimiento/nuevo', methods=['POST'])
+@login_required
+@admin_required
+def crear_conocimiento():
+    titulo = request.form.get('titulo', '').strip()
+    descripcion = request.form.get('descripcion', '').strip()
+    archivo = request.files.get('documento')
+
+    if titulo and archivo and archivo.filename and archivo_permitido(archivo.filename):
+        subidos = _subir_adjuntos_ticket([archivo])
+        if subidos:
+            url_doc, nombre_doc = subidos[0]
+            fecha_act = obtener_fecha_actual()
+            usuario = session.get('username')
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            try:
+                q_ins = "INSERT INTO conocimiento_articulos (titulo, descripcion, url_documento, nombre_archivo, vistas, creado_por, fecha_creacion, estado) VALUES (%s, %s, %s, %s, 0, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO conocimiento_articulos (titulo, descripcion, url_documento, nombre_archivo, vistas, creado_por, fecha_creacion, estado) VALUES (?, ?, ?, ?, 0, ?, ?, 'activo')"
+                cursor.execute(q_ins, (titulo, descripcion, url_doc, nombre_doc, usuario, fecha_act))
+                conn.commit()
+                registrar_log(usuario, "Artículo de Conocimiento Creado", f"'{titulo}' ({nombre_doc})")
+            except Exception as e:
+                conn.rollback()
+                print(f"Error creando artículo de conocimiento: {e}")
+            conn.close()
+
+    return redirect(url_for('ver_conocimiento'))
+
+
+@app.route('/tickets/conocimiento/<int:articulo_id>/editar', methods=['POST'])
+@login_required
+@admin_required
+def editar_conocimiento(articulo_id):
+    titulo = request.form.get('titulo', '').strip()
+    descripcion = request.form.get('descripcion', '').strip()
+    archivo = request.files.get('documento')
+
+    if not titulo:
+        return redirect(url_for('ver_conocimiento'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        if archivo and archivo.filename and archivo_permitido(archivo.filename):
+            subidos = _subir_adjuntos_ticket([archivo])
+            if subidos:
+                url_doc, nombre_doc = subidos[0]
+                q_upd = "UPDATE conocimiento_articulos SET titulo = %s, descripcion = %s, url_documento = %s, nombre_archivo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE conocimiento_articulos SET titulo = ?, descripcion = ?, url_documento = ?, nombre_archivo = ? WHERE id = ?"
+                cursor.execute(q_upd, (titulo, descripcion, url_doc, nombre_doc, articulo_id))
+            else:
+                q_upd = "UPDATE conocimiento_articulos SET titulo = %s, descripcion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE conocimiento_articulos SET titulo = ?, descripcion = ? WHERE id = ?"
+                cursor.execute(q_upd, (titulo, descripcion, articulo_id))
+        else:
+            q_upd = "UPDATE conocimiento_articulos SET titulo = %s, descripcion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE conocimiento_articulos SET titulo = ?, descripcion = ? WHERE id = ?"
+            cursor.execute(q_upd, (titulo, descripcion, articulo_id))
+        conn.commit()
+        registrar_log(session.get('username'), "Artículo de Conocimiento Editado", f"Artículo #{articulo_id}: '{titulo}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error editando artículo de conocimiento {articulo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_conocimiento'))
+
+
+@app.route('/tickets/conocimiento/<int:articulo_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_conocimiento(articulo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_upd = "UPDATE conocimiento_articulos SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE conocimiento_articulos SET estado = 'eliminado' WHERE id = ?"
+        cursor.execute(q_upd, (articulo_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Artículo de Conocimiento Eliminado", f"Artículo #{articulo_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando artículo de conocimiento {articulo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_conocimiento'))
+
+
+@app.route('/tickets/conocimiento/<int:articulo_id>/abrir')
+@login_required
+def abrir_conocimiento(articulo_id):
+    """Registra una vista y redirige al documento real (alojado en Cloudinary)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    url_doc = None
+    try:
+        q_sel = "SELECT url_documento FROM conocimiento_articulos WHERE id = %s" if db_type == 'postgres' else "SELECT url_documento FROM conocimiento_articulos WHERE id = ?"
+        cursor.execute(q_sel, (articulo_id,))
+        row = cursor.fetchone()
+        if row:
+            url_doc = row[0]
+            q_upd = "UPDATE conocimiento_articulos SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE conocimiento_articulos SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
+            cursor.execute(q_upd, (articulo_id,))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error registrando vista de artículo {articulo_id}: {e}")
+    conn.close()
+
+    if not url_doc:
+        return redirect(url_for('ver_conocimiento'))
+    return redirect(url_doc)
+
+
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
@@ -1312,6 +1672,29 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     except Exception as e:
         print(f"❌ Error en envío vía Google Script: {e}")
         traceback.print_exc()
+        return False
+
+
+# 🎫📧 Notificaciones por correo de Tickets: reutiliza el mismo webhook de Apps Script que ya
+# usa la recuperación de contraseña. Se llama siempre en un hilo aparte (threading.Thread)
+# desde las rutas de tickets para no hacer esperar al usuario a que el correo salga.
+def enviar_correo_ticket(email_destino, asunto, cuerpo):
+    if not email_destino:
+        return False
+    try:
+        payload = {"para": email_destino, "asunto": asunto, "cuerpo": cuerpo}
+        if requests:
+            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
+            print(f"✅ Correo de ticket enviado a {email_destino}. Status: {res.status_code}")
+        else:
+            data_json = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=15) as response:
+                response.read()
+            print(f"✅ Correo de ticket enviado a {email_destino} vía urllib.")
+        return True
+    except Exception as e:
+        print(f"⚠️ Error enviando correo de ticket a {email_destino}: {e}")
         return False
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
