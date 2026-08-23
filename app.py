@@ -497,14 +497,15 @@ def visor_db():
         conn.close()
 
     return render_template(
-        'admin_db.html', 
-        tabla=tabla_seleccionada, 
-        tablas=tablas_permitidas, 
-        columnas=columnas, 
-        registros=registros, 
-        sql=q_sql, 
+        'admin_db.html',
+        tabla=tabla_seleccionada,
+        tablas=tablas_permitidas,
+        columnas=columnas,
+        registros=registros,
+        sql=q_sql,
         exito=mensaje_exito,
-        error=error_sql
+        error=error_sql,
+        es_superadmin=(session.get('username') == 'admin')
     )
 
 # 📢 MÓDULO MURO DE COMUNICADOS
