@@ -30,9 +30,17 @@
 
         <!-- CABECERA DEL TICKET -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            <div class="flex flex-wrap items-start justify-between gap-3 mb-1">
+                <span class="font-mono text-[11px] text-slate-500">{{ ticket.codigo }}</span>
+            </div>
             <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                 <h2 class="text-xl font-extrabold text-white">{{ ticket.titulo }}</h2>
                 <div class="flex items-center gap-2 flex-wrap">
+                    {% if ticket.tipo == 'Requerimiento' %}
+                        <span class="px-2.5 py-0.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-clipboard-list mr-1"></i>Requerimiento</span>
+                    {% else %}
+                        <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Incidente</span>
+                    {% endif %}
                     <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ ticket.categoria }}</span>
                     {% if ticket.prioridad == 'Urgente' %}
                         <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Urgente</span>
@@ -55,7 +63,26 @@
                 </div>
             </div>
 
-            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line mb-5">{{ ticket.descripcion }}</p>
+            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line mb-4">{{ ticket.descripcion }}</p>
+
+            {% if ticket.adjuntos %}
+            <div class="flex flex-wrap gap-2 mb-5">
+                {% for a in ticket.adjuntos %}
+                    {% set ext = a.nombre_original.rsplit('.', 1)[-1].lower() if '.' in a.nombre_original else '' %}
+                    {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+                        <a href="{{ a.url }}" target="_blank" rel="noopener" class="block group">
+                            <img src="{{ a.url }}" alt="{{ a.nombre_original }}" class="h-20 w-20 object-cover rounded-xl border border-slate-700 group-hover:border-orange-400 transition-all">
+                        </a>
+                    {% else %}
+                        <a href="{{ a.url }}" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-900/60 border border-slate-700 hover:border-orange-400 rounded-xl px-3 py-2 text-[11px] text-slate-300 transition-all">
+                            <i class="fa-solid fa-file-lines text-orange-400"></i>
+                            <span class="max-w-[10rem] truncate">{{ a.nombre_original }}</span>
+                            <i class="fa-solid fa-arrow-up-right-from-square text-slate-500 text-[9px]"></i>
+                        </a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px] border-t border-slate-700/50 pt-4">
                 <div>
@@ -125,14 +152,34 @@
                                 <i class="fa-solid fa-clock-rotate-left"></i> {{ c.mensaje }} &middot; {{ c.fecha }}
                             </div>
                         {% else %}
-                            <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
+                            <div class="{% if c.tipo == 'interno' %}bg-amber-500/5 border border-amber-500/30{% else %}bg-slate-900/50 border border-slate-800{% endif %} rounded-2xl p-4">
                                 <div class="flex items-center justify-between mb-1.5">
                                     <span class="text-xs font-bold text-white flex items-center gap-1.5">
-                                        <i class="fa-regular fa-circle-user text-orange-400"></i> {{ c.autor }}
+                                        <i class="fa-regular fa-circle-user {% if c.tipo == 'interno' %}text-amber-400{% else %}text-orange-400{% endif %}"></i> {{ c.autor }}
+                                        {% if c.tipo == 'interno' %}
+                                            <span class="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[9px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-lock mr-1"></i>Interno</span>
+                                        {% endif %}
                                     </span>
                                     <span class="text-[10px] text-slate-500 font-mono">{{ c.fecha }}</span>
                                 </div>
                                 <p class="text-xs text-slate-300 whitespace-pre-line">{{ c.mensaje }}</p>
+                                {% if c.adjuntos %}
+                                <div class="flex flex-wrap gap-2 mt-3">
+                                    {% for a in c.adjuntos %}
+                                        {% set ext = a.nombre_original.rsplit('.', 1)[-1].lower() if '.' in a.nombre_original else '' %}
+                                        {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+                                            <a href="{{ a.url }}" target="_blank" rel="noopener" class="block group">
+                                                <img src="{{ a.url }}" alt="{{ a.nombre_original }}" class="h-16 w-16 object-cover rounded-lg border border-slate-700 group-hover:border-orange-400 transition-all">
+                                            </a>
+                                        {% else %}
+                                            <a href="{{ a.url }}" target="_blank" rel="noopener" class="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700 hover:border-orange-400 rounded-lg px-2.5 py-1.5 text-[10px] text-slate-300 transition-all">
+                                                <i class="fa-solid fa-file-lines text-orange-400"></i>
+                                                <span class="max-w-[8rem] truncate">{{ a.nombre_original }}</span>
+                                            </a>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
                             </div>
                         {% endif %}
                     {% endfor %}
@@ -142,12 +189,26 @@
             </div>
 
             {% if ticket.estado != 'Cerrado' %}
-            <form method="POST" action="/tickets/{{ ticket.id }}/comentar" class="flex flex-col sm:flex-row gap-2">
+            <form method="POST" action="/tickets/{{ ticket.id }}/comentar" enctype="multipart/form-data" class="flex flex-col gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <input type="text" name="mensaje" required placeholder="Escribe un comentario o novedad..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-orange-500/20">
-                    <i class="fa-solid fa-paper-plane"></i> Enviar
-                </button>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" name="mensaje" placeholder="Escribe un comentario o novedad..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-orange-500/20 whitespace-nowrap">
+                        <i class="fa-solid fa-paper-plane"></i> Enviar
+                    </button>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer">
+                        <i class="fa-solid fa-paperclip"></i>
+                        <input type="file" name="adjuntos" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.docx,.xlsx,.pptx,.zip,.rar,.7z,.mp4,.mov" class="text-slate-300 text-[11px] file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:text-slate-200 file:text-[10px] file:font-bold max-w-[14rem] sm:max-w-xs">
+                    </label>
+                    {% if es_soporte %}
+                    <label class="flex items-center gap-1.5 text-[11px] text-amber-400 cursor-pointer select-none">
+                        <input type="checkbox" name="interno" class="rounded border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500">
+                        <i class="fa-solid fa-lock"></i> Nota interna (solo la ve el equipo de soporte)
+                    </label>
+                    {% endif %}
+                </div>
             </form>
             {% else %}
                 <p class="text-[11px] text-slate-500 italic text-center">Este ticket está cerrado y ya no admite nuevos comentarios.</p>
