@@ -315,6 +315,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo VARCHAR(255) NOT NULL, vistas INTEGER DEFAULT 0, creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_configuraciones (
+                id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, nombre VARCHAR(150) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
+                id SERIAL PRIMARY KEY, nombre VARCHAR(200) NOT NULL, tipo_activo VARCHAR(100) DEFAULT 'Otro', marca VARCHAR(100), modelo VARCHAR(100), numero_serie VARCHAR(150), estado VARCHAR(30) DEFAULT 'Disponible', asignado_a VARCHAR(100), sede VARCHAR(100), observaciones TEXT, fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL, eliminado INTEGER DEFAULT 0
+            )''')
             conn.commit()
 
             for col_query in [
@@ -337,7 +343,9 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_cumplida VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_modificaciones INTEGER DEFAULT 0;",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion INTEGER;",
-                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion_fecha VARCHAR(100);"
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion_fecha VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS area VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sede VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -376,6 +384,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo TEXT NOT NULL, vistas INTEGER DEFAULT 0, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_configuraciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo_activo TEXT DEFAULT 'Otro', marca TEXT, modelo TEXT, numero_serie TEXT, estado TEXT DEFAULT 'Disponible', asignado_a TEXT, sede TEXT, observaciones TEXT, fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL, eliminado INTEGER DEFAULT 0
+            )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
@@ -406,13 +420,27 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN sla_resolucion_cumplida TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sla_modificaciones INTEGER DEFAULT 0;",
                 "ALTER TABLE tickets ADD COLUMN calificacion INTEGER;",
-                "ALTER TABLE tickets ADD COLUMN calificacion_fecha TEXT;"
+                "ALTER TABLE tickets ADD COLUMN calificacion_fecha TEXT;",
+                "ALTER TABLE tickets ADD COLUMN area TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sede TEXT;"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
                     conn.commit()
                 except Exception:
                     pass
+
+        # Siembra las categorías de ticket por defecto la primera vez (instalación nueva o
+        # actualización desde una versión sin `ticket_configuraciones`), para que la lista no
+        # aparezca vacía. Áreas y Sedes NO se siembran: son específicas de la organización y
+        # las define el equipo de soporte desde /tickets/configuracion.
+        q_count_cat = "SELECT COUNT(*) FROM ticket_configuraciones WHERE tipo = %s" if db_type == 'postgres' else "SELECT COUNT(*) FROM ticket_configuraciones WHERE tipo = ?"
+        cursor.execute(q_count_cat, ('categoria',))
+        if cursor.fetchone()[0] == 0:
+            q_seed_cat = "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (?, ?)"
+            for nombre_cat in ['Hardware', 'Software', 'Acceso/Credenciales', 'Red/Internet', 'Otro']:
+                cursor.execute(q_seed_cat, ('categoria', nombre_cat))
+            conn.commit()
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -812,6 +840,10 @@ TIPOS_TICKET_INFO = {
 }
 MAX_ADJUNTOS_TICKET = 5
 
+# 📦 INVENTARIO DE ACTIVOS DE TI
+ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja']
+TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor', 'Teléfono/Celular', 'Servidor', 'Red (Switch/Router/AP)', 'Otro']
+
 # ⏱️ SLA (Acuerdos de Nivel de Servicio): horas máximas de "primera respuesta" (sacar el
 # ticket de 'Abierto') y de "resolución" (llegar a 'Resuelto'/'Cerrado') según la prioridad.
 # Son valores de partida razonables para un equipo de soporte interno; se pueden ajustar
@@ -932,6 +964,24 @@ def _progreso_ticket(ticket):
     return max(0, min(100, round(horas_transcurridas / horas_totales * 100)))
 
 
+def _config_ticket_lista(tipo_config):
+    """Devuelve [{'id', 'nombre'}] de las Áreas, Sedes o Categorías activas configuradas por
+    el equipo de soporte en /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria').
+    Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
+    romper la página que la llama."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT id, nombre FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        cursor.execute(q, (tipo_config,))
+        filas = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+        conn.close()
+        return filas
+    except Exception as e:
+        print(f"⚠️ Error listando configuración de tickets ('{tipo_config}'): {e}")
+        return []
+
+
 def _correo_de_usuario(username):
     """Busca el correo registrado de un usuario por su nombre de cuenta. Devuelve None si no
     existe o si algo falla (nunca debe tumbar el flujo del ticket que lo llama)."""
@@ -1009,6 +1059,8 @@ def ver_tickets():
     q_prioridad = request.args.get('prioridad', '').strip()
     q_categoria = request.args.get('categoria', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
+    q_area = request.args.get('area', '').strip()
+    q_sede = request.args.get('sede', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
     q_cumplimiento = request.args.get('cumplimiento', '').strip()
 
@@ -1017,7 +1069,14 @@ def ver_tickets():
 
     es_soporte = (session.get('rol') == 'admin')
 
-    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida FROM tickets WHERE 1=1"
+    categorias_config = _config_ticket_lista('categoria')
+    areas_config = _config_ticket_lista('area')
+    sedes_config = _config_ticket_lista('sede')
+    nombres_categorias = [c['nombre'] for c in categorias_config] or CATEGORIAS_TICKET
+    nombres_areas = [a['nombre'] for a in areas_config]
+    nombres_sedes = [s['nombre'] for s in sedes_config]
+
+    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida, area, sede FROM tickets WHERE 1=1"
     params = []
 
     if not es_soporte:
@@ -1031,12 +1090,18 @@ def ver_tickets():
     if q_prioridad in PRIORIDADES_TICKET:
         query += " AND prioridad = %s" if db_type == 'postgres' else " AND prioridad = ?"
         params.append(q_prioridad)
-    if q_categoria in CATEGORIAS_TICKET:
+    if q_categoria in nombres_categorias:
         query += " AND categoria = %s" if db_type == 'postgres' else " AND categoria = ?"
         params.append(q_categoria)
     if q_tipo in TIPOS_TICKET:
         query += " AND tipo = %s" if db_type == 'postgres' else " AND tipo = ?"
         params.append(q_tipo)
+    if q_area in nombres_areas:
+        query += " AND area = %s" if db_type == 'postgres' else " AND area = ?"
+        params.append(q_area)
+    if q_sede in nombres_sedes:
+        query += " AND sede = %s" if db_type == 'postgres' else " AND sede = ?"
+        params.append(q_sede)
 
     query += " ORDER BY (estado = 'Cerrado'), (estado = 'Resuelto'), id DESC"
 
@@ -1058,7 +1123,8 @@ def ver_tickets():
                 'prioridad': r[5], 'estado': r[6], 'creado_por': r[7], 'asignado_a': r[8],
                 'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
                 'codigo': _codigo_ticket(tipo_t, r[0], r[9]),
-                'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12]
+                'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12],
+                'area': r[13], 'sede': r[14]
             }
             t['sla'] = _calcular_sla_ticket(t)
             t['cumplimiento'] = _bucket_cumplimiento_ticket(t)
@@ -1078,9 +1144,11 @@ def ver_tickets():
 
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
-        categorias=CATEGORIAS_TICKET, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
+        categorias=nombres_categorias, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
         tipos=TIPOS_TICKET, tipos_info=TIPOS_TICKET_INFO,
+        areas=nombres_areas, sedes=nombres_sedes,
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
+        q_area=q_area, q_sede=q_sede,
         q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets
     )
 
@@ -1093,13 +1161,23 @@ def crear_ticket():
     tipo = request.form.get('tipo', 'Incidente').strip()
     categoria = request.form.get('categoria', 'Otro').strip()
     prioridad = request.form.get('prioridad', 'Media').strip()
+    area = request.form.get('area', '').strip()
+    sede = request.form.get('sede', '').strip()
+
+    nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+    nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
+    nombres_sedes = [s['nombre'] for s in _config_ticket_lista('sede')]
 
     if tipo not in TIPOS_TICKET:
         tipo = 'Incidente'
-    if categoria not in CATEGORIAS_TICKET:
+    if categoria not in nombres_categorias:
         categoria = 'Otro'
     if prioridad not in PRIORIDADES_TICKET:
         prioridad = 'Media'
+    # Área y Sede son opcionales: si el valor enviado no corresponde a una configuración
+    # activa (o el equipo de soporte todavía no ha configurado ninguna), se guarda vacío.
+    area = area if area in nombres_areas else None
+    sede = sede if sede in nombres_sedes else None
 
     if titulo and descripcion:
         fecha_act = obtener_fecha_actual()
@@ -1114,12 +1192,12 @@ def crear_ticket():
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -1144,7 +1222,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -1163,7 +1241,8 @@ def ver_ticket(ticket_id):
         'sla_respuesta_limite': row[11], 'sla_resolucion_limite': row[12],
         'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
         'sla_modificaciones': row[15] or 0,
-        'calificacion': row[16], 'calificacion_fecha': row[17]
+        'calificacion': row[16], 'calificacion_fecha': row[17],
+        'area': row[18], 'sede': row[19]
     }
     ticket['sla'] = _calcular_sla_ticket(ticket)
 
@@ -1644,6 +1723,327 @@ def abrir_conocimiento(articulo_id):
     if not url_doc:
         return redirect(url_for('ver_conocimiento'))
     return redirect(url_doc)
+
+
+# ⚙️ CONFIGURACIÓN DE ÁREAS, SEDES Y CATEGORÍAS (solo equipo de soporte). Estos valores
+# alimentan los desplegables al crear una solicitud y los filtros de la lista de tickets.
+@app.route('/tickets/configuracion')
+@login_required
+@admin_required
+def configuracion_tickets():
+    areas = _config_ticket_lista('area')
+    sedes = _config_ticket_lista('sede')
+    categorias = _config_ticket_lista('categoria')
+    return render_template('tickets_configuracion.html', es_soporte=True, areas=areas, sedes=sedes, categorias=categorias)
+
+
+@app.route('/tickets/configuracion/nuevo', methods=['POST'])
+@login_required
+@admin_required
+def crear_configuracion_ticket():
+    tipo = request.form.get('tipo', '').strip()
+    nombre = request.form.get('nombre', '').strip()
+    if tipo in ('area', 'sede', 'categoria') and nombre:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q = "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (%s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre) VALUES (?, ?)"
+            cursor.execute(q, (tipo, nombre))
+            conn.commit()
+            registrar_log(session.get('username'), "Configuración de Tickets", f"Se agregó {tipo} '{nombre}'")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error creando configuración de ticket: {e}")
+        conn.close()
+    return redirect(url_for('configuracion_tickets'))
+
+
+@app.route('/tickets/configuracion/<int:config_id>/editar', methods=['POST'])
+@login_required
+@admin_required
+def editar_configuracion_ticket(config_id):
+    nombre = request.form.get('nombre', '').strip()
+    if nombre:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
+            cursor.execute(q, (nombre, config_id))
+            conn.commit()
+            registrar_log(session.get('username'), "Configuración de Tickets", f"Se renombró configuración #{config_id} a '{nombre}'")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error editando configuración de ticket: {e}")
+        conn.close()
+    return redirect(url_for('configuracion_tickets'))
+
+
+@app.route('/tickets/configuracion/<int:config_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_configuracion_ticket(config_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE ticket_configuraciones SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET estado = 'eliminado' WHERE id = ?"
+        cursor.execute(q, (config_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Configuración de Tickets", f"Se eliminó configuración #{config_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando configuración de ticket: {e}")
+    conn.close()
+    return redirect(url_for('configuracion_tickets'))
+
+
+# 📊 INDICADORES Y KPIS (solo equipo de soporte): panorama general del módulo de tickets —
+# cumplimiento de SLA, distribución por prioridad/categoría/área/sede, satisfacción de los
+# solicitantes y tendencia de solicitudes de los últimos 14 días — más exportación a Excel.
+@app.route('/tickets/indicadores')
+@login_required
+@admin_required
+def indicadores_tickets():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, sla_resolucion_limite, sla_resolucion_cumplida, calificacion, area, sede FROM tickets")
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando indicadores de tickets: {e}")
+        rows = []
+    conn.close()
+
+    tickets = []
+    for r in rows:
+        t = {
+            'id': r[0], 'tipo': r[1] or 'Incidente', 'categoria': r[2], 'prioridad': r[3],
+            'estado': r[4], 'creado_por': r[5], 'asignado_a': r[6], 'fecha_creacion': r[7],
+            'sla_resolucion_limite': r[8], 'sla_resolucion_cumplida': r[9],
+            'calificacion': r[10], 'area': r[11], 'sede': r[12]
+        }
+        t['sla'] = _calcular_sla_ticket(t)
+        t['cumplimiento'] = _bucket_cumplimiento_ticket(t)
+        tickets.append(t)
+
+    total = len(tickets)
+    por_estado = {e: 0 for e in ESTADOS_TICKET}
+    por_prioridad = {p: 0 for p in PRIORIDADES_TICKET}
+    por_tipo = {tp: 0 for tp in TIPOS_TICKET}
+    por_cumplimiento = {'vigente': 0, 'proximo_a_vencer': 0, 'vencido': 0, 'cerrado': 0}
+    por_categoria, por_area, por_sede, por_agente = {}, {}, {}, {}
+    calificaciones = []
+    conteo_por_fecha = {}
+
+    for t in tickets:
+        if t['estado'] in por_estado:
+            por_estado[t['estado']] += 1
+        if t['prioridad'] in por_prioridad:
+            por_prioridad[t['prioridad']] += 1
+        if t['tipo'] in por_tipo:
+            por_tipo[t['tipo']] += 1
+        por_cumplimiento[t['cumplimiento']] = por_cumplimiento.get(t['cumplimiento'], 0) + 1
+        cat = t['categoria'] or 'Sin categoría'
+        por_categoria[cat] = por_categoria.get(cat, 0) + 1
+        area_n = t['area'] or 'Sin área'
+        por_area[area_n] = por_area.get(area_n, 0) + 1
+        sede_n = t['sede'] or 'Sin sede'
+        por_sede[sede_n] = por_sede.get(sede_n, 0) + 1
+        if t['calificacion']:
+            calificaciones.append(t['calificacion'])
+        if t['estado'] in ('Resuelto', 'Cerrado') and t['asignado_a']:
+            por_agente[t['asignado_a']] = por_agente.get(t['asignado_a'], 0) + 1
+        fecha_corta = (t['fecha_creacion'] or '')[:10]
+        if fecha_corta:
+            conteo_por_fecha[fecha_corta] = conteo_por_fecha.get(fecha_corta, 0) + 1
+
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    dias_tendencia = []
+    for i in range(13, -1, -1):
+        dia = (hoy - timedelta(days=i)).strftime('%Y-%m-%d')
+        dias_tendencia.append({'fecha': dia, 'cantidad': conteo_por_fecha.get(dia, 0)})
+
+    promedio_calificacion = round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else None
+    top_agentes = sorted(por_agente.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    return render_template(
+        'tickets_indicadores.html', es_soporte=True, total=total,
+        por_estado=por_estado, por_prioridad=por_prioridad, por_tipo=por_tipo,
+        por_cumplimiento=por_cumplimiento, por_categoria=por_categoria,
+        por_area=por_area, por_sede=por_sede, dias_tendencia=dias_tendencia,
+        promedio_calificacion=promedio_calificacion, total_calificaciones=len(calificaciones),
+        top_agentes=top_agentes
+    )
+
+
+@app.route('/tickets/indicadores/exportar_csv')
+@login_required
+@admin_required
+def exportar_indicadores_tickets():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['CÓDIGO', 'TIPO', 'TÍTULO', 'CATEGORÍA', 'ÁREA', 'SEDE', 'PRIORIDAD', 'ESTADO', 'CREADO POR', 'ASIGNADO A', 'FECHA CREACIÓN', 'ÚLTIMA ACTUALIZACIÓN', 'CALIFICACIÓN'])
+
+    for row in rows:
+        tipo_t = row[1] or 'Incidente'
+        codigo = _codigo_ticket(tipo_t, row[0], row[10])
+        writer.writerow([codigo, tipo_t, row[2], row[3], row[4] or '', row[5] or '', row[6], row[7], row[8], row[9] or '', row[10], row[11], row[12] or ''])
+
+    csv_bytes = '﻿' + output.getvalue()
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    filename = f"Arkiv_Indicadores_Tickets_{fecha_filename}.csv"
+
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }
+    registrar_log(session.get('username'), "Exportación de Indicadores", f"Exportó {len(rows)} tickets a Excel/CSV")
+    return Response(csv_bytes, headers=headers, status=200)
+
+
+# 📦 INVENTARIO DE ACTIVOS DE TI (solo equipo de soporte): registro de equipos/activos y a
+# quién/qué sede están asignados. Reutiliza las Sedes configuradas en /tickets/configuracion.
+@app.route('/tickets/inventario')
+@login_required
+@admin_required
+def ver_inventario():
+    q_estado = request.args.get('estado', '').strip()
+    q_tipo = request.args.get('tipo', '').strip()
+    q_busqueda = request.args.get('q', '').strip().lower()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando inventario: {e}")
+        rows = []
+    conn.close()
+
+    activos_todos = [{
+        'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
+        'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8],
+        'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11]
+    } for r in rows]
+
+    conteos_estado = {e: 0 for e in ESTADOS_ACTIVO}
+    for a in activos_todos:
+        conteos_estado[a['estado']] = conteos_estado.get(a['estado'], 0) + 1
+    total_activos = len(activos_todos)
+
+    activos = activos_todos
+    if q_estado in ESTADOS_ACTIVO:
+        activos = [a for a in activos if a['estado'] == q_estado]
+    if q_tipo in TIPOS_ACTIVO:
+        activos = [a for a in activos if a['tipo_activo'] == q_tipo]
+    if q_busqueda:
+        activos = [a for a in activos if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+
+    sedes = _config_ticket_lista('sede')
+    return render_template(
+        'tickets_inventario.html', es_soporte=True, activos=activos,
+        tipos_activo=TIPOS_ACTIVO, estados_activo=ESTADOS_ACTIVO, sedes=sedes,
+        q_estado=q_estado, q_tipo=q_tipo, q_busqueda=q_busqueda,
+        conteos_estado=conteos_estado, total_activos=total_activos
+    )
+
+
+@app.route('/tickets/inventario/nuevo', methods=['POST'])
+@login_required
+@admin_required
+def crear_activo():
+    nombre = request.form.get('nombre', '').strip()
+    tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
+    marca = request.form.get('marca', '').strip()
+    modelo = request.form.get('modelo', '').strip()
+    numero_serie = request.form.get('numero_serie', '').strip()
+    estado = request.form.get('estado', 'Disponible').strip()
+    asignado_a = request.form.get('asignado_a', '').strip()
+    sede = request.form.get('sede', '').strip()
+    observaciones = request.form.get('observaciones', '').strip()
+
+    if tipo_activo not in TIPOS_ACTIVO:
+        tipo_activo = 'Otro'
+    if estado not in ESTADOS_ACTIVO:
+        estado = 'Disponible'
+    sedes_validas = [s['nombre'] for s in _config_ticket_lista('sede')]
+    sede = sede if sede in sedes_validas else None
+
+    if nombre:
+        fecha_act = obtener_fecha_actual()
+        usuario = session.get('username')
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, fecha_act, usuario))
+            conn.commit()
+            registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error creando activo: {e}")
+        conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/<int:activo_id>/editar', methods=['POST'])
+@login_required
+@admin_required
+def editar_activo(activo_id):
+    nombre = request.form.get('nombre', '').strip()
+    tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
+    marca = request.form.get('marca', '').strip()
+    modelo = request.form.get('modelo', '').strip()
+    numero_serie = request.form.get('numero_serie', '').strip()
+    estado = request.form.get('estado', 'Disponible').strip()
+    asignado_a = request.form.get('asignado_a', '').strip()
+    sede = request.form.get('sede', '').strip()
+    observaciones = request.form.get('observaciones', '').strip()
+
+    if tipo_activo not in TIPOS_ACTIVO:
+        tipo_activo = 'Otro'
+    if estado not in ESTADOS_ACTIVO:
+        estado = 'Disponible'
+    sedes_validas = [s['nombre'] for s in _config_ticket_lista('sede')]
+    sede = sede if sede in sedes_validas else None
+
+    if nombre:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, observaciones = ? WHERE id = ?"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, activo_id))
+            conn.commit()
+            registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error editando activo {activo_id}: {e}")
+        conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/<int:activo_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_activo(activo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE activos_inventario SET eliminado = 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET eliminado = 1 WHERE id = ?"
+        cursor.execute(q, (activo_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Inventario de Activos", f"Se eliminó el activo #{activo_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando activo {activo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_inventario'))
 
 
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
