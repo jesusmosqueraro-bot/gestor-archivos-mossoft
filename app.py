@@ -304,13 +304,16 @@ def init_db():
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets (
-                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT NOT NULL, categoria VARCHAR(50) DEFAULT 'Otro', prioridad VARCHAR(20) DEFAULT 'Media', estado VARCHAR(20) DEFAULT 'Abierto', creado_por VARCHAR(100) NOT NULL, asignado_a VARCHAR(100), fecha_creacion VARCHAR(100) NOT NULL, fecha_actualizacion VARCHAR(100) NOT NULL
+                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT NOT NULL, tipo VARCHAR(20) DEFAULT 'Incidente', categoria VARCHAR(50) DEFAULT 'Otro', prioridad VARCHAR(20) DEFAULT 'Media', estado VARCHAR(20) DEFAULT 'Abierto', creado_por VARCHAR(100) NOT NULL, asignado_a VARCHAR(100), fecha_creacion VARCHAR(100) NOT NULL, fecha_actualizacion VARCHAR(100) NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_comentarios (
                 id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, autor VARCHAR(100) NOT NULL, mensaje TEXT NOT NULL, tipo VARCHAR(20) DEFAULT 'comentario', fecha VARCHAR(100) NOT NULL
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
+                id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, comentario_id INTEGER REFERENCES tickets_comentarios(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
-            
+
             for col_query in [
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'General';",
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS tipo VARCHAR(100) DEFAULT 'Instructivo';",
@@ -323,7 +326,8 @@ def init_db():
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -351,10 +355,13 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, categoria TEXT DEFAULT 'Otro', prioridad TEXT DEFAULT 'Media', estado TEXT DEFAULT 'Abierto', creado_por TEXT NOT NULL, asignado_a TEXT, fecha_creacion TEXT NOT NULL, fecha_actualizacion TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, tipo TEXT DEFAULT 'Incidente', categoria TEXT DEFAULT 'Otro', prioridad TEXT DEFAULT 'Media', estado TEXT DEFAULT 'Abierto', creado_por TEXT NOT NULL, asignado_a TEXT, fecha_creacion TEXT NOT NULL, fecha_actualizacion TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_comentarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, autor TEXT NOT NULL, mensaje TEXT NOT NULL, tipo TEXT DEFAULT 'comentario', fecha TEXT NOT NULL, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, comentario_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE, FOREIGN KEY(comentario_id) REFERENCES tickets_comentarios(id) ON DELETE CASCADE
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -375,6 +382,11 @@ def init_db():
                 pass
             try:
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN estado TEXT DEFAULT 'activo';")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE tickets ADD COLUMN tipo TEXT DEFAULT 'Incidente';")
                 conn.commit()
             except Exception:
                 pass
@@ -761,11 +773,78 @@ def destruir_comunicado(com_id):
 CATEGORIAS_TICKET = ['Hardware', 'Software', 'Acceso/Credenciales', 'Red/Internet', 'Otro']
 PRIORIDADES_TICKET = ['Baja', 'Media', 'Alta', 'Urgente']
 ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado']
+TIPOS_TICKET = ['Incidente', 'Requerimiento']
+# Metadatos de cada tipo para pintar las tarjetas de selección y las insignias (inspirado
+# en la mesa de ayuda externa que ya usa la organización: distingue "algo se rompió" de
+# "necesito algo nuevo" desde el primer paso de creación).
+TIPOS_TICKET_INFO = {
+    'Incidente': {
+        'icono': 'fa-triangle-exclamation',
+        'descripcion': 'Algo no funciona, está roto o te bloquea para trabajar.'
+    },
+    'Requerimiento': {
+        'icono': 'fa-clipboard-list',
+        'descripcion': 'Solicitas algo nuevo: acceso, equipo, software o información.'
+    }
+}
+MAX_ADJUNTOS_TICKET = 5
 
 
 def _puede_ver_ticket(creado_por):
     """Un ticket solo lo puede ver quien lo creó o cualquier cuenta con rol admin (equipo de soporte TI)."""
     return session.get('rol') == 'admin' or session.get('username') == creado_por
+
+
+def _codigo_ticket(tipo, id_ticket, fecha_creacion):
+    """Código legible tipo 'IN-2026-000042' / 'RQ-2026-000042', solo para mostrar en la interfaz."""
+    prefijo = 'RQ' if tipo == 'Requerimiento' else 'IN'
+    anio = (fecha_creacion or '')[:4]
+    if not anio.isdigit():
+        anio = str(datetime.now().year)
+    return f"{prefijo}-{anio}-{str(id_ticket).zfill(6)}"
+
+
+def _subir_adjuntos_ticket(files):
+    """Sube hasta MAX_ADJUNTOS_TICKET archivos (evidencias: fotos, capturas, PDFs, documentos)
+    a Cloudinary y devuelve una lista de (url, nombre_original). Un archivo con extensión no
+    permitida, o que falle al subir, simplemente se descarta: nunca debe tumbar la creación
+    del ticket/comentario que lo acompaña."""
+    subidos = []
+    for file in (files or [])[:MAX_ADJUNTOS_TICKET]:
+        if not file or not file.filename or not archivo_permitido(file.filename):
+            continue
+        try:
+            ext = file.filename.rsplit('.', 1)[1].lower()
+            if ext == 'pdf':
+                upload_result = cloudinary.uploader.upload(
+                    file, resource_type="image", format="pdf",
+                    use_filename=True, unique_filename=True, timeout=60
+                )
+            elif ext in ['mp4', 'mov', 'webm', 'avi']:
+                upload_result = cloudinary.uploader.upload(
+                    file, resource_type="video",
+                    use_filename=True, unique_filename=True, timeout=120
+                )
+            elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
+                upload_result = cloudinary.uploader.upload(
+                    file, resource_type="raw",
+                    use_filename=True, unique_filename=True, timeout=60
+                )
+            else:
+                upload_result = cloudinary.uploader.upload(
+                    file, resource_type="image",
+                    use_filename=True, unique_filename=True, timeout=60
+                )
+            subidos.append((upload_result['secure_url'], file.filename))
+        except Exception as e:
+            print(f"⚠️ Error subiendo adjunto de ticket '{file.filename}': {e}")
+    return subidos
+
+
+def _guardar_adjuntos_ticket(cursor, db_type, ticket_id, comentario_id, subidos, usuario, fecha):
+    q = "INSERT INTO tickets_adjuntos (ticket_id, comentario_id, url, nombre_original, subido_por, fecha) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tickets_adjuntos (ticket_id, comentario_id, url, nombre_original, subido_por, fecha) VALUES (?, ?, ?, ?, ?, ?)"
+    for url, nombre in subidos:
+        cursor.execute(q, (ticket_id, comentario_id, url, nombre, usuario, fecha))
 
 
 @app.route('/tickets')
@@ -774,6 +853,7 @@ def ver_tickets():
     q_estado = request.args.get('estado', '').strip()
     q_prioridad = request.args.get('prioridad', '').strip()
     q_categoria = request.args.get('categoria', '').strip()
+    q_tipo = request.args.get('tipo', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
 
     conn, db_type = get_db()
@@ -781,7 +861,7 @@ def ver_tickets():
 
     es_soporte = (session.get('rol') == 'admin')
 
-    query = "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE 1=1"
+    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE 1=1"
     params = []
 
     if not es_soporte:
@@ -798,6 +878,9 @@ def ver_tickets():
     if q_categoria in CATEGORIAS_TICKET:
         query += " AND categoria = %s" if db_type == 'postgres' else " AND categoria = ?"
         params.append(q_categoria)
+    if q_tipo in TIPOS_TICKET:
+        query += " AND tipo = %s" if db_type == 'postgres' else " AND tipo = ?"
+        params.append(q_tipo)
 
     query += " ORDER BY (estado = 'Cerrado'), (estado = 'Resuelto'), id DESC"
 
@@ -811,18 +894,21 @@ def ver_tickets():
 
     tickets = []
     for r in rows:
-        texto_full = f"{r[1]} {r[2]} {r[6]}".lower()
+        texto_full = f"{r[1]} {r[2]} {r[7]}".lower()
         if not q_busqueda or q_busqueda in texto_full:
+            tipo_t = r[3] or 'Incidente'
             tickets.append({
-                'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'categoria': r[3],
-                'prioridad': r[4], 'estado': r[5], 'creado_por': r[6], 'asignado_a': r[7],
-                'fecha_creacion': r[8], 'fecha_actualizacion': r[9]
+                'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'tipo': tipo_t, 'categoria': r[4],
+                'prioridad': r[5], 'estado': r[6], 'creado_por': r[7], 'asignado_a': r[8],
+                'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
+                'codigo': _codigo_ticket(tipo_t, r[0], r[9])
             })
 
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
         categorias=CATEGORIAS_TICKET, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
-        q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_busqueda=q_busqueda
+        tipos=TIPOS_TICKET, tipos_info=TIPOS_TICKET_INFO,
+        q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda
     )
 
 
@@ -831,9 +917,12 @@ def ver_tickets():
 def crear_ticket():
     titulo = request.form.get('titulo', '').strip()
     descripcion = request.form.get('descripcion', '').strip()
+    tipo = request.form.get('tipo', 'Incidente').strip()
     categoria = request.form.get('categoria', 'Otro').strip()
     prioridad = request.form.get('prioridad', 'Media').strip()
 
+    if tipo not in TIPOS_TICKET:
+        tipo = 'Incidente'
     if categoria not in CATEGORIAS_TICKET:
         categoria = 'Otro'
     if prioridad not in PRIORIDADES_TICKET:
@@ -842,13 +931,27 @@ def crear_ticket():
     if titulo and descripcion:
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
+        archivos_subidos = _subir_adjuntos_ticket(request.files.getlist('adjuntos'))
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q_ins = "INSERT INTO tickets (titulo, descripcion, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (%s, %s, %s, %s, 'Abierto', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tickets (titulo, descripcion, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (?, ?, ?, ?, 'Abierto', ?, ?, ?)"
-            cursor.execute(q_ins, (titulo, descripcion, categoria, prioridad, usuario, fecha_act, fecha_act))
+            if db_type == 'postgres':
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act))
+                nuevo_id = cursor.fetchone()[0]
+            else:
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act))
+                nuevo_id = cursor.lastrowid
+
+            if archivos_subidos:
+                _guardar_adjuntos_ticket(cursor, db_type, nuevo_id, None, archivos_subidos, usuario, fecha_act)
+
             conn.commit()
-            registrar_log(usuario, "Solicitud de Soporte Creada", f"Nuevo ticket: '{titulo}' [{categoria} / {prioridad}]")
+            detalle_log = f"Nuevo ticket [{tipo}]: '{titulo}' [{categoria} / {prioridad}]"
+            if archivos_subidos:
+                detalle_log += f" — {len(archivos_subidos)} adjunto(s)"
+            registrar_log(usuario, "Solicitud de Soporte Creada", detalle_log)
         except Exception as e:
             conn.rollback()
             print(f"Error creando ticket: {e}")
@@ -863,26 +966,52 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
-    if not row or not _puede_ver_ticket(row[6]):
+    if not row or not _puede_ver_ticket(row[7]):
         conn.close()
         return redirect(url_for('ver_tickets'))
 
+    es_soporte = (session.get('rol') == 'admin')
+    tipo_t = row[3] or 'Incidente'
+
     ticket = {
-        'id': row[0], 'titulo': row[1], 'descripcion': row[2], 'categoria': row[3],
-        'prioridad': row[4], 'estado': row[5], 'creado_por': row[6], 'asignado_a': row[7],
-        'fecha_creacion': row[8], 'fecha_actualizacion': row[9]
+        'id': row[0], 'titulo': row[1], 'descripcion': row[2], 'tipo': tipo_t, 'categoria': row[4],
+        'prioridad': row[5], 'estado': row[6], 'creado_por': row[7], 'asignado_a': row[8],
+        'fecha_creacion': row[9], 'fecha_actualizacion': row[10],
+        'codigo': _codigo_ticket(tipo_t, row[0], row[9])
     }
 
-    q_com = "SELECT autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id ASC"
+    # Adjuntos cargados junto con la solicitud original (no pertenecen a ningún comentario).
+    q_adj_ticket = "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = %s AND comentario_id IS NULL ORDER BY id ASC" if db_type == 'postgres' else "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = ? AND comentario_id IS NULL ORDER BY id ASC"
+    cursor.execute(q_adj_ticket, (ticket_id,))
+    ticket['adjuntos'] = [{'url': a[0], 'nombre_original': a[1]} for a in cursor.fetchall()]
+
+    if es_soporte:
+        q_com = "SELECT id, autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id ASC"
+    else:
+        # Un usuario estándar no debe ver las notas internas que el equipo de soporte deja
+        # únicamente para coordinarse entre ellos.
+        q_com = "SELECT id, autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = %s AND tipo != 'interno' ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = ? AND tipo != 'interno' ORDER BY id ASC"
     cursor.execute(q_com, (ticket_id,))
-    comentarios = [{'autor': c[0], 'mensaje': c[1], 'tipo': c[2], 'fecha': c[3]} for c in cursor.fetchall()]
+    comentarios = [{'id': c[0], 'autor': c[1], 'mensaje': c[2], 'tipo': c[3], 'fecha': c[4], 'adjuntos': []} for c in cursor.fetchall()]
+
+    ids_com = [c['id'] for c in comentarios]
+    if ids_com:
+        placeholder = '%s' if db_type == 'postgres' else '?'
+        placeholders = ','.join([placeholder] * len(ids_com))
+        q_adj_com = f"SELECT comentario_id, url, nombre_original FROM tickets_adjuntos WHERE comentario_id IN ({placeholders}) ORDER BY id ASC"
+        cursor.execute(q_adj_com, tuple(ids_com))
+        adjuntos_por_com = {}
+        for com_id, url, nombre in cursor.fetchall():
+            adjuntos_por_com.setdefault(com_id, []).append({'url': url, 'nombre_original': nombre})
+        for c in comentarios:
+            c['adjuntos'] = adjuntos_por_com.get(c['id'], [])
 
     agentes = []
-    if session.get('rol') == 'admin':
+    if es_soporte:
         q_ag = "SELECT usuario FROM usuarios WHERE rol = 'admin' AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
         cursor.execute(q_ag)
         agentes = [a[0] for a in cursor.fetchall()]
@@ -891,7 +1020,7 @@ def ver_ticket(ticket_id):
 
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
-        es_soporte=(session.get('rol') == 'admin'), agentes=agentes,
+        es_soporte=es_soporte, agentes=agentes,
         estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET
     )
 
@@ -900,6 +1029,8 @@ def ver_ticket(ticket_id):
 @login_required
 def comentar_ticket(ticket_id):
     mensaje = request.form.get('mensaje', '').strip()
+    es_admin = (session.get('rol') == 'admin')
+    es_interno = es_admin and request.form.get('interno') == 'on'
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -913,20 +1044,35 @@ def comentar_ticket(ticket_id):
 
     # Un ticket cerrado ya no admite comentarios de quien lo creó (solo soporte TI podría
     # necesitar dejar una nota adicional sobre uno ya cerrado).
-    if row[1] == 'Cerrado' and session.get('rol') != 'admin':
+    if row[1] == 'Cerrado' and not es_admin:
         conn.close()
         return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
-    if mensaje:
+    archivos_subidos = _subir_adjuntos_ticket(request.files.getlist('adjuntos'))
+
+    if mensaje or archivos_subidos:
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
+        tipo_comentario = 'interno' if es_interno else 'comentario'
+        mensaje_final = mensaje or "(adjuntó archivo(s) sin comentario)"
         try:
-            q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'comentario', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'comentario', ?)"
-            cursor.execute(q_ins, (ticket_id, usuario, mensaje, fecha_act))
+            if db_type == 'postgres':
+                q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (ticket_id, usuario, mensaje_final, tipo_comentario, fecha_act))
+                nuevo_com_id = cursor.fetchone()[0]
+            else:
+                q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, ?, ?)"
+                cursor.execute(q_ins, (ticket_id, usuario, mensaje_final, tipo_comentario, fecha_act))
+                nuevo_com_id = cursor.lastrowid
+
+            if archivos_subidos:
+                _guardar_adjuntos_ticket(cursor, db_type, ticket_id, nuevo_com_id, archivos_subidos, usuario, fecha_act)
+
             q_upd = "UPDATE tickets SET fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET fecha_actualizacion = ? WHERE id = ?"
             cursor.execute(q_upd, (fecha_act, ticket_id))
             conn.commit()
-            registrar_log(usuario, "Comentario en Ticket", f"Comentario agregado al ticket #{ticket_id}")
+            etiqueta = "Comentario interno" if es_interno else "Comentario"
+            registrar_log(usuario, "Comentario en Ticket", f"{etiqueta} agregado al ticket #{ticket_id}" + (f" ({len(archivos_subidos)} adjunto(s))" if archivos_subidos else ""))
         except Exception as e:
             conn.rollback()
             print(f"Error comentando ticket {ticket_id}: {e}")
