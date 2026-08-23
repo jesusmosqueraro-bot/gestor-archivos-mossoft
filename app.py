@@ -401,6 +401,9 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
+                # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
+                # de contacto al crear un ticket y para que soporte tenga cómo ubicarlo.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -411,6 +414,10 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS calificacion_fecha VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS area VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sede VARCHAR(100);",
+                # 📞 Número de contacto para ESTE ticket en particular: puede ser distinto al
+                # teléfono registrado en el perfil del usuario (p. ej. reporta desde la
+                # extensión de otra persona). Se prellena con el del perfil pero es editable.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS telefono_contacto VARCHAR(50);",
                 # 📍 Dirección física y usuario responsable de cada Sede (solo aplican cuando
                 # tipo = 'sede'; para 'area'/'categoria' quedan en NULL sin usarse).
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS direccion TEXT;",
@@ -489,6 +496,11 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT;")
+                conn.commit()
+            except Exception:
+                pass
             for col_ticket_sql in [
                 "ALTER TABLE tickets ADD COLUMN tipo TEXT DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN sla_respuesta_limite TEXT;",
@@ -499,7 +511,8 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN calificacion INTEGER;",
                 "ALTER TABLE tickets ADD COLUMN calificacion_fecha TEXT;",
                 "ALTER TABLE tickets ADD COLUMN area TEXT;",
-                "ALTER TABLE tickets ADD COLUMN sede TEXT;"
+                "ALTER TABLE tickets ADD COLUMN sede TEXT;",
+                "ALTER TABLE tickets ADD COLUMN telefono_contacto TEXT;"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
@@ -1111,6 +1124,40 @@ def _correo_de_usuario(username):
         return None
 
 
+def _info_usuario(username):
+    """Trae el perfil completo (nombre, correo, teléfono, rol) de un usuario por su cuenta de
+    inicio de sesión. Se usa para mostrar la mayor cantidad de información posible del
+    solicitante en el detalle de un ticket. Devuelve None si no existe o si algo falla."""
+    if not username:
+        return None
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT usuario, nombre, correo, telefono, rol FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, nombre, correo, telefono, rol FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (username,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {'usuario': row[0], 'nombre': row[1], 'correo': row[2], 'telefono': row[3], 'rol': row[4]}
+    except Exception as e:
+        print(f"⚠️ Error buscando perfil de '{username}': {e}")
+        return None
+
+
+# 🗓️ Motivos preestablecidos para justificar un corrimiento de la fecha límite de solución.
+# Se muestran como opciones en el modal "Modificar fecha" del detalle del ticket, para que el
+# equipo de soporte deje registrado explícitamente si el atraso depende de un tercero (proveedor,
+# garantía, importación, etc.) y no necesariamente del analista o agente asignado.
+MOTIVOS_MODIFICACION_SLA = [
+    'Depende de un proveedor o tercero externo',
+    'Se requiere repuesto, licencia o material no disponible',
+    'Complejidad técnica mayor a la esperada',
+    'El usuario solicitó reprogramar',
+    'Otro',
+]
+
+
 def _codigo_ticket(tipo, id_ticket, fecha_creacion):
     """Código legible tipo 'IN-2026-000042' / 'RQ-2026-000042', solo para mostrar en la interfaz."""
     prefijo = 'RQ' if tipo == 'Requerimiento' else 'IN'
@@ -1230,6 +1277,12 @@ def ver_tickets():
     except Exception as e:
         print(f"Error consultando tickets: {e}")
         rows = []
+
+    # 👤 Nombre completo por usuario (para mostrar "Creado por"/"Asignado a" en la tabla con
+    # el nombre real de la persona en lugar de su usuario de inicio de sesión, un alias poco
+    # reconocible como 'escobar' o 'tmira').
+    cursor.execute("SELECT usuario, nombre FROM usuarios")
+    nombres_usuarios = {u[0]: (u[1] or u[0]) for u in cursor.fetchall()}
     conn.close()
 
     tickets = []
@@ -1240,6 +1293,8 @@ def ver_tickets():
             t = {
                 'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'tipo': tipo_t, 'categoria': r[4],
                 'prioridad': r[5], 'estado': r[6], 'creado_por': r[7], 'asignado_a': r[8],
+                'creado_por_nombre': nombres_usuarios.get(r[7], r[7]),
+                'asignado_a_nombre': nombres_usuarios.get(r[8], r[8]) if r[8] else None,
                 'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
                 'codigo': _codigo_ticket(tipo_t, r[0], r[9]),
                 'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12],
@@ -1261,6 +1316,12 @@ def ver_tickets():
     if q_cumplimiento in conteos_cumplimiento:
         tickets = [t for t in tickets if t['cumplimiento'] == q_cumplimiento]
 
+    # 📞 Prellena el número de contacto de "Nueva Solicitud" con el que el usuario ya tiene
+    # registrado en su perfil (si tiene uno) — sigue siendo editable en el formulario, por si
+    # para este ticket en particular hay que dejar otro número (p. ej. de un tercero).
+    perfil_actual = _info_usuario(session.get('username'))
+    telefono_usuario_actual = perfil_actual['telefono'] if perfil_actual else None
+
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
         categorias=nombres_categorias, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
@@ -1268,7 +1329,8 @@ def ver_tickets():
         areas=nombres_areas, sedes=nombres_sedes,
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
         q_area=q_area, q_sede=q_sede,
-        q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets
+        q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets,
+        telefono_usuario_actual=telefono_usuario_actual
     )
 
 
@@ -1282,6 +1344,7 @@ def crear_ticket():
     prioridad = request.form.get('prioridad', 'Media').strip()
     area = request.form.get('area', '').strip()
     sede = request.form.get('sede', '').strip()
+    telefono_contacto = request.form.get('telefono_contacto', '').strip() or None
 
     nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
     nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
@@ -1311,12 +1374,12 @@ def crear_ticket():
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0, %s, %s) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0, %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0, ?, ?)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0, ?, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -1341,7 +1404,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -1361,9 +1424,24 @@ def ver_ticket(ticket_id):
         'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
         'sla_modificaciones': row[15] or 0,
         'calificacion': row[16], 'calificacion_fecha': row[17],
-        'area': row[18], 'sede': row[19]
+        'area': row[18], 'sede': row[19], 'telefono_contacto': row[20]
     }
     ticket['sla'] = _calcular_sla_ticket(ticket)
+
+    # 🧑 La mayor cantidad de información posible sobre quién levantó la solicitud: nombre
+    # completo, correo y teléfono registrados en su perfil de Arkiv (si los tiene). Si el
+    # ticket no trae un teléfono de contacto propio, se usa el del perfil como respaldo.
+    creador_info = _info_usuario(ticket['creado_por']) or {}
+    if not ticket['telefono_contacto']:
+        ticket['telefono_contacto'] = creador_info.get('telefono')
+
+    # 👤 El nombre completo del agente asignado (no su usuario de inicio de sesión) se usa
+    # para mostrar "Asignado a" de forma legible, igual que en el desplegable de arriba.
+    if ticket['asignado_a']:
+        info_asignado = _info_usuario(ticket['asignado_a'])
+        ticket['asignado_a_nombre'] = (info_asignado or {}).get('nombre') or ticket['asignado_a']
+    else:
+        ticket['asignado_a_nombre'] = None
 
     # Adjuntos cargados junto con la solicitud original (no pertenecen a ningún comentario).
     q_adj_ticket = "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = %s AND comentario_id IS NULL ORDER BY id ASC" if db_type == 'postgres' else "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = ? AND comentario_id IS NULL ORDER BY id ASC"
@@ -1393,17 +1471,19 @@ def ver_ticket(ticket_id):
 
     agentes = []
     if es_soporte:
-        q_ag = "SELECT usuario FROM usuarios WHERE rol IN ('admin', 'agente') AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
+        # 👤 Se muestra el nombre completo de cada agente/admin en el desplegable "Asignar a"
+        # (no el usuario de inicio de sesión, que suele ser un alias técnico poco reconocible).
+        q_ag = "SELECT usuario, nombre FROM usuarios WHERE rol IN ('admin', 'agente') AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
         cursor.execute(q_ag)
-        agentes = [a[0] for a in cursor.fetchall()]
+        agentes = [{'usuario': a[0], 'nombre': a[1] or a[0]} for a in cursor.fetchall()]
 
     conn.close()
 
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
-        es_soporte=es_soporte, agentes=agentes,
+        es_soporte=es_soporte, agentes=agentes, creador_info=creador_info,
         estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
-        max_modificaciones_sla=MAX_MODIFICACIONES_SLA,
+        max_modificaciones_sla=MAX_MODIFICACIONES_SLA, motivos_sla=MOTIVOS_MODIFICACION_SLA,
         calificacion_max=CALIFICACION_MAX, session_username=session.get('username')
     )
 
@@ -1570,7 +1650,14 @@ def modificar_sla_ticket(ticket_id):
     'compromiso con el usuario'), siempre con un motivo y un tope de MAX_MODIFICACIONES_SLA
     veces — igual que en la mesa de ayuda externa que ya usa la organización."""
     nueva_fecha_raw = request.form.get('nueva_fecha', '').strip()  # <input type="datetime-local">
-    motivo = request.form.get('motivo', '').strip()
+    motivo_categoria = request.form.get('motivo_categoria', '').strip()
+    motivo_detalle = request.form.get('motivo', '').strip()
+    if motivo_categoria not in MOTIVOS_MODIFICACION_SLA:
+        motivo_categoria = 'Otro'
+    # El registro guarda la categoría (p. ej. "Depende de un proveedor o tercero externo",
+    # para dejar explícito que el atraso no depende del analista/agente) junto con el detalle
+    # libre que el equipo de soporte escriba.
+    motivo = f"{motivo_categoria} — {motivo_detalle}" if motivo_detalle else motivo_categoria
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1583,7 +1670,9 @@ def modificar_sla_ticket(ticket_id):
             return redirect(url_for('ver_tickets'))
 
         mods_actuales = row[0] or 0
-        if mods_actuales >= MAX_MODIFICACIONES_SLA or len(motivo) < 10 or not nueva_fecha_raw:
+        # El detalle libre (motivo_detalle) sigue exigiendo mínimo 10 caracteres, igual que
+        # antes; la categoría (motivo_categoria) es obligatoria por separado vía el <select>.
+        if mods_actuales >= MAX_MODIFICACIONES_SLA or len(motivo_detalle) < 10 or not nueva_fecha_raw:
             conn.close()
             return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
@@ -2981,6 +3070,7 @@ def gestion_usuarios():
         segundo_apellido = (request.form.get('segundo_apellido') or '').strip()
         nuevo_pass = request.form.get('password') or ''
         nuevo_email = (request.form.get('email') or '').strip()
+        nuevo_telefono = (request.form.get('telefono') or '').strip() or None
         nuevo_rol = request.form.get('rol', 'estandar')
         # 🛡️ Solo se aceptan los 3 roles válidos del sistema; cualquier otro valor (enviado a
         # mano, no desde el formulario) cae a 'estandar' por seguridad.
@@ -2996,7 +3086,7 @@ def gestion_usuarios():
         form_data = {
             'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
             'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
-            'email': nuevo_email, 'rol': nuevo_rol
+            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono
         }
 
         if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email:
@@ -3013,8 +3103,8 @@ def gestion_usuarios():
                 nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
                 nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
                 nuevo_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre) VALUES (%s, %s, %s, %s, 'activo', %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre) VALUES (?, ?, ?, ?, 'activo', ?)"
-                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo))
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono) VALUES (%s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono) VALUES (?, ?, ?, ?, 'activo', ?, ?)"
+                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
                 conn.close()
@@ -3026,9 +3116,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -3045,18 +3135,21 @@ def editar_usuario(usuario_id):
         nuevo_rol = 'estandar'
     nueva_pass = request.form.get('password', '').strip()
     nuevo_nombre = request.form.get('nombre', '').strip()
+    nuevo_telefono = request.form.get('telefono', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
         rol_target = row[1] if row else None
-        # Si el admin deja el campo Nombre vacío en el formulario de edición, se conserva el
-        # valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar el nombre).
+        # Si el admin deja el campo Nombre o Teléfono vacío en el formulario de edición, se
+        # conserva el valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar
+        # los demás datos).
         nombre_final = nuevo_nombre or (row[2] if row else None)
+        telefono_final = nuevo_telefono or (row[3] if row else None)
 
         if user_target is None:
             conn.close()
@@ -3081,12 +3174,12 @@ def editar_usuario(usuario_id):
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
