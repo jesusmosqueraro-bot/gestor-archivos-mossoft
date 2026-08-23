@@ -303,6 +303,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets (
+                id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT NOT NULL, categoria VARCHAR(50) DEFAULT 'Otro', prioridad VARCHAR(20) DEFAULT 'Media', estado VARCHAR(20) DEFAULT 'Abierto', creado_por VARCHAR(100) NOT NULL, asignado_a VARCHAR(100), fecha_creacion VARCHAR(100) NOT NULL, fecha_actualizacion VARCHAR(100) NOT NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_comentarios (
+                id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, autor VARCHAR(100) NOT NULL, mensaje TEXT NOT NULL, tipo VARCHAR(20) DEFAULT 'comentario', fecha VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
             
             for col_query in [
@@ -344,7 +350,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
             )''')
-            
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, categoria TEXT DEFAULT 'Otro', prioridad TEXT DEFAULT 'Media', estado TEXT DEFAULT 'Abierto', creado_por TEXT NOT NULL, asignado_a TEXT, fecha_creacion TEXT NOT NULL, fecha_actualizacion TEXT NOT NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_comentarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, autor TEXT NOT NULL, mensaje TEXT NOT NULL, tipo TEXT DEFAULT 'comentario', fecha TEXT NOT NULL, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+            )''')
+
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
                     cursor.execute(f"ALTER TABLE galerias ADD COLUMN {col_sql} TEXT DEFAULT 'activo';")
@@ -744,6 +756,237 @@ def destruir_comunicado(com_id):
 
     conn.close()
     return redirect(url_for('ver_papelera'))
+
+# 🎫 MÓDULO DE SOPORTE TI (TICKETS / SOLICITUDES INTERNAS)
+CATEGORIAS_TICKET = ['Hardware', 'Software', 'Acceso/Credenciales', 'Red/Internet', 'Otro']
+PRIORIDADES_TICKET = ['Baja', 'Media', 'Alta', 'Urgente']
+ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado']
+
+
+def _puede_ver_ticket(creado_por):
+    """Un ticket solo lo puede ver quien lo creó o cualquier cuenta con rol admin (equipo de soporte TI)."""
+    return session.get('rol') == 'admin' or session.get('username') == creado_por
+
+
+@app.route('/tickets')
+@login_required
+def ver_tickets():
+    q_estado = request.args.get('estado', '').strip()
+    q_prioridad = request.args.get('prioridad', '').strip()
+    q_categoria = request.args.get('categoria', '').strip()
+    q_busqueda = request.args.get('q', '').strip().lower()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    es_soporte = (session.get('rol') == 'admin')
+
+    query = "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE 1=1"
+    params = []
+
+    if not es_soporte:
+        # Un usuario estándar solo ve las solicitudes que él mismo creó.
+        query += " AND creado_por = %s" if db_type == 'postgres' else " AND creado_por = ?"
+        params.append(session.get('username'))
+
+    if q_estado in ESTADOS_TICKET:
+        query += " AND estado = %s" if db_type == 'postgres' else " AND estado = ?"
+        params.append(q_estado)
+    if q_prioridad in PRIORIDADES_TICKET:
+        query += " AND prioridad = %s" if db_type == 'postgres' else " AND prioridad = ?"
+        params.append(q_prioridad)
+    if q_categoria in CATEGORIAS_TICKET:
+        query += " AND categoria = %s" if db_type == 'postgres' else " AND categoria = ?"
+        params.append(q_categoria)
+
+    query += " ORDER BY (estado = 'Cerrado'), (estado = 'Resuelto'), id DESC"
+
+    try:
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando tickets: {e}")
+        rows = []
+    conn.close()
+
+    tickets = []
+    for r in rows:
+        texto_full = f"{r[1]} {r[2]} {r[6]}".lower()
+        if not q_busqueda or q_busqueda in texto_full:
+            tickets.append({
+                'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'categoria': r[3],
+                'prioridad': r[4], 'estado': r[5], 'creado_por': r[6], 'asignado_a': r[7],
+                'fecha_creacion': r[8], 'fecha_actualizacion': r[9]
+            })
+
+    return render_template(
+        'tickets.html', tickets=tickets, es_soporte=es_soporte,
+        categorias=CATEGORIAS_TICKET, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
+        q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_busqueda=q_busqueda
+    )
+
+
+@app.route('/tickets/crear', methods=['POST'])
+@login_required
+def crear_ticket():
+    titulo = request.form.get('titulo', '').strip()
+    descripcion = request.form.get('descripcion', '').strip()
+    categoria = request.form.get('categoria', 'Otro').strip()
+    prioridad = request.form.get('prioridad', 'Media').strip()
+
+    if categoria not in CATEGORIAS_TICKET:
+        categoria = 'Otro'
+    if prioridad not in PRIORIDADES_TICKET:
+        prioridad = 'Media'
+
+    if titulo and descripcion:
+        fecha_act = obtener_fecha_actual()
+        usuario = session.get('username')
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q_ins = "INSERT INTO tickets (titulo, descripcion, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (%s, %s, %s, %s, 'Abierto', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tickets (titulo, descripcion, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (?, ?, ?, ?, 'Abierto', ?, ?, ?)"
+            cursor.execute(q_ins, (titulo, descripcion, categoria, prioridad, usuario, fecha_act, fecha_act))
+            conn.commit()
+            registrar_log(usuario, "Solicitud de Soporte Creada", f"Nuevo ticket: '{titulo}' [{categoria} / {prioridad}]")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error creando ticket: {e}")
+        conn.close()
+
+    return redirect(url_for('ver_tickets'))
+
+
+@app.route('/tickets/<int:ticket_id>')
+@login_required
+def ver_ticket(ticket_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    q_sel = "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = ?"
+    cursor.execute(q_sel, (ticket_id,))
+    row = cursor.fetchone()
+
+    if not row or not _puede_ver_ticket(row[6]):
+        conn.close()
+        return redirect(url_for('ver_tickets'))
+
+    ticket = {
+        'id': row[0], 'titulo': row[1], 'descripcion': row[2], 'categoria': row[3],
+        'prioridad': row[4], 'estado': row[5], 'creado_por': row[6], 'asignado_a': row[7],
+        'fecha_creacion': row[8], 'fecha_actualizacion': row[9]
+    }
+
+    q_com = "SELECT autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT autor, mensaje, tipo, fecha FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id ASC"
+    cursor.execute(q_com, (ticket_id,))
+    comentarios = [{'autor': c[0], 'mensaje': c[1], 'tipo': c[2], 'fecha': c[3]} for c in cursor.fetchall()]
+
+    agentes = []
+    if session.get('rol') == 'admin':
+        q_ag = "SELECT usuario FROM usuarios WHERE rol = 'admin' AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
+        cursor.execute(q_ag)
+        agentes = [a[0] for a in cursor.fetchall()]
+
+    conn.close()
+
+    return render_template(
+        'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
+        es_soporte=(session.get('rol') == 'admin'), agentes=agentes,
+        estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET
+    )
+
+
+@app.route('/tickets/<int:ticket_id>/comentar', methods=['POST'])
+@login_required
+def comentar_ticket(ticket_id):
+    mensaje = request.form.get('mensaje', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT creado_por, estado FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado FROM tickets WHERE id = ?"
+    cursor.execute(q_sel, (ticket_id,))
+    row = cursor.fetchone()
+
+    if not row or not _puede_ver_ticket(row[0]):
+        conn.close()
+        return redirect(url_for('ver_tickets'))
+
+    # Un ticket cerrado ya no admite comentarios de quien lo creó (solo soporte TI podría
+    # necesitar dejar una nota adicional sobre uno ya cerrado).
+    if row[1] == 'Cerrado' and session.get('rol') != 'admin':
+        conn.close()
+        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+    if mensaje:
+        fecha_act = obtener_fecha_actual()
+        usuario = session.get('username')
+        try:
+            q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'comentario', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'comentario', ?)"
+            cursor.execute(q_ins, (ticket_id, usuario, mensaje, fecha_act))
+            q_upd = "UPDATE tickets SET fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET fecha_actualizacion = ? WHERE id = ?"
+            cursor.execute(q_upd, (fecha_act, ticket_id))
+            conn.commit()
+            registrar_log(usuario, "Comentario en Ticket", f"Comentario agregado al ticket #{ticket_id}")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error comentando ticket {ticket_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/<int:ticket_id>/actualizar', methods=['POST'])
+@login_required
+@admin_required
+def actualizar_ticket(ticket_id):
+    nuevo_estado = request.form.get('estado', '').strip()
+    nueva_prioridad = request.form.get('prioridad', '').strip()
+    nuevo_asignado = request.form.get('asignado_a', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT estado, prioridad, asignado_a FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a FROM tickets WHERE id = ?"
+        cursor.execute(q_sel, (ticket_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return redirect(url_for('ver_tickets'))
+
+        estado_old, prioridad_old, asignado_old = row
+        estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
+        prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
+        asignado_final = nuevo_asignado or None
+
+        fecha_act = obtener_fecha_actual()
+        q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ? WHERE id = ?"
+        cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, ticket_id))
+
+        cambios = []
+        if estado_final != estado_old:
+            cambios.append(f"estado: '{estado_old}' → '{estado_final}'")
+        if prioridad_final != prioridad_old:
+            cambios.append(f"prioridad: '{prioridad_old}' → '{prioridad_final}'")
+        if asignado_final != asignado_old:
+            cambios.append(f"asignado a: '{asignado_old or 'nadie'}' → '{asignado_final or 'nadie'}'")
+
+        usuario = session.get('username')
+        if cambios:
+            mensaje_sistema = f"{usuario} actualizó el ticket — " + "; ".join(cambios)
+            q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'sistema', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'sistema', ?)"
+            cursor.execute(q_ins, (ticket_id, usuario, mensaje_sistema, fecha_act))
+
+        conn.commit()
+
+        if cambios:
+            registrar_log(usuario, "Actualización de Ticket", f"Ticket #{ticket_id}: {'; '.join(cambios)}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error actualizando ticket {ticket_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
 
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
