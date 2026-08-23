@@ -1,1 +1,10 @@
+# Base de datos local de pruebas (en producción se usa Postgres/Neon vía DATABASE_URL).
+gestor.db
+*.db
 
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Variables de entorno locales, si alguna vez se usa un archivo .env
+.env
