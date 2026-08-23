@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Indicadores de Soporte TI</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-headset text-orange-400"></i> Indicadores de Soporte TI
+            </h1>
+        </div>
+        <a href="/tickets/indicadores/exportar_csv" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-emerald-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+            <i class="fa-solid fa-file-excel"></i>
+            <span class="hidden sm:inline">Exportar a Excel (CSV)</span>
+        </a>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- TARJETAS KPI -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total Solicitudes</p>
+                <p class="text-2xl font-extrabold text-white">{{ total }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vigentes</p>
+                <p class="text-2xl font-extrabold text-cyan-400">{{ por_cumplimiento.vigente }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-amber-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Próx. a vencer</p>
+                <p class="text-2xl font-extrabold text-amber-400">{{ por_cumplimiento.proximo_a_vencer }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vencidos</p>
+                <p class="text-2xl font-extrabold text-rose-400">{{ por_cumplimiento.vencido }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Satisfacción promedio</p>
+                {% if promedio_calificacion %}
+                    <p class="text-2xl font-extrabold text-emerald-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5 ({{ total_calificaciones }})</span></p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin calificaciones aún</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- TENDENCIA -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3">Solicitudes creadas — últimos 14 días</h3>
+            <div class="h-56"><canvas id="chart-tendencia"></canvas></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Cumplimiento de SLA</h3>
+                <div class="h-52"><canvas id="chart-cumplimiento"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por estado</h3>
+                <div class="h-52"><canvas id="chart-estado"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por prioridad</h3>
+                <div class="h-52"><canvas id="chart-prioridad"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por categoría</h3>
+                <div class="h-52"><canvas id="chart-categoria"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por área</h3>
+                <div class="h-52"><canvas id="chart-area"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por sede</h3>
+                <div class="h-52"><canvas id="chart-sede"></canvas></div>
+            </div>
+        </div>
+
+        <!-- TOP AGENTES -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3">Top agentes por solicitudes resueltas</h3>
+            {% if top_agentes %}
+            <div class="space-y-2">
+                {% for agente, cantidad in top_agentes %}
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold text-slate-300 w-32 truncate">{{ agente }}</span>
+                    <div class="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full bg-orange-500 rounded-full" style="width: {{ (cantidad / top_agentes[0][1] * 100) | round }}%"></div>
+                    </div>
+                    <span class="text-xs font-mono text-slate-400 w-8 text-right">{{ cantidad }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-xs text-slate-500 text-center py-4">Todavía no hay solicitudes resueltas por agente.</p>
+            {% endif %}
+        </div>
+
+    </main>
+
+    <script>
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        function donut(id, labels, data, colors) {
+            new Chart(document.getElementById(id), {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
+                options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, maintainAspectRatio: false }
+            });
+        }
+        function barra(id, labels, data, color) {
+            new Chart(document.getElementById(id), {
+                type: 'bar',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: color, borderRadius: 6 }] },
+                options: {
+                    plugins: { legend: { display: false } },
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } }
+                }
+            });
+        }
+
+        donut('chart-cumplimiento',
+            ['Vigentes', 'Próx. a vencer', 'Vencidos', 'Cerrados'],
+            [{{ por_cumplimiento.vigente }}, {{ por_cumplimiento.proximo_a_vencer }}, {{ por_cumplimiento.vencido }}, {{ por_cumplimiento.cerrado }}],
+            ['#22d3ee', '#f59e0b', '#f43f5e', '#64748b']
+        );
+        barra('chart-estado', {{ por_estado.keys() | list | tojson }}, {{ por_estado.values() | list | tojson }}, '#fb923c');
+        barra('chart-prioridad', {{ por_prioridad.keys() | list | tojson }}, {{ por_prioridad.values() | list | tojson }}, '#38bdf8');
+        barra('chart-categoria', {{ por_categoria.keys() | list | tojson }}, {{ por_categoria.values() | list | tojson }}, '#a78bfa');
+        barra('chart-area', {{ por_area.keys() | list | tojson }}, {{ por_area.values() | list | tojson }}, '#818cf8');
+        barra('chart-sede', {{ por_sede.keys() | list | tojson }}, {{ por_sede.values() | list | tojson }}, '#2dd4bf');
+
+        new Chart(document.getElementById('chart-tendencia'), {
+            type: 'line',
+            data: {
+                labels: {{ dias_tendencia | map(attribute='fecha') | list | tojson }},
+                datasets: [{
+                    label: 'Solicitudes',
+                    data: {{ dias_tendencia | map(attribute='cantidad') | list | tojson }},
+                    borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.15)',
+                    fill: true, tension: 0.3, pointRadius: 3
+                }]
+            },
+            options: {
+                plugins: { legend: { display: false } },
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            }
+        });
+    </script>
+</body>
+</html>

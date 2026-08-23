@@ -36,6 +36,11 @@
             <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
             <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>{% if es_soporte %}Todas las Solicitudes{% else %}Mis Solicitudes{% endif %}</a>
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            {% if es_soporte %}
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            {% endif %}
         </div>
     </div>
 
@@ -44,7 +49,7 @@
 
         <!-- PESTAÑAS DE CUMPLIMIENTO DE SLA -->
         <div class="flex items-center gap-2 overflow-x-auto pb-1">
-            {% set _base_qs = {'tipo': q_tipo, 'estado': q_estado, 'prioridad': q_prioridad, 'categoria': q_categoria, 'q': q_busqueda} %}
+            {% set _base_qs = {'tipo': q_tipo, 'estado': q_estado, 'prioridad': q_prioridad, 'categoria': q_categoria, 'area': q_area, 'sede': q_sede, 'q': q_busqueda} %}
             <a href="{{ url_for('ver_tickets', cumplimiento='', **_base_qs) }}" class="px-4 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap {% if not q_cumplimiento %}bg-orange-600 border-orange-600 text-white{% else %}bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-orange-500/40{% endif %}">
                 Todos <span class="opacity-70">{{ total_tickets }}</span>
             </a>
@@ -63,7 +68,7 @@
         </div>
 
         <!-- BARRA DE FILTROS -->
-        <form method="GET" action="/tickets" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
+        <form method="GET" action="/tickets" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-7 gap-3 text-xs">
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
                 <select name="tipo" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -101,6 +106,24 @@
                 </select>
             </div>
             <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                <select name="area" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for a in areas %}
+                        <option value="{{ a }}" {% if a == q_area %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                <select name="sede" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for s in sedes %}
+                        <option value="{{ s }}" {% if s == q_sede %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
                 <div class="relative">
                     <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Título, descripción..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -118,6 +141,7 @@
                         <th class="pb-3 px-3 font-bold">Tipo</th>
                         <th class="pb-3 px-3 font-bold">Título</th>
                         <th class="pb-3 px-3 font-bold">Categoría</th>
+                        <th class="pb-3 px-3 font-bold">Área/Sede</th>
                         <th class="pb-3 px-3 font-bold">Prioridad</th>
                         <th class="pb-3 px-3 font-bold">Estado</th>
                         <th class="pb-3 px-3 font-bold">SLA</th>
@@ -142,6 +166,9 @@
                             <td class="py-3.5 px-3 font-bold text-white max-w-xs truncate">{{ t.titulo }}</td>
                             <td class="py-3.5 px-3">
                                 <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">{{ t.categoria }}</span>
+                            </td>
+                            <td class="py-3.5 px-3 text-slate-400 whitespace-nowrap">
+                                {% if t.area or t.sede %}{{ t.area or '' }}{% if t.area and t.sede %} · {% endif %}{{ t.sede or '' }}{% else %}<span class="text-slate-600">-</span>{% endif %}
                             </td>
                             <td class="py-3.5 px-3">
                                 {% if t.prioridad == 'Urgente' %}
@@ -185,7 +212,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="{% if es_soporte %}11{% else %}9{% endif %}" class="text-center py-10 text-slate-500 font-bold">
+                            <td colspan="{% if es_soporte %}12{% else %}10{% endif %}" class="text-center py-10 text-slate-500 font-bold">
                                 No hay solicitudes que coincidan con los filtros. Crea una con "Nueva Solicitud".
                             </td>
                         </tr>
@@ -242,6 +269,25 @@
                         </select>
                     </div>
                 </div>
+
+                {% if areas or sedes %}
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                        <select name="area" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for a in areas %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                        <select name="sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for s in sedes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                {% endif %}
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción *</label>

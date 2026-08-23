@@ -31,6 +31,11 @@
             <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
             <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>{% if es_soporte %}Todas las Solicitudes{% else %}Mis Solicitudes{% endif %}</a>
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            {% if es_soporte %}
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            {% endif %}
         </div>
     </div>
 
@@ -51,6 +56,12 @@
                         <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Incidente</span>
                     {% endif %}
                     <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ ticket.categoria }}</span>
+                    {% if ticket.area %}
+                        <span class="px-2.5 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-building mr-1"></i>{{ ticket.area }}</span>
+                    {% endif %}
+                    {% if ticket.sede %}
+                        <span class="px-2.5 py-0.5 bg-teal-500/10 text-teal-300 border border-teal-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-location-dot mr-1"></i>{{ ticket.sede }}</span>
+                    {% endif %}
                     {% if ticket.prioridad == 'Urgente' %}
                         <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Urgente</span>
                     {% elif ticket.prioridad == 'Alta' %}

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Inventario de Activos</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-headset text-orange-400"></i> Inventario de Activos
+            </h1>
+        </div>
+        <button onclick="abrirModalNuevo()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+            <i class="fa-solid fa-plus"></i>
+            <span>Nuevo Activo</span>
+        </button>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- TARJETAS DE CONTEO POR ESTADO -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Disponibles</p>
+                <p class="text-2xl font-extrabold text-emerald-400">{{ conteos_estado.Disponible }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Asignados</p>
+                <p class="text-2xl font-extrabold text-blue-400">{{ conteos_estado.Asignado }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-amber-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">En mantenimiento</p>
+                <p class="text-2xl font-extrabold text-amber-400">{{ conteos_estado.Mantenimiento }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">De baja</p>
+                <p class="text-2xl font-extrabold text-slate-400">{{ conteos_estado.Baja }}</p>
+            </div>
+        </div>
+
+        <!-- BARRA DE FILTROS -->
+        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todos</option>
+                    {% for e in estados_activo %}<option value="{{ e }}" {% if e == q_estado %}selected{% endif %}>{{ e }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                <select name="tipo" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todos</option>
+                    {% for t in tipos_activo %}<option value="{{ t }}" {% if t == q_tipo %}selected{% endif %}>{{ t }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
+                <div class="relative">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Nombre, marca, serie, asignado a..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+            </div>
+        </form>
+
+        <!-- TABLA DE ACTIVOS -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                    <tr>
+                        <th class="pb-3 px-3 font-bold">Nombre</th>
+                        <th class="pb-3 px-3 font-bold">Tipo</th>
+                        <th class="pb-3 px-3 font-bold">Marca / Modelo</th>
+                        <th class="pb-3 px-3 font-bold">N° Serie</th>
+                        <th class="pb-3 px-3 font-bold">Estado</th>
+                        <th class="pb-3 px-3 font-bold">Asignado a</th>
+                        <th class="pb-3 px-3 font-bold">Sede</th>
+                        <th class="pb-3 px-3 font-bold text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% if activos %}
+                        {% for a in activos %}
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}</td>
+                            <td class="py-3.5 px-3">{{ a.tipo_activo }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}</td>
+                            <td class="py-3.5 px-3 font-mono text-slate-500">{{ a.numero_serie or '-' }}</td>
+                            <td class="py-3.5 px-3">
+                                {% if a.estado == 'Disponible' %}
+                                    <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Disponible</span>
+                                {% elif a.estado == 'Asignado' %}
+                                    <span class="px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Asignado</span>
+                                {% elif a.estado == 'Mantenimiento' %}
+                                    <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Mantenimiento</span>
+                                {% else %}
+                                    <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Baja</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-3 text-slate-400 italic">{{ a.asignado_a or '-' }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
+                            <td class="py-3.5 px-3 text-right">
+                                <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs mr-2"><i class="fa-solid fa-pen"></i></button>
+                                <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center py-10 text-slate-500 font-bold">
+                                {% if q_busqueda or q_estado or q_tipo %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+    <!-- MODAL NUEVO / EDITAR ACTIVO -->
+    <div id="modal-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-activo-titulo" class="text-base font-bold text-white">Nuevo Activo</h3>
+                <button onclick="cerrarModalActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="form-activo" method="POST" action="/tickets/inventario/nuevo" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre *</label>
+                    <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: Portátil recepción" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                        <select name="tipo_activo" id="input-activo-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            {% for t in tipos_activo %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                        <select name="estado" id="input-activo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            {% for e in estados_activo %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Marca</label>
+                        <input type="text" name="marca" id="input-activo-marca" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Modelo</label>
+                        <input type="text" name="modelo" id="input-activo-modelo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
+                    <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a (usuario)</label>
+                        <input type="text" name="asignado_a" id="input-activo-asignado" placeholder="Opcional" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                        <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
+                    <textarea name="observaciones" id="input-activo-observaciones" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                </div>
+                <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-orange-500/20 transition-all active:scale-95 mt-2">
+                    <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function abrirModalNuevo() {
+            document.getElementById('modal-activo-titulo').textContent = 'Nuevo Activo';
+            document.getElementById('form-activo').action = '/tickets/inventario/nuevo';
+            document.getElementById('input-activo-nombre').value = '';
+            document.getElementById('input-activo-tipo').value = '{{ tipos_activo[0] }}';
+            document.getElementById('input-activo-estado').value = 'Disponible';
+            document.getElementById('input-activo-marca').value = '';
+            document.getElementById('input-activo-modelo').value = '';
+            document.getElementById('input-activo-serie').value = '';
+            document.getElementById('input-activo-asignado').value = '';
+            document.getElementById('input-activo-sede').value = '';
+            document.getElementById('input-activo-observaciones').value = '';
+            document.getElementById('modal-activo').classList.remove('hidden');
+            document.getElementById('modal-activo').classList.add('flex');
+        }
+        function abrirModalEditar(activo) {
+            document.getElementById('modal-activo-titulo').textContent = 'Editar Activo';
+            document.getElementById('form-activo').action = '/tickets/inventario/' + activo.id + '/editar';
+            document.getElementById('input-activo-nombre').value = activo.nombre || '';
+            document.getElementById('input-activo-tipo').value = activo.tipo_activo || '';
+            document.getElementById('input-activo-estado').value = activo.estado || 'Disponible';
+            document.getElementById('input-activo-marca').value = activo.marca || '';
+            document.getElementById('input-activo-modelo').value = activo.modelo || '';
+            document.getElementById('input-activo-serie').value = activo.numero_serie || '';
+            document.getElementById('input-activo-asignado').value = activo.asignado_a || '';
+            document.getElementById('input-activo-sede').value = activo.sede || '';
+            document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
+            document.getElementById('modal-activo').classList.remove('hidden');
+            document.getElementById('modal-activo').classList.add('flex');
+        }
+        function cerrarModalActivo() {
+            document.getElementById('modal-activo').classList.add('hidden');
+            document.getElementById('modal-activo').classList.remove('flex');
+        }
+    </script>
+</body>
+</html>
