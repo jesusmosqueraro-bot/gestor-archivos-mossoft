@@ -36,7 +36,8 @@
             {% endfor %}
         </div>
 
-        <!-- CONSOLA SQL PERSONALIZADA -->
+        <!-- CONSOLA SQL PERSONALIZADA (solo visible/usable para el super-admin 'admin') -->
+        {% if es_superadmin %}
         <form method="POST" action="/admin/db?tabla={{ tabla }}" class="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60 space-y-3 shadow-lg">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider">Ejecutar Consulta SQL Personalizada (SELECT, UPDATE, DELETE, INSERT)</label>
@@ -47,6 +48,12 @@
                 </button>
             </div>
         </form>
+        {% else %}
+        <div class="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/60 flex items-center gap-3 text-xs text-slate-400">
+            <i class="fa-solid fa-lock text-slate-500"></i>
+            <span>La ejecución de SQL personalizado está reservada para la cuenta super-admin. Aquí puedes visualizar las tablas, pero no ejecutar consultas.</span>
+        </div>
+        {% endif %}
 
         <!-- ALERTA DE ÉXITO -->
         {% if exito %}
