@@ -1872,10 +1872,10 @@ def configuracion_tickets():
 def crear_configuracion_ticket():
     tipo = request.form.get('tipo', '').strip()
     nombre = request.form.get('nombre', '').strip()
-    # 📍 Dirección y responsable solo aplican (y solo se guardan) cuando tipo == 'sede'.
+    # 📍 Dirección y responsable aplican a Sedes y Áreas; Categoría no los usa.
     direccion = request.form.get('direccion', '').strip() or None
     responsable = request.form.get('responsable', '').strip() or None
-    if tipo != 'sede':
+    if tipo not in ('sede', 'area'):
         direccion = None
         responsable = None
     if tipo in ('area', 'sede', 'categoria') and nombre:
@@ -1886,7 +1886,7 @@ def crear_configuracion_ticket():
             cursor.execute(q, (tipo, nombre, direccion, responsable))
             conn.commit()
             detalle = f"Se agregó {tipo} '{nombre}'"
-            if tipo == 'sede' and (direccion or responsable):
+            if tipo in ('sede', 'area') and (direccion or responsable):
                 detalle += f" (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
             registrar_log(session.get('username'), "Configuración de Tickets", detalle)
         except Exception as e:
@@ -1910,14 +1910,15 @@ def editar_configuracion_ticket(config_id):
             fila = cursor.fetchone()
             tipo_actual = fila[0] if fila else None
 
-            if tipo_actual == 'sede':
-                # 📍 Solo las Sedes tienen dirección y responsable; el formulario de Sedes
-                # envía estos dos campos junto con el nombre.
+            if tipo_actual in ('sede', 'area'):
+                # 📍 Sedes y Áreas tienen dirección y responsable; sus formularios envían
+                # estos dos campos junto con el nombre. Categoría no los usa.
                 direccion = request.form.get('direccion', '').strip() or None
                 responsable = request.form.get('responsable', '').strip() or None
                 q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
                 cursor.execute(q, (nombre, direccion, responsable, config_id))
-                detalle = f"Se editó la sede '{nombre}' (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
+                etiqueta_tipo = 'sede' if tipo_actual == 'sede' else 'área'
+                detalle = f"Se editó la {etiqueta_tipo} '{nombre}' (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
             else:
                 q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
                 cursor.execute(q, (nombre, config_id))
