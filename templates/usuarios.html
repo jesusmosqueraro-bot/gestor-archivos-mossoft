@@ -78,7 +78,16 @@
                                 {% set es_otro_admin = (u[3] == 'admin' and u[1] != session.get('username') and session.get('username') != 'admin') %}
                                 <div class="flex items-center justify-end gap-2">
                                     {% if not es_otro_admin %}
-                                    <button onclick="abrirModalEditarUsuario({{ u[0] }}, '{{ u[1] }}', '{{ u[2] }}', '{{ u[3] }}', {{ (u[5] or '') | tojson }})" class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    {# ⚠️ IMPORTANTE: este atributo usa comillas SIMPLES (onclick='...') a propósito.
+                                       El filtro |tojson SIEMPRE envuelve su salida en comillas DOBLES; si el
+                                       atributo también usara comillas dobles, el primer '"' que produce tojson
+                                       (por ejemplo al convertir un nombre vacío en "") cerraría el atributo a
+                                       la mitad y dejaría el resto como texto suelto — el botón quedaba con un
+                                       onclick roto (JS "Unexpected end of input") y el clic no hacía nada. Con
+                                       comillas simples en el atributo y tojson en cada valor (que escapa
+                                       comillas, backslashes y demás) esto queda seguro para cualquier nombre,
+                                       correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% else %}
