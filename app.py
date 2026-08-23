@@ -327,7 +327,12 @@ def init_db():
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
-                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';"
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_cumplida VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_cumplida VARCHAR(100);",
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_modificaciones INTEGER DEFAULT 0;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -385,11 +390,19 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
-            try:
-                cursor.execute("ALTER TABLE tickets ADD COLUMN tipo TEXT DEFAULT 'Incidente';")
-                conn.commit()
-            except Exception:
-                pass
+            for col_ticket_sql in [
+                "ALTER TABLE tickets ADD COLUMN tipo TEXT DEFAULT 'Incidente';",
+                "ALTER TABLE tickets ADD COLUMN sla_respuesta_limite TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sla_resolucion_limite TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sla_respuesta_cumplida TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sla_resolucion_cumplida TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sla_modificaciones INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_ticket_sql)
+                    conn.commit()
+                except Exception:
+                    pass
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -789,10 +802,71 @@ TIPOS_TICKET_INFO = {
 }
 MAX_ADJUNTOS_TICKET = 5
 
+# ⏱️ SLA (Acuerdos de Nivel de Servicio): horas máximas de "primera respuesta" (sacar el
+# ticket de 'Abierto') y de "resolución" (llegar a 'Resuelto'/'Cerrado') según la prioridad.
+# Son valores de partida razonables para un equipo de soporte interno; se pueden ajustar
+# aquí si el equipo de TI define otros tiempos formales más adelante.
+SLA_HORAS_POR_PRIORIDAD = {
+    'Urgente': {'respuesta': 2, 'resolucion': 24},
+    'Alta': {'respuesta': 4, 'resolucion': 48},
+    'Media': {'respuesta': 8, 'resolucion': 96},
+    'Baja': {'respuesta': 24, 'resolucion': 168},
+}
+MAX_MODIFICACIONES_SLA = 2
+FORMATO_FECHA_TICKET = "%Y-%m-%d %H:%M:%S"
+
 
 def _puede_ver_ticket(creado_por):
     """Un ticket solo lo puede ver quien lo creó o cualquier cuenta con rol admin (equipo de soporte TI)."""
     return session.get('rol') == 'admin' or session.get('username') == creado_por
+
+
+def _parsear_fecha_ticket(fecha_str):
+    """Convierte el formato de fecha usado en todo el módulo ('YYYY-MM-DD HH:MM:SS') a
+    datetime. Devuelve None si el valor está vacío o no tiene el formato esperado."""
+    if not fecha_str:
+        return None
+    try:
+        return datetime.strptime(fecha_str, FORMATO_FECHA_TICKET)
+    except Exception:
+        return None
+
+
+def _calcular_limite_sla(fecha_base_str, horas):
+    """Suma 'horas' a una fecha base (en el formato del módulo) y devuelve el resultado en
+    ese mismo formato. Si la fecha base no se puede interpretar, usa el momento actual."""
+    base = _parsear_fecha_ticket(fecha_base_str) or datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    return (base + timedelta(hours=horas)).strftime(FORMATO_FECHA_TICKET)
+
+
+def _calcular_sla_ticket(ticket):
+    """Calcula, a partir de los campos crudos del ticket, el estado de cumplimiento del SLA
+    de RESOLUCIÓN (el que se muestra de forma prominente en la interfaz, como hace la mesa
+    de ayuda externa con su 'Compromiso con el usuario'). Devuelve un dict listo para pintar:
+    {'estado': 'en_tiempo'|'vencido'|'cumplido'|'incumplido'|'sin_datos', 'texto': ..., 'color': ...}
+    """
+    limite = _parsear_fecha_ticket(ticket.get('sla_resolucion_limite'))
+    if not limite:
+        return {'estado': 'sin_datos', 'texto': 'Sin datos de SLA', 'color': 'slate'}
+
+    cumplida = _parsear_fecha_ticket(ticket.get('sla_resolucion_cumplida'))
+    ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+
+    if cumplida:
+        if cumplida <= limite:
+            return {'estado': 'cumplido', 'texto': 'Resuelto en tiempo', 'color': 'emerald'}
+        return {'estado': 'incumplido', 'texto': 'Resuelto fuera de tiempo', 'color': 'rose'}
+
+    if ahora > limite:
+        return {'estado': 'vencido', 'texto': 'SLA vencido', 'color': 'rose'}
+
+    restante = limite - ahora
+    if restante.days >= 1:
+        texto = f"Quedan ~{restante.days} día(s)"
+    else:
+        horas_restantes = max(1, restante.seconds // 3600)
+        texto = f"Quedan ~{horas_restantes} hora(s)"
+    return {'estado': 'en_tiempo', 'texto': texto, 'color': 'cyan'}
 
 
 def _codigo_ticket(tipo, id_ticket, fecha_creacion):
@@ -861,7 +935,7 @@ def ver_tickets():
 
     es_soporte = (session.get('rol') == 'admin')
 
-    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE 1=1"
+    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida FROM tickets WHERE 1=1"
     params = []
 
     if not es_soporte:
@@ -897,12 +971,15 @@ def ver_tickets():
         texto_full = f"{r[1]} {r[2]} {r[7]}".lower()
         if not q_busqueda or q_busqueda in texto_full:
             tipo_t = r[3] or 'Incidente'
-            tickets.append({
+            t = {
                 'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'tipo': tipo_t, 'categoria': r[4],
                 'prioridad': r[5], 'estado': r[6], 'creado_por': r[7], 'asignado_a': r[8],
                 'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
-                'codigo': _codigo_ticket(tipo_t, r[0], r[9])
-            })
+                'codigo': _codigo_ticket(tipo_t, r[0], r[9]),
+                'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12]
+            }
+            t['sla'] = _calcular_sla_ticket(t)
+            tickets.append(t)
 
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
@@ -932,16 +1009,21 @@ def crear_ticket():
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
         archivos_subidos = _subir_adjuntos_ticket(request.files.getlist('adjuntos'))
+
+        horas_sla = SLA_HORAS_POR_PRIORIDAD.get(prioridad, SLA_HORAS_POR_PRIORIDAD['Media'])
+        sla_respuesta_limite = _calcular_limite_sla(fecha_act, horas_sla['respuesta'])
+        sla_resolucion_limite = _calcular_limite_sla(fecha_act, horas_sla['resolucion'])
+
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -966,7 +1048,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -981,8 +1063,12 @@ def ver_ticket(ticket_id):
         'id': row[0], 'titulo': row[1], 'descripcion': row[2], 'tipo': tipo_t, 'categoria': row[4],
         'prioridad': row[5], 'estado': row[6], 'creado_por': row[7], 'asignado_a': row[8],
         'fecha_creacion': row[9], 'fecha_actualizacion': row[10],
-        'codigo': _codigo_ticket(tipo_t, row[0], row[9])
+        'codigo': _codigo_ticket(tipo_t, row[0], row[9]),
+        'sla_respuesta_limite': row[11], 'sla_resolucion_limite': row[12],
+        'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
+        'sla_modificaciones': row[15] or 0
     }
+    ticket['sla'] = _calcular_sla_ticket(ticket)
 
     # Adjuntos cargados junto con la solicitud original (no pertenecen a ningún comentario).
     q_adj_ticket = "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = %s AND comentario_id IS NULL ORDER BY id ASC" if db_type == 'postgres' else "SELECT url, nombre_original FROM tickets_adjuntos WHERE ticket_id = ? AND comentario_id IS NULL ORDER BY id ASC"
@@ -1021,7 +1107,8 @@ def ver_ticket(ticket_id):
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
         es_soporte=es_soporte, agentes=agentes,
-        estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET
+        estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
+        max_modificaciones_sla=MAX_MODIFICACIONES_SLA
     )
 
 
@@ -1092,21 +1179,35 @@ def actualizar_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT estado, prioridad, asignado_a FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a FROM tickets WHERE id = ?"
+        q_sel = "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida FROM tickets WHERE id = ?"
         cursor.execute(q_sel, (ticket_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
             return redirect(url_for('ver_tickets'))
 
-        estado_old, prioridad_old, asignado_old = row
+        estado_old, prioridad_old, asignado_old, respuesta_cumplida_old, resolucion_cumplida_old = row
         estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
 
         fecha_act = obtener_fecha_actual()
-        q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ? WHERE id = ?"
-        cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, ticket_id))
+
+        # SLA de "primera respuesta": queda marcado la primera vez que el ticket sale de
+        # 'Abierto' (y no se vuelve a tocar aunque después cambie de estado otra vez).
+        respuesta_cumplida_final = respuesta_cumplida_old
+        if estado_final != 'Abierto' and not respuesta_cumplida_final:
+            respuesta_cumplida_final = fecha_act
+
+        # SLA de "resolución": se marca al llegar a Resuelto/Cerrado. Si el ticket se
+        # reabre (vuelve a Abierto/En Proceso), deja de contar como resuelto a tiempo.
+        if estado_final in ('Resuelto', 'Cerrado'):
+            resolucion_cumplida_final = resolucion_cumplida_old or fecha_act
+        else:
+            resolucion_cumplida_final = None
+
+        q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s, sla_respuesta_cumplida = %s, sla_resolucion_cumplida = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ?, sla_respuesta_cumplida = ?, sla_resolucion_cumplida = ? WHERE id = ?"
+        cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, respuesta_cumplida_final, resolucion_cumplida_final, ticket_id))
 
         cambios = []
         if estado_final != estado_old:
@@ -1129,6 +1230,57 @@ def actualizar_ticket(ticket_id):
     except Exception as e:
         conn.rollback()
         print(f"Error actualizando ticket {ticket_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/<int:ticket_id>/modificar_sla', methods=['POST'])
+@login_required
+@admin_required
+def modificar_sla_ticket(ticket_id):
+    """Permite al equipo de soporte correr la fecha límite de SOLUCIÓN de un ticket (el
+    'compromiso con el usuario'), siempre con un motivo y un tope de MAX_MODIFICACIONES_SLA
+    veces — igual que en la mesa de ayuda externa que ya usa la organización."""
+    nueva_fecha_raw = request.form.get('nueva_fecha', '').strip()  # <input type="datetime-local">
+    motivo = request.form.get('motivo', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT sla_modificaciones, estado FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT sla_modificaciones, estado FROM tickets WHERE id = ?"
+        cursor.execute(q_sel, (ticket_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return redirect(url_for('ver_tickets'))
+
+        mods_actuales = row[0] or 0
+        if mods_actuales >= MAX_MODIFICACIONES_SLA or len(motivo) < 10 or not nueva_fecha_raw:
+            conn.close()
+            return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+        try:
+            nueva_fecha_fmt = datetime.strptime(nueva_fecha_raw, "%Y-%m-%dT%H:%M").strftime(FORMATO_FECHA_TICKET)
+        except Exception:
+            conn.close()
+            return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+        fecha_act = obtener_fecha_actual()
+        usuario = session.get('username')
+
+        q_upd = "UPDATE tickets SET sla_resolucion_limite = %s, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET sla_resolucion_limite = ?, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = ? WHERE id = ?"
+        cursor.execute(q_upd, (nueva_fecha_fmt, fecha_act, ticket_id))
+
+        mensaje_sistema = f"{usuario} modificó la fecha límite de solución a {nueva_fecha_fmt} — Motivo: {motivo}"
+        q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'sistema', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'sistema', ?)"
+        cursor.execute(q_ins, (ticket_id, usuario, mensaje_sistema, fecha_act))
+
+        conn.commit()
+        registrar_log(usuario, "SLA de Ticket Modificado", f"Ticket #{ticket_id}: nueva fecha límite de solución {nueva_fecha_fmt} ({mods_actuales + 1}/{MAX_MODIFICACIONES_SLA}) — {motivo}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error modificando SLA del ticket {ticket_id}: {e}")
 
     conn.close()
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
