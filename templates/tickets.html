@@ -91,6 +91,7 @@
                         <th class="pb-3 px-3 font-bold">Categoría</th>
                         <th class="pb-3 px-3 font-bold">Prioridad</th>
                         <th class="pb-3 px-3 font-bold">Estado</th>
+                        <th class="pb-3 px-3 font-bold">SLA</th>
                         {% if es_soporte %}<th class="pb-3 px-3 font-bold">Creado por</th>
                         <th class="pb-3 px-3 font-bold">Asignado a</th>{% endif %}
                         <th class="pb-3 px-3 font-bold">Actualizado</th>
@@ -134,6 +135,9 @@
                                     <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-lock mr-1"></i>Cerrado</span>
                                 {% endif %}
                             </td>
+                            <td class="py-3.5 px-3">
+                                <span class="px-2.5 py-0.5 bg-{{ t.sla.color }}-500/10 text-{{ t.sla.color }}-400 border border-{{ t.sla.color }}-500/20 text-[10px] font-bold rounded-full whitespace-nowrap">{{ t.sla.texto }}</span>
+                            </td>
                             {% if es_soporte %}
                             <td class="py-3.5 px-3 text-slate-300">{{ t.creado_por }}</td>
                             <td class="py-3.5 px-3 text-slate-400 italic">{{ t.asignado_a or 'Sin asignar' }}</td>
@@ -143,7 +147,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="{% if es_soporte %}9{% else %}7{% endif %}" class="text-center py-10 text-slate-500 font-bold">
+                            <td colspan="{% if es_soporte %}10{% else %}8{% endif %}" class="text-center py-10 text-slate-500 font-bold">
                                 No hay solicitudes que coincidan con los filtros. Crea una con "Nueva Solicitud".
                             </td>
                         </tr>

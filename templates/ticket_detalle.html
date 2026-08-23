@@ -104,6 +104,64 @@
             </div>
         </div>
 
+        <!-- SLA: COMPROMISO DE ATENCIÓN -->
+        {% set _pasos_sla = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado'] %}
+        {% set _paso_actual = _pasos_sla.index(ticket.estado) if ticket.estado in _pasos_sla else 0 %}
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-stopwatch text-orange-400"></i> SLA &mdash; Compromiso de Atención
+                </h3>
+                <span class="px-2.5 py-0.5 bg-{{ ticket.sla.color }}-500/10 text-{{ ticket.sla.color }}-400 border border-{{ ticket.sla.color }}-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ ticket.sla.texto }}</span>
+            </div>
+
+            <!-- BARRA DE PROGRESO -->
+            <div class="mb-5">
+                <div class="flex items-center">
+                    {% for paso in _pasos_sla %}
+                        <div class="w-3 h-3 rounded-full {% if loop.index0 <= _paso_actual %}bg-{{ ticket.sla.color }}-400{% else %}bg-slate-700{% endif %} flex-none"></div>
+                        {% if not loop.last %}
+                            <div class="flex-1 h-0.5 {% if loop.index0 < _paso_actual %}bg-{{ ticket.sla.color }}-400{% else %}bg-slate-700{% endif %}"></div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="flex justify-between mt-1.5 text-[9px] text-slate-500 uppercase font-bold tracking-wider">
+                    <span class="{% if _paso_actual == 0 %}text-slate-200{% endif %}">Recibido</span>
+                    <span class="{% if _paso_actual == 1 %}text-slate-200{% endif %}">En Curso</span>
+                    <span class="{% if _paso_actual == 2 %}text-slate-200{% endif %}">Resuelto</span>
+                    <span class="{% if _paso_actual == 3 %}text-slate-200{% endif %}">Cerrado</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] mb-4">
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5">Respuesta antes de</span>
+                    <span class="text-slate-200 font-mono">{{ ticket.sla_respuesta_limite or 'Sin definir' }}</span>
+                    {% if ticket.sla_respuesta_cumplida %}
+                        <span class="block text-emerald-400 text-[10px] mt-0.5"><i class="fa-solid fa-check mr-1"></i>Atendido {{ ticket.sla_respuesta_cumplida }}</span>
+                    {% endif %}
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5">Solución antes de</span>
+                    <span class="text-slate-200 font-mono">{{ ticket.sla_resolucion_limite or 'Sin definir' }}</span>
+                    {% if ticket.sla_resolucion_cumplida %}
+                        <span class="block text-emerald-400 text-[10px] mt-0.5"><i class="fa-solid fa-check mr-1"></i>Resuelto {{ ticket.sla_resolucion_cumplida }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if es_soporte %}
+            <div class="flex items-center justify-between border-t border-slate-700/50 pt-3">
+                <span class="text-[10px] text-slate-500">Modificaciones disponibles: {{ max_modificaciones_sla - ticket.sla_modificaciones }} de {{ max_modificaciones_sla }}</span>
+                {% if ticket.sla_modificaciones < max_modificaciones_sla %}
+                <button onclick="abrirModalSla()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+                    <i class="fa-solid fa-calendar-pen"></i> Modificar fecha
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
         {% if es_soporte %}
         <!-- PANEL DE GESTIÓN (SOLO SOPORTE TI) -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
@@ -216,5 +274,46 @@
         </div>
 
     </main>
+
+    {% if es_soporte %}
+    <!-- MODAL MODIFICAR FECHA LÍMITE DE SLA -->
+    <div id="modal-sla" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Modificar fecha límite de solución</h3>
+                <button onclick="cerrarModalSla()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Te quedan {{ max_modificaciones_sla - ticket.sla_modificaciones }} de {{ max_modificaciones_sla }} modificaciones para este ticket. El motivo queda registrado en el seguimiento.
+            </p>
+            <form method="POST" action="/tickets/{{ ticket.id }}/modificar_sla" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nueva fecha y hora límite *</label>
+                    <input type="datetime-local" name="nueva_fecha" required value="{{ (ticket.sla_resolucion_limite[:16] | replace(' ', 'T')) if ticket.sla_resolucion_limite else '' }}" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Motivo del cambio *</label>
+                    <textarea name="motivo" required minlength="10" rows="3" placeholder="Ej: se requiere soporte del proveedor externo, se amplía el plazo 2 días." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                    <p class="text-slate-500 text-[10px] mt-1">Mínimo 10 caracteres.</p>
+                </div>
+                <div class="mt-2 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalSla()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold shadow-lg shadow-orange-500/25">Confirmar cambio</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+        function abrirModalSla() {
+            document.getElementById('modal-sla').classList.remove('hidden');
+            document.getElementById('modal-sla').classList.add('flex');
+        }
+        function cerrarModalSla() {
+            document.getElementById('modal-sla').classList.add('hidden');
+            document.getElementById('modal-sla').classList.remove('flex');
+        }
+    </script>
+    {% endif %}
 </body>
 </html>
