@@ -23,7 +23,7 @@
             </h1>
         </div>
 
-        {% if rol == 'admin' %}
+        {% if rol in ['admin', 'agente'] %}
         <button onclick="abrirModalCrear()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-sky-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
             <i class="fa-solid fa-plus"></i>
             <span>Publicar Comunicado</span>
@@ -104,7 +104,7 @@
                         <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
                             <span><i class="fa-regular fa-user text-slate-500"></i> Publicado por: <strong class="text-slate-300">{{ c.autor }}</strong></span>
 
-                            {% if rol == 'admin' %}
+                            {% if rol in ['admin', 'agente'] %}
                                 <div class="flex items-center gap-2">
                                     <button type="button" onclick='abrirModalEditar({{ c | tojson }})' class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
                                         <i class="fa-solid fa-pen text-sky-400"></i> Editar

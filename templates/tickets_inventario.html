@@ -126,6 +126,9 @@
                             <td class="py-3.5 px-3 text-slate-400 italic">{{ a.asignado_a or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
                             <td class="py-3.5 px-3 text-right">
+                                <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs mr-2" title="Adjuntos ({{ a.adjuntos|length }})">
+                                    <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
+                                </button>
                                 <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs mr-2"><i class="fa-solid fa-pen"></i></button>
                                 <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -212,6 +215,27 @@
         </div>
     </div>
 
+    <!-- MODAL ADJUNTOS DEL ACTIVO -->
+    <div id="modal-adjuntos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-adjuntos-titulo" class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-paperclip text-cyan-400"></i> Adjuntos</h3>
+                <button onclick="cerrarModalAdjuntos()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div id="lista-adjuntos" class="mb-4 max-h-64 overflow-y-auto"></div>
+
+            <form id="form-adjuntar" method="POST" enctype="multipart/form-data" class="flex flex-col gap-2 text-xs border-t border-slate-700/60 pt-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Agregar archivo(s) — factura, foto, garantía, manual...</label>
+                <input type="file" name="adjuntos" multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-cyan-500/20 transition-all active:scale-95 mt-1">
+                    <i class="fa-solid fa-upload mr-1"></i> Subir
+                </button>
+            </form>
+        </div>
+    </div>
+
     <script>
         function abrirModalNuevo() {
             document.getElementById('modal-activo-titulo').textContent = 'Nuevo Activo';
@@ -246,6 +270,66 @@
         function cerrarModalActivo() {
             document.getElementById('modal-activo').classList.add('hidden');
             document.getElementById('modal-activo').classList.remove('flex');
+        }
+
+        // 📎 Adjuntos: la lista se arma con el DOM (no innerHTML con datos del usuario) para
+        // que un nombre de archivo con comillas, acentos o símbolos nunca pueda romper el
+        // marcado — el mismo tipo de problema que ya causó un bug real en el botón Editar de
+        // Usuarios (ver comentario en usuarios.html).
+        function abrirModalAdjuntos(activo) {
+            document.getElementById('modal-adjuntos-titulo').textContent = 'Adjuntos de: ' + (activo.nombre || '');
+            document.getElementById('form-adjuntar').action = '/tickets/inventario/' + activo.id + '/adjuntar';
+
+            var lista = document.getElementById('lista-adjuntos');
+            lista.innerHTML = '';
+            var adjuntos = activo.adjuntos || [];
+
+            if (adjuntos.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-3';
+                vacio.textContent = 'Este activo todavía no tiene archivos adjuntos.';
+                lista.appendChild(vacio);
+            } else {
+                adjuntos.forEach(function(adj) {
+                    var fila = document.createElement('div');
+                    fila.className = 'flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2 mb-2';
+
+                    var enlace = document.createElement('a');
+                    enlace.href = adj.url;
+                    enlace.target = '_blank';
+                    enlace.rel = 'noopener noreferrer';
+                    enlace.className = 'text-xs text-slate-300 hover:text-cyan-400 truncate flex-1 mr-2';
+                    enlace.textContent = adj.nombre_original || 'archivo';
+                    fila.appendChild(enlace);
+
+                    var form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/tickets/inventario/adjunto/' + adj.id + '/eliminar';
+                    form.onsubmit = function() { return confirm('¿Eliminar este adjunto?'); };
+
+                    var csrf = document.createElement('input');
+                    csrf.type = 'hidden';
+                    csrf.name = 'csrf_token';
+                    csrf.value = '{{ csrf_token() }}';
+                    form.appendChild(csrf);
+
+                    var btn = document.createElement('button');
+                    btn.type = 'submit';
+                    btn.className = 'text-slate-400 hover:text-rose-400 text-xs';
+                    btn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                    form.appendChild(btn);
+
+                    fila.appendChild(form);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-adjuntos').classList.remove('hidden');
+            document.getElementById('modal-adjuntos').classList.add('flex');
+        }
+        function cerrarModalAdjuntos() {
+            document.getElementById('modal-adjuntos').classList.add('hidden');
+            document.getElementById('modal-adjuntos').classList.remove('flex');
         }
     </script>
 </body>

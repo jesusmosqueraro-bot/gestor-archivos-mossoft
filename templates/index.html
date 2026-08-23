@@ -25,7 +25,7 @@
         </div>
 
         <div class="flex items-center gap-2">
-            {% if rol == 'admin' %}
+            {% if rol in ['admin', 'agente'] %}
                 <a href="/papelera" title="Papelera" class="p-2 bg-slate-700 hover:bg-slate-600 text-rose-400 rounded-xl transition-all text-xs">
                     <i class="fa-solid fa-trash-can"></i>
                 </a>
@@ -101,6 +101,11 @@
                                     <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[10px] font-bold rounded-full uppercase tracking-wider">
                                         {{ item.tipo }}
                                     </span>
+                                    {% if item.visibilidad == 'admin' %}
+                                    <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider" title="Los usuarios Estándar no pueden ver este instructivo">
+                                        <i class="fa-solid fa-lock"></i> Solo Admin/Agente
+                                    </span>
+                                    {% endif %}
                                 </div>
 
                                 <div class="flex items-center gap-2 text-slate-400 text-[11px] font-mono">
@@ -146,7 +151,7 @@
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
 
-                                            {% if rol == 'admin' %}
+                                            {% if rol in ['admin', 'agente'] %}
                                                 <form action="/eliminar_imagen/{{ item.id }}/{{ arch | urlencode }}" method="POST" onsubmit="return confirm('¿Mover este archivo a la papelera?')">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                     <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar archivo">
@@ -164,7 +169,7 @@
                         <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
                             <span><i class="fa-regular fa-clock text-slate-500"></i> {{ item.fecha }}</span>
                             
-                            {% if rol == 'admin' %}
+                            {% if rol in ['admin', 'agente'] %}
                             <div class="flex items-center gap-1">
                                 <button onclick='abrirModalEditar({{ item | tojson }})' class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-blue-400 rounded-lg transition-colors" title="Editar">
                                     <i class="fa-solid fa-pen-to-square"></i>
@@ -247,6 +252,14 @@
                 </div>
 
                 <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Quién puede verlo?</label>
+                    <select name="visibilidad" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="todos">Todos los usuarios</option>
+                        <option value="admin">Solo Administradores / Agentes</option>
+                    </select>
+                </div>
+
+                <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Archivos Adjuntos / Comprimidos (.zip, .rar) *</label>
                     <input type="file" name="archivo" multiple required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
                 </div>
@@ -303,6 +316,14 @@
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción</label>
                     <textarea name="descripcion" id="edit-descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Quién puede verlo?</label>
+                    <select name="visibilidad" id="edit-visibilidad" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="todos">Todos los usuarios</option>
+                        <option value="admin">Solo Administradores / Agentes</option>
+                    </select>
                 </div>
 
                 <div>
@@ -398,6 +419,7 @@
             document.getElementById('edit-categoria').value = item.categoria;
             document.getElementById('edit-tipo').value = item.tipo;
             document.getElementById('edit-descripcion').value = item.descripcion;
+            document.getElementById('edit-visibilidad').value = item.visibilidad || 'todos';
             document.getElementById('modal-editar').classList.remove('hidden');
             document.getElementById('modal-editar').classList.add('flex');
         }
