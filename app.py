@@ -11,6 +11,7 @@ import csv
 import threading
 import base64
 import hashlib
+import hmac
 import traceback
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -59,6 +60,49 @@ app.secret_key = _SECRET_KEY_ENV or base64.urlsafe_b64encode(os.urandom(32)).dec
 
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=25)
+
+# 🍪 Banderas explícitas de la cookie de sesión (antes quedaban en los valores por
+# defecto de Flask). SECURE: el navegador nunca la envía por HTTP sin cifrar (Render
+# solo sirve por HTTPS, así que no afecta nada). HTTPONLY: JavaScript en el navegador
+# no puede leerla, ni siquiera vía un XSS. SAMESITE=Lax: no se envía en peticiones
+# disparadas desde otros sitios, lo que además mitiga CSRF de rebote.
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+
+@app.after_request
+def _agregar_cabeceras_seguridad(response):
+    # 🛡️ Cabeceras HTTP de seguridad estándar, ausentes hasta ahora. No cambian
+    # el comportamiento visible de la app; reducen la superficie de ataque del
+    # navegador (clickjacking, MIME-sniffing, fuga de referrer, etc.).
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains'
+    # CSP armada específicamente con los orígenes externos que la app realmente usa
+    # hoy (Tailwind CDN, Font Awesome/cdnjs, Google Fonts, Cloudinary, reCAPTCHA).
+    # 'unsafe-inline' se mantiene porque las plantillas usan scripts/estilos en línea
+    # (onclick=, <script> por página); quitarlo requeriría reescribir todas las
+    # plantillas a un esquema de nonces, algo que no se hizo en este cambio para no
+    # arriesgar romper funcionalidad fuera de esta ronda de correcciones.
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com "
+        "https://www.google.com https://www.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+        "img-src 'self' data: https://res.cloudinary.com; "
+        "media-src 'self' https://res.cloudinary.com; "
+        "connect-src 'self' https://www.google.com; "
+        "frame-src https://www.google.com; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'self';"
+    )
+    return response
 
 # 🛡️ Protección CSRF real vía Flask-WTF. Todas las plantillas con formularios POST ya
 # incluyen (o se les agregó) el campo oculto csrf_token(); CSRFProtect valida ese token en
@@ -406,15 +450,26 @@ def visor_db():
     tablas_permitidas = ['usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados']
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
-        
-    conn, db_type = get_db()
-    cursor = conn.cursor()
-    
+
     columnas = []
     registros = []
     mensaje_exito = None
     error_sql = None
-    
+
+    # 🛡️ Ejecutar SQL libre aquí puede saltarse por completo las protecciones de
+    # jerarquía de administradores (editar_usuario, eliminar_usuario, etc.), ya que
+    # con una sola consulta cualquier Admin común podría auto-promoverse, editar la
+    # cuenta 'admin' o cambiarle la contraseña. Por eso, aunque la vista de tablas
+    # sigue abierta para todos los admins, ejecutar SQL personalizado queda
+    # restringido únicamente a la cuenta super-admin ('admin').
+    if q_sql and session.get('username') != 'admin':
+        registrar_log(session.get('username'), "SQL Manual Bloqueado", f"Intento de ejecutar SQL personalizado sin ser super-admin: {q_sql[:120]}")
+        q_sql = ''
+        error_sql = "Solo la cuenta 'admin' (super-admin) puede ejecutar consultas SQL personalizadas. Puedes seguir explorando las tablas normalmente."
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
     try:
         if q_sql:
             cursor.execute(q_sql)
@@ -849,7 +904,9 @@ def login():
                     else:
                         # Contraseña vieja guardada en texto plano: valida por compatibilidad
                         # y de una vez la re-guarda ya hasheada para dejar de usar texto plano.
-                        es_valida = (clave_db == password)
+                        # compare_digest en vez de == : evita que el tiempo de respuesta filtre,
+                        # carácter por carácter, cuánto de la contraseña coincidió (timing attack).
+                        es_valida = hmac.compare_digest(clave_db, password)
                         if es_valida:
                             _migrar_password_a_hash(user[0], password)
 
@@ -919,6 +976,24 @@ def incrementar_descarga(galeria_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 200
 
+# 🛡️ Dominios de Cloudinary a los que este proxy tiene permitido conectarse.
+# Cualquier otro destino se rechaza ANTES de hacer la petición saliente: sin esto,
+# /pdf_proxy podía usarse como SSRF hacia servidores externos, y si esos servidores
+# respondían 401, la app terminaba reenviando las credenciales reales de Cloudinary.
+DOMINIOS_CLOUDINARY_PERMITIDOS = {'res.cloudinary.com', 'res-console.cloudinary.com'}
+
+
+def _url_cloudinary_valida(url):
+    try:
+        partes = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    return (
+        partes.scheme == 'https'
+        and (partes.hostname or '').lower() in DOMINIOS_CLOUDINARY_PERMITIDOS
+    )
+
+
 # 🚀 PROXY AUTENTICADO
 @app.route('/pdf_proxy')
 @login_required
@@ -935,6 +1010,15 @@ def pdf_proxy():
             filename_custom = url_target.split('/')[-1]
 
         clean_url = url_target.replace('/fl_attachment/', '/').replace('/upload/fl_attachment/', '/upload/')
+
+        # 🛡️ Bloquea SSRF: solo se permite reenviar la petición si el destino final
+        # es realmente Cloudinary. Sin esta validación, cualquier usuario autenticado
+        # podía apuntar "url" a un servidor propio y capturar las credenciales de
+        # Cloudinary (ver comentario de DOMINIOS_CLOUDINARY_PERMITIDOS arriba).
+        if not _url_cloudinary_valida(clean_url):
+            usuario_actual = session.get('username', 'Anónimo')
+            registrar_log(usuario_actual, "Intento de Proxy Bloqueado", f"URL no permitida (no es Cloudinary): {url_target[:200]}")
+            return "URL no permitida: este proxy solo puede usarse para documentos alojados en Cloudinary.", 400
 
         if download_flag == '1':
             usuario_actual = session.get('username', 'Anónimo')
@@ -2019,4 +2103,8 @@ def eliminar_galeria(galeria_id):
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # 🛡️ debug=False: este bloque no lo usa producción (Render arranca con gunicorn,
+    # ver Procfile), pero si algún día el comando de arranque cambiara a "python app.py",
+    # debug=True habilita el depurador interactivo de Werkzeug, que permite ejecutar
+    # código Python arbitrario desde el navegador. Mejor dejarlo en False siempre.
+    app.run(host='0.0.0.0', port=5000, debug=False)
