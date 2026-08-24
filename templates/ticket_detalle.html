@@ -46,6 +46,13 @@
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
             <div class="flex flex-wrap items-start justify-between gap-3 mb-1">
                 <span class="font-mono text-[11px] text-slate-500">{{ ticket.codigo }}</span>
+                {% if whatsapp_url %}
+                <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
+                   title="Abre WhatsApp Web/Desktop con un mensaje ya redactado para el solicitante — revísalo antes de enviarlo"
+                   class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center gap-2">
+                    <i class="fa-brands fa-whatsapp text-sm"></i> WhatsApp
+                </a>
+                {% endif %}
             </div>
             <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                 <h2 class="text-xl font-extrabold text-white">{{ ticket.titulo }}</h2>

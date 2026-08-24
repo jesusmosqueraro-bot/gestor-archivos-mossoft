@@ -162,11 +162,11 @@
             <!-- CATEGORÍAS -->
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-tags text-amber-400"></i> Categorías <span class="text-slate-500 font-normal">({{ categorias|length }})</span></h3>
-                <form method="POST" action="/tickets/configuracion/nuevo" class="flex gap-2 mb-4">
+                <form method="POST" action="/tickets/configuracion/nuevo" class="flex flex-col gap-2 mb-4">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="tipo" value="categoria"/>
-                    <input type="text" name="nombre" required maxlength="150" placeholder="Ej: Impresoras" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold px-3 rounded-xl text-xs"><i class="fa-solid fa-plus"></i></button>
+                    <input type="text" name="nombre" required maxlength="150" placeholder="Ej: Impresoras" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar categoría</button>
                 </form>
 
                 {% if categorias %}
@@ -179,16 +179,22 @@
 
                 <div class="space-y-2" id="lista-categorias">
                     {% for c in categorias %}
-                    <div class="flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2" data-nombre-config="{{ c.nombre|lower }}">
-                        <form method="POST" action="/tickets/configuracion/{{ c.id }}/editar" class="flex-1 flex items-center gap-2">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <input type="text" name="nombre" value="{{ c.nombre }}" class="flex-1 bg-transparent text-xs text-slate-200 focus:outline-none focus:bg-slate-800 rounded px-1">
-                            <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]"><i class="fa-solid fa-floppy-disk"></i></button>
-                        </form>
-                        <form method="POST" action="/tickets/configuracion/{{ c.id }}/eliminar" onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}?');">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px] ml-2"><i class="fa-solid fa-trash"></i></button>
-                        </form>
+                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl overflow-hidden" data-nombre-config="{{ c.nombre|lower }}">
+                        <button type="button" onclick="toggleConfigItem(this)" class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left">
+                            <span class="text-xs font-bold text-slate-200 truncate"><i class="fa-solid fa-tag text-amber-400/70 text-[10px] mr-1.5"></i>{{ c.nombre }}</span>
+                            <i class="fa-solid fa-chevron-down text-slate-500 text-[10px] flex-none transition-transform"></i>
+                        </button>
+                        <div class="hidden px-3 pb-3">
+                            <form method="POST" action="/tickets/configuracion/{{ c.id }}/editar" class="flex items-center gap-2 mb-1.5">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <input type="text" name="nombre" value="{{ c.nombre }}" placeholder="Nombre" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                            </form>
+                            <form method="POST" action="/tickets/configuracion/{{ c.id }}/eliminar" onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}?');" class="text-right">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar categoría</button>
+                            </form>
+                        </div>
                     </div>
                     {% else %}
                     <p class="text-[11px] text-slate-500 text-center py-3">Sin categorías configuradas todavía.</p>
