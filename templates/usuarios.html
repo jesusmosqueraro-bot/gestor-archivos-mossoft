@@ -31,6 +31,10 @@
             </div>
 
             <div class="flex items-center gap-2">
+                <button onclick="abrirModalEspecialidades()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-briefcase-medical text-xs"></i>
+                    <span class="hidden sm:inline">Especialidades</span>
+                </button>
                 <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2">
                     <i class="fa-solid fa-user-plus text-xs"></i>
                     <span>Nuevo Usuario</span>
@@ -61,6 +65,7 @@
                             <th class="px-6 py-4">Usuario</th>
                             <th class="px-6 py-4">Nombre</th>
                             <th class="px-6 py-4">Cédula</th>
+                            <th class="px-6 py-4">Especialidad</th>
                             <th class="px-6 py-4">Correo Electrónico</th>
                             <th class="px-6 py-4">Teléfono</th>
                             <th class="px-6 py-4">Rol</th>
@@ -76,6 +81,7 @@
                             </td>
                             <td class="px-6 py-4 {% if not u[5] %}text-slate-600 italic{% endif %}">{{ u[5] or 'Sin nombre registrado' }}</td>
                             <td class="px-6 py-4 {% if not u[7] %}text-slate-600 italic{% endif %}">{{ u[7] or 'Sin registrar' }}</td>
+                            <td class="px-6 py-4 {% if not u[8] %}text-slate-600 italic{% endif %}">{{ u[8] or 'Sin asignar' }}</td>
                             <td class="px-6 py-4">{{ u[2] }}</td>
                             <td class="px-6 py-4 {% if not u[6] %}text-slate-600 italic{% endif %}">{{ u[6] or 'Sin registrar' }}</td>
                             <td class="px-6 py-4">
@@ -101,7 +107,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% else %}
@@ -198,6 +204,22 @@
                 </div>
 
                 <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Especialidad *</label>
+                        <button type="button" onclick="abrirModalEspecialidades()" class="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold">+ Administrar</button>
+                    </div>
+                    <select name="especialidad" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <option value="" disabled {% if not form_data or not form_data.especialidad %}selected{% endif %}>Selecciona...</option>
+                        {% for e in especialidades %}
+                        <option value="{{ e.nombre }}" {% if form_data and form_data.especialidad == e.nombre %}selected{% endif %}>{{ e.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if not especialidades %}
+                    <p class="text-[10px] text-amber-400 mt-1">No hay especialidades registradas todavía. Usa "+ Administrar" para agregar la primera antes de crear el usuario.</p>
+                    {% endif %}
+                </div>
+
+                <div>
                     <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Contraseña *</label>
                     <input type="password" name="password" required autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
@@ -261,6 +283,19 @@
                 </div>
 
                 <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Especialidad</label>
+                        <button type="button" onclick="abrirModalEspecialidades()" class="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold">+ Administrar</button>
+                    </div>
+                    <select id="edit_especialidad" name="especialidad" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <option value="">Sin asignar</option>
+                        {% for e in especialidades %}
+                        <option value="{{ e.nombre }}">{{ e.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
                     <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Nueva Contraseña (Opcional)</label>
                     <input type="password" name="password" placeholder="Dejar vacío si no se desea cambiar" autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                 </div>
@@ -282,17 +317,71 @@
         </div>
     </div>
 
+    <!-- Modal Catálogo de Especialidades -->
+    <div id="modalEspecialidades" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-briefcase-medical text-cyan-400"></i> Catálogo de Especialidades
+                </h3>
+                <button onclick="cerrarModalEspecialidades()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form method="POST" action="{{ url_for('crear_especialidad_catalogo') }}" class="flex gap-2 text-xs mb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="nombre" required placeholder="Nombre de la nueva especialidad" class="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shrink-0 text-xs">Agregar</button>
+            </form>
+
+            <div class="mb-3 relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                <input type="text" id="input-buscar-especialidad" oninput="filtrarCatalogoEspecialidades()" placeholder="Buscar especialidad..." autocomplete="off" class="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500">
+            </div>
+
+            <div id="lista-catalogo-especialidades" class="space-y-1.5">
+                {% for e in especialidades %}
+                <div class="fila-especialidad flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs" data-nombre="{{ e.nombre|lower }}">
+                    <span class="text-slate-200 font-semibold">{{ e.nombre }}</span>
+                    <form method="POST" action="{{ url_for('eliminar_especialidad_catalogo', esp_id=e.id) }}" onsubmit="return confirm('¿Desactivar la especialidad {{ e.nombre }}? Ya no aparecerá para nuevos usuarios.')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" title="Desactivar" class="text-slate-400 hover:text-rose-400 p-1"><i class="fa-solid fa-trash-can"></i></button>
+                    </form>
+                </div>
+                {% else %}
+                <p class="text-slate-500 text-xs text-center py-4">No hay especialidades activas en el catálogo.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
     <script>
         function abrirModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.remove('hidden'); }
         function cerrarModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.add('hidden'); }
-        
-        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula) {
+
+        function abrirModalEspecialidades() { document.getElementById('modalEspecialidades').classList.remove('hidden'); }
+        function cerrarModalEspecialidades() { document.getElementById('modalEspecialidades').classList.add('hidden'); }
+
+        // 🔎 Filtro rápido dentro del catálogo de especialidades — útil cuando la lista crece y
+        // hay que encontrar rápido una especialidad puntual para agregarla o desactivarla.
+        function filtrarCatalogoEspecialidades() {
+            var termino = document.getElementById('input-buscar-especialidad').value.trim().toLowerCase();
+            var filas = document.querySelectorAll('#lista-catalogo-especialidades .fila-especialidad');
+            filas.forEach(function(fila) {
+                var nombre = fila.getAttribute('data-nombre') || '';
+                fila.style.display = (!termino || nombre.indexOf(termino) !== -1) ? '' : 'none';
+            });
+        }
+
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
             document.getElementById('edit_nombre').value = nombre || '';
             document.getElementById('edit_telefono').value = telefono || '';
             document.getElementById('edit_cedula').value = cedula || '';
+            document.getElementById('edit_especialidad').value = especialidad || '';
             document.getElementById('modalEditarUsuario').classList.remove('hidden');
         }
         function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
