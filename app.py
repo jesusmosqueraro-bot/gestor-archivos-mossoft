@@ -14,10 +14,12 @@ import base64
 import hashlib
 import hmac
 import traceback
+import time
+import decimal
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context
+from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # flask_wtf seguro (protección CSRF real)
@@ -392,6 +394,16 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
             )''')
+            # 👁️ Registro de qué usuario ya leyó cada comunicado (se marca al ver el muro de
+            # comunicados o el comunicado fijado en la bienvenida) — para saber quién falta.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados_leidos (
+                id SERIAL PRIMARY KEY, comunicado_id INTEGER REFERENCES comunicados(id) ON DELETE CASCADE, usuario VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, UNIQUE(comunicado_id, usuario)
+            )''')
+            # 🔔 Notificaciones internas (campanita): se generan en los mismos puntos donde ya
+            # sale un correo (ticket creado, comentado, cambio de estado).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo VARCHAR(50) DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -482,6 +494,16 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
+            # 👁️ Registro de qué usuario ya leyó cada comunicado (se marca al ver el muro de
+            # comunicados o el comunicado fijado en la bienvenida) — para saber quién falta.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados_leidos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, comunicado_id INTEGER NOT NULL, usuario TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(comunicado_id) REFERENCES comunicados(id) ON DELETE CASCADE, UNIQUE(comunicado_id, usuario)
+            )''')
+            # 🔔 Notificaciones internas (campanita): se generan en los mismos puntos donde ya
+            # sale un correo (ticket creado, comentado, cambio de estado).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo TEXT DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha TEXT NOT NULL
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -726,6 +748,225 @@ def visor_db():
         es_superadmin=(session.get('username') == 'admin')
     )
 
+
+# 💾 MÓDULO DE RESPALDOS DE BASE DE DATOS ------------------------------------------------
+# Vuelca todas las tablas (datos y metadatos — los ARCHIVOS en sí ya viven aparte, en
+# Cloudinary) a un archivo JSON. Dos vías: un botón manual "Generar y descargar ahora"
+# (esta sección), y un hilo en segundo plano que genera uno automático cada día (ver
+# _respaldo_diario_automatico más abajo). Ambos guardan el archivo en RESPALDOS_DIR, que
+# debe apuntar a un disco PERSISTENTE de Render (Mount Path /var/data) — sin eso, cualquier
+# archivo escrito en el propio servidor se pierde en el siguiente despliegue.
+RESPALDOS_DIR = os.environ.get('RESPALDOS_DIR', '/var/data/respaldos')
+RESPALDOS_RETENCION_DIAS = 30  # Antigüedad máxima de los respaldos AUTOMÁTICOS antes de borrarlos solos.
+
+TABLAS_RESPALDO = [
+    'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
+    'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
+    'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
+    'activos_inventario', 'inventario_adjuntos'
+]
+
+
+def _valor_respaldo_serializable(v):
+    """json.dumps no sabe convertir algunos tipos que psycopg2/sqlite3 entregan tal cual
+    (datetime, Decimal) — esto los vuelve texto/número plano antes de serializar, sin tocar
+    el resto."""
+    if isinstance(v, (datetime,)):
+        return v.isoformat()
+    if isinstance(v, decimal.Decimal):
+        return float(v)
+    return v
+
+
+def _generar_respaldo_datos():
+    """Vuelca todas las tablas de TABLAS_RESPALDO a un diccionario serializable — el
+    contenido real del archivo de respaldo. Si una tabla puntual falla (p. ej. todavía no
+    existe en una instalación muy vieja), se omite y se sigue con las demás: un respaldo
+    parcial es mejor que ninguno."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    respaldo = {
+        'generado': datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S'),
+        'motor': db_type,
+        'tablas': {}
+    }
+    for tabla in TABLAS_RESPALDO:
+        try:
+            cursor.execute(f"SELECT * FROM {tabla}")
+            columnas = [d[0] for d in cursor.description]
+            filas = cursor.fetchall()
+            respaldo['tablas'][tabla] = {
+                'columnas': columnas,
+                'filas': [[_valor_respaldo_serializable(v) for v in fila] for fila in filas]
+            }
+        except Exception as e:
+            print(f"⚠️ Error respaldando tabla '{tabla}': {e}")
+    conn.close()
+    return respaldo
+
+
+def _guardar_respaldo_en_disco(prefijo='manual'):
+    """Genera el respaldo y lo guarda como JSON en RESPALDOS_DIR. Devuelve la ruta completa
+    del archivo creado, o None si no se pudo escribir (p. ej. el disco persistente de Render
+    todavía no está montado — la carpeta ni siquiera se puede crear)."""
+    try:
+        os.makedirs(RESPALDOS_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"⚠️ No se pudo crear/acceder a la carpeta de respaldos '{RESPALDOS_DIR}': {e}")
+        return None
+    datos = _generar_respaldo_datos()
+    nombre = f"{prefijo}_{datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d_%H%M%S')}.json"
+    ruta = os.path.join(RESPALDOS_DIR, nombre)
+    try:
+        with open(ruta, 'w', encoding='utf-8') as f:
+            json.dump(datos, f, ensure_ascii=False)
+        return ruta
+    except Exception as e:
+        print(f"⚠️ Error escribiendo el respaldo en '{ruta}': {e}")
+        return None
+
+
+def _listar_respaldos():
+    """Lista los archivos de respaldo ya guardados en RESPALDOS_DIR, más recientes primero.
+    Devuelve [] si la carpeta no existe todavía (nunca se ha generado un respaldo, o el
+    disco persistente no está montado)."""
+    try:
+        if not os.path.isdir(RESPALDOS_DIR):
+            return []
+        items = []
+        for nombre in os.listdir(RESPALDOS_DIR):
+            if not nombre.endswith('.json'):
+                continue
+            ruta = os.path.join(RESPALDOS_DIR, nombre)
+            try:
+                stat = os.stat(ruta)
+                items.append({
+                    'nombre': nombre,
+                    'tipo': 'Automático (diario)' if nombre.startswith('auto_') else 'Manual',
+                    'tamano_kb': round(stat.st_size / 1024, 1),
+                    'fecha': datetime.fromtimestamp(stat.st_mtime, tz=ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S')
+                })
+            except Exception:
+                continue
+        items.sort(key=lambda x: x['fecha'], reverse=True)
+        return items
+    except Exception as e:
+        print(f"⚠️ Error listando respaldos: {e}")
+        return []
+
+
+def _limpiar_respaldos_viejos():
+    """Borra respaldos AUTOMÁTICOS ('auto_...') con más de RESPALDOS_RETENCION_DIAS de
+    antigüedad, para que el disco no se llene solo con el tiempo. Los respaldos MANUALES
+    nunca se borran solos — quien los generó decide cuándo quitarlos desde la página."""
+    try:
+        if not os.path.isdir(RESPALDOS_DIR):
+            return
+        limite = datetime.now(ZONA_HORARIA_COLOMBIA) - timedelta(days=RESPALDOS_RETENCION_DIAS)
+        for nombre in os.listdir(RESPALDOS_DIR):
+            if not nombre.startswith('auto_') or not nombre.endswith('.json'):
+                continue
+            ruta = os.path.join(RESPALDOS_DIR, nombre)
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(ruta), tz=ZONA_HORARIA_COLOMBIA)
+                if mtime < limite:
+                    os.remove(ruta)
+                    print(f"🧹 Respaldo automático vencido eliminado: {nombre}")
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"⚠️ Error limpiando respaldos viejos: {e}")
+
+
+def _respaldo_diario_automatico():
+    """Hilo en segundo plano (arranca una vez al cargar la app): cada hora revisa si ya se
+    generó el respaldo automático de HOY y, si no, lo genera. El propio nombre del archivo
+    del día actúa como candado (se crea con modo exclusivo 'x', que falla si ya existe) —
+    así, aunque Render corra 2 procesos gunicorn de esta misma app en paralelo (como está
+    configurado), solo uno de ellos termina generando el respaldo cada día."""
+    time.sleep(30)  # Pequeña espera para no competir con el arranque del propio servidor.
+    while True:
+        try:
+            os.makedirs(RESPALDOS_DIR, exist_ok=True)
+            hoy = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d')
+            marcador = os.path.join(RESPALDOS_DIR, f"auto_{hoy}.json")
+            try:
+                fh = os.open(marcador, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fh)
+            except FileExistsError:
+                pass  # Ya se generó hoy (por este proceso o por otro worker) — nada que hacer.
+            else:
+                datos = _generar_respaldo_datos()
+                with open(marcador, 'w', encoding='utf-8') as f:
+                    json.dump(datos, f, ensure_ascii=False)
+                print(f"✅ Respaldo automático diario generado: {marcador}")
+                _limpiar_respaldos_viejos()
+        except Exception as e:
+            print(f"⚠️ Error en el hilo de respaldo automático: {e}")
+        time.sleep(3600)  # Revisa cada hora si ya cambió el día.
+
+
+if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
+    threading.Thread(target=_respaldo_diario_automatico, daemon=True).start()
+
+
+@app.route('/admin/respaldos')
+@login_required
+@admin_required
+def ver_respaldos():
+    disco_disponible = os.path.isdir(RESPALDOS_DIR) or _crear_dir_respaldos_silencioso()
+    return render_template('respaldos.html', respaldos=_listar_respaldos(), respaldos_dir=RESPALDOS_DIR, disco_disponible=disco_disponible)
+
+
+def _crear_dir_respaldos_silencioso():
+    try:
+        os.makedirs(RESPALDOS_DIR, exist_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+@app.route('/admin/respaldos/generar', methods=['POST'])
+@login_required
+@admin_required
+def generar_respaldo():
+    """Botón "Generar y descargar ahora": crea un respaldo manual, lo guarda en el disco
+    (queda listado igual que los automáticos) y lo entrega de inmediato como descarga."""
+    ruta = _guardar_respaldo_en_disco(prefijo='manual')
+    if not ruta:
+        flash("No se pudo generar el respaldo: la carpeta de respaldos no está disponible (¿el disco persistente de Render ya está montado en /var/data?).", "error")
+        return redirect(url_for('ver_respaldos'))
+    registrar_log(session.get('username'), "Respaldo de Base de Datos", f"Respaldo manual generado: {os.path.basename(ruta)}")
+    return send_file(ruta, as_attachment=True, download_name=os.path.basename(ruta))
+
+
+@app.route('/admin/respaldos/descargar/<nombre>')
+@login_required
+@admin_required
+def descargar_respaldo(nombre):
+    nombre_seguro = os.path.basename(nombre)
+    ruta = os.path.join(RESPALDOS_DIR, nombre_seguro)
+    if not nombre_seguro.endswith('.json') or not os.path.isfile(ruta):
+        flash("Ese archivo de respaldo ya no existe.", "error")
+        return redirect(url_for('ver_respaldos'))
+    return send_file(ruta, as_attachment=True, download_name=nombre_seguro)
+
+
+@app.route('/admin/respaldos/eliminar/<nombre>', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_respaldo(nombre):
+    nombre_seguro = os.path.basename(nombre)
+    ruta = os.path.join(RESPALDOS_DIR, nombre_seguro)
+    if nombre_seguro.endswith('.json') and os.path.isfile(ruta):
+        try:
+            os.remove(ruta)
+            registrar_log(session.get('username'), "Respaldo de Base de Datos", f"Respaldo eliminado manualmente: {nombre_seguro}")
+        except Exception as e:
+            print(f"⚠️ Error eliminando respaldo '{nombre_seguro}': {e}")
+    return redirect(url_for('ver_respaldos'))
+
+
 # 📢 MÓDULO MURO DE COMUNICADOS
 @app.route('/comunicados')
 @login_required
@@ -769,7 +1010,24 @@ def ver_comunicados():
                 'autor': _nombre_para_mostrar(autor, nombres_usuarios)
             })
 
-    return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
+    # 👁️ Ver el muro de Comunicados marca como "leídos" todos los que están activos (no los
+    # archivados: esos ya son historial, no algo pendiente por leer).
+    usuario_actual = session.get('username')
+    if pestana == 'activos':
+        for c in comunicados:
+            _marcar_comunicado_leido(c['id'], usuario_actual)
+
+    # 👁️ Para soporte/admin, se muestra cuántos usuarios (de los activos) ya leyeron cada
+    # comunicado — útil para políticas de lectura obligatoria.
+    es_soporte = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
+    if es_soporte and comunicados:
+        conteos = _conteo_lecturas_comunicados([c['id'] for c in comunicados])
+        total_usuarios = _total_usuarios_activos()
+        for c in comunicados:
+            c['leidos'] = conteos.get(c['id'], 0)
+            c['total_usuarios'] = total_usuarios
+
+    return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'), es_soporte=es_soporte)
 
 @app.route('/comunicados/crear', methods=['POST'])
 @login_required
@@ -924,6 +1182,33 @@ def eliminar_comunicado(com_id):
 
     conn.close()
     return redirect(url_for('ver_comunicados'))
+
+@app.route('/comunicados/<int:com_id>/lecturas')
+@login_required
+@agente_o_admin_required
+def lecturas_comunicado(com_id):
+    """JSON con quién (de las cuentas activas) ya leyó este comunicado y quién falta —
+    usado por el modal de "Ver lecturas" en el muro de Comunicados."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT usuario, COALESCE(nombre, usuario) FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC")
+        todos = {r[0]: r[1] for r in cursor.fetchall()}
+
+        q = "SELECT usuario, fecha FROM comunicados_leidos WHERE comunicado_id = %s" if db_type == 'postgres' else "SELECT usuario, fecha FROM comunicados_leidos WHERE comunicado_id = ?"
+        cursor.execute(q, (com_id,))
+        leidos = {r[0]: r[1] for r in cursor.fetchall()}
+        conn.close()
+
+        leyeron = [{'usuario': u, 'nombre': todos.get(u, u), 'fecha': f} for u, f in leidos.items() if u in todos]
+        faltan = [{'usuario': u, 'nombre': n} for u, n in todos.items() if u not in leidos]
+        leyeron.sort(key=lambda x: x['fecha'], reverse=True)
+        faltan.sort(key=lambda x: x['nombre'].lower())
+        return {'leyeron': leyeron, 'faltan': faltan, 'total': len(todos)}
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error listando lecturas del comunicado {com_id}: {e}")
+        return {'leyeron': [], 'faltan': [], 'total': 0}
 
 @app.route('/restaurar_comunicado/<int:com_id>', methods=['POST'])
 @login_required
@@ -1172,6 +1457,100 @@ def _info_usuario(username):
     except Exception as e:
         print(f"⚠️ Error buscando perfil de '{username}': {e}")
         return None
+
+
+def _equipo_soporte_activo():
+    """Devuelve la lista de cuentas activas con rol 'admin' o 'agente' — el 'equipo de
+    soporte' que se notifica cuando se crea un ticket nuevo (salvo que quede asignado
+    automáticamente a alguien puntual). Devuelve [] si algo falla."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT usuario, correo FROM usuarios WHERE estado = 'activo' AND rol IN ('admin', 'agente')" if db_type == 'postgres' else "SELECT usuario, correo FROM usuarios WHERE estado = 'activo' AND rol IN ('admin', 'agente')"
+        cursor.execute(q)
+        filas = [{'usuario': r[0], 'correo': r[1]} for r in cursor.fetchall()]
+        conn.close()
+        return filas
+    except Exception as e:
+        print(f"⚠️ Error listando equipo de soporte: {e}")
+        return []
+
+
+def crear_notificacion(usuario, mensaje, url='', tipo='ticket'):
+    """Crea una notificación interna (campanita) para un usuario puntual. Nunca debe tumbar
+    el flujo que la llama: cualquier error se registra en consola y se ignora."""
+    if not usuario:
+        return
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        fecha = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S')
+        q = "INSERT INTO notificaciones (usuario, tipo, mensaje, url, fecha) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO notificaciones (usuario, tipo, mensaje, url, fecha) VALUES (?, ?, ?, ?, ?)"
+        cursor.execute(q, (usuario, tipo, mensaje, url, fecha))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error creando notificación para '{usuario}': {e}")
+
+
+def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
+    """Igual que crear_notificacion pero para una lista de usuarios (p. ej. todo el equipo
+    de soporte), sin duplicar destinatarios."""
+    for u in set(u for u in (usuarios or []) if u):
+        crear_notificacion(u, mensaje, url=url, tipo=tipo)
+
+
+def _marcar_comunicado_leido(comunicado_id, usuario):
+    """Registra que 'usuario' ya vio este comunicado (muro de Comunicados o el fijado en la
+    bienvenida). Si ya estaba marcado, no hace nada — la tabla tiene un UNIQUE(comunicado_id,
+    usuario) para evitar duplicados; el intento repetido se ignora silenciosamente."""
+    if not comunicado_id or not usuario:
+        return
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        fecha = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S')
+        if db_type == 'postgres':
+            q = "INSERT INTO comunicados_leidos (comunicado_id, usuario, fecha) VALUES (%s, %s, %s) ON CONFLICT (comunicado_id, usuario) DO NOTHING"
+        else:
+            q = "INSERT OR IGNORE INTO comunicados_leidos (comunicado_id, usuario, fecha) VALUES (?, ?, ?)"
+        cursor.execute(q, (comunicado_id, usuario, fecha))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error marcando comunicado {comunicado_id} como leído por '{usuario}': {e}")
+
+
+def _conteo_lecturas_comunicados(ids_comunicados):
+    """Devuelve {comunicado_id: cantidad_de_usuarios_que_lo_leyeron} para una lista de ids —
+    usado en el muro de Comunicados para que soporte/admin vea cuántos ya lo vieron."""
+    if not ids_comunicados:
+        return {}
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        placeholders = ','.join(['%s' if db_type == 'postgres' else '?'] * len(ids_comunicados))
+        q = f"SELECT comunicado_id, COUNT(*) FROM comunicados_leidos WHERE comunicado_id IN ({placeholders}) GROUP BY comunicado_id"
+        cursor.execute(q, tuple(ids_comunicados))
+        conteos = {r[0]: r[1] for r in cursor.fetchall()}
+        conn.close()
+        return conteos
+    except Exception as e:
+        print(f"⚠️ Error contando lecturas de comunicados: {e}")
+        return {}
+
+
+def _total_usuarios_activos():
+    """Cantidad de cuentas activas — el denominador para mostrar 'X de Y ya lo leyeron'."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo'")
+        total = cursor.fetchone()[0]
+        conn.close()
+        return total or 0
+    except Exception:
+        return 0
 
 
 # 📝 Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado de color y
@@ -1526,16 +1905,31 @@ def crear_ticket():
         sla_respuesta_limite = _calcular_limite_sla(fecha_act, horas_sla['respuesta'])
         sla_resolucion_limite = _calcular_limite_sla(fecha_act, horas_sla['resolucion'])
 
+        # 🤖 Asignación automática: si el equipo de soporte configuró un responsable para
+        # esta categoría (o, si no hay, para el área) en /tickets/configuracion, el ticket
+        # nace ya asignado a esa persona en vez de quedar "Sin asignar" hasta que alguien lo
+        # tome manualmente. Prioridad: categoría primero, área como respaldo.
+        asignado_auto = None
+        for cfg in _config_ticket_lista('categoria'):
+            if cfg['nombre'] == categoria and cfg.get('responsable'):
+                asignado_auto = cfg['responsable']
+                break
+        if not asignado_auto and area:
+            for cfg in _config_ticket_lista('area'):
+                if cfg['nombre'] == area and cfg.get('responsable'):
+                    asignado_auto = cfg['responsable']
+                    break
+
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, 0, %s, %s, %s) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0, %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, 0, ?, ?, ?)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -1545,7 +1939,44 @@ def crear_ticket():
             detalle_log = f"Nuevo ticket [{tipo}]: '{titulo}' [{categoria} / {prioridad}]"
             if archivos_subidos:
                 detalle_log += f" — {len(archivos_subidos)} adjunto(s)"
+            if asignado_auto:
+                detalle_log += f" — auto-asignado a {asignado_auto}"
             registrar_log(usuario, "Solicitud de Soporte Creada", detalle_log)
+
+            # 📧🔔 Avisamos de la solicitud nueva: confirmación al que la creó, y aviso a quien
+            # deba atenderla — si quedó auto-asignada a alguien puntual (arriba), solo a esa
+            # persona recibe el correo/notificación (para no saturar a todo el equipo con algo
+            # que ya tiene dueño); si no quedó asignada, se avisa a todo el equipo de soporte
+            # activo (admins + agentes), igual que pidió Tomas.
+            codigo = _codigo_ticket(tipo, nuevo_id, fecha_act)
+            url_ticket = url_for('ver_ticket', ticket_id=nuevo_id)
+
+            correo_creador = _correo_de_usuario(usuario)
+            if correo_creador:
+                asunto_creador = f"[Arkiv] Recibimos tu solicitud {codigo}"
+                cuerpo_creador = (
+                    f"Hola,\n\nRecibimos tu solicitud de soporte {codigo} ('{titulo}').\n\n"
+                    f"Puedes ver el detalle y su avance ingresando a Arkiv, módulo Solicitudes TI.\n\n"
+                    f"---\nEquipo de Soporte TI - Arkiv"
+                )
+                threading.Thread(target=enviar_correo_ticket, args=(correo_creador, asunto_creador, cuerpo_creador)).start()
+
+            asunto_soporte = f"[Arkiv] Nueva solicitud {codigo}: '{titulo}'"
+            cuerpo_soporte = (
+                f"Se creó una nueva solicitud de soporte {codigo} ('{titulo}') — {categoria} / prioridad {prioridad}.\n"
+                f"Creada por: {usuario}.\n\nPuedes verla ingresando a Arkiv, módulo Solicitudes TI.\n\n---\nArkiv"
+            )
+            if asignado_auto:
+                correo_asignado = _correo_de_usuario(asignado_auto)
+                if correo_asignado:
+                    threading.Thread(target=enviar_correo_ticket, args=(correo_asignado, asunto_soporte, cuerpo_soporte)).start()
+                crear_notificacion(asignado_auto, f"Nueva solicitud {codigo} asignada a ti: '{titulo}'", url=url_ticket)
+            else:
+                equipo = _equipo_soporte_activo()
+                for miembro in equipo:
+                    if miembro['correo']:
+                        threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto_soporte, cuerpo_soporte)).start()
+                crear_notificacion_para_varios([m['usuario'] for m in equipo], f"Nueva solicitud {codigo}: '{titulo}'", url=url_ticket)
         except Exception as e:
             conn.rollback()
             print(f"Error creando ticket: {e}")
@@ -1671,14 +2102,14 @@ def comentar_ticket(ticket_id):
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    q_sel = "SELECT creado_por, estado, titulo, tipo, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, titulo, tipo, fecha_creacion FROM tickets WHERE id = ?"
+    q_sel = "SELECT creado_por, estado, titulo, tipo, fecha_creacion, asignado_a FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, titulo, tipo, fecha_creacion, asignado_a FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
     if not row or not _puede_ver_ticket(row[0]):
         conn.close()
         return redirect(url_for('ver_tickets'))
-    creado_por, estado_actual, titulo_ticket, tipo_ticket, fecha_creacion_ticket = row
+    creado_por, estado_actual, titulo_ticket, tipo_ticket, fecha_creacion_ticket, asignado_actual = row
 
     # Un ticket cerrado ya no admite comentarios de quien lo creó (solo soporte TI podría
     # necesitar dejar una nota adicional sobre uno ya cerrado).
@@ -1712,13 +2143,14 @@ def comentar_ticket(ticket_id):
             etiqueta = "Comentario interno" if es_interno else "Comentario"
             registrar_log(usuario, "Comentario en Ticket", f"{etiqueta} agregado al ticket #{ticket_id}" + (f" ({len(archivos_subidos)} adjunto(s))" if archivos_subidos else ""))
 
-            # 📧 Avisamos por correo al solicitante cuando alguien más (típicamente soporte TI)
-            # responde su ticket. Las notas internas nunca generan este correo: son solo
-            # para coordinación entre el equipo de soporte.
+            # 📧🔔 Avisamos al solicitante cuando alguien más (típicamente soporte TI) responde
+            # su ticket. Las notas internas nunca generan este aviso: son solo para
+            # coordinación entre el equipo de soporte.
+            url_ticket = url_for('ver_ticket', ticket_id=ticket_id)
+            codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
             if not es_interno and usuario != creado_por:
                 correo_solicitante = _correo_de_usuario(creado_por)
                 if correo_solicitante:
-                    codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
                     asunto = f"[Arkiv] Nueva respuesta en tu solicitud {codigo}"
                     cuerpo = (
                         f"Hola,\n\nTu solicitud de soporte {codigo} ('{titulo_ticket}') tiene una respuesta nueva "
@@ -1726,6 +2158,15 @@ def comentar_ticket(ticket_id):
                         f"Equipo de Soporte TI - Arkiv"
                     )
                     threading.Thread(target=enviar_correo_ticket, args=(correo_solicitante, asunto, cuerpo)).start()
+                crear_notificacion(creado_por, f"Nueva respuesta en tu solicitud {codigo}", url=url_ticket)
+            # 🔔 Si quien comenta es el propio solicitante, avisamos (solo campanita, sin correo
+            # adicional) a quien tenga el ticket asignado — o a todo el equipo si nadie lo ha
+            # tomado — para que sepan que hay actividad nueva por atender.
+            elif not es_interno and usuario == creado_por:
+                if asignado_actual:
+                    crear_notificacion(asignado_actual, f"{usuario} respondió la solicitud {codigo}", url=url_ticket)
+                else:
+                    crear_notificacion_para_varios([m['usuario'] for m in _equipo_soporte_activo()], f"{usuario} respondió la solicitud {codigo}", url=url_ticket)
         except Exception as e:
             conn.rollback()
             print(f"Error comentando ticket {ticket_id}: {e}")
@@ -1807,9 +2248,9 @@ def actualizar_ticket(ticket_id):
         # 📧 Avisamos por correo al solicitante cuando su ticket cambia de ESTADO (no en cada
         # cambio de prioridad/asignación, que es más una gestión interna del equipo de TI).
         if estado_final != estado_old and creado_por != usuario:
+            codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
             correo_solicitante = _correo_de_usuario(creado_por)
             if correo_solicitante:
-                codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
                 asunto = f"[Arkiv] Tu solicitud {codigo} cambió a '{estado_final}'"
                 cuerpo = (
                     f"Hola,\n\nTu solicitud de soporte {codigo} ('{titulo_ticket}') cambió de estado: "
@@ -1817,6 +2258,7 @@ def actualizar_ticket(ticket_id):
                     f"módulo Solicitudes TI.\n\n---\nEquipo de Soporte TI - Arkiv"
                 )
                 threading.Thread(target=enviar_correo_ticket, args=(correo_solicitante, asunto, cuerpo)).start()
+            crear_notificacion(creado_por, f"Tu solicitud {codigo} cambió a '{estado_final}'", url=url_for('ver_ticket', ticket_id=ticket_id))
     except Exception as e:
         conn.rollback()
         print(f"Error actualizando ticket {ticket_id}: {e}")
@@ -2144,11 +2586,13 @@ def configuracion_tickets():
 def crear_configuracion_ticket():
     tipo = request.form.get('tipo', '').strip()
     nombre = request.form.get('nombre', '').strip()
-    # 📍 Dirección y responsable aplican a Sedes y Áreas; Categoría no los usa.
+    # 📍 Dirección solo aplica a Sedes y Áreas. Responsable aplica a los tres tipos (se usa
+    # para la asignación automática de tickets por categoría/área).
     direccion = request.form.get('direccion', '').strip() or None
     responsable = request.form.get('responsable', '').strip() or None
     if tipo not in ('sede', 'area'):
         direccion = None
+    if tipo not in ('sede', 'area', 'categoria'):
         responsable = None
     if tipo in ('area', 'sede', 'categoria') and nombre:
         conn, db_type = get_db()
@@ -2184,13 +2628,20 @@ def editar_configuracion_ticket(config_id):
 
             if tipo_actual in ('sede', 'area'):
                 # 📍 Sedes y Áreas tienen dirección y responsable; sus formularios envían
-                # estos dos campos junto con el nombre. Categoría no los usa.
+                # estos dos campos junto con el nombre.
                 direccion = request.form.get('direccion', '').strip() or None
                 responsable = request.form.get('responsable', '').strip() or None
                 q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
                 cursor.execute(q, (nombre, direccion, responsable, config_id))
                 etiqueta_tipo = 'sede' if tipo_actual == 'sede' else 'área'
                 detalle = f"Se editó la {etiqueta_tipo} '{nombre}' (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
+            elif tipo_actual == 'categoria':
+                # 🤖 Categoría no tiene dirección, pero sí responsable (para la asignación
+                # automática de tickets por categoría).
+                responsable = request.form.get('responsable', '').strip() or None
+                q = "UPDATE ticket_configuraciones SET nombre = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, responsable = ? WHERE id = ?"
+                cursor.execute(q, (nombre, responsable, config_id))
+                detalle = f"Se editó la categoría '{nombre}' (responsable: {responsable or 'sin asignar'})"
             else:
                 q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
                 cursor.execute(q, (nombre, config_id))
@@ -3643,6 +4094,79 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+
+# 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
+# Se generan en los mismos puntos donde ya sale un correo (ticket creado, comentado, cambio
+# de estado — ver crear_ticket/comentar_ticket/actualizar_ticket) vía crear_notificacion() /
+# crear_notificacion_para_varios(). Estas rutas son las que alimenta el ícono de campana que
+# aparece en la barra de navegación de toda página autenticada.
+
+@app.route('/notificaciones/resumen')
+@login_required
+def notificaciones_resumen():
+    """JSON con el contador de no leídas y las últimas notificaciones del usuario en sesión —
+    consultado periódicamente por la campanita en la barra de navegación."""
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_count = "SELECT COUNT(*) FROM notificaciones WHERE usuario = %s AND leida = 0" if db_type == 'postgres' else "SELECT COUNT(*) FROM notificaciones WHERE usuario = ? AND leida = 0"
+        cursor.execute(q_count, (usuario,))
+        no_leidas = cursor.fetchone()[0]
+
+        q_lista = "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = %s ORDER BY id DESC LIMIT 10" if db_type == 'postgres' else "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = ? ORDER BY id DESC LIMIT 10"
+        cursor.execute(q_lista, (usuario,))
+        recientes = [{'id': r[0], 'tipo': r[1], 'mensaje': r[2], 'url': r[3], 'leida': bool(r[4]), 'fecha': r[5]} for r in cursor.fetchall()]
+        conn.close()
+        return {'no_leidas': no_leidas, 'recientes': recientes}
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error obteniendo resumen de notificaciones de '{usuario}': {e}")
+        return {'no_leidas': 0, 'recientes': []}
+
+
+@app.route('/notificaciones/<int:notif_id>/ir')
+@login_required
+def notificacion_ir(notif_id):
+    """La campanita enlaza cada notificación acá en vez de directo a su URL destino: esto
+    la marca como leída y de una vez redirige adonde corresponda (el ticket, etc.)."""
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    destino = url_for('bienvenida')
+    try:
+        q_sel = "SELECT usuario, url FROM notificaciones WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, url FROM notificaciones WHERE id = ?"
+        cursor.execute(q_sel, (notif_id,))
+        row = cursor.fetchone()
+        if row and row[0] == usuario:
+            destino = row[1] or destino
+            q_upd = "UPDATE notificaciones SET leida = 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE notificaciones SET leida = 1 WHERE id = ?"
+            cursor.execute(q_upd, (notif_id,))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error marcando notificación {notif_id} como leída: {e}")
+    conn.close()
+    return redirect(destino)
+
+
+@app.route('/notificaciones/marcar_todas_leidas', methods=['POST'])
+@login_required
+def notificaciones_marcar_todas_leidas():
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE notificaciones SET leida = 1 WHERE usuario = %s AND leida = 0" if db_type == 'postgres' else "UPDATE notificaciones SET leida = 1 WHERE usuario = ? AND leida = 0"
+        cursor.execute(q, (usuario,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error marcando todas las notificaciones de '{usuario}' como leídas: {e}")
+    conn.close()
+    return ('', 204)
+
+
 @app.route('/')
 def home():
     return redirect(url_for('bienvenida')) if session.get('logged_in') else redirect(url_for('login'))
@@ -3655,22 +4179,27 @@ def bienvenida():
     comunicado_fijado = None
     try:
         # "fijado = 1" literal fallaba en Postgres contra la columna BOOLEAN real; "true" funciona en ambos motores.
-        query_fij = "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = true AND estado = 'activo' ORDER BY id DESC LIMIT 1" if db_type == 'postgres' else "SELECT titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
+        query_fij = "SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = true AND estado = 'activo' ORDER BY id DESC LIMIT 1" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, imagen_url, fecha, autor FROM comunicados WHERE fijado = 1 AND estado = 'activo' ORDER BY id DESC LIMIT 1"
         cursor.execute(query_fij)
         row = cursor.fetchone()
         if row:
             comunicado_fijado = {
-                'titulo': row[0],
-                'contenido': row[1],
-                'nivel': row[2],
-                'imagen_url': row[3],
-                'fecha': row[4],
+                'id': row[0],
+                'titulo': row[1],
+                'contenido': row[2],
+                'nivel': row[3],
+                'imagen_url': row[4],
+                'fecha': row[5],
                 # 👤 Alias/nombre real de quien publicó, no su usuario de inicio de sesión.
-                'autor': _nombre_para_mostrar(row[5], _mapa_nombres_usuarios())
+                'autor': _nombre_para_mostrar(row[6], _mapa_nombres_usuarios())
             }
     except Exception:
         comunicado_fijado = None
     conn.close()
+
+    # 👁️ Ver el comunicado fijado en la bienvenida también cuenta como "leído".
+    if comunicado_fijado:
+        _marcar_comunicado_leido(comunicado_fijado['id'], session.get('username'))
 
     return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
 
