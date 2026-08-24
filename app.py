@@ -461,6 +461,11 @@ def init_db():
                 # 🎨 Preferencia de tema (claro/oscuro) de cada usuario: se guarda en su cuenta
                 # (no solo en el navegador) para que lo siga a donde inicie sesión.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tema VARCHAR(20) DEFAULT 'oscuro';",
+                # 🪪 Cédula/documento de identidad: opcional, no es única (no todos los usuarios
+                # existentes la tienen todavía). Sirve para buscar y asociar rápidamente a la
+                # persona correcta al asignarle un activo del Inventario, sin tener que escribir
+                # su nombre completo de memoria.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cedula VARCHAR(30);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -603,6 +608,13 @@ def init_db():
                 # 🎨 Preferencia de tema (claro/oscuro) de cada usuario: se guarda en su cuenta
                 # (no solo en el navegador) para que lo siga a donde inicie sesión.
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN tema TEXT DEFAULT 'oscuro';")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                # 🪪 Cédula/documento de identidad: opcional, no única. Ver comentario equivalente
+                # en la rama de Postgres.
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN cedula TEXT;")
                 conn.commit()
             except Exception:
                 pass
@@ -3383,13 +3395,14 @@ def ver_inventario():
         activos = [a for a in activos if a['estado'] == q_estado]
 
     sedes = _config_ticket_lista('sede')
+    error_placa = request.args.get('error_placa', '').strip()
     return render_template(
         'tickets_inventario.html', es_soporte=True, activos=activos,
         tipos_activo=TIPOS_ACTIVO, estados_activo=ESTADOS_ACTIVO, sedes=sedes,
         q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
         total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
-        por_tipo_activo=por_tipo_activo
+        por_tipo_activo=por_tipo_activo, error_placa=error_placa
     )
 
 
@@ -3420,6 +3433,15 @@ def crear_activo():
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
+            # 🏷️ El número de placa (columna "nombre" en la base) identifica un activo físico
+            # puntual: no puede haber dos filas activas con la misma placa, o el inventario deja
+            # de ser confiable (ya pasó — ver los "15011" duplicados que motivaron este cambio).
+            q_dup = "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(%s) AND eliminado = 0" if db_type == 'postgres' else "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(?) AND eliminado = 0"
+            cursor.execute(q_dup, (nombre,))
+            if cursor.fetchone():
+                conn.close()
+                return redirect(url_for('ver_inventario', error_placa=nombre))
+
             q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, fecha_act, usuario))
             conn.commit()
@@ -3456,6 +3478,14 @@ def editar_activo(activo_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
+            # 🏷️ Misma validación de placa única que en crear_activo, excluyendo la propia fila
+            # que se está editando (si no cambió la placa, no debe chocar consigo misma).
+            q_dup = "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(%s) AND eliminado = 0 AND id != %s" if db_type == 'postgres' else "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(?) AND eliminado = 0 AND id != ?"
+            cursor.execute(q_dup, (nombre, activo_id))
+            if cursor.fetchone():
+                conn.close()
+                return redirect(url_for('ver_inventario', error_placa=nombre))
+
             q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, observaciones = ? WHERE id = ?"
             cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, activo_id))
             conn.commit()
@@ -4669,6 +4699,7 @@ def gestion_usuarios():
         nuevo_pass = request.form.get('password') or ''
         nuevo_email = (request.form.get('email') or '').strip()
         nuevo_telefono = (request.form.get('telefono') or '').strip() or None
+        nueva_cedula = (request.form.get('cedula') or '').strip() or None
         nuevo_rol = request.form.get('rol', 'estandar')
         # 🛡️ Solo se aceptan los 3 roles válidos del sistema; cualquier otro valor (enviado a
         # mano, no desde el formulario) cae a 'estandar' por seguridad.
@@ -4684,7 +4715,7 @@ def gestion_usuarios():
         form_data = {
             'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
             'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
-            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono
+            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono, 'cedula': nueva_cedula
         }
 
         if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email:
@@ -4701,8 +4732,8 @@ def gestion_usuarios():
                 nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
                 nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
                 nuevo_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono) VALUES (%s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono) VALUES (?, ?, ?, ?, 'activo', ?, ?)"
-                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono))
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?)"
+                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
                 conn.close()
@@ -4714,13 +4745,40 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
     return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data, usuario_creado=usuario_creado)
+
+
+@app.route('/usuarios/buscar_cedula')
+@login_required
+def buscar_usuario_por_cedula():
+    """Busca una cuenta de Arkiv por número de cédula — usado desde el buscador rápido del
+    Inventario de Activos para llenar 'Asignado a' sin tener que escribir el nombre completo de
+    memoria. Cualquier usuario logueado puede consultarlo (lo necesitan agentes al registrar
+    activos, no solo administradores)."""
+    cedula = request.args.get('cedula', '').strip()
+    if not cedula:
+        return jsonify({'encontrado': False})
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT usuario, nombre FROM usuarios WHERE cedula = %s AND COALESCE(estado, 'activo') = 'activo'" if db_type == 'postgres' else "SELECT usuario, nombre FROM usuarios WHERE cedula = ? AND COALESCE(estado, 'activo') = 'activo'"
+        cursor.execute(q, (cedula,))
+        row = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error buscando usuario por cédula: {e}")
+        row = None
+    conn.close()
+
+    if not row:
+        return jsonify({'encontrado': False})
+    return jsonify({'encontrado': True, 'usuario': row[0], 'nombre': row[1] or row[0]})
 
 # ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
@@ -4734,20 +4792,22 @@ def editar_usuario(usuario_id):
     nueva_pass = request.form.get('password', '').strip()
     nuevo_nombre = request.form.get('nombre', '').strip()
     nuevo_telefono = request.form.get('telefono', '').strip()
+    nueva_cedula = request.form.get('cedula', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
         rol_target = row[1] if row else None
-        # Si el admin deja el campo Nombre o Teléfono vacío en el formulario de edición, se
-        # conserva el valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar
+        # Si el admin deja el campo Nombre, Teléfono o Cédula vacío en el formulario de edición,
+        # se conserva el valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar
         # los demás datos).
         nombre_final = nuevo_nombre or (row[2] if row else None)
         telefono_final = nuevo_telefono or (row[3] if row else None)
+        cedula_final = nueva_cedula or (row[4] if row else None)
 
         if user_target is None:
             conn.close()
@@ -4772,12 +4832,12 @@ def editar_usuario(usuario_id):
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
