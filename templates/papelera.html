@@ -192,6 +192,17 @@
             tabActivo.classList.add('active', 'text-white');
             tabActivo.classList.remove('text-slate-400');
         }
+
+        // 🧭 Si llegamos aquí con "?tab=comunicados" (p. ej. justo después de enviar un
+        // comunicado a la papelera), abrimos esa pestaña directamente en vez de dejar la de
+        // Instructivos por defecto — así se ve de inmediato que el elemento sí quedó guardado
+        // y se puede restaurar, en vez de parecer que se perdió para siempre.
+        document.addEventListener('DOMContentLoaded', function () {
+            const tabSolicitada = new URLSearchParams(window.location.search).get('tab');
+            if (tabSolicitada && document.getElementById('seccion-' + tabSolicitada)) {
+                cambiarPestana(tabSolicitada);
+            }
+        });
     </script>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
