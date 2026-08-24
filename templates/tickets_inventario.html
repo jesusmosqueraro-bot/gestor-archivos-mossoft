@@ -8,6 +8,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -77,6 +78,22 @@
             <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">De baja</p>
                 <p class="text-2xl font-extrabold text-slate-400">{{ conteos_estado.Baja }}</p>
+            </div>
+        </div>
+
+        <!-- GRÁFICOS: representación visual de los indicadores (respetan los filtros de sede/tipo/búsqueda ya elegidos) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por estado</h3>
+                <div class="h-52"><canvas id="chart-inv-estado"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por tipo de activo</h3>
+                <div class="h-52"><canvas id="chart-inv-tipo"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por sede</h3>
+                <div class="h-52"><canvas id="chart-inv-sede"></canvas></div>
             </div>
         </div>
 
@@ -401,6 +418,41 @@
             document.getElementById('modal-adjuntos').classList.add('hidden');
             document.getElementById('modal-adjuntos').classList.remove('flex');
         }
+    </script>
+
+    <script>
+        // 📊 Representación gráfica de los indicadores del Inventario (mismo patrón ya usado
+        // en Indicadores de Soporte TI): un donut para el estado de los activos y barras para
+        // la distribución por tipo y por sede — todo respetando los filtros ya elegidos.
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        function donut(id, labels, data, colors) {
+            new Chart(document.getElementById(id), {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
+                options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, maintainAspectRatio: false }
+            });
+        }
+        function barra(id, labels, data, color) {
+            new Chart(document.getElementById(id), {
+                type: 'bar',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: color, borderRadius: 6 }] },
+                options: {
+                    plugins: { legend: { display: false } },
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } }
+                }
+            });
+        }
+
+        donut('chart-inv-estado',
+            ['Disponibles', 'Asignados', 'En mantenimiento', 'De baja'],
+            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado.Baja }}],
+            ['#34d399', '#38bdf8', '#f59e0b', '#64748b']
+        );
+        barra('chart-inv-tipo', {{ por_tipo_activo.keys() | list | tojson }}, {{ por_tipo_activo.values() | list | tojson }}, '#a78bfa');
+        barra('chart-inv-sede', {{ distribucion_por_sede | map(attribute='sede') | list | tojson }}, {{ distribucion_por_sede | map(attribute='total') | list | tojson }}, '#2dd4bf');
     </script>
 </body>
 </html>
