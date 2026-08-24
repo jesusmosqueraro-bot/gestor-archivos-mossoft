@@ -2225,6 +2225,7 @@ def exportar_indicadores_tickets():
 def ver_inventario():
     q_estado = request.args.get('estado', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
+    q_sede = request.args.get('sede', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
 
     conn, db_type = get_db()
@@ -2253,26 +2254,47 @@ def ver_inventario():
         'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11],
         'adjuntos': adjuntos_por_activo.get(r[0], [])
     } for r in rows]
+    total_activos_general = len(activos_todos)
+
+    # 🏢 Distribución por sede: cuántos activos hay en cada sede y en qué estado están, sin
+    # importar los filtros aplicados — le da al equipo de soporte una vista completa de la
+    # organización de un vistazo, y cada fila enlaza a la vista filtrada por esa sede.
+    distribucion_por_sede = {}
+    for a in activos_todos:
+        clave = a['sede'] or 'Sin sede asignada'
+        fila = distribucion_por_sede.setdefault(clave, {'sede': clave, 'total': 0, 'estados': {e: 0 for e in ESTADOS_ACTIVO}})
+        fila['total'] += 1
+        fila['estados'][a['estado']] = fila['estados'].get(a['estado'], 0) + 1
+    distribucion_por_sede = sorted(distribucion_por_sede.values(), key=lambda f: (f['sede'] == 'Sin sede asignada', -f['total'], f['sede']))
+
+    # 📊 Los indicadores de arriba (Disponibles/Asignados/...) responden a la sede, tipo y
+    # búsqueda ya elegidos —para que, al filtrar por una sede, se vea cuántos activos de ESA
+    # sede están en cada estado— pero no al estado en sí, así el agente puede seguir comparando
+    # los 4 estados entre ellos en vez de que el filtro los reduzca a uno solo.
+    activos_en_contexto = activos_todos
+    if q_sede:
+        activos_en_contexto = [a for a in activos_en_contexto if (a['sede'] or '') == q_sede]
+    if q_tipo in TIPOS_ACTIVO:
+        activos_en_contexto = [a for a in activos_en_contexto if a['tipo_activo'] == q_tipo]
+    if q_busqueda:
+        activos_en_contexto = [a for a in activos_en_contexto if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
 
     conteos_estado = {e: 0 for e in ESTADOS_ACTIVO}
-    for a in activos_todos:
+    for a in activos_en_contexto:
         conteos_estado[a['estado']] = conteos_estado.get(a['estado'], 0) + 1
-    total_activos = len(activos_todos)
+    total_activos = len(activos_en_contexto)
 
-    activos = activos_todos
+    activos = activos_en_contexto
     if q_estado in ESTADOS_ACTIVO:
         activos = [a for a in activos if a['estado'] == q_estado]
-    if q_tipo in TIPOS_ACTIVO:
-        activos = [a for a in activos if a['tipo_activo'] == q_tipo]
-    if q_busqueda:
-        activos = [a for a in activos if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
 
     sedes = _config_ticket_lista('sede')
     return render_template(
         'tickets_inventario.html', es_soporte=True, activos=activos,
         tipos_activo=TIPOS_ACTIVO, estados_activo=ESTADOS_ACTIVO, sedes=sedes,
-        q_estado=q_estado, q_tipo=q_tipo, q_busqueda=q_busqueda,
-        conteos_estado=conteos_estado, total_activos=total_activos
+        q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_busqueda=q_busqueda,
+        conteos_estado=conteos_estado, total_activos=total_activos,
+        total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede
     )
 
 
