@@ -420,6 +420,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS aplicativos_catalogo (
                 id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
             )''')
+            # 🩺 Catálogo de especialidades/áreas para los usuarios de Arkiv (Medicina General,
+            # Enfermería, Odontología, Administrativo...). Administrable desde /usuarios: el
+            # equipo admin puede agregar nuevas especialidades sin tocar código, igual que con
+            # el catálogo de aplicativos.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS especialidades_catalogo (
+                id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
             # 🪪 Altas y bajas de credenciales de colaboradores: un registro por cada aplicativo
             # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
             # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
@@ -466,6 +473,10 @@ def init_db():
                 # persona correcta al asignarle un activo del Inventario, sin tener que escribir
                 # su nombre completo de memoria.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cedula VARCHAR(30);",
+                # 🩺 Especialidad/área del usuario (Medicina General, Enfermería, Administrativo...),
+                # elegida de especialidades_catalogo. Obligatoria para cuentas nuevas; las que ya
+                # existían quedan en NULL hasta que se editen.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS especialidad VARCHAR(150);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -555,6 +566,11 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS aplicativos_catalogo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
+            # 🩺 Catálogo de especialidades/áreas para los usuarios de Arkiv. Ver comentario
+            # equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS especialidades_catalogo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+            )''')
             # 🪪 Altas y bajas de credenciales de colaboradores: un registro por cada aplicativo
             # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
             # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
@@ -615,6 +631,12 @@ def init_db():
                 # 🪪 Cédula/documento de identidad: opcional, no única. Ver comentario equivalente
                 # en la rama de Postgres.
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN cedula TEXT;")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                # 🩺 Especialidad/área del usuario. Ver comentario equivalente en la rama de Postgres.
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN especialidad TEXT;")
                 conn.commit()
             except Exception:
                 pass
@@ -4208,6 +4230,22 @@ def _catalogo_aplicativos_activos():
     return [{'id': f[0], 'nombre': f[1]} for f in filas]
 
 
+def _catalogo_especialidades_activas():
+    """Especialidades/áreas disponibles para asignar a un usuario (Medicina General, Enfermería,
+    Administrativo...). Administrable desde /usuarios sin tocar código — ver crear_especialidad_catalogo
+    y eliminar_especialidad_catalogo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, nombre FROM especialidades_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando catálogo de especialidades: {e}")
+        filas = []
+    conn.close()
+    return [{'id': f[0], 'nombre': f[1]} for f in filas]
+
+
 @app.route('/credenciales/colaboradores')
 @login_required
 @agente_o_admin_required
@@ -4700,6 +4738,7 @@ def gestion_usuarios():
         nuevo_email = (request.form.get('email') or '').strip()
         nuevo_telefono = (request.form.get('telefono') or '').strip() or None
         nueva_cedula = (request.form.get('cedula') or '').strip() or None
+        nueva_especialidad = (request.form.get('especialidad') or '').strip() or None
         nuevo_rol = request.form.get('rol', 'estandar')
         # 🛡️ Solo se aceptan los 3 roles válidos del sistema; cualquier otro valor (enviado a
         # mano, no desde el formulario) cae a 'estandar' por seguridad.
@@ -4715,11 +4754,12 @@ def gestion_usuarios():
         form_data = {
             'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
             'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
-            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono, 'cedula': nueva_cedula
+            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono, 'cedula': nueva_cedula,
+            'especialidad': nueva_especialidad
         }
 
-        if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email:
-            error = "Nombre, primer apellido, correo y contraseña son obligatorios para crear un usuario."
+        if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
+            error = "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario."
 
         if not error:
             try:
@@ -4732,8 +4772,8 @@ def gestion_usuarios():
                 nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
                 nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
                 nuevo_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?)"
-                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula))
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?)"
+                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
                 conn.close()
@@ -4745,13 +4785,16 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
-    return render_template('usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data, usuario_creado=usuario_creado)
+    return render_template(
+        'usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data,
+        usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas()
+    )
 
 
 @app.route('/usuarios/buscar_cedula')
@@ -4793,21 +4836,23 @@ def editar_usuario(usuario_id):
     nuevo_nombre = request.form.get('nombre', '').strip()
     nuevo_telefono = request.form.get('telefono', '').strip()
     nueva_cedula = request.form.get('cedula', '').strip()
+    nueva_especialidad = request.form.get('especialidad', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono, cedula FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
         rol_target = row[1] if row else None
-        # Si el admin deja el campo Nombre, Teléfono o Cédula vacío en el formulario de edición,
-        # se conserva el valor que ya tenía (permite editar solo correo/rol/contraseña sin borrar
-        # los demás datos).
+        # Si el admin deja el campo Nombre, Teléfono, Cédula o Especialidad vacío en el formulario
+        # de edición, se conserva el valor que ya tenía (permite editar solo correo/rol/contraseña
+        # sin borrar los demás datos).
         nombre_final = nuevo_nombre or (row[2] if row else None)
         telefono_final = nuevo_telefono or (row[3] if row else None)
         cedula_final = nueva_cedula or (row[4] if row else None)
+        especialidad_final = nueva_especialidad or (row[5] if row else None)
 
         if user_target is None:
             conn.close()
@@ -4832,12 +4877,12 @@ def editar_usuario(usuario_id):
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
@@ -4847,6 +4892,46 @@ def editar_usuario(usuario_id):
 
     conn.close()
     return redirect(url_for('gestion_usuarios'))
+
+
+# 🩺 CATÁLOGO DE ESPECIALIDADES (administrable desde /usuarios, igual que el de aplicativos)
+@app.route('/usuarios/especialidades/crear', methods=['POST'])
+@login_required
+@admin_required
+def crear_especialidad_catalogo():
+    nombre = request.form.get('nombre', '').strip()
+    if nombre:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q = "INSERT INTO especialidades_catalogo (nombre) VALUES (%s)" if db_type == 'postgres' else "INSERT INTO especialidades_catalogo (nombre) VALUES (?)"
+            cursor.execute(q, (nombre,))
+            conn.commit()
+            registrar_log(session.get('username'), "Catálogo de Especialidades", f"Se agregó la especialidad '{nombre}'")
+        except Exception as e:
+            conn.rollback()
+            print(f"⚠️ Error agregando especialidad '{nombre}': {e}")
+        conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
+
+@app.route('/usuarios/especialidades/<int:esp_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_especialidad_catalogo(esp_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE especialidades_catalogo SET estado = 'inactivo' WHERE id = %s" if db_type == 'postgres' else "UPDATE especialidades_catalogo SET estado = 'inactivo' WHERE id = ?"
+        cursor.execute(q, (esp_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Catálogo de Especialidades", f"Se desactivó la especialidad ID {esp_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error desactivando especialidad {esp_id}: {e}")
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
 
 # ❌ ELIMINAR USUARIO
 @app.route('/eliminar_usuario/<int:usuario_id>', methods=['POST'])
