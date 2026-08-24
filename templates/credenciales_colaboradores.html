@@ -140,6 +140,13 @@
                                         <i class="fa-solid fa-user-slash"></i> <span class="hidden lg:inline">Deshabilitar</span>
                                     </button>
                                 </form>
+                                {% else %}
+                                <form action="{{ url_for('reactivar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Reactivar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-semibold rounded-xl transition-all">
+                                        <i class="fa-solid fa-user-check"></i> <span class="hidden lg:inline">Reactivar</span>
+                                    </button>
+                                </form>
                                 {% endif %}
                             </td>
                         </tr>
@@ -169,7 +176,12 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
-                    <input type="text" name="colaborador" required placeholder="Nombre del colaborador" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <input type="text" name="colaborador" required list="lista_colaboradores" autocomplete="off" placeholder="Nombre del colaborador (existente o nuevo)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <datalist id="lista_colaboradores">
+                        {% for c in colaboradores_existentes %}
+                        <option value="{{ c }}"></option>
+                        {% endfor %}
+                    </datalist>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
