@@ -26,6 +26,10 @@
             </h1>
         </div>
         <div class="flex items-center gap-2">
+            <button onclick="abrirModalTiposActivo()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-layer-group"></i>
+                <span class="hidden sm:inline">Tipos de activo</span>
+            </button>
             <button onclick="abrirModalNuevo()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-plus"></i>
                 <span>Nuevo Activo</span>
@@ -69,7 +73,7 @@
         </div>
 
         <!-- TARJETAS DE CONTEO POR ESTADO (reflejan la sede/tipo/búsqueda ya elegidos) -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-6 gap-4">
             <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total</p>
                 <p class="text-2xl font-extrabold text-white">{{ total_activos }}</p>
@@ -89,6 +93,10 @@
             <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">De baja</p>
                 <p class="text-2xl font-extrabold text-slate-400">{{ conteos_estado.Baja }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Perdidos</p>
+                <p class="text-2xl font-extrabold text-rose-400">{{ conteos_estado.Perdido }}</p>
             </div>
         </div>
 
@@ -123,6 +131,7 @@
                         <th class="pb-2 px-2 font-bold text-center text-blue-400">Asignados</th>
                         <th class="pb-2 px-2 font-bold text-center text-amber-400">Mantenimiento</th>
                         <th class="pb-2 px-2 font-bold text-center text-slate-400">Baja</th>
+                        <th class="pb-2 px-2 font-bold text-center text-rose-400">Perdidos</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-700/40">
@@ -140,6 +149,7 @@
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Asignado }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Mantenimiento }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Baja }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Perdido }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -214,6 +224,8 @@
                                     <span class="px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Asignado</span>
                                 {% elif a.estado == 'Mantenimiento' %}
                                     <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Mantenimiento</span>
+                                {% elif a.estado == 'Perdido' %}
+                                    <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Perdido</span>
                                 {% else %}
                                     <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Baja</span>
                                 {% endif %}
@@ -221,9 +233,16 @@
                             <td class="py-3.5 px-3 text-slate-400 italic">{{ a.asignado_a or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
                             <td class="py-3.5 px-3 text-right">
+                                <button type="button" onclick='abrirModalHistorialTickets({{ a | tojson }})' class="text-slate-400 hover:text-indigo-400 text-xs mr-2" title="Historial de tickets ({{ a.tickets_historial|length }})">
+                                    <i class="fa-solid fa-clock-rotate-left"></i>{% if a.tickets_historial %} <span class="text-[10px] font-bold">{{ a.tickets_historial|length }}</span>{% endif %}
+                                </button>
+                                <button type="button" onclick='abrirModalTrazabilidad({{ a | tojson }})' class="text-slate-400 hover:text-violet-400 text-xs mr-2" title="Trazabilidad del activo">
+                                    <i class="fa-solid fa-code-branch"></i>
+                                </button>
                                 <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs mr-2" title="Adjuntos ({{ a.adjuntos|length }})">
                                     <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
                                 </button>
+                                <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs mr-2" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
                                 <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs mr-2"><i class="fa-solid fa-pen"></i></button>
                                 <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -334,6 +353,153 @@
                 <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-cyan-500/20 transition-all active:scale-95 mt-1">
                     <i class="fa-solid fa-upload mr-1"></i> Subir
                 </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Catálogo de Tipos de activo -->
+    <div id="modal-tipos-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-layer-group text-orange-400"></i> Tipos de activo</h3>
+                <button onclick="cerrarModalTiposActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('crear_tipo_activo_catalogo') }}" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-4 border-b border-slate-700/60 pb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="key" required maxlength="50" placeholder="Key (ej: TABLET)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 uppercase" style="text-transform:uppercase">
+                <input type="text" name="etiqueta" required maxlength="150" placeholder="Etiqueta (ej: Tablet)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500">
+                <select name="icono" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 sm:col-span-2">
+                    {% for ic in ICONOS_TIPO_ACTIVO %}<option value="{{ ic }}"><i class="fa-solid fa-{{ ic }}"></i> {{ ic }}</option>{% endfor %}
+                </select>
+                <button type="submit" class="sm:col-span-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold text-xs">
+                    <i class="fa-solid fa-plus mr-1"></i> Agregar tipo
+                </button>
+            </form>
+
+            <div class="space-y-1.5">
+                {% for t in tipos_activo_catalogo %}
+                <div class="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs">
+                    <span class="text-slate-200 font-semibold flex items-center gap-2">
+                        <i class="fa-solid fa-{{ t.icono }} text-orange-400 w-4 text-center"></i> {{ t.etiqueta }}
+                        <span class="text-slate-500 font-mono text-[10px]">{{ t.key }}</span>
+                    </span>
+                    <div class="flex items-center gap-1">
+                        <form method="POST" action="{{ url_for('reordenar_tipo_activo_catalogo', tipo_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="direccion" value="up">
+                            <button type="submit" title="Subir" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-arrow-up"></i></button>
+                        </form>
+                        <form method="POST" action="{{ url_for('reordenar_tipo_activo_catalogo', tipo_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="direccion" value="down">
+                            <button type="submit" title="Bajar" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-arrow-down"></i></button>
+                        </form>
+                        <form method="POST" action="{{ url_for('eliminar_tipo_activo_catalogo', tipo_id=t.id) }}" onsubmit="return confirm('¿Desactivar el tipo {{ t.etiqueta }}? Ya no aparecerá para nuevos activos.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" title="Desactivar" class="text-slate-400 hover:text-rose-400 p-1"><i class="fa-solid fa-trash-can"></i></button>
+                        </form>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-slate-500 text-xs text-center py-4">No hay tipos de activo activos en el catálogo.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL HISTORIAL DE TICKETS DEL ACTIVO -->
+    <div id="modal-historial-tickets" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-indigo-400"></i> Historial de tickets del activo</h3>
+                    <p id="historial-tickets-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalHistorialTickets()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="historial-tickets-lista" class="space-y-2 mt-4 max-h-[60vh] overflow-y-auto"></div>
+            <div class="mt-4 flex justify-end">
+                <button type="button" onclick="cerrarModalHistorialTickets()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TRAZABILIDAD DEL ACTIVO -->
+    <div id="modal-trazabilidad" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-code-branch text-violet-400"></i> Trazabilidad del activo</h3>
+                    <p id="trazabilidad-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalTrazabilidad()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="trazabilidad-lista" class="space-y-2 mt-4 max-h-[60vh] overflow-y-auto"></div>
+            <div class="mt-4 flex justify-end">
+                <button type="button" onclick="cerrarModalTrazabilidad()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL REEMPLAZAR ACTIVO -->
+    <div id="modal-reemplazar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-xl w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-arrows-rotate text-amber-400"></i> Reemplazar activo</h3>
+                    <p id="reemplazar-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalReemplazar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" id="form-reemplazar" class="flex flex-col gap-3 text-xs mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="motivo" id="input-reemplazo-motivo" required>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1.5 uppercase tracking-wider text-[10px]">Motivo del reemplazo *</label>
+                    <div id="reemplazo-motivo-cards" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {% for m in motivos_reemplazo %}
+                        <div data-motivo="{{ m.clave }}" onclick="seleccionarMotivoReemplazo('{{ m.clave }}')" class="motivo-card relative flex flex-col gap-1 p-2.5 rounded-xl border-2 border-slate-700 bg-slate-900/40 cursor-pointer transition-all">
+                            <span class="flex items-center gap-1.5 text-slate-200 font-bold text-[11px]"><i class="fa-solid fa-{{ m.icono }} text-amber-400"></i> {{ m.clave }}</span>
+                            <span class="text-slate-500 text-[10px] leading-snug">{{ m.descripcion }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas adicionales</label>
+                    <textarea name="notas" rows="2" placeholder="Información adicional (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Activo de reemplazo (opcional)</label>
+                    <input type="text" id="input-reemplazo-buscar" oninput="filtrarActivosReemplazo()" placeholder="Busca por nombre, marca, modelo..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <select name="activo_nuevo_id" id="select-reemplazo-activo" size="4" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <option value="">-- Sin activo de reemplazo (solo dar de baja) --</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha del reemplazo</label>
+                        <input type="date" name="fecha_reemplazo" id="input-reemplazo-fecha" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-slate-500 text-[10px] mt-1">Cuándo pasó físicamente (puede ser retroactivo).</p>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Qué pasa con el activo anterior?</label>
+                        <select name="estado_anterior_resultante" id="input-reemplazo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            {% for e in estados_resultantes_reemplazo %}<option value="{{ e.valor }}">{{ e.etiqueta }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mt-2 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalReemplazar()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold text-xs"><i class="fa-solid fa-arrows-rotate mr-1"></i> Reemplazar</button>
+                </div>
             </form>
         </div>
     </div>
@@ -472,6 +638,175 @@
             document.getElementById('modal-adjuntos').classList.add('hidden');
             document.getElementById('modal-adjuntos').classList.remove('flex');
         }
+
+        function abrirModalTiposActivo() {
+            document.getElementById('modal-tipos-activo').classList.remove('hidden');
+            document.getElementById('modal-tipos-activo').classList.add('flex');
+        }
+
+        function cerrarModalTiposActivo() {
+            document.getElementById('modal-tipos-activo').classList.add('hidden');
+            document.getElementById('modal-tipos-activo').classList.remove('flex');
+        }
+
+        // 🎫 HISTORIAL DE TICKETS DEL ACTIVO
+        function abrirModalHistorialTickets(activo) {
+            document.getElementById('historial-tickets-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            var lista = document.getElementById('historial-tickets-lista');
+            lista.innerHTML = '';
+            var tickets = activo.tickets_historial || [];
+
+            if (tickets.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-6';
+                vacio.textContent = 'Este activo no tiene tickets registrados. Cuando se cree un ticket vinculado a este activo, aparecerá aquí.';
+                lista.appendChild(vacio);
+            } else {
+                tickets.forEach(function(tk) {
+                    var fila = document.createElement('a');
+                    fila.href = '/tickets/' + tk.id;
+                    fila.className = 'flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5 hover:border-indigo-500/50 transition-colors';
+
+                    var izq = document.createElement('div');
+                    izq.className = 'flex flex-col';
+                    var codigo = document.createElement('span');
+                    codigo.className = 'text-[10px] text-slate-500 font-mono';
+                    codigo.textContent = tk.codigo;
+                    var titulo = document.createElement('span');
+                    titulo.className = 'text-xs text-slate-200';
+                    titulo.textContent = tk.titulo;
+                    izq.appendChild(codigo);
+                    izq.appendChild(titulo);
+
+                    var estado = document.createElement('span');
+                    estado.className = 'px-2 py-0.5 bg-slate-700/50 text-slate-300 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap';
+                    estado.textContent = tk.estado;
+
+                    fila.appendChild(izq);
+                    fila.appendChild(estado);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-historial-tickets').classList.remove('hidden');
+            document.getElementById('modal-historial-tickets').classList.add('flex');
+        }
+        function cerrarModalHistorialTickets() {
+            document.getElementById('modal-historial-tickets').classList.add('hidden');
+            document.getElementById('modal-historial-tickets').classList.remove('flex');
+        }
+
+        // 🔀 TRAZABILIDAD DEL ACTIVO (cadena de reemplazos, entrantes y salientes)
+        function abrirModalTrazabilidad(activo) {
+            document.getElementById('trazabilidad-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            var lista = document.getElementById('trazabilidad-lista');
+            lista.innerHTML = '';
+            var eventos = activo.trazabilidad || [];
+
+            if (eventos.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-6';
+                vacio.textContent = 'Este activo no tiene historial de reemplazos. Cuando un activo se reemplace por otro (por daño, renovación, etc.) la cadena aparecerá aquí para reconstruir la historia completa.';
+                lista.appendChild(vacio);
+            } else {
+                eventos.forEach(function(ev) {
+                    var fila = document.createElement('div');
+                    fila.className = 'bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5';
+
+                    var encabezado = document.createElement('div');
+                    encabezado.className = 'flex items-center justify-between mb-1';
+                    var titulo = document.createElement('span');
+                    titulo.className = 'text-xs font-bold ' + (ev.direccion === 'saliente' ? 'text-amber-400' : 'text-emerald-400');
+                    titulo.textContent = ev.direccion === 'saliente'
+                        ? 'Reemplazado por: ' + (ev.otro_nombre || 'sin activo asignado')
+                        : 'Reemplazó a: ' + (ev.otro_nombre || 'activo eliminado');
+                    var fecha = document.createElement('span');
+                    fecha.className = 'text-[10px] text-slate-500';
+                    fecha.textContent = ev.fecha_reemplazo;
+                    encabezado.appendChild(titulo);
+                    encabezado.appendChild(fecha);
+
+                    var detalle = document.createElement('p');
+                    detalle.className = 'text-[11px] text-slate-400';
+                    detalle.textContent = 'Motivo: ' + ev.motivo + (ev.notas ? ' — ' + ev.notas : '');
+
+                    fila.appendChild(encabezado);
+                    fila.appendChild(detalle);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-trazabilidad').classList.remove('hidden');
+            document.getElementById('modal-trazabilidad').classList.add('flex');
+        }
+        function cerrarModalTrazabilidad() {
+            document.getElementById('modal-trazabilidad').classList.add('hidden');
+            document.getElementById('modal-trazabilidad').classList.remove('flex');
+        }
+
+        // 🔁 REEMPLAZAR ACTIVO
+        var ACTIVOS_PARA_REEMPLAZO = {{ activos_para_reemplazo | tojson }};
+
+        function seleccionarMotivoReemplazo(clave) {
+            document.getElementById('input-reemplazo-motivo').value = clave;
+            document.querySelectorAll('#reemplazo-motivo-cards .motivo-card').forEach(function(card) {
+                if (card.getAttribute('data-motivo') === clave) {
+                    card.classList.add('border-amber-500', 'bg-amber-500/10');
+                    card.classList.remove('border-slate-700', 'bg-slate-900/40');
+                } else {
+                    card.classList.remove('border-amber-500', 'bg-amber-500/10');
+                    card.classList.add('border-slate-700', 'bg-slate-900/40');
+                }
+            });
+        }
+
+        function filtrarActivosReemplazo() {
+            var texto = document.getElementById('input-reemplazo-buscar').value.trim().toLowerCase();
+            var select = document.getElementById('select-reemplazo-activo');
+            var activoActualId = parseInt(select.getAttribute('data-activo-actual'), 10);
+            select.innerHTML = '';
+
+            var opcionVacia = document.createElement('option');
+            opcionVacia.value = '';
+            opcionVacia.textContent = '-- Sin activo de reemplazo (solo dar de baja) --';
+            select.appendChild(opcionVacia);
+
+            ACTIVOS_PARA_REEMPLAZO.forEach(function(act) {
+                if (act.id === activoActualId) { return; }
+                var texto_act = (act.nombre + ' ' + (act.marca || '') + ' ' + (act.modelo || '')).toLowerCase();
+                if (texto && texto_act.indexOf(texto) === -1) { return; }
+                var opcion = document.createElement('option');
+                opcion.value = act.id;
+                opcion.textContent = act.nombre + ' — ' + (act.marca || '') + ' ' + (act.modelo || '') + ' (' + act.estado + ')';
+                select.appendChild(opcion);
+            });
+        }
+
+        function abrirModalReemplazar(activo) {
+            document.getElementById('reemplazar-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            document.getElementById('form-reemplazar').action = '/tickets/inventario/' + activo.id + '/reemplazar';
+            document.getElementById('input-reemplazo-motivo').value = '';
+            seleccionarMotivoReemplazo('');
+            document.getElementById('input-reemplazo-buscar').value = '';
+            document.getElementById('select-reemplazo-activo').setAttribute('data-activo-actual', activo.id);
+            filtrarActivosReemplazo();
+            var hoy = new Date().toISOString().slice(0, 10);
+            document.getElementById('input-reemplazo-fecha').value = hoy;
+            document.getElementById('input-reemplazo-estado').value = 'Baja';
+            document.getElementById('modal-reemplazar').classList.remove('hidden');
+            document.getElementById('modal-reemplazar').classList.add('flex');
+        }
+        function cerrarModalReemplazar() {
+            document.getElementById('modal-reemplazar').classList.add('hidden');
+            document.getElementById('modal-reemplazar').classList.remove('flex');
+        }
+
+        document.getElementById('form-reemplazar').addEventListener('submit', function(e) {
+            if (!document.getElementById('input-reemplazo-motivo').value) {
+                e.preventDefault();
+                alert('Selecciona el motivo del reemplazo.');
+            }
+        });
     </script>
 
     <script>
@@ -501,9 +836,9 @@
         }
 
         donut('chart-inv-estado',
-            ['Disponibles', 'Asignados', 'En mantenimiento', 'De baja'],
-            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado.Baja }}],
-            ['#34d399', '#38bdf8', '#f59e0b', '#64748b']
+            ['Disponibles', 'Asignados', 'En mantenimiento', 'De baja', 'Perdidos'],
+            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado.Baja }}, {{ conteos_estado.Perdido }}],
+            ['#34d399', '#38bdf8', '#f59e0b', '#64748b', '#fb7185']
         );
         barra('chart-inv-tipo', {{ por_tipo_activo.keys() | list | tojson }}, {{ por_tipo_activo.values() | list | tojson }}, '#a78bfa');
         barra('chart-inv-sede', {{ distribucion_por_sede | map(attribute='sede') | list | tojson }}, {{ distribucion_por_sede | map(attribute='total') | list | tojson }}, '#2dd4bf');

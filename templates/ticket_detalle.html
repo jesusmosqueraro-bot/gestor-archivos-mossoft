@@ -92,6 +92,8 @@
                         <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-spinner mr-1"></i>En Proceso</span>
                     {% elif ticket.estado == 'Resuelto' %}
                         <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-check mr-1"></i>Resuelto</span>
+                    {% elif ticket.estado == 'Cancelado' %}
+                        <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-ban mr-1"></i>Cancelado</span>
                     {% else %}
                         <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-lock mr-1"></i>Cerrado</span>
                     {% endif %}
@@ -169,6 +171,17 @@
                     <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5"><i class="fa-solid fa-location-dot mr-1"></i>Sede</span>
                     <span class="text-slate-200">{{ ticket.sede or 'Sin especificar' }}</span>
                 </div>
+                {% if ticket.activo %}
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+                    <span class="block text-slate-500 uppercase tracking-wider font-bold text-[10px] mb-0.5"><i class="fa-solid fa-boxes-stacked mr-1"></i>Activo relacionado</span>
+                    {% if es_soporte %}
+                    <a href="{{ url_for('ver_inventario') }}?q={{ ticket.activo.nombre }}" class="text-orange-400 hover:text-orange-300 font-semibold">{{ ticket.activo.nombre }}</a>
+                    {% else %}
+                    <span class="text-slate-200 font-semibold">{{ ticket.activo.nombre }}</span>
+                    {% endif %}
+                    <span class="text-slate-500"> — {{ ticket.activo.tipo_activo }} · {{ ticket.activo.estado }}</span>
+                </div>
+                {% endif %}
             </div>
         </div>
 
@@ -319,6 +332,20 @@
                     <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar
                 </button>
             </form>
+            {% if session.get('username') == 'admin' %}
+            <!-- 🗑️ Baja definitiva de la vista (para tickets de prueba/capacitación o creados
+                 por error). No es lo mismo que poner el estado en "Cancelado": esto lo saca por
+                 completo de las listas e indicadores. Solo el super-admin la ve. -->
+            <div class="mt-4 pt-4 border-t border-slate-700/60 flex items-center justify-between">
+                <p class="text-[11px] text-slate-500">Solo para tickets de prueba, duplicados o creados por error. No se puede deshacer desde la interfaz.</p>
+                <form method="POST" action="/tickets/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar definitivamente esta solicitud {{ ticket.codigo }}? Dejará de aparecer en las listas e indicadores.');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" class="bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-600/40 font-bold py-2 px-4 rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap">
+                        <i class="fa-solid fa-trash mr-1"></i> Eliminar solicitud
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -372,7 +399,7 @@
                 {% endif %}
             </div>
 
-            {% if ticket.estado != 'Cerrado' %}
+            {% if ticket.estado not in ['Cerrado', 'Cancelado'] %}
             <form method="POST" action="/tickets/{{ ticket.id }}/comentar" enctype="multipart/form-data" class="flex flex-col gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <!-- Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado y

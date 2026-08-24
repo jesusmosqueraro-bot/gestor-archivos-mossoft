@@ -60,7 +60,7 @@
         <div class="flex items-center gap-2 overflow-x-auto pb-1">
             {% set _base_qs = {'tipo': q_tipo, 'estado': q_estado, 'prioridad': q_prioridad, 'categoria': q_categoria, 'area': q_area, 'sede': q_sede, 'q': q_busqueda} %}
             <a href="{{ url_for('ver_tickets', cumplimiento='', **_base_qs) }}" class="px-4 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap {% if not q_cumplimiento %}bg-orange-600 border-orange-600 text-white{% else %}bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-orange-500/40{% endif %}">
-                Todos <span class="opacity-70">{{ total_tickets }}</span>
+                Activos <span class="opacity-70">{{ total_tickets }}</span>
             </a>
             <a href="{{ url_for('ver_tickets', cumplimiento='vigente', **_base_qs) }}" class="px-4 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap {% if q_cumplimiento == 'vigente' %}bg-cyan-500/20 border-cyan-500/60 text-cyan-300{% else %}bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-cyan-500/40{% endif %}">
                 Vigentes <span class="opacity-70">{{ conteos_cumplimiento.vigente }}</span>
@@ -72,7 +72,7 @@
                 Vencidos <span class="opacity-70">{{ conteos_cumplimiento.vencido }}</span>
             </a>
             <a href="{{ url_for('ver_tickets', cumplimiento='cerrado', **_base_qs) }}" class="px-4 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap {% if q_cumplimiento == 'cerrado' %}bg-slate-600/40 border-slate-500 text-slate-200{% else %}bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-slate-500/40{% endif %}">
-                Cerrados <span class="opacity-70">{{ conteos_cumplimiento.cerrado }}</span>
+                Cerrados / historial <span class="opacity-70">{{ conteos_cumplimiento.cerrado }}</span>
             </a>
         </div>
 
@@ -197,6 +197,8 @@
                                     <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-spinner mr-1"></i>En Proceso</span>
                                 {% elif t.estado == 'Resuelto' %}
                                     <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-check mr-1"></i>Resuelto</span>
+                                {% elif t.estado == 'Cancelado' %}
+                                    <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-ban mr-1"></i>Cancelado</span>
                                 {% else %}
                                     <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-lock mr-1"></i>Cerrado</span>
                                 {% endif %}
@@ -295,6 +297,17 @@
                             {% for s in sedes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
                         </select>
                     </div>
+                </div>
+                {% endif %}
+
+                {% if activos_inventario %}
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-boxes-stacked mr-1"></i>Activo relacionado (opcional)</label>
+                    <select name="activo_id" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin especificar</option>
+                        {% for act in activos_inventario %}<option value="{{ act.id }}">{{ act.nombre }} ({{ act.tipo_activo }})</option>{% endfor %}
+                    </select>
+                    <p class="text-slate-500 text-[10px] mt-1">Si tu solicitud es sobre un equipo específico del inventario (un computador, una impresora...), selecciónalo aquí.</p>
                 </div>
                 {% endif %}
 
