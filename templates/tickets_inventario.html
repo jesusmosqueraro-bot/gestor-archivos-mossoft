@@ -44,8 +44,24 @@
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-        <!-- TARJETAS DE CONTEO POR ESTADO -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- CONTEXTO DE LOS INDICADORES: aclara si se están viendo todas las sedes o una sola -->
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <p class="text-xs text-slate-400">
+                <i class="fa-solid fa-circle-info mr-1"></i>
+                {% if q_sede or q_tipo or q_busqueda %}
+                    Indicadores de <span class="text-white font-bold">{{ q_sede or 'todas las sedes' }}</span>{% if q_tipo %} · tipo <span class="text-white font-bold">{{ q_tipo }}</span>{% endif %}{% if q_busqueda %} · búsqueda "<span class="text-white font-bold">{{ q_busqueda }}</span>"{% endif %} — <a href="/tickets/inventario" class="text-orange-400 hover:underline">ver todas</a>
+                {% else %}
+                    Indicadores de <span class="text-white font-bold">todas las sedes</span> ({{ total_activos_general }} activo{{ 's' if total_activos_general != 1 else '' }} en total)
+                {% endif %}
+            </p>
+        </div>
+
+        <!-- TARJETAS DE CONTEO POR ESTADO (reflejan la sede/tipo/búsqueda ya elegidos) -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total</p>
+                <p class="text-2xl font-extrabold text-white">{{ total_activos }}</p>
+            </div>
             <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Disponibles</p>
                 <p class="text-2xl font-extrabold text-emerald-400">{{ conteos_estado.Disponible }}</p>
@@ -64,8 +80,47 @@
             </div>
         </div>
 
+        <!-- DISTRIBUCIÓN POR SEDE: vista completa de la organización, sin importar los filtros -->
+        {% if distribucion_por_sede|length > 1 %}
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-map-location-dot text-orange-400"></i> Distribución por sede
+            </h3>
+            <table class="w-full text-left text-xs text-slate-300 min-w-[560px]">
+                <thead class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-700/60">
+                    <tr>
+                        <th class="pb-2 px-2 font-bold">Sede</th>
+                        <th class="pb-2 px-2 font-bold text-center">Total</th>
+                        <th class="pb-2 px-2 font-bold text-center text-emerald-400">Disponibles</th>
+                        <th class="pb-2 px-2 font-bold text-center text-blue-400">Asignados</th>
+                        <th class="pb-2 px-2 font-bold text-center text-amber-400">Mantenimiento</th>
+                        <th class="pb-2 px-2 font-bold text-center text-slate-400">Baja</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% for f in distribucion_por_sede %}
+                    <tr class="hover:bg-slate-800/40 transition-colors {% if f.sede == q_sede %}bg-orange-500/5{% endif %}">
+                        <td class="py-2.5 px-2 font-bold text-white">
+                            {% if f.sede == 'Sin sede asignada' %}
+                                <span class="italic text-slate-500 font-normal">{{ f.sede }}</span>
+                            {% else %}
+                                <a href="/tickets/inventario?sede={{ f.sede | urlencode }}" class="hover:text-orange-400 {% if f.sede == q_sede %}text-orange-400{% endif %}">{{ f.sede }}</a>
+                            {% endif %}
+                        </td>
+                        <td class="py-2.5 px-2 text-center font-bold">{{ f.total }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Disponible }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Asignado }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Mantenimiento }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Baja }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <!-- BARRA DE FILTROS -->
-        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
                 <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -81,6 +136,13 @@
                 </select>
             </div>
             <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                <select name="sede" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for s in sedes %}<option value="{{ s.nombre }}" {% if s.nombre == q_sede %}selected{% endif %}>{{ s.nombre }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
                 <div class="relative">
                     <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Nombre, marca, serie, asignado a..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -88,6 +150,11 @@
                 </div>
             </div>
         </form>
+        {% if q_estado or q_tipo or q_sede or q_busqueda %}
+        <div class="-mt-3">
+            <a href="/tickets/inventario" class="text-[11px] text-slate-400 hover:text-orange-400 font-bold"><i class="fa-solid fa-filter-circle-xmark mr-1"></i>Limpiar filtros</a>
+        </div>
+        {% endif %}
 
         <!-- TABLA DE ACTIVOS -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
@@ -140,7 +207,7 @@
                     {% else %}
                         <tr>
                             <td colspan="8" class="text-center py-10 text-slate-500 font-bold">
-                                {% if q_busqueda or q_estado or q_tipo %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
+                                {% if q_busqueda or q_estado or q_tipo or q_sede %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
                             </td>
                         </tr>
                     {% endif %}
@@ -247,7 +314,10 @@
             document.getElementById('input-activo-modelo').value = '';
             document.getElementById('input-activo-serie').value = '';
             document.getElementById('input-activo-asignado').value = '';
-            document.getElementById('input-activo-sede').value = '';
+            // 🏢 Si el agente ya está viendo una sede filtrada, se la sugerimos de una vez en
+            // el formulario de "Nuevo Activo" — lo más probable es que esté registrando un
+            // equipo de esa misma sede.
+            document.getElementById('input-activo-sede').value = {{ q_sede | tojson }};
             document.getElementById('input-activo-observaciones').value = '';
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
