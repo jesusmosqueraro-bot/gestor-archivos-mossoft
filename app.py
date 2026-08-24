@@ -726,7 +726,11 @@ def ver_comunicados():
         rows = []
 
     conn.close()
-    
+
+    # 👤 "Publicado por" muestra el nombre/alias real del autor, no su usuario de inicio de
+    # sesión crudo (p. ej. 'analistati' en vez de 'Ana Lisboa T.').
+    nombres_usuarios = _mapa_nombres_usuarios()
+
     comunicados = []
     for r in rows:
         c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor = r
@@ -741,7 +745,7 @@ def ver_comunicados():
                 'imagen_url': img_url,
                 'estado': estado,
                 'fecha': fecha,
-                'autor': autor
+                'autor': _nombre_para_mostrar(autor, nombres_usuarios)
             })
 
     return render_template('comunicados.html', comunicados=comunicados, pestana=pestana, q_busqueda=q_busqueda, rol=session.get('rol'))
@@ -1143,6 +1147,32 @@ def _info_usuario(username):
     except Exception as e:
         print(f"⚠️ Error buscando perfil de '{username}': {e}")
         return None
+
+
+def _mapa_nombres_usuarios():
+    """Devuelve {usuario: nombre_para_mostrar} de TODOS los usuarios (activos o no), para
+    resolver en bloque el alias/nombre real de quien publicó algo (comunicados, tickets, etc.)
+    en vez de mostrar la cuenta de inicio de sesión cruda. Si un usuario no tiene 'nombre'
+    guardado, o la cuenta ya no existe, se usa su propio usuario como respaldo — nunca deja el
+    campo vacío."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT usuario, nombre FROM usuarios")
+        mapa = {u[0]: (u[1] or u[0]) for u in cursor.fetchall()}
+        conn.close()
+        return mapa
+    except Exception as e:
+        print(f"⚠️ Error cargando el mapa de nombres de usuarios: {e}")
+        return {}
+
+
+def _nombre_para_mostrar(username, mapa_nombres):
+    """Alias legible de 'username' según 'mapa_nombres' (ver _mapa_nombres_usuarios) — si no
+    aparece ahí, se muestra el mismo username tal cual, para no dejar el campo vacío."""
+    if not username:
+        return username
+    return mapa_nombres.get(username, username)
 
 
 # 📞 Código de país por defecto para los números de contacto: la organización opera en
@@ -1650,6 +1680,15 @@ def actualizar_ticket(ticket_id):
         estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
+
+        # 👤 Si el ticket se resuelve/cierra sin que nadie quedara asignado (el agente cambió
+        # el estado pero dejó el selector "Asignar a" en "Sin asignar"), se asigna
+        # automáticamente a quien hizo el cambio. Sin esto, "Top agentes por solicitudes
+        # resueltas" en Indicadores queda vacío aunque sí haya tickets resueltos, porque
+        # ese indicador cuenta por 'asignado_a' — y de paso deja un registro correcto de
+        # quién atendió realmente el caso.
+        if estado_final in ('Resuelto', 'Cerrado') and not asignado_final:
+            asignado_final = session.get('username')
 
         fecha_act = obtener_fecha_actual()
 
@@ -2174,7 +2213,13 @@ def indicadores_tickets():
         dias_tendencia.append({'fecha': dia, 'cantidad': conteo_por_fecha.get(dia, 0)})
 
     promedio_calificacion = round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else None
-    top_agentes = sorted(por_agente.items(), key=lambda x: x[1], reverse=True)[:5]
+    # 👤 Igual que en el resto de Tickets, se muestra el nombre/alias real del agente, no su
+    # usuario de inicio de sesión.
+    nombres_usuarios_ind = _mapa_nombres_usuarios()
+    top_agentes = [
+        (_nombre_para_mostrar(u, nombres_usuarios_ind), cant)
+        for u, cant in sorted(por_agente.items(), key=lambda x: x[1], reverse=True)[:5]
+    ]
 
     return render_template(
         'tickets_indicadores.html', es_soporte=True, total=total,
@@ -2952,8 +2997,10 @@ def ver_papelera():
     except Exception:
         rows_com = []
 
+    # 👤 Igual que en el Muro de Comunicados: se muestra el alias/nombre real del autor.
+    _nombres_papelera = _mapa_nombres_usuarios()
     comunicados_eliminados = [
-        {'id': r[0], 'titulo': r[1], 'nivel': r[2], 'fecha': r[3], 'autor': r[4]} for r in rows_com
+        {'id': r[0], 'titulo': r[1], 'nivel': r[2], 'fecha': r[3], 'autor': _nombre_para_mostrar(r[4], _nombres_papelera)} for r in rows_com
     ]
 
     conn.close()
@@ -3499,7 +3546,8 @@ def bienvenida():
                 'nivel': row[2],
                 'imagen_url': row[3],
                 'fecha': row[4],
-                'autor': row[5]
+                # 👤 Alias/nombre real de quien publicó, no su usuario de inicio de sesión.
+                'autor': _nombre_para_mostrar(row[5], _mapa_nombres_usuarios())
             }
     except Exception:
         comunicado_fijado = None
