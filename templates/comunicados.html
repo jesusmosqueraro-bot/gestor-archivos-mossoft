@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +7,12 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/contenido-enriquecido.css">
+    <!-- Editor de texto enriquecido (Quill) para publicar/editar un comunicado -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+    <script src="/static/js/editor-enriquecido.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -91,7 +97,7 @@
 
                         <!-- TÍTULO Y CONTENIDO -->
                         <h3 class="text-lg font-bold text-white mb-2">{{ c.titulo }}</h3>
-                        <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed mb-4">{{ c.contenido }}</p>
+                        <div class="text-xs text-slate-300 leading-relaxed mb-4 contenido-enriquecido">{{ c.contenido | safe }}</div>
 
                         <!-- IMAGEN ADJUNTA SI EXISTE -->
                         {% if c.imagen_url %}
@@ -170,7 +176,13 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Detalle / Mensaje *</label>
-                    <textarea name="contenido" rows="4" required placeholder="Escribe el cuerpo del comunicado aquí..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
+                    <!-- Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado y
+                         listas. El <textarea> real queda oculto — crearEditorEnriquecido() lo mantiene
+                         sincronizado con el HTML del editor (ver /static/js/editor-enriquecido.js). Sin
+                         'required': un campo oculto no se puede validar de forma confiable en el
+                         navegador; el servidor valida que no quede vacío (_html_esta_vacio en app.py). -->
+                    <div id="editor-crear-contenido" class="bg-slate-900 text-slate-200"></div>
+                    <textarea name="contenido" id="input-crear-contenido" class="hidden"></textarea>
                 </div>
 
                 <div>
@@ -217,7 +229,8 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Detalle / Mensaje *</label>
-                    <textarea id="editar-contenido" name="contenido" rows="4" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
+                    <div id="editor-editar-contenido" class="bg-slate-900 text-slate-200"></div>
+                    <textarea id="editar-contenido" name="contenido" class="hidden"></textarea>
                 </div>
 
                 <div>
@@ -245,7 +258,17 @@
     </div>
 
     <script>
+        // Editores de texto enriquecido de "Publicar Comunicado" y "Editar Comunicado" (ver
+        // /static/js/editor-enriquecido.js).
+        const quillCrearComunicado = crearEditorEnriquecido(
+            'editor-crear-contenido', 'input-crear-contenido', 'Escribe el cuerpo del comunicado aquí...'
+        );
+        const quillEditarComunicado = crearEditorEnriquecido('editor-editar-contenido', 'editar-contenido', '');
+
         function abrirModalCrear() {
+            // Por si el modal ya se había abierto y cancelado antes en esta misma página: se
+            // limpia el editor para no arrastrar texto de un intento anterior.
+            cargarContenidoEnEditor(quillCrearComunicado, 'input-crear-contenido', '');
             document.getElementById('modal-crear').classList.remove('hidden');
             document.getElementById('modal-crear').classList.add('flex');
         }
@@ -259,7 +282,7 @@
             document.getElementById('form-editar-comunicado').action = '/comunicados/editar/' + c.id;
             document.getElementById('editar-titulo').value = c.titulo || '';
             document.getElementById('editar-nivel').value = c.nivel || 'info';
-            document.getElementById('editar-contenido').value = c.contenido || '';
+            cargarContenidoEnEditor(quillEditarComunicado, 'editar-contenido', c.contenido || '');
             document.getElementById('editar-fijado').checked = !!c.fijado;
 
             const imgPreview = document.getElementById('editar-imagen-actual');
@@ -283,5 +306,16 @@
             document.getElementById('modal-editar').classList.remove('flex');
         }
     </script>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
 </body>
 </html>

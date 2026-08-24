@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,12 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/contenido-enriquecido.css">
+    <!-- Editor de texto enriquecido (Quill) para responder/comentar la solicitud -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+    <script src="/static/js/editor-enriquecido.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -90,7 +96,7 @@
                 </div>
             </div>
 
-            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-line mb-4">{{ ticket.descripcion }}</p>
+            <div class="text-sm text-slate-300 leading-relaxed mb-4 contenido-enriquecido">{{ ticket.descripcion | safe }}</div>
 
             {% if ticket.adjuntos %}
             <div class="flex flex-wrap gap-2 mb-5">
@@ -338,7 +344,7 @@
                                     </span>
                                     <span class="text-[10px] text-slate-500 font-mono">{{ c.fecha }}</span>
                                 </div>
-                                <p class="text-xs text-slate-300 whitespace-pre-line">{{ c.mensaje }}</p>
+                                <div class="text-xs text-slate-300 contenido-enriquecido">{{ c.mensaje | safe }}</div>
                                 {% if c.adjuntos %}
                                 <div class="flex flex-wrap gap-2 mt-3">
                                     {% for a in c.adjuntos %}
@@ -367,12 +373,11 @@
             {% if ticket.estado != 'Cerrado' %}
             <form method="POST" action="/tickets/{{ ticket.id }}/comentar" enctype="multipart/form-data" class="flex flex-col gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="text" name="mensaje" placeholder="Escribe un comentario o novedad..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-orange-500/20 whitespace-nowrap">
-                        <i class="fa-solid fa-paper-plane"></i> Enviar
-                    </button>
-                </div>
+                <!-- Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado y
+                     listas. El <textarea> real queda oculto — crearEditorEnriquecido() lo mantiene
+                     sincronizado con el HTML del editor (ver /static/js/editor-enriquecido.js). -->
+                <div id="editor-comentario-ticket" class="bg-slate-900 text-slate-200"></div>
+                <textarea name="mensaje" id="input-comentario-ticket" class="hidden"></textarea>
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer">
                         <i class="fa-solid fa-paperclip"></i>
@@ -384,6 +389,9 @@
                         <i class="fa-solid fa-lock"></i> Nota interna (solo la ve el equipo de soporte)
                     </label>
                     {% endif %}
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-orange-500/20 whitespace-nowrap ml-auto">
+                        <i class="fa-solid fa-paper-plane"></i> Enviar
+                    </button>
                 </div>
             </form>
             {% else %}
@@ -392,6 +400,14 @@
         </div>
 
     </main>
+
+    <script>
+        // El editor solo existe si el ticket sigue abierto a comentarios (ver la condición del
+        // formulario de comentar más arriba) — se protege por si no está en el DOM.
+        if (document.getElementById('editor-comentario-ticket')) {
+            crearEditorEnriquecido('editor-comentario-ticket', 'input-comentario-ticket', 'Escribe un comentario o novedad...');
+        }
+    </script>
 
     {% if es_soporte %}
     <!-- MODAL MODIFICAR FECHA LÍMITE DE SLA -->
@@ -440,5 +456,16 @@
         }
     </script>
     {% endif %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
 </body>
 </html>

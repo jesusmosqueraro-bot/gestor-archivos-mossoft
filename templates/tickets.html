@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,11 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <!-- Editor de texto enriquecido (Quill) para la descripción de la solicitud -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+    <script src="/static/js/editor-enriquecido.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -297,7 +302,16 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción *</label>
-                    <textarea name="descripcion" required rows="4" placeholder="Cuéntanos qué pasa, cuándo empezó y cualquier detalle que ayude a resolverlo..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                    <!-- Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado y
+                         listas. El <textarea> real queda oculto y es el que de verdad viaja con el
+                         formulario — crearEditorEnriquecido() lo mantiene sincronizado con el HTML del
+                         editor en cada cambio (ver /static/js/editor-enriquecido.js). -->
+                    <div id="editor-descripcion-ticket" class="bg-slate-900 text-slate-200"></div>
+                    <!-- Sin 'required': un <textarea> con display:none no se puede validar de forma
+                         confiable en el navegador (algunos bloquean el envío con un error que no se
+                         puede ver, por estar oculto). La validación de "no puede quedar vacío" la hace
+                         el servidor (_html_esta_vacio en app.py). -->
+                    <textarea name="descripcion" id="input-descripcion-ticket" class="hidden"></textarea>
                 </div>
 
                 <div>
@@ -315,6 +329,12 @@
     </div>
 
     <script>
+        // Editor de texto enriquecido de la descripción (ver /static/js/editor-enriquecido.js).
+        const quillDescripcionTicket = crearEditorEnriquecido(
+            'editor-descripcion-ticket', 'input-descripcion-ticket',
+            'Cuéntanos qué pasa, cuándo empezó y cualquier detalle que ayude a resolverlo...'
+        );
+
         function abrirModalCrear() {
             document.getElementById('modal-ticket').classList.remove('hidden');
             document.getElementById('modal-ticket').classList.add('flex');
@@ -345,5 +365,16 @@
             abrirModalCrear();
         }
     </script>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
 </body>
 </html>
