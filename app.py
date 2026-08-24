@@ -1145,6 +1145,48 @@ def _info_usuario(username):
         return None
 
 
+# 📞 Código de país por defecto para los números de contacto: la organización opera en
+# Colombia y casi todos los teléfonos se guardan en formato local (10 dígitos, sin +57).
+CODIGO_PAIS_WHATSAPP_DEFAULT = '57'
+
+
+def _normalizar_telefono_whatsapp(telefono):
+    """Convierte un teléfono guardado en cualquier formato local (con espacios, guiones,
+    paréntesis, con o sin +57) al formato que exige wa.me: solo dígitos, con código de país.
+    Devuelve None si no queda un número razonable (muy corto) para evitar generar un enlace
+    de WhatsApp roto."""
+    if not telefono:
+        return None
+    solo_digitos = re.sub(r'\D', '', telefono)
+    if not solo_digitos:
+        return None
+    # Un celular colombiano local tiene 10 dígitos (empieza en 3) y no trae el código de país
+    # todavía — se lo anteponemos. Si ya viene con el 57 delante (12 dígitos) se deja tal cual.
+    if len(solo_digitos) == 10:
+        solo_digitos = CODIGO_PAIS_WHATSAPP_DEFAULT + solo_digitos
+    if len(solo_digitos) < 10:
+        return None
+    return solo_digitos
+
+
+def _link_whatsapp_ticket(ticket, creador_info, nombre_agente):
+    """Arma el enlace 'click to chat' de WhatsApp (wa.me) para contactar al solicitante de un
+    ticket, con un mensaje ya redactado que el agente puede revisar y enviar desde WhatsApp
+    Web/Desktop — Arkiv no manda el mensaje por sí solo, solo deja el borrador listo. Devuelve
+    None si no hay ningún teléfono de contacto registrado para este ticket."""
+    telefono = _normalizar_telefono_whatsapp(ticket.get('telefono_contacto'))
+    if not telefono:
+        return None
+    nombre_solicitante = (creador_info or {}).get('nombre') or ticket.get('creado_por') or 'usuario'
+    mensaje = (
+        f"Hola {nombre_solicitante}, soy {nombre_agente} de Preventiva Salud SAS. "
+        f"Te escribo respecto a tu solicitud {ticket.get('codigo')} sobre \"{ticket.get('titulo')}\". "
+        f"Estoy revisando el caso y quería coordinar contigo para resolverlo lo antes posible. "
+        f"¿Cuándo te queda bien que conversemos?"
+    )
+    return f"https://wa.me/{telefono}?text={urllib.parse.quote(mensaje)}"
+
+
 # 🗓️ Motivos preestablecidos para justificar un corrimiento de la fecha límite de solución.
 # Se muestran como opciones en el modal "Modificar fecha" del detalle del ticket, para que el
 # equipo de soporte deje registrado explícitamente si el atraso depende de un tercero (proveedor,
@@ -1479,12 +1521,23 @@ def ver_ticket(ticket_id):
 
     conn.close()
 
+    # 💬 Enlace "click to chat" de WhatsApp para contactar al solicitante desde el detalle del
+    # ticket (solo el equipo de soporte lo ve — es una herramienta de gestión, no algo que el
+    # propio solicitante necesite). Arkiv NO envía el mensaje: solo abre WhatsApp Web/Desktop
+    # con un borrador ya redactado, el agente decide si lo edita y lo envía.
+    whatsapp_url = None
+    if es_soporte:
+        perfil_agente = _info_usuario(session.get('username'))
+        nombre_agente = (perfil_agente or {}).get('nombre') or session.get('username') or 'Soporte TI'
+        whatsapp_url = _link_whatsapp_ticket(ticket, creador_info, nombre_agente)
+
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
         es_soporte=es_soporte, agentes=agentes, creador_info=creador_info,
         estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
         max_modificaciones_sla=MAX_MODIFICACIONES_SLA, motivos_sla=MOTIVOS_MODIFICACION_SLA,
-        calificacion_max=CALIFICACION_MAX, session_username=session.get('username')
+        calificacion_max=CALIFICACION_MAX, session_username=session.get('username'),
+        whatsapp_url=whatsapp_url
     )
 
 
