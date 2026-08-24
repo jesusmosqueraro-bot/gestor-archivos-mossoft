@@ -1181,7 +1181,11 @@ def eliminar_comunicado(com_id):
         print(f"Error enviando comunicado {com_id} a la papelera: {e}")
 
     conn.close()
-    return redirect(url_for('ver_comunicados'))
+    # 🧭 Antes esto volvía al muro de Comunicados, donde el aviso simplemente desaparecía sin
+    # ninguna confirmación visible de a dónde fue — eso hacía parecer que se había borrado para
+    # siempre. Ahora se redirige directo a la Papelera con la pestaña de Comunicados ya abierta,
+    # para que quede claro que sigue ahí y se puede restaurar.
+    return redirect(url_for('ver_papelera', tab='comunicados'))
 
 @app.route('/comunicados/<int:com_id>/lecturas')
 @login_required
