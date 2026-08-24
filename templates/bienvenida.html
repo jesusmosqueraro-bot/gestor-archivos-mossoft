@@ -238,8 +238,8 @@
             </a>
             {% endif %}
 
-            {% if rol == 'admin' %}
-            <!-- 8. Gestor de Base de Datos (Solo Admin) -->
+            {% if session.get('username') == 'admin' %}
+            <!-- 8. Gestor de Base de Datos (Solo super-admin: no lo ven agentes ni otros admins) -->
             <a href="{{ url_for('visor_db') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -254,7 +254,7 @@
                 </div>
             </a>
 
-            <!-- 9. Respaldos de Base de Datos (Solo Admin) -->
+            <!-- 9. Respaldos de Base de Datos (Solo super-admin: no lo ven agentes ni otros admins) -->
             <a href="{{ url_for('ver_respaldos') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-teal-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
