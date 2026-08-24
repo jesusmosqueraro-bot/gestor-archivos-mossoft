@@ -91,18 +91,20 @@ html[data-theme="claro"] body { background-color: #f8fafc !important; }
 /* El overlay oscuro de los modales (bg-slate-950/80, /90) se deja igual a propósito:
    un fondo oscuro semitransparente detrás de una tarjeta blanca se ve bien en ambos temas. */
 
-/* Tarjetas "acento-oscuro": el Comunicado Oficial fijado (bienvenida) y la Mesa de
-   Ayuda (Soporte TI) usan un fondo degradado oscuro (bg-gradient-to-*) que el tema
-   claro NO reescribe (los degradados no están en el listado de arriba, a propósito:
-   son un acento de marca). Sin esto, el texto quedaría oscuro sobre fondo oscuro. Se
-   restauran aquí los mismos colores de texto/borde del tema oscuro para esas tarjetas,
-   en ambos temas. Especificidad (.acento-oscuro + la clase) > la regla genérica de
-   arriba, así que estas reglas ganan sin importar el orden en el archivo. */
-html[data-theme="claro"] .acento-oscuro .text-white { color: #ffffff !important; }
-html[data-theme="claro"] .acento-oscuro .text-slate-300 { color: #cbd5e1 !important; }
-html[data-theme="claro"] .acento-oscuro .text-slate-400 { color: #94a3b8 !important; }
-html[data-theme="claro"] .acento-oscuro .text-slate-500 { color: #64748b !important; }
-html[data-theme="claro"] .acento-oscuro .text-amber-400 { color: #fbbf24 !important; }
-html[data-theme="claro"] .acento-oscuro .text-orange-400 { color: #fb923c !important; }
-html[data-theme="claro"] .acento-oscuro .border-slate-700\/60 { border-color: rgba(51,65,85,0.6) !important; }
-html[data-theme="claro"] .acento-oscuro .border-slate-800\/80 { border-color: rgba(30,41,59,0.8) !important; }
+/* El Comunicado Oficial fijado (bienvenida) y la Mesa de Ayuda (Soporte TI) traen un
+   fondo degradado oscuro de fábrica (bg-gradient-to-*), y esos degradados no están en
+   el listado de arriba porque Tailwind los arma con varias clases (from-/via-/to-) que
+   no se pueden traducir 1:1 con una sola regla. En tema claro TODA la tarjeta debe
+   verse clara, como el resto de la página — así que aquí se reemplaza el degradado
+   completo por uno claro con el mismo acento de marca (cian/naranja) pero muy tenue.
+   Con el fondo ya claro, el texto de adentro (text-white, text-slate-300, etc.) se
+   oscurece solo, con las mismas reglas genéricas de arriba — no hace falta nada
+   especial para él. */
+html[data-theme="claro"] .banner-comunicado-oficial {
+    background-image: linear-gradient(to right, #ecfeff, #ffffff, #eff6ff) !important;
+    border-color: #a5f3fc !important;
+}
+html[data-theme="claro"] .banner-mesa-ayuda {
+    background-image: linear-gradient(to bottom right, #fff7ed, #ffffff, #ffffff) !important;
+    border-color: #fed7aa !important;
+}
