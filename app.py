@@ -404,6 +404,22 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
             )''')
+            # 🗂️ Catálogo administrable de Tipos de activo (Portátil, Impresora, Servidor...),
+            # inspirado en el módulo de Solvyx: cada tipo tiene una key estable, una etiqueta
+            # visible, un ícono (nombre de ícono de Font Awesome, sin el prefijo 'fa-') y un
+            # orden de despliegue. Antes era una lista fija en el código (TIPOS_ACTIVO);
+            # ahora el equipo puede agregar/reordenar/desactivar tipos sin tocar código.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
+                id SERIAL PRIMARY KEY, key VARCHAR(50) NOT NULL, etiqueta VARCHAR(150) NOT NULL, icono VARCHAR(50) DEFAULT 'box', orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
+            # 🔁 Historial de reemplazos de activos (Reemplazar activo / Trazabilidad, visto en
+            # Solvyx): cada fila conecta un activo "anterior" con el activo que lo reemplazó,
+            # con el motivo, notas libres y qué pasó con el activo anterior. Reconstruyendo la
+            # cadena (activo_nuevo_id de una fila == activo_anterior_id de la siguiente) se arma
+            # la trazabilidad completa de un equipo a través de sus reemplazos sucesivos.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS activos_reemplazos (
+                id SERIAL PRIMARY KEY, activo_anterior_id INTEGER NOT NULL REFERENCES activos_inventario(id) ON DELETE CASCADE, activo_nuevo_id INTEGER REFERENCES activos_inventario(id) ON DELETE SET NULL, motivo VARCHAR(50) NOT NULL, notas TEXT, fecha_reemplazo VARCHAR(100) NOT NULL, estado_anterior_resultante VARCHAR(30) NOT NULL, creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL
+            )''')
             # 👁️ Registro de qué usuario ya leyó cada comunicado (se marca al ver el muro de
             # comunicados o el comunicado fijado en la bienvenida) — para saber quién falta.
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados_leidos (
@@ -495,6 +511,14 @@ def init_db():
                 # o 'vencido') — evita reenviar el mismo aviso en cada visita a la lista de
                 # tickets; se limpia cuando se extiende el SLA para que pueda volver a avisar.
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_alerta_nivel VARCHAR(20);",
+                # 🗑️ Baja lógica: para tickets de prueba/capacitación o creados por error que el
+                # equipo de soporte quiera sacar de las listas por completo (a diferencia de
+                # 'Cancelado', que es un estado visible pensado para dejar rastro de auditoría).
+                # Solo el super-admin puede activarla (ver eliminar_ticket()).
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS eliminado INTEGER DEFAULT 0;",
+                # 🔗 Activo de Inventario al que se refiere este ticket (opcional). Permite, desde
+                # el activo, ver el historial completo de solicitudes que se le han abierto.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE SET NULL;",
                 # 📢 Fecha en que se envió (una sola vez) el recordatorio automático de lectura
                 # pendiente de este comunicado — ver _revisar_recordatorios_lectura(). NULL
                 # mientras no se haya enviado ninguno (automático o manual) todavía.
@@ -549,6 +573,12 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, etiqueta TEXT NOT NULL, icono TEXT DEFAULT 'box', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS activos_reemplazos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_anterior_id INTEGER NOT NULL, activo_nuevo_id INTEGER, motivo TEXT NOT NULL, notas TEXT, fecha_reemplazo TEXT NOT NULL, estado_anterior_resultante TEXT NOT NULL, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, FOREIGN KEY(activo_anterior_id) REFERENCES activos_inventario(id) ON DELETE CASCADE, FOREIGN KEY(activo_nuevo_id) REFERENCES activos_inventario(id)
             )''')
             # 👁️ Registro de qué usuario ya leyó cada comunicado (se marca al ver el muro de
             # comunicados o el comunicado fijado en la bienvenida) — para saber quién falta.
@@ -652,7 +682,9 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN area TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sede TEXT;",
                 "ALTER TABLE tickets ADD COLUMN telefono_contacto TEXT;",
-                "ALTER TABLE tickets ADD COLUMN sla_alerta_nivel TEXT;"
+                "ALTER TABLE tickets ADD COLUMN sla_alerta_nivel TEXT;",
+                "ALTER TABLE tickets ADD COLUMN eliminado INTEGER DEFAULT 0;",
+                "ALTER TABLE tickets ADD COLUMN activo_id INTEGER REFERENCES activos_inventario(id);"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
@@ -702,6 +734,27 @@ def init_db():
             q_seed_app = "INSERT INTO aplicativos_catalogo (nombre) VALUES (%s)" if db_type == 'postgres' else "INSERT INTO aplicativos_catalogo (nombre) VALUES (?)"
             for nombre_app in ['KUBAPP', 'SAMI', 'Moodle', 'Wolkvox', 'Correo (cPanel / Outlook)', 'Solvyx']:
                 cursor.execute(q_seed_app, (nombre_app,))
+            conn.commit()
+
+        # 🗂️ Siembra el catálogo de Tipos de activo con los mismos 8 tipos que antes vivían
+        # fijos en el código (TIPOS_ACTIVO), solo la primera vez. De ahí en adelante se
+        # administra por completo desde /tickets/inventario/tipos (agregar, reordenar,
+        # desactivar) sin volver a tocar código, igual que aplicativos/especialidades.
+        cursor.execute("SELECT COUNT(*) FROM tipos_activo_catalogo")
+        if cursor.fetchone()[0] == 0:
+            q_seed_tipo = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (?, ?, ?, ?)"
+            tipos_semilla = [
+                ('DESKTOP', 'Computador de Escritorio', 'desktop'),
+                ('LAPTOP', 'Portátil', 'laptop'),
+                ('PRINTER', 'Impresora', 'print'),
+                ('MONITOR', 'Monitor', 'display'),
+                ('PHONE', 'Teléfono/Celular', 'mobile-screen'),
+                ('SERVER', 'Servidor', 'server'),
+                ('NETWORK', 'Red (Switch/Router/AP)', 'network-wired'),
+                ('OTHER', 'Otro', 'box'),
+            ]
+            for orden_i, (key_tipo, etiqueta_tipo, icono_tipo) in enumerate(tipos_semilla):
+                cursor.execute(q_seed_tipo, (key_tipo, etiqueta_tipo, icono_tipo, orden_i))
             conn.commit()
 
         # 🩺 Sincroniza el catálogo de especialidades con la lista real de Preventiva. A
@@ -1450,7 +1503,7 @@ def destruir_comunicado(com_id):
 # 🎫 MÓDULO DE SOPORTE TI (TICKETS / SOLICITUDES INTERNAS)
 CATEGORIAS_TICKET = ['Hardware', 'Software', 'Acceso/Credenciales', 'Red/Internet', 'Otro']
 PRIORIDADES_TICKET = ['Baja', 'Media', 'Alta', 'Urgente']
-ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado']
+ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado', 'Cancelado']
 TIPOS_TICKET = ['Incidente', 'Requerimiento']
 # Metadatos de cada tipo para pintar las tarjetas de selección y las insignias (inspirado
 # en la mesa de ayuda externa que ya usa la organización: distingue "algo se rompió" de
@@ -1468,8 +1521,26 @@ TIPOS_TICKET_INFO = {
 MAX_ADJUNTOS_TICKET = 5
 
 # 📦 INVENTARIO DE ACTIVOS DE TI
-ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja']
+ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja', 'Perdido']
 TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor', 'Teléfono/Celular', 'Servidor', 'Red (Switch/Router/AP)', 'Otro']
+ICONOS_TIPO_ACTIVO = ['desktop', 'laptop', 'print', 'display', 'mobile-screen', 'server', 'network-wired', 'box',
+                      'tablet', 'keyboard', 'headphones', 'camera', 'video', 'wifi', 'hard-drive', 'database',
+                      'microchip', 'plug', 'tv', 'phone', 'box-archive', 'shield-halved', 'briefcase']
+MOTIVOS_REEMPLAZO_ACTIVO = [
+    {'clave': 'Equipo dañado', 'icono': 'screwdriver-wrench', 'descripcion': 'No funciona o requiere reparación mayor'},
+    {'clave': 'Renovación', 'icono': 'arrows-rotate', 'descripcion': 'Reemplazo por uno más nuevo o mejor'},
+    {'clave': 'Pérdida', 'icono': 'lock', 'descripcion': 'El equipo se extravió'},
+    {'clave': 'Robo', 'icono': 'user-secret', 'descripcion': 'Hurto reportado a las autoridades'},
+    {'clave': 'Fin de vida útil', 'icono': 'calendar-xmark', 'descripcion': 'Equipo obsoleto, se da de baja'},
+    {'clave': 'Reasignación', 'icono': 'right-left', 'descripcion': 'Cambio de usuario, sin daño'},
+    {'clave': 'Otro', 'icono': 'comment', 'descripcion': 'Especifica el motivo en las notas'},
+]
+ESTADOS_RESULTANTES_REEMPLAZO = [
+    {'valor': 'Disponible', 'etiqueta': 'En bodega — puede reasignarse'},
+    {'valor': 'Mantenimiento', 'etiqueta': 'En mantenimiento — pendiente reparar'},
+    {'valor': 'Baja', 'etiqueta': 'Dado de baja — definitivamente'},
+    {'valor': 'Perdido', 'etiqueta': 'Perdido'},
+]
 
 # ⏱️ SLA (Acuerdos de Nivel de Servicio): horas máximas de "primera respuesta" (sacar el
 # ticket de 'Abierto') y de "resolución" (llegar a 'Resuelto'/'Cerrado') según la prioridad.
@@ -1554,7 +1625,7 @@ def _bucket_cumplimiento_ticket(ticket):
     la lista (inspirado en la mesa de ayuda externa): 'cerrado' (ya Resuelto/Cerrado, sin
     importar si llegó a tiempo o no), 'vencido' (abierto y ya pasó la fecha límite),
     'proximo_a_vencer' (abierto y le queda poco tiempo) o 'vigente' (abierto, con margen)."""
-    if ticket.get('estado') in ('Resuelto', 'Cerrado'):
+    if ticket.get('estado') in ('Resuelto', 'Cerrado', 'Cancelado'):
         return 'cerrado'
 
     sla = ticket.get('sla') or _calcular_sla_ticket(ticket)
@@ -1606,7 +1677,7 @@ def _revisar_alertas_sla():
         cursor.execute(
             "SELECT id, titulo, tipo, prioridad, estado, asignado_a, fecha_creacion, "
             "sla_resolucion_limite, sla_resolucion_cumplida, sla_alerta_nivel FROM tickets "
-            "WHERE estado NOT IN ('Resuelto', 'Cerrado')"
+            "WHERE estado NOT IN ('Resuelto', 'Cerrado', 'Cancelado') AND COALESCE(eliminado, 0) = 0"
         )
         filas = cursor.fetchall()
 
@@ -2147,7 +2218,7 @@ def ver_tickets():
     nombres_areas = [a['nombre'] for a in areas_config]
     nombres_sedes = [s['nombre'] for s in sedes_config]
 
-    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida, area, sede FROM tickets WHERE 1=1"
+    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida, area, sede FROM tickets WHERE COALESCE(eliminado, 0) = 0"
     params = []
 
     if not es_soporte:
@@ -2188,6 +2259,11 @@ def ver_tickets():
     # reconocible como 'escobar' o 'tmira').
     cursor.execute("SELECT usuario, nombre FROM usuarios")
     nombres_usuarios = {u[0]: (u[1] or u[0]) for u in cursor.fetchall()}
+
+    # 💻 Activos del inventario (no eliminados) para el selector "Activo relacionado" del
+    # formulario de "Nueva Solicitud" — vincular el ticket a un equipo puntual del inventario.
+    cursor.execute("SELECT id, nombre, tipo_activo FROM activos_inventario WHERE eliminado = 0 ORDER BY nombre ASC")
+    activos_inventario = [{'id': a[0], 'nombre': a[1], 'tipo_activo': a[2]} for a in cursor.fetchall()]
     conn.close()
 
     tickets = []
@@ -2216,10 +2292,17 @@ def ver_tickets():
     conteos_cumplimiento = {'vigente': 0, 'proximo_a_vencer': 0, 'vencido': 0, 'cerrado': 0}
     for t in tickets:
         conteos_cumplimiento[t['cumplimiento']] = conteos_cumplimiento.get(t['cumplimiento'], 0) + 1
-    total_tickets = len(tickets)
+
+    # 📂 La pestaña por defecto ("Activos") ya NO incluye Resueltos/Cerrados/Cancelados — esos
+    # quedan disponibles únicamente en la pestaña "Cerrados" (el historial). Antes se mostraban
+    # todos juntos (solo se ordenaban al final); ahora hay que entrar a "Cerrados" a propósito
+    # para verlos, igual que se pidió en el seguimiento de Solvyx.
+    total_tickets = len([t for t in tickets if t['cumplimiento'] != 'cerrado'])
 
     if q_cumplimiento in conteos_cumplimiento:
         tickets = [t for t in tickets if t['cumplimiento'] == q_cumplimiento]
+    else:
+        tickets = [t for t in tickets if t['cumplimiento'] != 'cerrado']
 
     # 📞 Prellena el número de contacto de "Nueva Solicitud" con el que el usuario ya tiene
     # registrado en su perfil (si tiene uno) — sigue siendo editable en el formulario, por si
@@ -2231,7 +2314,7 @@ def ver_tickets():
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
         categorias=nombres_categorias, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
         tipos=TIPOS_TICKET, tipos_info=TIPOS_TICKET_INFO,
-        areas=nombres_areas, sedes=nombres_sedes,
+        areas=nombres_areas, sedes=nombres_sedes, activos_inventario=activos_inventario,
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
         q_area=q_area, q_sede=q_sede,
         q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets,
@@ -2252,6 +2335,7 @@ def crear_ticket():
     area = request.form.get('area', '').strip()
     sede = request.form.get('sede', '').strip()
     telefono_contacto = request.form.get('telefono_contacto', '').strip() or None
+    activo_id_raw = request.form.get('activo_id', '').strip()
 
     nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
     nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
@@ -2272,6 +2356,18 @@ def crear_ticket():
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
         archivos_subidos = _subir_adjuntos_ticket(request.files.getlist('adjuntos'))
+
+        # 💻 Activo relacionado (opcional): validamos que exista y no esté eliminado antes de
+        # vincularlo, para no dejar un ticket apuntando a un activo_id inválido.
+        activo_id = None
+        if activo_id_raw.isdigit():
+            conn_chk, db_type_chk = get_db()
+            cur_chk = conn_chk.cursor()
+            ph_chk = '%s' if db_type_chk == 'postgres' else '?'
+            cur_chk.execute(f"SELECT id FROM activos_inventario WHERE id = {ph_chk} AND eliminado = 0", (int(activo_id_raw),))
+            if cur_chk.fetchone():
+                activo_id = int(activo_id_raw)
+            conn_chk.close()
 
         horas_sla = SLA_HORAS_POR_PRIORIDAD.get(prioridad, SLA_HORAS_POR_PRIORIDAD['Media'])
         sla_respuesta_limite = _calcular_limite_sla(fecha_act, horas_sla['respuesta'])
@@ -2296,12 +2392,12 @@ def crear_ticket():
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0, %s, %s, %s) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -2363,7 +2459,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -2383,9 +2479,21 @@ def ver_ticket(ticket_id):
         'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
         'sla_modificaciones': row[15] or 0,
         'calificacion': row[16], 'calificacion_fecha': row[17],
-        'area': row[18], 'sede': row[19], 'telefono_contacto': row[20]
+        'area': row[18], 'sede': row[19], 'telefono_contacto': row[20], 'activo_id': row[21]
     }
     ticket['sla'] = _calcular_sla_ticket(ticket)
+
+    # 💻 Si el ticket quedó vinculado a un activo del inventario, se muestra en el detalle
+    # (nombre, tipo y estado actual) con enlace directo a Inventario.
+    ticket['activo'] = None
+    if ticket['activo_id']:
+        cursor.execute(
+            "SELECT id, nombre, tipo_activo, estado FROM activos_inventario WHERE id = %s" if db_type == 'postgres' else "SELECT id, nombre, tipo_activo, estado FROM activos_inventario WHERE id = ?",
+            (ticket['activo_id'],)
+        )
+        fila_activo = cursor.fetchone()
+        if fila_activo:
+            ticket['activo'] = {'id': fila_activo[0], 'nombre': fila_activo[1], 'tipo_activo': fila_activo[2], 'estado': fila_activo[3]}
 
     # 🧑 La mayor cantidad de información posible sobre quién levantó la solicitud: nombre
     # completo, correo y teléfono registrados en su perfil de Arkiv (si los tiene). Si el
@@ -2639,6 +2747,34 @@ def actualizar_ticket(ticket_id):
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
 
+@app.route('/tickets/<int:ticket_id>/eliminar', methods=['POST'])
+@login_required
+@superadmin_required
+def eliminar_ticket(ticket_id):
+    """Baja lógica de un ticket (tickets.eliminado = 1): lo saca por completo de las listas,
+    el panel de inicio y los indicadores — a diferencia de poner el estado en 'Cancelado', que
+    deja el ticket visible como parte del historial. Pensada para los tickets de prueba,
+    duplicados o creados por error que el equipo pidió poder limpiar antes de operar en serio
+    (ver seguimiento de Solvyx). Solo el super-admin la tiene disponible, precisamente porque
+    no se puede deshacer desde la interfaz."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT titulo FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM tickets WHERE id = ?"
+        cursor.execute(q_sel, (ticket_id,))
+        row = cursor.fetchone()
+        if row:
+            q_upd = "UPDATE tickets SET eliminado = 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET eliminado = 1 WHERE id = ?"
+            cursor.execute(q_upd, (ticket_id,))
+            conn.commit()
+            registrar_log(session.get('username'), "Eliminación de Ticket", f"Se eliminó el ticket #{ticket_id} ('{row[0]}')")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error eliminando ticket {ticket_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_tickets'))
+
+
 @app.route('/tickets/<int:ticket_id>/modificar_sla', methods=['POST'])
 @login_required
 @agente_o_admin_required
@@ -2756,23 +2892,23 @@ def inicio_tickets():
     resumen = {}
     try:
         if es_soporte:
-            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Abierto', 'En Proceso')", (usuario,))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Abierto', 'En Proceso') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['asignados_abiertos'] = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM tickets WHERE (asignado_a IS NULL OR asignado_a = '') AND estado IN ('Abierto', 'En Proceso')")
+            cursor.execute("SELECT COUNT(*) FROM tickets WHERE (asignado_a IS NULL OR asignado_a = '') AND estado IN ('Abierto', 'En Proceso') AND COALESCE(eliminado, 0) = 0")
             resumen['sin_asignar'] = cursor.fetchone()[0]
-            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Resuelto', 'Cerrado')", (usuario,))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Resuelto', 'Cerrado') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['resueltos_por_mi'] = cursor.fetchone()[0]
         else:
-            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Abierto', 'En Proceso')", (usuario,))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Abierto', 'En Proceso') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['mis_abiertos'] = cursor.fetchone()[0]
-            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Resuelto', 'Cerrado')", (usuario,))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Resuelto', 'Cerrado') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['mis_resueltos'] = cursor.fetchone()[0]
-            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph}", (usuario,))
+            cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['mis_total'] = cursor.fetchone()[0]
     except Exception as e:
         print(f"Error calculando resumen de inicio de tickets: {e}")
 
-    query = "SELECT id, titulo, tipo, categoria, prioridad, estado, creado_por, fecha_creacion FROM tickets WHERE 1=1"
+    query = "SELECT id, titulo, tipo, categoria, prioridad, estado, creado_por, fecha_creacion FROM tickets WHERE COALESCE(eliminado, 0) = 0"
     params = []
     if not es_soporte:
         query += f" AND creado_por = {ph}"
@@ -3059,7 +3195,7 @@ def _calcular_indicadores_tickets():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, sla_resolucion_limite, sla_resolucion_cumplida, calificacion, area, sede FROM tickets")
+        cursor.execute("SELECT id, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, sla_resolucion_limite, sla_resolucion_cumplida, calificacion, area, sede FROM tickets WHERE COALESCE(eliminado, 0) = 0")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando indicadores de tickets: {e}")
@@ -3151,7 +3287,7 @@ def indicadores_tickets():
 def exportar_indicadores_tickets():
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets ORDER BY id DESC")
+    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
 
@@ -3339,7 +3475,7 @@ def exportar_indicadores_tickets_xlsx():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets ORDER BY id DESC")
+    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
 
@@ -3376,6 +3512,9 @@ def ver_inventario():
     q_sede = request.args.get('sede', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
 
+    tipos_activo_catalogo = _catalogo_tipos_activo_activos()
+    nombres_tipos_activo = [t['etiqueta'] for t in tipos_activo_catalogo] or TIPOS_ACTIVO
+
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -3394,13 +3533,61 @@ def ver_inventario():
             adjuntos_por_activo.setdefault(activo_id, []).append({'id': adj_id, 'url': url, 'nombre_original': nombre_original})
     except Exception as e:
         print(f"Error consultando adjuntos de inventario: {e}")
+
+    # 🔀 Trazabilidad: cadena de reemplazos de cada activo, en ambos sentidos — como activo
+    # "saliente" (fue reemplazado por otro) y como activo "entrante" (reemplazó a otro).
+    trazabilidad_por_activo = {}
+    try:
+        cursor.execute("""
+            SELECT r.id, r.activo_anterior_id, r.activo_nuevo_id, r.motivo, r.notas, r.fecha_reemplazo,
+                   r.estado_anterior_resultante, r.creado_por, r.fecha_creacion,
+                   ant.nombre, nue.nombre
+            FROM activos_reemplazos r
+            LEFT JOIN activos_inventario ant ON r.activo_anterior_id = ant.id
+            LEFT JOIN activos_inventario nue ON r.activo_nuevo_id = nue.id
+            ORDER BY r.fecha_creacion DESC, r.id DESC
+        """)
+        for (rid, ant_id, nue_id, motivo, notas, fecha_reemplazo, estado_resultante, creado_por, fecha_creacion,
+             ant_nombre, nue_nombre) in cursor.fetchall():
+            trazabilidad_por_activo.setdefault(ant_id, []).append({
+                'id': rid, 'direccion': 'saliente', 'motivo': motivo, 'notas': notas,
+                'fecha_reemplazo': fecha_reemplazo, 'estado_resultante': estado_resultante,
+                'creado_por': creado_por, 'fecha_creacion': fecha_creacion,
+                'otro_id': nue_id, 'otro_nombre': nue_nombre
+            })
+            if nue_id:
+                trazabilidad_por_activo.setdefault(nue_id, []).append({
+                    'id': rid, 'direccion': 'entrante', 'motivo': motivo, 'notas': notas,
+                    'fecha_reemplazo': fecha_reemplazo, 'estado_resultante': estado_resultante,
+                    'creado_por': creado_por, 'fecha_creacion': fecha_creacion,
+                    'otro_id': ant_id, 'otro_nombre': ant_nombre
+                })
+    except Exception as e:
+        print(f"Error consultando trazabilidad de activos: {e}")
+
+    # 🎫 Historial de tickets vinculados a cada activo (solicitudes de soporte que marcaron
+    # "Activo relacionado" al crearse).
+    tickets_por_activo = {}
+    try:
+        cursor.execute("SELECT id, titulo, tipo, estado, prioridad, fecha_creacion, activo_id FROM tickets WHERE activo_id IS NOT NULL AND COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+        for tk_id, titulo, tipo_t, estado_t, prioridad_t, fecha_creacion_t, activo_id_t in cursor.fetchall():
+            tickets_por_activo.setdefault(activo_id_t, []).append({
+                'id': tk_id, 'titulo': titulo, 'tipo': tipo_t or 'Incidente', 'estado': estado_t,
+                'prioridad': prioridad_t, 'fecha_creacion': fecha_creacion_t,
+                'codigo': _codigo_ticket(tipo_t or 'Incidente', tk_id, fecha_creacion_t)
+            })
+    except Exception as e:
+        print(f"Error consultando historial de tickets por activo: {e}")
+
     conn.close()
 
     activos_todos = [{
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8],
         'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11],
-        'adjuntos': adjuntos_por_activo.get(r[0], [])
+        'adjuntos': adjuntos_por_activo.get(r[0], []),
+        'trazabilidad': trazabilidad_por_activo.get(r[0], []),
+        'tickets_historial': tickets_por_activo.get(r[0], [])
     } for r in rows]
     total_activos_general = len(activos_todos)
 
@@ -3422,7 +3609,7 @@ def ver_inventario():
     activos_en_contexto = activos_todos
     if q_sede:
         activos_en_contexto = [a for a in activos_en_contexto if (a['sede'] or '') == q_sede]
-    if q_tipo in TIPOS_ACTIVO:
+    if q_tipo in nombres_tipos_activo:
         activos_en_contexto = [a for a in activos_en_contexto if a['tipo_activo'] == q_tipo]
     if q_busqueda:
         activos_en_contexto = [a for a in activos_en_contexto if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
@@ -3452,9 +3639,18 @@ def ver_inventario():
 
     sedes = _config_ticket_lista('sede')
     error_placa = request.args.get('error_placa', '').strip()
+    # 🔀 Candidatos para "Activo de reemplazo": todo el inventario activo (sin filtrar por la
+    # vista actual), con los campos mínimos que necesita el buscador del modal.
+    activos_para_reemplazo = [{
+        'id': a['id'], 'nombre': a['nombre'], 'marca': a['marca'], 'modelo': a['modelo'], 'estado': a['estado']
+    } for a in activos_todos]
     return render_template(
         'tickets_inventario.html', es_soporte=True, activos=activos,
-        tipos_activo=TIPOS_ACTIVO, estados_activo=ESTADOS_ACTIVO, sedes=sedes,
+        tipos_activo=nombres_tipos_activo, tipos_activo_catalogo=tipos_activo_catalogo,
+        ICONOS_TIPO_ACTIVO=ICONOS_TIPO_ACTIVO,
+        motivos_reemplazo=MOTIVOS_REEMPLAZO_ACTIVO, estados_resultantes_reemplazo=ESTADOS_RESULTANTES_REEMPLAZO,
+        activos_para_reemplazo=activos_para_reemplazo,
+        estados_activo=ESTADOS_ACTIVO, sedes=sedes,
         q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
         total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
@@ -3476,7 +3672,8 @@ def crear_activo():
     sede = request.form.get('sede', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
-    if tipo_activo not in TIPOS_ACTIVO:
+    nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
+    if tipo_activo not in nombres_tipos_activo_validos:
         tipo_activo = 'Otro'
     if estado not in ESTADOS_ACTIVO:
         estado = 'Disponible'
@@ -3523,7 +3720,8 @@ def editar_activo(activo_id):
     sede = request.form.get('sede', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
-    if tipo_activo not in TIPOS_ACTIVO:
+    nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
+    if tipo_activo not in nombres_tipos_activo_validos:
         tipo_activo = 'Otro'
     if estado not in ESTADOS_ACTIVO:
         estado = 'Disponible'
@@ -3567,6 +3765,144 @@ def eliminar_activo(activo_id):
     except Exception as e:
         conn.rollback()
         print(f"Error eliminando activo {activo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+# 🔀 REEMPLAZAR ACTIVO: registra en 'activos_reemplazos' el motivo, notas, fecha y qué pasa con
+# el equipo saliente (queda en bodega/mantenimiento/baja/perdido); si se eligió un activo de
+# reemplazo, ese activo "hereda" el responsable y la sede del que reemplaza, para no perder el
+# hilo de a quién le está llegando el equipo nuevo. Inspirado en el flujo de Solvyx.
+@app.route('/tickets/inventario/<int:activo_id>/reemplazar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def reemplazar_activo(activo_id):
+    motivo = request.form.get('motivo', '').strip()
+    notas = request.form.get('notas', '').strip()
+    activo_nuevo_id_raw = request.form.get('activo_nuevo_id', '').strip()
+    fecha_reemplazo = request.form.get('fecha_reemplazo', '').strip()
+    estado_resultante = request.form.get('estado_anterior_resultante', '').strip()
+
+    motivos_validos = [m['clave'] for m in MOTIVOS_REEMPLAZO_ACTIVO]
+    estados_resultantes_validos = [e['valor'] for e in ESTADOS_RESULTANTES_REEMPLAZO]
+    if motivo not in motivos_validos or estado_resultante not in estados_resultantes_validos:
+        return redirect(url_for('ver_inventario'))
+    if not fecha_reemplazo:
+        fecha_reemplazo = obtener_fecha_actual()
+
+    activo_nuevo_id = int(activo_nuevo_id_raw) if activo_nuevo_id_raw.isdigit() else None
+    if activo_nuevo_id == activo_id:
+        activo_nuevo_id = None
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT nombre, asignado_a, sede FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_id,))
+        fila_anterior = cursor.fetchone()
+        if not fila_anterior:
+            conn.close()
+            return redirect(url_for('ver_inventario'))
+        nombre_anterior, asignado_a_anterior, sede_anterior = fila_anterior
+
+        usuario = session.get('username')
+        fecha_creacion = obtener_fecha_actual()
+        q_ins = f"INSERT INTO activos_reemplazos (activo_anterior_id, activo_nuevo_id, motivo, notas, fecha_reemplazo, estado_anterior_resultante, creado_por, fecha_creacion) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})"
+        cursor.execute(q_ins, (activo_id, activo_nuevo_id, motivo, notas or None, fecha_reemplazo, estado_resultante, usuario, fecha_creacion))
+
+        cursor.execute(f"UPDATE activos_inventario SET estado = {ph} WHERE id = {ph}", (estado_resultante, activo_id))
+
+        detalle = f"Se reemplazó el activo #{activo_id} ('{nombre_anterior}') — motivo: {motivo}. Queda en estado '{estado_resultante}'."
+        if activo_nuevo_id:
+            # 🔁 El activo de reemplazo hereda responsable y sede del que sale de servicio, para
+            # que el inventario refleje de una vez a quién/dónde quedó el equipo nuevo.
+            estado_nuevo = 'Asignado' if asignado_a_anterior else 'Disponible'
+            cursor.execute(
+                f"UPDATE activos_inventario SET asignado_a = {ph}, sede = {ph}, estado = {ph} WHERE id = {ph} AND eliminado = 0",
+                (asignado_a_anterior, sede_anterior, estado_nuevo, activo_nuevo_id)
+            )
+            detalle += f" Reemplazado por el activo #{activo_nuevo_id}."
+
+        conn.commit()
+        registrar_log(usuario, "Inventario de Activos", detalle)
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error reemplazando activo {activo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+# 🗂️ CATÁLOGO DE TIPOS DE ACTIVO (administrable desde el modal "Tipos de activo" de
+# Inventario — key, etiqueta visible, ícono y orden). Reemplaza la lista fija TIPOS_ACTIVO.
+@app.route('/tickets/inventario/tipos/crear', methods=['POST'])
+@login_required
+@admin_required
+def crear_tipo_activo_catalogo():
+    key = re.sub(r'[^A-Z0-9_]', '', request.form.get('key', '').strip().upper())
+    etiqueta = request.form.get('etiqueta', '').strip()
+    icono = (request.form.get('icono', '').strip() or 'box')
+    if key and etiqueta:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_activo_catalogo")
+            siguiente_orden = cursor.fetchone()[0] + 1
+            q = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (?, ?, ?, ?)"
+            cursor.execute(q, (key, etiqueta, icono, siguiente_orden))
+            conn.commit()
+            registrar_log(session.get('username'), "Catálogo de Tipos de Activo", f"Se agregó el tipo '{etiqueta}' ({key})")
+        except Exception as e:
+            conn.rollback()
+            print(f"⚠️ Error agregando tipo de activo '{etiqueta}': {e}")
+        conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/tipos/<int:tipo_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_tipo_activo_catalogo(tipo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE tipos_activo_catalogo SET estado = 'inactivo' WHERE id = %s" if db_type == 'postgres' else "UPDATE tipos_activo_catalogo SET estado = 'inactivo' WHERE id = ?"
+        cursor.execute(q, (tipo_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Catálogo de Tipos de Activo", f"Se desactivó el tipo de activo ID {tipo_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error desactivando tipo de activo {tipo_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/tipos/<int:tipo_id>/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def reordenar_tipo_activo_catalogo(tipo_id):
+    """Sube o baja un tipo de activo en el orden de despliegue, intercambiando su 'orden' con
+    el del vecino inmediato (entre los tipos activos) — las flechas ↑/↓ del modal."""
+    direccion = request.form.get('direccion', '')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, orden FROM tipos_activo_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, etiqueta ASC")
+        filas = cursor.fetchall()
+        ids_ordenados = [f[0] for f in filas]
+        if tipo_id in ids_ordenados:
+            pos = ids_ordenados.index(tipo_id)
+            pos_vecino = pos - 1 if direccion == 'up' else pos + 1
+            if 0 <= pos_vecino < len(ids_ordenados):
+                id_vecino = ids_ordenados[pos_vecino]
+                orden_actual = filas[pos][1]
+                orden_vecino = filas[pos_vecino][1]
+                q = "UPDATE tipos_activo_catalogo SET orden = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tipos_activo_catalogo SET orden = ? WHERE id = ?"
+                cursor.execute(q, (orden_vecino, tipo_id))
+                cursor.execute(q, (orden_actual, id_vecino))
+                conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error reordenando tipo de activo {tipo_id}: {e}")
     conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -4278,6 +4614,38 @@ def _catalogo_especialidades_activas():
         filas = []
     conn.close()
     return [{'id': f[0], 'nombre': f[1]} for f in filas]
+
+
+def _catalogo_tipos_activo_activos():
+    """Tipos de activo disponibles para Inventario (Portátil, Impresora, Servidor...),
+    administrables desde /tickets/inventario/tipos sin tocar código — ver
+    crear_tipo_activo_catalogo, editar_tipo_activo_catalogo, reordenar_tipo_activo_catalogo y
+    eliminar_tipo_activo_catalogo. Antes era la lista fija TIPOS_ACTIVO."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, key, etiqueta, icono, orden FROM tipos_activo_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, etiqueta ASC")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando catálogo de tipos de activo: {e}")
+        filas = []
+    conn.close()
+    return [{'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0} for f in filas]
+
+
+def _catalogo_tipos_activo_todos():
+    """Igual que _catalogo_tipos_activo_activos() pero incluye los inactivos — para el modal de
+    administración, donde también se pueden reactivar."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, key, etiqueta, icono, orden, estado FROM tipos_activo_catalogo ORDER BY orden ASC, etiqueta ASC")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando catálogo de tipos de activo: {e}")
+        filas = []
+    conn.close()
+    return [{'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0, 'estado': f[5] or 'activo'} for f in filas]
 
 
 @app.route('/credenciales/colaboradores')
