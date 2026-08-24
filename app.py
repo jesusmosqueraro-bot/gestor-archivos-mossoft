@@ -2983,9 +2983,6 @@ def eliminar_configuracion_ticket(config_id):
 # 📊 INDICADORES Y KPIS (solo equipo de soporte): panorama general del módulo de tickets —
 # cumplimiento de SLA, distribución por prioridad/categoría/área/sede, satisfacción de los
 # solicitantes y tendencia de solicitudes de los últimos 14 días — más exportación a Excel.
-@app.route('/tickets/indicadores')
-@login_required
-@agente_o_admin_required
 def _calcular_indicadores_tickets():
     """Calcula todos los indicadores/KPIs de Tickets (por estado, prioridad, tipo, cumplimiento
     de SLA, categoría/área/sede, calificación promedio, top agentes y tendencia de 14 días).
@@ -3068,6 +3065,9 @@ def _calcular_indicadores_tickets():
     }
 
 
+@app.route('/tickets/indicadores')
+@login_required
+@agente_o_admin_required
 def indicadores_tickets():
     # 🔔 Aviso perezoso de SLA por vencer/vencido — ver _revisar_alertas_sla(). Esta página ya
     # está gateada a admin/agente, así que se corre sin condición adicional.
