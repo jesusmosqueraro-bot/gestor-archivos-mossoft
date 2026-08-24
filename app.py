@@ -2329,6 +2329,20 @@ def ver_inventario():
         conteos_estado[a['estado']] = conteos_estado.get(a['estado'], 0) + 1
     total_activos = len(activos_en_contexto)
 
+    # 📊 "Por tipo de activo": mismo criterio de contexto que arriba — responde a la sede y la
+    # búsqueda ya elegidas, pero no al tipo en sí, para poder comparar los tipos entre ellos en
+    # vez de que el propio filtro de tipo colapse el gráfico a una sola barra.
+    activos_para_tipo = activos_todos
+    if q_sede:
+        activos_para_tipo = [a for a in activos_para_tipo if (a['sede'] or '') == q_sede]
+    if q_busqueda:
+        activos_para_tipo = [a for a in activos_para_tipo if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+    por_tipo_activo = {}
+    for a in activos_para_tipo:
+        tp = a['tipo_activo'] or 'Otro'
+        por_tipo_activo[tp] = por_tipo_activo.get(tp, 0) + 1
+    por_tipo_activo = dict(sorted(por_tipo_activo.items(), key=lambda kv: kv[1], reverse=True))
+
     activos = activos_en_contexto
     if q_estado in ESTADOS_ACTIVO:
         activos = [a for a in activos if a['estado'] == q_estado]
@@ -2339,7 +2353,8 @@ def ver_inventario():
         tipos_activo=TIPOS_ACTIVO, estados_activo=ESTADOS_ACTIVO, sedes=sedes,
         q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
-        total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede
+        total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
+        por_tipo_activo=por_tipo_activo
     )
 
 
