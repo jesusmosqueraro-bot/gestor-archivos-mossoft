@@ -1,0 +1,36 @@
+/* =============================================================================
+   Estilos mínimos para mostrar (en modo lectura) el HTML que produce el editor de texto
+   enriquecido (Quill) en la descripción de tickets, sus comentarios/respuestas, y el
+   contenido de los Comunicados. Tailwind resetea los márgenes por defecto de <p>/<ul>/<ol>,
+   así que sin esto los párrafos y listas del editor se verían todos pegados entre sí.
+   ============================================================================= */
+
+.contenido-enriquecido p {
+    margin: 0 0 0.6em 0;
+}
+.contenido-enriquecido p:last-child {
+    margin-bottom: 0;
+}
+.contenido-enriquecido ul,
+.contenido-enriquecido ol {
+    margin: 0 0 0.6em 1.25rem;
+    padding: 0;
+}
+.contenido-enriquecido ul {
+    list-style-type: disc;
+}
+.contenido-enriquecido ol {
+    list-style-type: decimal;
+}
+.contenido-enriquecido li {
+    margin: 0.15em 0;
+}
+.contenido-enriquecido strong {
+    font-weight: 700;
+}
+.contenido-enriquecido u {
+    text-decoration: underline;
+}
+.contenido-enriquecido s {
+    text-decoration: line-through;
+}
