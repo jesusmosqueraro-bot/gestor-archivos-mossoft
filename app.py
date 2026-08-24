@@ -4795,6 +4795,16 @@ def gestion_usuarios():
         if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
             error = "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario."
 
+        # 🪪 La cédula sigue siendo opcional, pero si se indica no puede repetirse: dos cuentas
+        # distintas no pueden compartir el mismo número de documento. (No se toca a ningún
+        # usuario que ya exista con una cédula duplicada de antes de esta validación — solo se
+        # bloquean los duplicados NUEVOS a partir de ahora.)
+        if not error and nueva_cedula:
+            q_dup_cedula = "SELECT id FROM usuarios WHERE cedula = %s" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE cedula = ?"
+            cursor.execute(q_dup_cedula, (nueva_cedula,))
+            if cursor.fetchone():
+                error = f"Ya existe un usuario registrado con la cédula {nueva_cedula}."
+
         if not error:
             try:
                 # 🧑 El nombre de usuario (login) ya NO lo escribe el admin a mano: se genera
@@ -4825,9 +4835,11 @@ def gestion_usuarios():
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
+    error_cedula = request.args.get('error_cedula', '').strip()
     return render_template(
         'usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data,
-        usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas()
+        usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas(),
+        error_cedula=error_cedula
     )
 
 
@@ -4885,12 +4897,25 @@ def editar_usuario(usuario_id):
         # sin borrar los demás datos).
         nombre_final = nuevo_nombre or (row[2] if row else None)
         telefono_final = nuevo_telefono or (row[3] if row else None)
-        cedula_final = nueva_cedula or (row[4] if row else None)
+        cedula_original = row[4] if row else None
+        cedula_final = nueva_cedula or cedula_original
         especialidad_final = nueva_especialidad or (row[5] if row else None)
 
         if user_target is None:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
+
+        # 🪪 Solo se valida la unicidad de la cédula cuando el admin la está CAMBIANDO
+        # activamente a un valor distinto del que este usuario ya tenía — así una pareja de
+        # cuentas que ya compartía cédula desde antes de esta validación puede seguir
+        # editando sus demás datos (correo, rol, teléfono...) sin quedar bloqueada por su
+        # propio duplicado histórico. Solo se impide crear un duplicado NUEVO.
+        if nueva_cedula and nueva_cedula != (cedula_original or ''):
+            q_dup_cedula = "SELECT id FROM usuarios WHERE cedula = %s AND id != %s" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE cedula = ? AND id != ?"
+            cursor.execute(q_dup_cedula, (nueva_cedula, usuario_id))
+            if cursor.fetchone():
+                conn.close()
+                return redirect(url_for('gestion_usuarios', error_cedula=nueva_cedula))
 
         es_superadmin = (session.get('username') == 'admin')
         es_propio = (user_target == session.get('username'))
