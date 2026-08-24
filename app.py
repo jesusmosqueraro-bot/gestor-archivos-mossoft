@@ -414,6 +414,18 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo VARCHAR(50) DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha VARCHAR(100) NOT NULL
             )''')
+            # 🆔 Catálogo de aplicativos/herramientas para los que se crean credenciales a los
+            # colaboradores (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx...). Administrable:
+            # el equipo de soporte puede agregar o desactivar aplicativos sin tocar código.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS aplicativos_catalogo (
+                id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
+            # 🪪 Altas y bajas de credenciales de colaboradores: un registro por cada aplicativo
+            # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
+            # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
+                id SERIAL PRIMARY KEY, colaborador VARCHAR(200) NOT NULL, aplicativo VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion VARCHAR(100), fecha_solicitud VARCHAR(100), analista_gestiona VARCHAR(150), solicitado_por VARCHAR(150), capacitado_por VARCHAR(150), medio_envio VARCHAR(30), estado VARCHAR(20) DEFAULT 'activo', fecha_deshabilitacion VARCHAR(100), deshabilitado_por VARCHAR(150), fecha_registro VARCHAR(100) NOT NULL, registrado_por VARCHAR(150) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -532,6 +544,18 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo TEXT DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha TEXT NOT NULL
             )''')
+            # 🆔 Catálogo de aplicativos/herramientas para los que se crean credenciales a los
+            # colaboradores (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx...). Administrable:
+            # el equipo de soporte puede agregar o desactivar aplicativos sin tocar código.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS aplicativos_catalogo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, estado TEXT DEFAULT 'activo'
+            )''')
+            # 🪪 Altas y bajas de credenciales de colaboradores: un registro por cada aplicativo
+            # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
+            # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, colaborador TEXT NOT NULL, aplicativo TEXT NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion TEXT, fecha_solicitud TEXT, analista_gestiona TEXT, solicitado_por TEXT, capacitado_por TEXT, medio_envio TEXT, estado TEXT DEFAULT 'activo', fecha_deshabilitacion TEXT, deshabilitado_por TEXT, fecha_registro TEXT NOT NULL, registrado_por TEXT NOT NULL
+            )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
@@ -636,6 +660,16 @@ def init_db():
                 cursor.execute(q_seed_cat, ('categoria', nombre_cat))
             conn.commit()
 
+        # 🆔 Siembra el catálogo de aplicativos con los que ya se manejan hoy, solo la primera
+        # vez (instalación nueva o actualización desde una versión sin esta tabla). Después de
+        # esto, el catálogo se administra por completo desde el módulo (agregar/desactivar).
+        cursor.execute("SELECT COUNT(*) FROM aplicativos_catalogo")
+        if cursor.fetchone()[0] == 0:
+            q_seed_app = "INSERT INTO aplicativos_catalogo (nombre) VALUES (%s)" if db_type == 'postgres' else "INSERT INTO aplicativos_catalogo (nombre) VALUES (?)"
+            for nombre_app in ['KUBAPP', 'SAMI', 'Moodle', 'Wolkvox', 'Correo (cPanel / Outlook)', 'Solvyx']:
+                cursor.execute(q_seed_app, (nombre_app,))
+            conn.commit()
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             # Solo se ejecuta si la tabla usuarios está realmente vacía (instalación nueva).
@@ -736,7 +770,8 @@ def visor_db():
     tablas_permitidas = [
         'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
         'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
-        'ticket_configuraciones', 'activos_inventario'
+        'ticket_configuraciones', 'activos_inventario', 'aplicativos_catalogo',
+        'credenciales_colaboradores'
     ]
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
@@ -813,7 +848,8 @@ TABLAS_RESPALDO = [
     'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
     'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
-    'activos_inventario', 'inventario_adjuntos'
+    'activos_inventario', 'inventario_adjuntos', 'aplicativos_catalogo',
+    'credenciales_colaboradores'
 ]
 
 
@@ -4118,6 +4154,214 @@ def eliminar_credencial(cred_id):
     
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
+
+
+# 🪪 MÓDULO ALTAS Y BAJAS DE CREDENCIALES DE COLABORADORES — bitácora de qué credenciales se
+# le crean a cada colaborador nuevo (o existente) en cada aplicativo institucional (KUBAPP,
+# SAMI, Moodle, Wolkvox, Correo, Solvyx...), quién las gestionó/capacitó y por qué medio se
+# entregaron. Es un registro por aplicativo (no por colaborador), para poder dar de baja el
+# acceso a uno puntual sin afectar los demás que tenga esa misma persona. Distinto de la
+# Bóveda de Accesos (que guarda credenciales de sistemas/servidores para el equipo de soporte).
+MEDIOS_ENVIO_CREDENCIAL = ('WhatsApp', 'Correo', 'SMS', 'Chat Teams')
+
+
+def _catalogo_aplicativos_activos():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, nombre FROM aplicativos_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando catálogo de aplicativos: {e}")
+        filas = []
+    conn.close()
+    return [{'id': f[0], 'nombre': f[1]} for f in filas]
+
+
+@app.route('/credenciales/colaboradores')
+@login_required
+@agente_o_admin_required
+def ver_credenciales_colaboradores():
+    q_busqueda = request.args.get('q', '').strip().lower()
+    f_aplicativo = request.args.get('aplicativo', '').strip()
+    f_estado = request.args.get('estado', 'activo').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, "
+            "solicitado_por, capacitado_por, medio_envio, estado, fecha_deshabilitacion, deshabilitado_por "
+            "FROM credenciales_colaboradores ORDER BY id DESC"
+        )
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando credenciales de colaboradores: {e}")
+        filas = []
+    conn.close()
+
+    registros = []
+    aplicativos_en_uso = set()
+    for r in filas:
+        (r_id, colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona,
+         solicitado_por, capacitado_por, medio_envio, estado, fecha_deshabilitacion, deshabilitado_por) = r
+        aplicativos_en_uso.add(aplicativo)
+
+        if f_estado and f_estado != 'todos' and estado != f_estado:
+            continue
+        if f_aplicativo and aplicativo != f_aplicativo:
+            continue
+        if q_busqueda and q_busqueda not in f"{colaborador} {aplicativo} {solicitado_por or ''}".lower():
+            continue
+
+        registros.append({
+            'id': r_id, 'colaborador': colaborador, 'aplicativo': aplicativo,
+            'fecha_creacion': fecha_creacion, 'fecha_solicitud': fecha_solicitud,
+            'analista_gestiona': analista_gestiona, 'solicitado_por': solicitado_por,
+            'capacitado_por': capacitado_por, 'medio_envio': medio_envio, 'estado': estado,
+            'fecha_deshabilitacion': fecha_deshabilitacion, 'deshabilitado_por': deshabilitado_por
+        })
+
+    return render_template(
+        'credenciales_colaboradores.html', registros=registros,
+        aplicativos=_catalogo_aplicativos_activos(), medios=MEDIOS_ENVIO_CREDENCIAL,
+        q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado
+    )
+
+
+@app.route('/credenciales/colaboradores/crear', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def crear_credencial_colaborador():
+    colaborador = request.form.get('colaborador', '').strip()
+    aplicativo = request.form.get('aplicativo', '').strip()
+    password = request.form.get('password', '').strip()
+    fecha_creacion = request.form.get('fecha_creacion', '').strip() or None
+    fecha_solicitud = request.form.get('fecha_solicitud', '').strip() or None
+    analista_gestiona = request.form.get('analista_gestiona', '').strip() or None
+    solicitado_por = request.form.get('solicitado_por', '').strip() or None
+    capacitado_por = request.form.get('capacitado_por', '').strip() or None
+    medio_envio = request.form.get('medio_envio', '').strip() or None
+    if medio_envio not in MEDIOS_ENVIO_CREDENCIAL:
+        medio_envio = None
+
+    if colaborador and aplicativo and password:
+        try:
+            pass_cifrada = encriptar_texto(password)
+            fecha_act = obtener_fecha_actual()
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            q_ins = (
+                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
+                "fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio, estado, "
+                "fecha_registro, registrado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)"
+                if db_type == 'postgres' else
+                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
+                "fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio, estado, "
+                "fecha_registro, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
+            )
+            cursor.execute(q_ins, (colaborador, aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
+                                    analista_gestiona, solicitado_por, capacitado_por, medio_envio,
+                                    fecha_act, session.get('username')))
+            conn.commit()
+            conn.close()
+            registrar_log(session.get('username'), "Alta de Credencial de Colaborador",
+                          f"Se creó la credencial de '{aplicativo}' para {colaborador}")
+        except Exception as e:
+            print(f"⚠️ Error creando credencial de colaborador '{colaborador}'/{aplicativo}: {e}")
+
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/<int:reg_id>/deshabilitar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def deshabilitar_credencial_colaborador(reg_id):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        fecha_act = obtener_fecha_actual()
+        q = (
+            "UPDATE credenciales_colaboradores SET estado = 'deshabilitado', fecha_deshabilitacion = %s, deshabilitado_por = %s WHERE id = %s"
+            if db_type == 'postgres' else
+            "UPDATE credenciales_colaboradores SET estado = 'deshabilitado', fecha_deshabilitacion = ?, deshabilitado_por = ? WHERE id = ?"
+        )
+        cursor.execute(q, (fecha_act, session.get('username'), reg_id))
+        conn.commit()
+        conn.close()
+        registrar_log(session.get('username'), "Baja de Credencial de Colaborador", f"Se deshabilitó la credencial ID {reg_id}")
+    except Exception as e:
+        print(f"⚠️ Error deshabilitando credencial de colaborador {reg_id}: {e}")
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/<int:reg_id>/revelar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def revelar_credencial_colaborador(reg_id):
+    """Descifra a demanda la clave de una credencial de colaborador puntual y deja constancia
+    en el log general de quién la consultó/copió — misma idea que /credenciales/<id>/revelar
+    para la Bóveda de Accesos."""
+    accion = request.form.get('accion', 'ver')
+    accion_legible = 'copió' if accion == 'copiar' else 'vio'
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT colaborador, aplicativo, password_cifrada FROM credenciales_colaboradores WHERE id = %s" if db_type == 'postgres' else "SELECT colaborador, aplicativo, password_cifrada FROM credenciales_colaboradores WHERE id = ?"
+        cursor.execute(q, (reg_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando credencial de colaborador {reg_id} para revelar: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    if not row:
+        return jsonify({'error': 'no encontrada'}), 404
+
+    colaborador, aplicativo, pass_enc = row
+    pass_real = desencriptar_texto(pass_enc)
+    registrar_log(session.get('username'), "Consulta de Credencial de Colaborador",
+                  f"Se {accion_legible} la clave de '{aplicativo}' de {colaborador} (ID {reg_id})")
+    return jsonify({'password': pass_real})
+
+
+@app.route('/credenciales/colaboradores/aplicativos/crear', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def crear_aplicativo_catalogo():
+    nombre = request.form.get('nombre', '').strip()
+    if nombre:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q = "INSERT INTO aplicativos_catalogo (nombre) VALUES (%s)" if db_type == 'postgres' else "INSERT INTO aplicativos_catalogo (nombre) VALUES (?)"
+            cursor.execute(q, (nombre,))
+            conn.commit()
+            registrar_log(session.get('username'), "Catálogo de Aplicativos", f"Se agregó el aplicativo '{nombre}'")
+        except Exception as e:
+            conn.rollback()
+            print(f"⚠️ Error agregando aplicativo '{nombre}': {e}")
+        conn.close()
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/aplicativos/<int:app_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_aplicativo_catalogo(app_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE aplicativos_catalogo SET estado = 'inactivo' WHERE id = %s" if db_type == 'postgres' else "UPDATE aplicativos_catalogo SET estado = 'inactivo' WHERE id = ?"
+        cursor.execute(q, (app_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Catálogo de Aplicativos", f"Se desactivó el aplicativo ID {app_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error desactivando aplicativo {app_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
 
 # ♻️ MÓDULO PAPELERA DE RECICLAJE
 @app.route('/papelera')
