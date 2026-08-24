@@ -4222,10 +4222,24 @@ def ver_credenciales_colaboradores():
             'fecha_deshabilitacion': fecha_deshabilitacion, 'deshabilitado_por': deshabilitado_por
         })
 
+    conn2, db_type2 = get_db()
+    cursor2 = conn2.cursor()
+    try:
+        cursor2.execute(
+            "SELECT usuario, nombre FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' "
+            "AND rol IN ('admin', 'agente') ORDER BY nombre ASC"
+        )
+        equipo_soporte = [{'usuario': r[0], 'nombre': r[1] or r[0]} for r in cursor2.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error listando equipo de soporte para altas de credenciales: {e}")
+        equipo_soporte = []
+    conn2.close()
+
     return render_template(
         'credenciales_colaboradores.html', registros=registros,
         aplicativos=_catalogo_aplicativos_activos(), medios=MEDIOS_ENVIO_CREDENCIAL,
-        q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado
+        q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado,
+        equipo_soporte=equipo_soporte
     )
 
 
