@@ -4235,11 +4235,25 @@ def ver_credenciales_colaboradores():
         equipo_soporte = []
     conn2.close()
 
+    conn3, db_type3 = get_db()
+    cursor3 = conn3.cursor()
+    try:
+        # 📋 Nombres de colaboradores ya registrados antes (en cualquier aplicativo), para que
+        # el campo "Colaborador" del modal sugiera autocompletar en vez de obligar a retipear el
+        # nombre completo cada vez que a la misma persona se le da de alta un acceso más. Sigue
+        # siendo texto libre: si la persona es nueva, se puede escribir un nombre que no esté aquí.
+        cursor3.execute("SELECT DISTINCT colaborador FROM credenciales_colaboradores ORDER BY colaborador ASC")
+        colaboradores_existentes = [r[0] for r in cursor3.fetchall() if r[0]]
+    except Exception as e:
+        print(f"⚠️ Error listando colaboradores existentes para autocompletar: {e}")
+        colaboradores_existentes = []
+    conn3.close()
+
     return render_template(
         'credenciales_colaboradores.html', registros=registros,
         aplicativos=_catalogo_aplicativos_activos(), medios=MEDIOS_ENVIO_CREDENCIAL,
         q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado,
-        equipo_soporte=equipo_soporte
+        equipo_soporte=equipo_soporte, colaboradores_existentes=colaboradores_existentes
     )
 
 
@@ -4306,6 +4320,36 @@ def deshabilitar_credencial_colaborador(reg_id):
         registrar_log(session.get('username'), "Baja de Credencial de Colaborador", f"Se deshabilitó la credencial ID {reg_id}")
     except Exception as e:
         print(f"⚠️ Error deshabilitando credencial de colaborador {reg_id}: {e}")
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/<int:reg_id>/reactivar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def reactivar_credencial_colaborador(reg_id):
+    """Vuelve a 'activo' una fila de Altas de Credenciales que había quedado 'deshabilitado' —
+    flujo simétrico al de deshabilitar. Limpia fecha_deshabilitacion/deshabilitado_por para que
+    la fila quede exactamente como si nunca se hubiera dado de baja."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_sel = "SELECT colaborador, aplicativo FROM credenciales_colaboradores WHERE id = %s" if db_type == 'postgres' else "SELECT colaborador, aplicativo FROM credenciales_colaboradores WHERE id = ?"
+        cursor.execute(q_sel, (reg_id,))
+        row = cursor.fetchone()
+        colaborador = row[0] if row else f"ID {reg_id}"
+        aplicativo = row[1] if row else ""
+
+        q_upd = (
+            "UPDATE credenciales_colaboradores SET estado = 'activo', fecha_deshabilitacion = NULL, deshabilitado_por = NULL WHERE id = %s"
+            if db_type == 'postgres' else
+            "UPDATE credenciales_colaboradores SET estado = 'activo', fecha_deshabilitacion = NULL, deshabilitado_por = NULL WHERE id = ?"
+        )
+        cursor.execute(q_upd, (reg_id,))
+        conn.commit()
+        conn.close()
+        registrar_log(session.get('username'), "Reactivación de Credencial de Colaborador", f"Se reactivó el acceso a '{aplicativo}' de {colaborador} (ID {reg_id})")
+    except Exception as e:
+        print(f"⚠️ Error reactivando credencial de colaborador {reg_id}: {e}")
     return redirect(url_for('ver_credenciales_colaboradores'))
 
 
