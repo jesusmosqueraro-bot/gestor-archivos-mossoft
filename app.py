@@ -1172,19 +1172,30 @@ def _normalizar_telefono_whatsapp(telefono):
 def _link_whatsapp_ticket(ticket, creador_info, nombre_agente):
     """Arma el enlace 'click to chat' de WhatsApp (wa.me) para contactar al solicitante de un
     ticket, con un mensaje ya redactado que el agente puede revisar y enviar desde WhatsApp
-    Web/Desktop — Arkiv no manda el mensaje por sí solo, solo deja el borrador listo. Devuelve
-    None si no hay ningún teléfono de contacto registrado para este ticket."""
+    Web/Desktop — Arkiv no manda el mensaje por sí solo, solo deja el borrador listo.
+
+    El botón siempre se genera (para que el agente lo tenga disponible en todos los tickets,
+    igual que en la referencia): si hay un teléfono de contacto válido, el chat se abre
+    directamente con el solicitante; si no hay ninguno registrado, se arma el enlace sin
+    número (wa.me/?text=...), que abre WhatsApp Web/Desktop con el mensaje ya redactado para
+    que el agente elija el contacto manualmente."""
     telefono = _normalizar_telefono_whatsapp(ticket.get('telefono_contacto'))
-    if not telefono:
-        return None
     nombre_solicitante = (creador_info or {}).get('nombre') or ticket.get('creado_por') or 'usuario'
+    # El mensaje nombra el tipo real del ticket (incidente/requerimiento) en vez de un genérico
+    # "solicitud", igual a como lo redacta la referencia (Solvyx) con su "tu solicitud RQ-...").
+    tipo_ticket = (ticket.get('tipo') or '').strip().lower()
+    if tipo_ticket not in ('incidente', 'requerimiento'):
+        tipo_ticket = 'solicitud'
     mensaje = (
         f"Hola {nombre_solicitante}, soy {nombre_agente} de Preventiva Salud SAS. "
-        f"Te escribo respecto a tu solicitud {ticket.get('codigo')} sobre \"{ticket.get('titulo')}\". "
+        f"Te escribo respecto a tu {tipo_ticket} {ticket.get('codigo')} sobre \"{ticket.get('titulo')}\". "
         f"Estoy revisando el caso y quería coordinar contigo para resolverlo lo antes posible. "
         f"¿Cuándo te queda bien que conversemos?"
     )
-    return f"https://wa.me/{telefono}?text={urllib.parse.quote(mensaje)}"
+    texto = urllib.parse.quote(mensaje)
+    if telefono:
+        return f"https://wa.me/{telefono}?text={texto}"
+    return f"https://wa.me/?text={texto}"
 
 
 # 🗓️ Motivos preestablecidos para justificar un corrimiento de la fecha límite de solución.
@@ -1526,15 +1537,18 @@ def ver_ticket(ticket_id):
     # propio solicitante necesite). Arkiv NO envía el mensaje: solo abre WhatsApp Web/Desktop
     # con un borrador ya redactado, el agente decide si lo edita y lo envía.
     whatsapp_url = None
+    whatsapp_tiene_numero = False
     if es_soporte:
         perfil_agente = _info_usuario(session.get('username'))
         nombre_agente = (perfil_agente or {}).get('nombre') or session.get('username') or 'Soporte TI'
         whatsapp_url = _link_whatsapp_ticket(ticket, creador_info, nombre_agente)
+        whatsapp_tiene_numero = bool(_normalizar_telefono_whatsapp(ticket.get('telefono_contacto')))
 
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
         es_soporte=es_soporte, agentes=agentes, creador_info=creador_info,
         estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
+        whatsapp_tiene_numero=whatsapp_tiene_numero,
         max_modificaciones_sla=MAX_MODIFICACIONES_SLA, motivos_sla=MOTIVOS_MODIFICACION_SLA,
         calificacion_max=CALIFICACION_MAX, session_username=session.get('username'),
         whatsapp_url=whatsapp_url
