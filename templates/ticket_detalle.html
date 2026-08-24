@@ -48,7 +48,7 @@
                 <span class="font-mono text-[11px] text-slate-500">{{ ticket.codigo }}</span>
                 {% if whatsapp_url %}
                 <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
-                   title="Abre WhatsApp Web/Desktop con un mensaje ya redactado para el solicitante — revísalo antes de enviarlo"
+                   title="{% if whatsapp_tiene_numero %}Abre WhatsApp Web/Desktop con un mensaje ya redactado para el solicitante — revísalo antes de enviarlo{% else %}Este ticket no tiene un teléfono de contacto registrado: se abre WhatsApp Web/Desktop con el mensaje ya redactado para que elijas el contacto manualmente{% endif %}"
                    class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center gap-2">
                     <i class="fa-brands fa-whatsapp text-sm"></i> WhatsApp
                 </a>
