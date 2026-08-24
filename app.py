@@ -50,6 +50,17 @@ try:
 except Exception:
     requests = None
 
+# bleach: limpia el HTML que produce el editor de texto enriquecido (Quill) antes de
+# guardarlo, para que nadie pueda inyectar <script>, atributos onerror/onclick, etc. en la
+# descripción de un ticket, un comentario o un comunicado. Si por algo no está instalado, se
+# cae a texto plano (nunca se guarda HTML sin filtrar).
+try:
+    import bleach
+    from bleach.css_sanitizer import CSSSanitizer
+except Exception:
+    bleach = None
+    CSSSanitizer = None
+
 app = Flask(__name__)
 # 🔐 SECRET_KEY: nunca debe tener un valor real escrito en el código (quedaría expuesto en GitHub).
 # Si no está seteada en las variables de entorno de Render, se genera una aleatoria en cada arranque.
@@ -404,6 +415,9 @@ def init_db():
                 # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
                 # de contacto al crear un ticket y para que soporte tenga cómo ubicarlo.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);",
+                # 🎨 Preferencia de tema (claro/oscuro) de cada usuario: se guarda en su cuenta
+                # (no solo en el navegador) para que lo siga a donde inicie sesión.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tema VARCHAR(20) DEFAULT 'oscuro';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -498,6 +512,13 @@ def init_db():
                 pass
             try:
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT;")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                # 🎨 Preferencia de tema (claro/oscuro) de cada usuario: se guarda en su cuenta
+                # (no solo en el navegador) para que lo siga a donde inicie sesión.
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN tema TEXT DEFAULT 'oscuro';")
                 conn.commit()
             except Exception:
                 pass
@@ -755,7 +776,9 @@ def ver_comunicados():
 @agente_o_admin_required
 def crear_comunicado():
     titulo = request.form.get('titulo', '').strip()
-    contenido = request.form.get('contenido', '').strip()
+    # 📝 El contenido llega como HTML del editor de texto enriquecido (Quill) — se limpia
+    # ANTES de guardarlo, para no confiar en lo que manda el navegador.
+    contenido = _sanitizar_html_enriquecido(request.form.get('contenido', '').strip())
     nivel = request.form.get('nivel', 'info').strip()
     # ⚠️ Usar un bool nativo de Python (no 0/1 literal): la columna "fijado" en Neon
     # es de tipo BOOLEAN, y Postgres rechaza "column is of type boolean but expression
@@ -777,7 +800,7 @@ def crear_comunicado():
         except Exception as e:
             print(f"Error subiendo imagen de comunicado: {e}")
 
-    if titulo and contenido:
+    if titulo and contenido and not _html_esta_vacio(contenido):
         fecha_act = obtener_fecha_actual()
         autor = session.get('username', 'Admin')
 
@@ -814,12 +837,14 @@ def editar_comunicado(com_id):
         imagen_url_actual = row[0] or ""
 
         titulo = request.form.get('titulo', '').strip()
-        contenido = request.form.get('contenido', '').strip()
+        # 📝 El contenido llega como HTML del editor de texto enriquecido (Quill) — se limpia
+        # ANTES de guardarlo, para no confiar en lo que manda el navegador.
+        contenido = _sanitizar_html_enriquecido(request.form.get('contenido', '').strip())
         nivel = request.form.get('nivel', 'info').strip()
         fijado = (request.form.get('fijado') == 'on')
         imagen = request.files.get('imagen')
 
-        if not titulo or not contenido:
+        if not titulo or not contenido or _html_esta_vacio(contenido):
             conn.close()
             return redirect(url_for('ver_comunicados'))
 
@@ -1149,6 +1174,52 @@ def _info_usuario(username):
         return None
 
 
+# 📝 Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado de color y
+# listas en la descripción de tickets, sus comentarios/respuestas, y el contenido de los
+# Comunicados. Quill entrega HTML (p. ej. "<p><strong>hola</strong> <span style=\"background-
+# color: rgb(255,255,0)\">urgente</span></p>"), así que ese HTML se limpia ANTES de guardarlo
+# — nunca se confía en lo que llega del navegador — permitiendo solo un puñado de etiquetas y
+# el estilo de color/resaltado, y quitando cualquier <script>, atributo onerror/onclick, o
+# link javascript: que alguien intente colar.
+_QUILL_TAGS_PERMITIDAS = ['p', 'br', 'strong', 'em', 'u', 's', 'span', 'ol', 'ul', 'li']
+_QUILL_ATRIBUTOS_PERMITIDOS = {'span': ['style'], 'li': ['data-list']}
+_QUILL_CSS_PERMITIDO = ['background-color', 'color']
+
+if bleach and CSSSanitizer:
+    _sanitizador_css = CSSSanitizer(allowed_css_properties=_QUILL_CSS_PERMITIDO)
+else:
+    _sanitizador_css = None
+
+
+def _sanitizar_html_enriquecido(html_bruto):
+    """Limpia el HTML que llega del editor de texto enriquecido antes de guardarlo. Si
+    'bleach' no está disponible por alguna razón, se cae a texto plano (se escapan todas las
+    etiquetas) — nunca se guarda HTML sin filtrar en la base de datos."""
+    if not html_bruto:
+        return html_bruto
+    if not bleach:
+        from markupsafe import escape
+        return str(escape(html_bruto))
+    return bleach.clean(
+        html_bruto, tags=_QUILL_TAGS_PERMITIDAS, attributes=_QUILL_ATRIBUTOS_PERMITIDOS,
+        css_sanitizer=_sanitizador_css, strip=True
+    )
+
+
+def _html_esta_vacio(html):
+    """El editor de texto enriquecido (Quill) manda '<p><br></p>' cuando el usuario no
+    escribió nada — sigue siendo una cadena "verdadera" en Python, así que una validación
+    tipo `if contenido:` no detecta que en realidad está vacío. Esta función sí lo detecta,
+    quitando TODAS las etiquetas y mirando si queda algo de texto real."""
+    if not html:
+        return True
+    if bleach:
+        texto_plano = bleach.clean(html, tags=[], attributes={}, strip=True)
+    else:
+        texto_plano = re.sub(r'<[^>]+>', '', html)
+    return not texto_plano.strip()
+
+
 def _mapa_nombres_usuarios():
     """Devuelve {usuario: nombre_para_mostrar} de TODOS los usuarios (activos o no), para
     resolver en bloque el alias/nombre real de quien publicó algo (comunicados, tickets, etc.)
@@ -1421,7 +1492,9 @@ def ver_tickets():
 @login_required
 def crear_ticket():
     titulo = request.form.get('titulo', '').strip()
-    descripcion = request.form.get('descripcion', '').strip()
+    # 📝 La descripción llega como HTML del editor de texto enriquecido (Quill) — se limpia
+    # ANTES de guardarla, para no confiar en lo que manda el navegador.
+    descripcion = _sanitizar_html_enriquecido(request.form.get('descripcion', '').strip())
     tipo = request.form.get('tipo', 'Incidente').strip()
     categoria = request.form.get('categoria', 'Otro').strip()
     prioridad = request.form.get('prioridad', 'Media').strip()
@@ -1444,7 +1517,7 @@ def crear_ticket():
     area = area if area in nombres_areas else None
     sede = sede if sede in nombres_sedes else None
 
-    if titulo and descripcion:
+    if titulo and descripcion and not _html_esta_vacio(descripcion):
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
         archivos_subidos = _subir_adjuntos_ticket(request.files.getlist('adjuntos'))
@@ -1588,7 +1661,11 @@ def ver_ticket(ticket_id):
 @app.route('/tickets/<int:ticket_id>/comentar', methods=['POST'])
 @login_required
 def comentar_ticket(ticket_id):
-    mensaje = request.form.get('mensaje', '').strip()
+    # 📝 El mensaje llega como HTML del editor de texto enriquecido (Quill) — se limpia ANTES
+    # de guardarlo, para no confiar en lo que manda el navegador.
+    mensaje = _sanitizar_html_enriquecido(request.form.get('mensaje', '').strip())
+    if _html_esta_vacio(mensaje):
+        mensaje = ''
     es_admin = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
     es_interno = es_admin and request.form.get('interno') == 'on'
 
@@ -2663,7 +2740,7 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol, estado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                query = "SELECT usuario, password_hash, rol, estado, tema FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -2693,6 +2770,7 @@ def login():
                     session['username'] = user[0]
                     session['rol'] = user[2]
                     session['instance_id'] = SERVER_INSTANCE_ID
+                    session['tema'] = user[4] or 'oscuro'
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
                     return redirect(url_for('bienvenida'))
             except Exception as db_err:
@@ -3531,6 +3609,32 @@ def exportar_logs_csv():
     }
 
     return Response(csv_bytes, headers=headers, status=200)
+
+@app.route('/perfil/tema', methods=['POST'])
+@login_required
+def cambiar_tema():
+    """Alterna el tema claro/oscuro del usuario que tiene la sesión abierta. Se guarda en su
+    cuenta (no solo en el navegador) para que lo siga a donde inicie sesión — y de paso se
+    actualiza la sesión actual para que se vea reflejado de inmediato, sin tener que
+    volver a iniciar sesión."""
+    nuevo_tema = request.form.get('tema', '').strip()
+    if nuevo_tema not in ('claro', 'oscuro'):
+        nuevo_tema = 'oscuro'
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "UPDATE usuarios SET tema = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET tema = ? WHERE usuario = ?"
+        cursor.execute(q, (nuevo_tema, session.get('username')))
+        conn.commit()
+        conn.close()
+        session['tema'] = nuevo_tema
+    except Exception as e:
+        print(f"⚠️ Error guardando preferencia de tema: {e}")
+    # Vuelve a la misma página desde la que se alternó el tema (con un respaldo razonable
+    # por si el navegador no manda 'Referer').
+    destino = request.referrer or url_for('bienvenida')
+    return redirect(destino)
+
 
 @app.route('/logout')
 def logout():

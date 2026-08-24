@@ -6,3 +6,5 @@ psycopg2-binary
 cloudinary
 requests
 cryptography
+bleach
+tinycss2
