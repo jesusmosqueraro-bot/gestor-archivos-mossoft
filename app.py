@@ -444,6 +444,10 @@ def init_db():
                 # teléfono registrado en el perfil del usuario (p. ej. reporta desde la
                 # extensión de otra persona). Se prellena con el del perfil pero es editable.
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS telefono_contacto VARCHAR(50);",
+                # 🔔 Último nivel de alerta de SLA ya avisado para este ticket ('proximo_a_vencer'
+                # o 'vencido') — evita reenviar el mismo aviso en cada visita a la lista de
+                # tickets; se limpia cuando se extiende el SLA para que pueda volver a avisar.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_alerta_nivel VARCHAR(20);",
                 # 📍 Dirección física y usuario responsable de cada Sede (solo aplican cuando
                 # tipo = 'sede'; para 'area'/'categoria' quedan en NULL sin usarse).
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS direccion TEXT;",
@@ -555,7 +559,8 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN calificacion_fecha TEXT;",
                 "ALTER TABLE tickets ADD COLUMN area TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sede TEXT;",
-                "ALTER TABLE tickets ADD COLUMN telefono_contacto TEXT;"
+                "ALTER TABLE tickets ADD COLUMN telefono_contacto TEXT;",
+                "ALTER TABLE tickets ADD COLUMN sla_alerta_nivel TEXT;"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
@@ -1404,6 +1409,74 @@ def _progreso_ticket(ticket):
     return max(0, min(100, round(horas_transcurridas / horas_totales * 100)))
 
 
+def _revisar_alertas_sla():
+    """Revisa los tickets abiertos/en proceso y avisa (campanita + correo) la primera vez que
+    uno entra en 'Próximo a vencer' o se escala a 'Vencido' — así el equipo no depende de estar
+    mirando la lista para enterarse. No hay un scheduler aparte corriendo en Render, así que
+    esto se llama de forma perezosa (best-effort, nunca debe tumbar la página) cada vez que
+    alguien del equipo de soporte abre la lista de tickets o los indicadores. 'sla_alerta_nivel'
+    guarda el último nivel ya avisado por ticket para no repetir el mismo aviso una y otra vez;
+    se limpia a NULL cuando se extiende el SLA (ver extender_sla_ticket) para que pueda volver
+    a avisar si se vuelve a acercar la nueva fecha límite."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, titulo, tipo, prioridad, estado, asignado_a, fecha_creacion, "
+            "sla_resolucion_limite, sla_resolucion_cumplida, sla_alerta_nivel FROM tickets "
+            "WHERE estado NOT IN ('Resuelto', 'Cerrado')"
+        )
+        filas = cursor.fetchall()
+
+        for (ticket_id, titulo, tipo, prioridad, estado, asignado_a, fecha_creacion,
+             sla_limite, sla_cumplida, nivel_previo) in filas:
+            t = {
+                'estado': estado, 'prioridad': prioridad, 'fecha_creacion': fecha_creacion,
+                'sla_resolucion_limite': sla_limite, 'sla_resolucion_cumplida': sla_cumplida,
+            }
+            bucket = _bucket_cumplimiento_ticket(t)
+            if bucket not in ('proximo_a_vencer', 'vencido'):
+                continue
+            if bucket == nivel_previo or (bucket == 'proximo_a_vencer' and nivel_previo == 'vencido'):
+                continue  # ya se avisó este nivel (o uno peor) — no repetir ni "des-escalar"
+
+            q_upd = ("UPDATE tickets SET sla_alerta_nivel = %s WHERE id = %s" if db_type == 'postgres'
+                      else "UPDATE tickets SET sla_alerta_nivel = ? WHERE id = ?")
+            cursor.execute(q_upd, (bucket, ticket_id))
+            conn.commit()
+
+            codigo = _codigo_ticket(tipo or 'Incidente', ticket_id, fecha_creacion)
+            url_ticket = url_for('ver_ticket', ticket_id=ticket_id)
+            equipo = [] if asignado_a else _equipo_soporte_activo()
+            destinatarios = [asignado_a] if asignado_a else [m['usuario'] for m in equipo]
+
+            if bucket == 'vencido':
+                mensaje = f"⛔ SLA vencido en la solicitud {codigo}: '{titulo}'"
+                asunto = f"[Arkiv] SLA vencido — solicitud {codigo}"
+                cuerpo_estado = "ya superó"
+            else:
+                mensaje = f"⏳ La solicitud {codigo} está próxima a vencer su SLA: '{titulo}'"
+                asunto = f"[Arkiv] SLA próximo a vencer — solicitud {codigo}"
+                cuerpo_estado = "está por superar"
+            cuerpo = (
+                f"La solicitud de soporte {codigo} ('{titulo}') {cuerpo_estado} su tiempo límite de resolución.\n\n"
+                f"Ingresa a Arkiv, módulo Solicitudes TI, para revisarla.\n\n---\nArkiv"
+            )
+
+            crear_notificacion_para_varios(destinatarios, mensaje, url=url_ticket)
+            if asignado_a:
+                correo_dest = _correo_de_usuario(asignado_a)
+                if correo_dest:
+                    threading.Thread(target=enviar_correo_ticket, args=(correo_dest, asunto, cuerpo)).start()
+            else:
+                for miembro in equipo:
+                    if miembro['correo']:
+                        threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto, cuerpo)).start()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error revisando alertas de SLA: {e}")
+
+
 def _config_ticket_lista(tipo_config):
     """Devuelve [{'id', 'nombre', 'direccion', 'responsable'}] de las Áreas, Sedes o
     Categorías activas configuradas por el equipo de soporte en /tickets/configuracion
@@ -1771,6 +1844,10 @@ def ver_tickets():
     cursor = conn.cursor()
 
     es_soporte = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
+    if es_soporte:
+        # 🔔 Aviso perezoso de SLA por vencer/vencido — ver _revisar_alertas_sla(). Solo tiene
+        # sentido correrlo cuando quien mira la lista es del equipo de soporte.
+        _revisar_alertas_sla()
 
     categorias_config = _config_ticket_lista('categoria')
     areas_config = _config_ticket_lista('area')
@@ -2314,7 +2391,9 @@ def modificar_sla_ticket(ticket_id):
         fecha_act = obtener_fecha_actual()
         usuario = session.get('username')
 
-        q_upd = "UPDATE tickets SET sla_resolucion_limite = %s, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET sla_resolucion_limite = ?, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = ? WHERE id = ?"
+        # 🔔 Se limpia el nivel de alerta de SLA ya avisado: con la nueva fecha límite el ticket
+        # vuelve a "vigente", y así puede volver a avisar más adelante si se acerca de nuevo.
+        q_upd = "UPDATE tickets SET sla_resolucion_limite = %s, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = %s, sla_alerta_nivel = NULL WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET sla_resolucion_limite = ?, sla_modificaciones = sla_modificaciones + 1, fecha_actualizacion = ?, sla_alerta_nivel = NULL WHERE id = ?"
         cursor.execute(q_upd, (nueva_fecha_fmt, fecha_act, ticket_id))
 
         mensaje_sistema = f"{usuario} modificó la fecha límite de solución a {nueva_fecha_fmt} — Motivo: {motivo}"
@@ -2684,7 +2763,11 @@ def eliminar_configuracion_ticket(config_id):
 @app.route('/tickets/indicadores')
 @login_required
 @agente_o_admin_required
-def indicadores_tickets():
+def _calcular_indicadores_tickets():
+    """Calcula todos los indicadores/KPIs de Tickets (por estado, prioridad, tipo, cumplimiento
+    de SLA, categoría/área/sede, calificación promedio, top agentes y tendencia de 14 días).
+    Lo usan tanto la página de Indicadores como sus exportaciones a PDF/Excel, para no duplicar
+    la lógica de agregación en dos lugares."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -2753,14 +2836,22 @@ def indicadores_tickets():
         for u, cant in sorted(por_agente.items(), key=lambda x: x[1], reverse=True)[:5]
     ]
 
-    return render_template(
-        'tickets_indicadores.html', es_soporte=True, total=total,
-        por_estado=por_estado, por_prioridad=por_prioridad, por_tipo=por_tipo,
-        por_cumplimiento=por_cumplimiento, por_categoria=por_categoria,
-        por_area=por_area, por_sede=por_sede, dias_tendencia=dias_tendencia,
-        promedio_calificacion=promedio_calificacion, total_calificaciones=len(calificaciones),
-        top_agentes=top_agentes
-    )
+    return {
+        'total': total, 'por_estado': por_estado, 'por_prioridad': por_prioridad, 'por_tipo': por_tipo,
+        'por_cumplimiento': por_cumplimiento, 'por_categoria': por_categoria,
+        'por_area': por_area, 'por_sede': por_sede, 'dias_tendencia': dias_tendencia,
+        'promedio_calificacion': promedio_calificacion, 'total_calificaciones': len(calificaciones),
+        'top_agentes': top_agentes
+    }
+
+
+def indicadores_tickets():
+    # 🔔 Aviso perezoso de SLA por vencer/vencido — ver _revisar_alertas_sla(). Esta página ya
+    # está gateada a admin/agente, así que se corre sin condición adicional.
+    _revisar_alertas_sla()
+
+    ind = _calcular_indicadores_tickets()
+    return render_template('tickets_indicadores.html', es_soporte=True, **ind)
 
 
 @app.route('/tickets/indicadores/exportar_csv')
@@ -2792,6 +2883,195 @@ def exportar_indicadores_tickets():
     }
     registrar_log(session.get('username'), "Exportación de Indicadores", f"Exportó {len(rows)} tickets a Excel/CSV")
     return Response(csv_bytes, headers=headers, status=200)
+
+
+# 📊 Traducciones legibles para las tablas de los reportes de Indicadores (PDF/Excel) — los
+# diccionarios internos usan claves técnicas ('proximo_a_vencer') que no se le muestran así a
+# Tomas/gerencia en el reporte descargado.
+ETIQUETAS_CUMPLIMIENTO_SLA = {
+    'vigente': 'Vigente', 'proximo_a_vencer': 'Próximo a vencer',
+    'vencido': 'Vencido', 'cerrado': 'Cerrado'
+}
+
+
+@app.route('/tickets/indicadores/exportar_pdf')
+@login_required
+@agente_o_admin_required
+def exportar_indicadores_tickets_pdf():
+    """Reporte de indicadores de Tickets en PDF — mismo contenido que se ve en pantalla, listo
+    para imprimir o adjuntar en un correo a gerencia."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    ind = _calcular_indicadores_tickets()
+    estilos = getSampleStyleSheet()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    ahora_txt = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M')
+
+    def tabla_conteos(titulo, datos, encabezados=('Categoría', 'Cantidad')):
+        elementos = [Paragraph(titulo, estilos['Heading3'])]
+        filas = [list(encabezados)] + [[k, str(v)] for k, v in datos]
+        t = Table(filas, colWidths=[10 * cm, 4 * cm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f1f5f9')]),
+        ]))
+        elementos.append(t)
+        elementos.append(Spacer(1, 0.5 * cm))
+        return elementos
+
+    contenido = [
+        Paragraph("Arkiv — Indicadores de Tickets de Soporte TI", estilos['Title']),
+        Paragraph(f"Generado el {ahora_txt} (hora Colombia) — Total de solicitudes: {ind['total']}", estilos['Normal']),
+        Spacer(1, 0.5 * cm),
+    ]
+    if ind['promedio_calificacion'] is not None:
+        contenido.append(Paragraph(
+            f"Calificación promedio de satisfacción: {ind['promedio_calificacion']}/5 "
+            f"({ind['total_calificaciones']} calificaciones recibidas)", estilos['Normal']
+        ))
+        contenido.append(Spacer(1, 0.5 * cm))
+
+    contenido += tabla_conteos("Por estado", ind['por_estado'].items(), ('Estado', 'Cantidad'))
+    contenido += tabla_conteos("Por prioridad", ind['por_prioridad'].items(), ('Prioridad', 'Cantidad'))
+    contenido += tabla_conteos("Por tipo", ind['por_tipo'].items(), ('Tipo', 'Cantidad'))
+    contenido += tabla_conteos(
+        "Cumplimiento de SLA",
+        [(ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k), v) for k, v in ind['por_cumplimiento'].items()],
+        ('Estado de SLA', 'Cantidad')
+    )
+    if ind['por_categoria']:
+        contenido += tabla_conteos("Por categoría", sorted(ind['por_categoria'].items(), key=lambda x: x[1], reverse=True), ('Categoría', 'Cantidad'))
+    if ind['por_area']:
+        contenido += tabla_conteos("Por área", sorted(ind['por_area'].items(), key=lambda x: x[1], reverse=True), ('Área', 'Cantidad'))
+    if ind['por_sede']:
+        contenido += tabla_conteos("Por sede", sorted(ind['por_sede'].items(), key=lambda x: x[1], reverse=True), ('Sede', 'Cantidad'))
+    if ind['top_agentes']:
+        contenido += tabla_conteos("Top agentes (tickets resueltos/cerrados)", ind['top_agentes'], ('Agente', 'Tickets'))
+    contenido += tabla_conteos("Tendencia — solicitudes creadas por día (últimos 14 días)", [(d['fecha'], d['cantidad']) for d in ind['dias_tendencia']], ('Fecha', 'Cantidad'))
+
+    doc.build(contenido)
+    buffer.seek(0)
+
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    filename = f"Arkiv_Indicadores_Tickets_{fecha_filename}.pdf"
+    registrar_log(session.get('username'), "Exportación de Indicadores", "Exportó los indicadores de Tickets a PDF")
+    return Response(buffer.getvalue(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }, status=200)
+
+
+@app.route('/tickets/indicadores/exportar_xlsx')
+@login_required
+@agente_o_admin_required
+def exportar_indicadores_tickets_xlsx():
+    """Reporte de indicadores de Tickets en un libro de Excel real (con formato), a diferencia
+    del CSV de detalle que ya existía — una hoja de Resumen con los KPIs y una de Detalle con
+    el listado completo de tickets."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    ind = _calcular_indicadores_tickets()
+    wb = openpyxl.Workbook()
+
+    relleno_encabezado = PatternFill(start_color='0F172A', end_color='0F172A', fill_type='solid')
+    fuente_encabezado = Font(color='FFFFFF', bold=True)
+    fuente_titulo = Font(bold=True, size=14)
+
+    resumen = wb.active
+    resumen.title = 'Resumen'
+    fila = 1
+    resumen.cell(row=fila, column=1, value='Arkiv — Indicadores de Tickets de Soporte TI').font = fuente_titulo
+    fila += 1
+    ahora_txt = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M')
+    resumen.cell(row=fila, column=1, value=f"Generado el {ahora_txt} — Total de solicitudes: {ind['total']}")
+    fila += 2
+    if ind['promedio_calificacion'] is not None:
+        resumen.cell(row=fila, column=1, value=(
+            f"Calificación promedio de satisfacción: {ind['promedio_calificacion']}/5 "
+            f"({ind['total_calificaciones']} calificaciones)"
+        ))
+        fila += 2
+
+    def volcar_seccion(titulo, datos, encabezados):
+        nonlocal fila
+        resumen.cell(row=fila, column=1, value=titulo).font = Font(bold=True, size=12)
+        fila += 1
+        for col, texto in enumerate(encabezados, start=1):
+            c = resumen.cell(row=fila, column=col, value=texto)
+            c.fill = relleno_encabezado
+            c.font = fuente_encabezado
+        fila += 1
+        for clave, valor in datos:
+            resumen.cell(row=fila, column=1, value=clave)
+            resumen.cell(row=fila, column=2, value=valor)
+            fila += 1
+        fila += 1
+
+    volcar_seccion('Por estado', ind['por_estado'].items(), ['Estado', 'Cantidad'])
+    volcar_seccion('Por prioridad', ind['por_prioridad'].items(), ['Prioridad', 'Cantidad'])
+    volcar_seccion('Por tipo', ind['por_tipo'].items(), ['Tipo', 'Cantidad'])
+    volcar_seccion(
+        'Cumplimiento de SLA',
+        [(ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k), v) for k, v in ind['por_cumplimiento'].items()],
+        ['Estado de SLA', 'Cantidad']
+    )
+    if ind['por_categoria']:
+        volcar_seccion('Por categoría', sorted(ind['por_categoria'].items(), key=lambda x: x[1], reverse=True), ['Categoría', 'Cantidad'])
+    if ind['por_area']:
+        volcar_seccion('Por área', sorted(ind['por_area'].items(), key=lambda x: x[1], reverse=True), ['Área', 'Cantidad'])
+    if ind['por_sede']:
+        volcar_seccion('Por sede', sorted(ind['por_sede'].items(), key=lambda x: x[1], reverse=True), ['Sede', 'Cantidad'])
+    if ind['top_agentes']:
+        volcar_seccion('Top agentes (tickets resueltos/cerrados)', ind['top_agentes'], ['Agente', 'Tickets'])
+    volcar_seccion('Tendencia — últimos 14 días', [(d['fecha'], d['cantidad']) for d in ind['dias_tendencia']], ['Fecha', 'Cantidad'])
+
+    resumen.column_dimensions['A'].width = 32
+    resumen.column_dimensions['B'].width = 14
+
+    # 📋 Hoja de detalle: el mismo listado completo de tickets que ya ofrece la exportación CSV,
+    # para tener ambas vistas (resumen y detalle) en un solo archivo.
+    detalle = wb.create_sheet('Detalle')
+    encabezados_detalle = ['CÓDIGO', 'TIPO', 'TÍTULO', 'CATEGORÍA', 'ÁREA', 'SEDE', 'PRIORIDAD', 'ESTADO', 'CREADO POR', 'ASIGNADO A', 'FECHA CREACIÓN', 'ÚLTIMA ACTUALIZACIÓN', 'CALIFICACIÓN']
+    for col, texto in enumerate(encabezados_detalle, start=1):
+        c = detalle.cell(row=1, column=col, value=texto)
+        c.fill = relleno_encabezado
+        c.font = fuente_encabezado
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    for i, row in enumerate(rows, start=2):
+        tipo_t = row[1] or 'Incidente'
+        codigo = _codigo_ticket(tipo_t, row[0], row[10])
+        valores = [codigo, tipo_t, row[2], row[3], row[4] or '', row[5] or '', row[6], row[7], row[8], row[9] or '', row[10], row[11], row[12] or '']
+        for col, valor in enumerate(valores, start=1):
+            detalle.cell(row=i, column=col, value=valor)
+    for letra, ancho in zip('ABCDEFGHIJKLM', [16, 12, 30, 18, 16, 16, 12, 12, 14, 14, 18, 18, 12]):
+        detalle.column_dimensions[letra].width = ancho
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    filename = f"Arkiv_Indicadores_Tickets_{fecha_filename}.xlsx"
+    registrar_log(session.get('username'), "Exportación de Indicadores", "Exportó los indicadores de Tickets a Excel")
+    return Response(buffer.getvalue(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }, status=200)
 
 
 # 📦 INVENTARIO DE ACTIVOS DE TI (solo equipo de soporte): registro de equipos/activos y a

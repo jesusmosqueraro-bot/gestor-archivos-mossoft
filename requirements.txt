@@ -8,3 +8,5 @@ requests
 cryptography
 bleach
 tinycss2
+reportlab
+openpyxl
