@@ -49,6 +49,13 @@
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
+        {% if error_placa %}
+        <div class="px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>Ya existe un activo activo con el número de placa "<strong class="text-white">{{ error_placa }}</strong>". Cada placa debe ser única — usa otro número o edita el activo que ya existe.</span>
+        </div>
+        {% endif %}
+
         <!-- CONTEXTO DE LOS INDICADORES: aclara si se están viendo todas las sedes o una sola -->
         <div class="flex items-center justify-between flex-wrap gap-2">
             <p class="text-xs text-slate-400">
@@ -166,7 +173,7 @@
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
                 <div class="relative">
-                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Nombre, marca, serie, asignado a..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Placa, marca, serie, asignado a..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
                 </div>
             </div>
@@ -182,7 +189,7 @@
             <table class="w-full text-left text-xs text-slate-300">
                 <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
                     <tr>
-                        <th class="pb-3 px-3 font-bold">Nombre</th>
+                        <th class="pb-3 px-3 font-bold">N° de Placa</th>
                         <th class="pb-3 px-3 font-bold">Tipo</th>
                         <th class="pb-3 px-3 font-bold">Marca / Modelo</th>
                         <th class="pb-3 px-3 font-bold">N° Serie</th>
@@ -248,8 +255,9 @@
             <form id="form-activo" method="POST" action="/tickets/inventario/nuevo" class="flex flex-col gap-3 text-xs">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre *</label>
-                    <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: Portátil recepción" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de Placa *</label>
+                    <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: 15011" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <p class="text-[10px] text-slate-500 mt-1">Debe ser único: no puede repetirse en dos activos activos a la vez.</p>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
@@ -279,18 +287,24 @@
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
                     <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a (usuario)</label>
-                        <input type="text" name="asignado_a" id="input-activo-asignado" placeholder="Opcional" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a</label>
+                    <input type="text" name="asignado_a" id="input-activo-asignado" autocomplete="off" placeholder="Nombre del colaborador (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <div class="flex items-center gap-2 mt-1.5">
+                        <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
+                            <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                        </button>
                     </div>
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
-                        <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                            <option value="">Sin especificar</option>
-                            {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
-                        </select>
-                    </div>
+                    <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
+                    <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                    <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin especificar</option>
+                        {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
+                    </select>
                 </div>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
@@ -335,6 +349,8 @@
             document.getElementById('input-activo-modelo').value = '';
             document.getElementById('input-activo-serie').value = '';
             document.getElementById('input-activo-asignado').value = '';
+            document.getElementById('input-activo-cedula-buscar').value = '';
+            document.getElementById('mensaje-busqueda-cedula').textContent = '';
             // 🏢 Si el agente ya está viendo una sede filtrada, se la sugerimos de una vez en
             // el formulario de "Nuevo Activo" — lo más probable es que esté registrando un
             // equipo de esa misma sede.
@@ -353,6 +369,8 @@
             document.getElementById('input-activo-modelo').value = activo.modelo || '';
             document.getElementById('input-activo-serie').value = activo.numero_serie || '';
             document.getElementById('input-activo-asignado').value = activo.asignado_a || '';
+            document.getElementById('input-activo-cedula-buscar').value = '';
+            document.getElementById('mensaje-busqueda-cedula').textContent = '';
             document.getElementById('input-activo-sede').value = activo.sede || '';
             document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
             document.getElementById('modal-activo').classList.remove('hidden');
@@ -361,6 +379,38 @@
         function cerrarModalActivo() {
             document.getElementById('modal-activo').classList.add('hidden');
             document.getElementById('modal-activo').classList.remove('flex');
+        }
+
+        // 🪪 Busca una cuenta de Arkiv por cédula y, si la encuentra, llena "Asignado a" con
+        // "Nombre (usuario)" — así queda claro tanto el nombre real como el alias/usuario con el
+        // que esa persona inicia sesión. Si no la encuentra, no bloquea nada: el campo sigue
+        // siendo de texto libre para escribir a cualquier colaborador manualmente.
+        function buscarAsignadoPorCedula() {
+            var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
+            var mensaje = document.getElementById('mensaje-busqueda-cedula');
+            if (!cedula) {
+                mensaje.textContent = 'Escribe una cédula para buscar.';
+                mensaje.className = 'text-[10px] mt-1 text-amber-400';
+                return;
+            }
+            mensaje.textContent = 'Buscando...';
+            mensaje.className = 'text-[10px] mt-1 text-slate-400';
+            fetch('/usuarios/buscar_cedula?cedula=' + encodeURIComponent(cedula))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.encontrado) {
+                        document.getElementById('input-activo-asignado').value = data.nombre + ' (' + data.usuario + ')';
+                        mensaje.textContent = 'Encontrado: ' + data.nombre + ' (' + data.usuario + ')';
+                        mensaje.className = 'text-[10px] mt-1 text-emerald-400';
+                    } else {
+                        mensaje.textContent = 'No se encontró ningún usuario de Arkiv con esa cédula. Puedes escribir el nombre manualmente arriba.';
+                        mensaje.className = 'text-[10px] mt-1 text-amber-400';
+                    }
+                })
+                .catch(function() {
+                    mensaje.textContent = 'No se pudo completar la búsqueda. Intenta de nuevo.';
+                    mensaje.className = 'text-[10px] mt-1 text-rose-400';
+                });
         }
 
         // 📎 Adjuntos: la lista se arma con el DOM (no innerHTML con datos del usuario) para
