@@ -207,11 +207,21 @@
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Analista que gestiona</label>
-                        <input type="text" name="analista_gestiona" placeholder="Quién creó el acceso" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        <select name="analista_gestiona" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <option value="" disabled selected>Selecciona...</option>
+                            {% for m in equipo_soporte %}
+                            <option value="{{ m.nombre }}">{{ m.nombre }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Capacitado por</label>
-                        <input type="text" name="capacitado_por" placeholder="Quién capacitó al usuario" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        <select name="capacitado_por" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <option value="" disabled selected>Selecciona...</option>
+                            {% for m in equipo_soporte %}
+                            <option value="{{ m.nombre }}">{{ m.nombre }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
 
