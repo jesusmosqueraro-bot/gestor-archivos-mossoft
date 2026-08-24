@@ -448,6 +448,10 @@ def init_db():
                 # o 'vencido') — evita reenviar el mismo aviso en cada visita a la lista de
                 # tickets; se limpia cuando se extiende el SLA para que pueda volver a avisar.
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_alerta_nivel VARCHAR(20);",
+                # 📢 Fecha en que se envió (una sola vez) el recordatorio automático de lectura
+                # pendiente de este comunicado — ver _revisar_recordatorios_lectura(). NULL
+                # mientras no se haya enviado ninguno (automático o manual) todavía.
+                "ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS recordatorio_enviado_fecha VARCHAR(100);",
                 # 📍 Dirección física y usuario responsable de cada Sede (solo aplican cuando
                 # tipo = 'sede'; para 'area'/'categoria' quedan en NULL sin usarse).
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS direccion TEXT;",
@@ -564,6 +568,14 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            for col_comunicado_sql in [
+                "ALTER TABLE comunicados ADD COLUMN recordatorio_enviado_fecha TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_comunicado_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -1025,6 +1037,9 @@ def ver_comunicados():
     # 👁️ Para soporte/admin, se muestra cuántos usuarios (de los activos) ya leyeron cada
     # comunicado — útil para políticas de lectura obligatoria.
     es_soporte = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
+    if es_soporte:
+        # 📢 Recordatorio automático de lectura pendiente — ver _revisar_recordatorios_lectura().
+        _revisar_recordatorios_lectura()
     if es_soporte and comunicados:
         conteos = _conteo_lecturas_comunicados([c['id'] for c in comunicados])
         total_usuarios = _total_usuarios_activos()
@@ -1218,6 +1233,36 @@ def lecturas_comunicado(com_id):
         conn.close()
         print(f"⚠️ Error listando lecturas del comunicado {com_id}: {e}")
         return {'leyeron': [], 'faltan': [], 'total': 0}
+
+
+@app.route('/comunicados/cumplimiento')
+@login_required
+@agente_o_admin_required
+def cumplimiento_comunicados():
+    """Panel de cumplimiento de lectura: de un vistazo, qué % de las cuentas activas ya leyó
+    cada comunicado activo y quién falta — sin tener que abrir el modal de cada uno por
+    separado en el muro de Comunicados."""
+    _revisar_recordatorios_lectura()
+    detalle = _detalle_cumplimiento_comunicados()
+    return render_template(
+        'comunicados_cumplimiento.html', detalle=detalle,
+        horas_recordatorio=HORAS_RECORDATORIO_LECTURA_COMUNICADO
+    )
+
+
+@app.route('/comunicados/<int:com_id>/recordatorio', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def enviar_recordatorio_comunicado(com_id):
+    """Envía ahora mismo (a demanda) el recordatorio de lectura pendiente para un comunicado
+    puntual — no hay que esperar a que se cumplan las horas del aviso automático."""
+    detalle = _detalle_cumplimiento_comunicados()
+    comunicado = next((c for c in detalle if c['id'] == com_id), None)
+    if comunicado:
+        cantidad = _enviar_recordatorio_lectura(comunicado)
+        registrar_log(session.get('username'), "Recordatorio de Lectura Enviado", f"Comunicado '{comunicado['titulo']}' (ID {com_id}): recordatorio a {cantidad} usuario(s)")
+    return redirect(url_for('cumplimiento_comunicados'))
+
 
 @app.route('/restaurar_comunicado/<int:com_id>', methods=['POST'])
 @login_required
@@ -1628,6 +1673,115 @@ def _total_usuarios_activos():
         return total or 0
     except Exception:
         return 0
+
+
+# ⏳ Cuántas horas después de publicado se envía (una sola vez) el recordatorio automático de
+# lectura pendiente a quien todavía no haya leído un comunicado activo.
+HORAS_RECORDATORIO_LECTURA_COMUNICADO = 48
+
+
+def _detalle_cumplimiento_comunicados():
+    """Para cada comunicado activo (no archivado ni eliminado), cuántos usuarios activos ya lo
+    leyeron y cuáles faltan — la base tanto del panel de Cumplimiento como de los recordatorios
+    automáticos/manuales. Devuelve una lista ordenada del más reciente al más antiguo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, titulo, nivel, fecha, autor, recordatorio_enviado_fecha FROM comunicados WHERE estado = 'activo' ORDER BY id DESC")
+        comunicados_rows = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando comunicados para cumplimiento: {e}")
+        conn.close()
+        return []
+
+    try:
+        cursor.execute("SELECT usuario, COALESCE(nombre, usuario), correo FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo'")
+        activos = [{'usuario': r[0], 'nombre': r[1], 'correo': r[2]} for r in cursor.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error listando usuarios activos para cumplimiento: {e}")
+        activos = []
+
+    leidos_por_comunicado = {}
+    try:
+        ids = [r[0] for r in comunicados_rows]
+        if ids:
+            placeholders = ','.join(['%s' if db_type == 'postgres' else '?'] * len(ids))
+            cursor.execute(f"SELECT comunicado_id, usuario FROM comunicados_leidos WHERE comunicado_id IN ({placeholders})", tuple(ids))
+            for com_id, usuario in cursor.fetchall():
+                leidos_por_comunicado.setdefault(com_id, set()).add(usuario)
+    except Exception as e:
+        print(f"⚠️ Error listando lecturas para cumplimiento: {e}")
+
+    conn.close()
+
+    total_activos = len(activos)
+    resultado = []
+    for com_id, titulo, nivel, fecha, autor, recordatorio_fecha in comunicados_rows:
+        leidos_usuarios = leidos_por_comunicado.get(com_id, set())
+        faltan = [u for u in activos if u['usuario'] not in leidos_usuarios]
+        resultado.append({
+            'id': com_id, 'titulo': titulo, 'nivel': nivel, 'fecha': fecha, 'autor': autor,
+            'recordatorio_enviado_fecha': recordatorio_fecha,
+            'leidos': len(leidos_usuarios), 'total': total_activos,
+            'porcentaje': round((len(leidos_usuarios) / total_activos) * 100) if total_activos else 100,
+            'faltan': faltan
+        })
+    return resultado
+
+
+def _enviar_recordatorio_lectura(comunicado, marcar_enviado=True):
+    """Notifica (campanita + correo) a cada usuario en comunicado['faltan'] que le falta leer
+    ese comunicado, y opcionalmente marca recordatorio_enviado_fecha para que el chequeo
+    automático no lo vuelva a enviar. Nunca debe tumbar la página que lo llama."""
+    if not comunicado.get('faltan'):
+        return 0
+    try:
+        url_comunicado = url_for('ver_comunicados')
+        mensaje = f"📢 Te falta leer el comunicado '{comunicado['titulo']}'"
+        asunto = f"[Arkiv] Recordatorio: te falta leer '{comunicado['titulo']}'"
+        cuerpo = (
+            f"Hola,\n\nTe falta leer el comunicado '{comunicado['titulo']}' publicado en el muro de "
+            f"Novedades y Comunicados de Arkiv.\n\nIngresa a Arkiv para revisarlo.\n\n---\nArkiv"
+        )
+        for u in comunicado['faltan']:
+            crear_notificacion(u['usuario'], mensaje, url=url_comunicado, tipo='comunicado')
+            if u.get('correo'):
+                threading.Thread(target=enviar_correo_ticket, args=(u['correo'], asunto, cuerpo)).start()
+
+        if marcar_enviado:
+            fecha_act = obtener_fecha_actual()
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            q = "UPDATE comunicados SET recordatorio_enviado_fecha = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET recordatorio_enviado_fecha = ? WHERE id = ?"
+            cursor.execute(q, (fecha_act, comunicado['id']))
+            conn.commit()
+            conn.close()
+        return len(comunicado['faltan'])
+    except Exception as e:
+        print(f"⚠️ Error enviando recordatorio de lectura del comunicado {comunicado.get('id')}: {e}")
+        return 0
+
+
+def _revisar_recordatorios_lectura():
+    """Recordatorio automático (una sola vez por comunicado): si pasaron más de
+    HORAS_RECORDATORIO_LECTURA_COMUNICADO horas desde que se publicó un comunicado activo y
+    todavía faltan usuarios por leerlo, se les avisa por campanita/correo. Se llama de forma
+    perezosa (sin scheduler externo, ver _revisar_alertas_sla para el mismo patrón en Tickets)
+    cada vez que el equipo de soporte visita el muro de Comunicados o el panel de Cumplimiento —
+    nunca debe tumbar esa página si algo falla."""
+    try:
+        ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+        for c in _detalle_cumplimiento_comunicados():
+            if c['recordatorio_enviado_fecha']:
+                continue  # ya se envió (automático o manual) — no repetir
+            fecha_pub = _parsear_fecha_ticket(c['fecha'])  # mismo formato 'YYYY-MM-DD HH:MM:SS'
+            if not fecha_pub or (ahora - fecha_pub).total_seconds() < HORAS_RECORDATORIO_LECTURA_COMUNICADO * 3600:
+                continue
+            if not c['faltan']:
+                continue
+            _enviar_recordatorio_lectura(c)
+    except Exception as e:
+        print(f"⚠️ Error revisando recordatorios de lectura de comunicados: {e}")
 
 
 # 📝 Editor de texto enriquecido (Quill): negrilla, cursiva, subrayado, resaltado de color y
