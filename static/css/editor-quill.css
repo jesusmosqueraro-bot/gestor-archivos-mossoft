@@ -1,0 +1,98 @@
+/* =========================================================================
+   CAJA DEL EDITOR DE TEXTO ENRIQUECIDO (Quill) — Solicitudes TI y Comunicados
+   =========================================================================
+   Quill no trae ningún estilo propio de Arkiv: por defecto usa su tema "snow"
+   pensado para fondo blanco (borde gris claro, texto de marcador de posición
+   casi negro). Como el resto de los campos del formulario ya tienen un borde
+   redondeado bien definido y colores acordes al tema, aquí se le da ese mismo
+   tratamiento a la caja del editor — para que quede claro dónde empieza y
+   termina, y para que el texto (incluido el de "escribe aquí...") se lea bien
+   en los dos temas.
+
+   Los valores de abajo son los del tema OSCURO (el que usa la app por
+   defecto). El bloque final, bajo html[data-theme="claro"], los cambia para
+   el tema claro — igual que en tema-claro.css. */
+
+.ql-toolbar.ql-snow {
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-radius: 0.75rem 0.75rem 0 0;
+    background-color: #0f172a;
+    padding: 8px 10px;
+}
+
+.ql-container.ql-snow {
+    border: 1px solid #334155;
+    border-radius: 0 0 0.75rem 0.75rem;
+    background-color: #0f172a;
+    font-family: inherit;
+    font-size: 0.875rem;
+}
+
+/* Alto mínimo para que la caja tenga suficiente espacio visible desde el
+   principio (no solo una línea) y máximo con scroll propio, para que un
+   texto largo se quede DENTRO de la caja en vez de desbordarla. */
+.ql-editor {
+    min-height: 100px;
+    max-height: 260px;
+    overflow-y: auto;
+    color: #e2e8f0;
+    line-height: 1.5;
+}
+
+.ql-editor.ql-blank::before {
+    color: #64748b;
+    font-style: italic;
+    left: 15px;
+    right: 15px;
+}
+
+/* Iconos de la barra (negrilla, cursiva, subrayado, resaltado, listas). */
+.ql-snow .ql-stroke { stroke: #94a3b8; }
+.ql-snow .ql-fill { fill: #94a3b8; }
+.ql-snow .ql-picker { color: #94a3b8; }
+.ql-snow .ql-picker-options { background-color: #1e293b; border-color: #334155 !important; }
+.ql-snow.ql-toolbar button:hover .ql-stroke,
+.ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow .ql-picker-item:hover .ql-stroke { stroke: #f97316; }
+.ql-snow.ql-toolbar button:hover .ql-fill,
+.ql-snow.ql-toolbar button.ql-active .ql-fill { fill: #f97316; }
+.ql-snow .ql-picker-item:hover { color: #f97316; }
+
+/* Tema claro: mismos colores que usa tema-claro.css para el resto de los
+   campos (fondo blanco, texto oscuro, bordes grises claros). */
+html[data-theme="claro"] .ql-toolbar.ql-snow,
+html[data-theme="claro"] .ql-container.ql-snow {
+    border-color: #cbd5e1;
+    background-color: #ffffff;
+}
+html[data-theme="claro"] .ql-editor {
+    color: #1e293b;
+}
+html[data-theme="claro"] .ql-editor.ql-blank::before {
+    color: #475569;
+}
+html[data-theme="claro"] .ql-snow .ql-stroke {
+    stroke: #475569;
+}
+html[data-theme="claro"] .ql-snow .ql-fill {
+    fill: #475569;
+}
+html[data-theme="claro"] .ql-snow .ql-picker {
+    color: #475569;
+}
+html[data-theme="claro"] .ql-snow .ql-picker-options {
+    background-color: #ffffff;
+    border-color: #cbd5e1 !important;
+}
+html[data-theme="claro"] .ql-snow.ql-toolbar button:hover .ql-stroke,
+html[data-theme="claro"] .ql-snow.ql-toolbar button.ql-active .ql-stroke {
+    stroke: #ea580c;
+}
+html[data-theme="claro"] .ql-snow.ql-toolbar button:hover .ql-fill,
+html[data-theme="claro"] .ql-snow.ql-toolbar button.ql-active .ql-fill {
+    fill: #ea580c;
+}
+html[data-theme="claro"] .ql-snow .ql-picker-item:hover {
+    color: #ea580c;
+}
