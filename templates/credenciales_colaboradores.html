@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Altas de Credenciales</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-id-card-clip text-fuchsia-400"></i> Altas de Credenciales
+            </h1>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button onclick="abrirModalAplicativos()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-list-check"></i>
+                <span class="hidden sm:inline">Aplicativos</span>
+            </button>
+            <button onclick="abrirModalCrear()" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-fuchsia-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>Nueva Alta</span>
+            </button>
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-4">
+
+        <p class="text-xs text-slate-400 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3">
+            <i class="fa-solid fa-circle-info text-sky-400 mr-1"></i>
+            Aquí queda el registro de cada credencial que se le crea a un colaborador en los aplicativos institucionales
+            (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx y los que agregues desde "Aplicativos"). Cada fila es un
+            aplicativo puntual: si alguien tiene varios accesos, aparecerá una fila por cada uno, y puedes dar de baja
+            uno sin afectar los demás.
+        </p>
+
+        <!-- NOTIFICACIÓN TOAST -->
+        <div id="toast" class="fixed bottom-6 right-6 bg-emerald-600 text-white font-bold text-xs px-4 py-3 rounded-2xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 z-50 flex items-center gap-2">
+            <i class="fa-solid fa-circle-check"></i>
+            <span id="toast-msg">Copiado al portapapeles</span>
+        </div>
+
+        <!-- BARRA DE FILTROS -->
+        <form method="GET" action="{{ url_for('ver_credenciales_colaboradores') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar (colaborador, aplicativo, solicitante)</label>
+                <div class="relative">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Escribe y presiona Enter..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Filtrar por Aplicativo</label>
+                <select name="aplicativo" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <option value="">Todos los Aplicativos</option>
+                    {% for a in aplicativos %}
+                        <option value="{{ a.nombre }}" {% if a.nombre == f_aplicativo %}selected{% endif %}>{{ a.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <option value="activo" {% if f_estado == 'activo' %}selected{% endif %}>Activos</option>
+                    <option value="deshabilitado" {% if f_estado == 'deshabilitado' %}selected{% endif %}>Deshabilitados</option>
+                    <option value="todos" {% if f_estado == 'todos' %}selected{% endif %}>Todos</option>
+                </select>
+            </div>
+        </form>
+
+        <!-- TABLA -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                    <tr>
+                        <th class="pb-3 px-3 font-bold">Colaborador</th>
+                        <th class="pb-3 px-3 font-bold">Aplicativo</th>
+                        <th class="pb-3 px-3 font-bold">Clave</th>
+                        <th class="pb-3 px-3 font-bold">F. Creación</th>
+                        <th class="pb-3 px-3 font-bold">F. Solicitud</th>
+                        <th class="pb-3 px-3 font-bold">Analista</th>
+                        <th class="pb-3 px-3 font-bold">Solicitado por</th>
+                        <th class="pb-3 px-3 font-bold">Capacitado por</th>
+                        <th class="pb-3 px-3 font-bold">Enviado vía</th>
+                        <th class="pb-3 px-3 font-bold">Estado</th>
+                        <th class="pb-3 px-3 font-bold text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% if registros %}
+                        {% for r in registros %}
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3 px-3 font-bold text-white whitespace-nowrap">{{ r.colaborador }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">
+                                <span class="px-2 py-0.5 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ r.aplicativo }}</span>
+                            </td>
+                            <td class="py-3 px-3 whitespace-nowrap">
+                                <div class="flex items-center gap-1.5 font-mono">
+                                    <input type="password" id="pass-colab-{{ r.id }}" value="••••••••" readonly class="bg-transparent text-slate-200 w-20 focus:outline-none font-bold">
+                                    <button onclick="togglePasswordColab({{ r.id }}, this)" title="Ver clave" class="text-slate-400 hover:text-amber-400 p-1 transition-colors">
+                                        <i class="fa-regular fa-eye"></i>
+                                    </button>
+                                    <button onclick="copiarClaveColab({{ r.id }})" title="Copiar clave" class="text-slate-400 hover:text-emerald-400 p-1 transition-colors">
+                                        <i class="fa-regular fa-copy"></i>
+                                    </button>
+                                </div>
+                            </td>
+                            <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ r.fecha_creacion or '—' }}</td>
+                            <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ r.fecha_solicitud or '—' }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">{{ r.analista_gestiona or '—' }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">{{ r.solicitado_por or '—' }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">{{ r.capacitado_por or '—' }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">{{ r.medio_envio or '—' }}</td>
+                            <td class="py-3 px-3 whitespace-nowrap">
+                                {% if r.estado == 'activo' %}
+                                <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Activo</span>
+                                {% else %}
+                                <span title="Deshabilitado el {{ r.fecha_deshabilitacion }} por {{ r.deshabilitado_por }}" class="px-2.5 py-0.5 bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-bold rounded-full uppercase tracking-wider">Deshabilitado</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-3 text-right whitespace-nowrap">
+                                {% if r.estado == 'activo' %}
+                                <form action="{{ url_for('deshabilitar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Deshabilitar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
+                                        <i class="fa-solid fa-user-slash"></i> <span class="hidden lg:inline">Deshabilitar</span>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="11" class="text-center py-10 text-slate-500 font-bold">
+                                No se encontraron registros que coincidan con los filtros.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- MODAL NUEVA ALTA -->
+    <div id="modal-alta" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Nueva Alta de Credencial</h3>
+                <button onclick="cerrarModalAlta()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('crear_credencial_colaborador') }}" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
+                    <input type="text" name="colaborador" required placeholder="Nombre del colaborador" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo *</label>
+                        <select name="aplicativo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <option value="" disabled selected>Selecciona...</option>
+                            {% for a in aplicativos %}
+                            <option value="{{ a.nombre }}">{{ a.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña asignada *</label>
+                        <input type="text" name="password" required placeholder="Clave asignada" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 font-mono">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de solicitud</label>
+                        <input type="date" name="fecha_solicitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de creación</label>
+                        <input type="date" name="fecha_creacion" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Solicitado por (PQRS)</label>
+                    <input type="text" name="solicitado_por" placeholder="Nombre de quien radicó la solicitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Analista que gestiona</label>
+                        <input type="text" name="analista_gestiona" placeholder="Quién creó el acceso" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Capacitado por</label>
+                        <input type="text" name="capacitado_por" placeholder="Quién capacitó al usuario" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Credenciales enviadas vía</label>
+                    <select name="medio_envio" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        <option value="" disabled selected>Selecciona un medio...</option>
+                        {% for m in medios %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalAlta()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-xl font-bold shadow-lg shadow-fuchsia-500/25">Guardar Alta</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CATÁLOGO DE APLICATIVOS -->
+    <div id="modal-aplicativos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Catálogo de Aplicativos</h3>
+                <button onclick="cerrarModalAplicativos()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('crear_aplicativo_catalogo') }}" class="flex gap-2 text-xs mb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="nombre" required placeholder="Nombre del nuevo aplicativo" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                <button type="submit" class="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-xl font-bold shrink-0">Agregar</button>
+            </form>
+
+            <div class="space-y-1.5">
+                {% for a in aplicativos %}
+                <div class="flex items-center justify-between bg-slate-900/50 border border-slate-800 rounded-xl px-3 py-2 text-xs">
+                    <span class="text-slate-200 font-semibold">{{ a.nombre }}</span>
+                    <form method="POST" action="{{ url_for('eliminar_aplicativo_catalogo', app_id=a.id) }}" onsubmit="return confirm('¿Desactivar el aplicativo {{ a.nombre }}? Ya no aparecerá para nuevas altas.')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" title="Desactivar" class="text-slate-400 hover:text-rose-400 p-1"><i class="fa-solid fa-trash-can"></i></button>
+                    </form>
+                </div>
+                {% else %}
+                <p class="text-slate-500 text-xs text-center py-4">No hay aplicativos activos en el catálogo.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS INTERACTIVOS -->
+    <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
+        const clavesReveladasColab = {};
+
+        function mostrarToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 2000);
+        }
+
+        async function revelarClaveColab(regId, accion) {
+            if (clavesReveladasColab[regId] !== undefined) {
+                return clavesReveladasColab[regId];
+            }
+            const resp = await fetch(`/credenciales/colaboradores/${regId}/revelar`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': CSRF_TOKEN
+                },
+                body: `accion=${encodeURIComponent(accion)}`
+            });
+            if (!resp.ok) {
+                throw new Error('No se pudo obtener la clave');
+            }
+            const data = await resp.json();
+            clavesReveladasColab[regId] = data.password;
+            return data.password;
+        }
+
+        async function togglePasswordColab(regId, btn) {
+            const input = document.getElementById(`pass-colab-${regId}`);
+            const icon = btn.querySelector('i');
+            if (input.type === "password") {
+                try {
+                    input.value = await revelarClaveColab(regId, 'ver');
+                } catch (e) {
+                    mostrarToast('No se pudo obtener la clave');
+                    return;
+                }
+                input.type = "text";
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = "password";
+                input.value = "••••••••";
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        async function copiarClaveColab(regId) {
+            try {
+                const clave = await revelarClaveColab(regId, 'copiar');
+                await navigator.clipboard.writeText(clave);
+                mostrarToast('Contraseña copiada al portapapeles');
+            } catch (e) {
+                mostrarToast('No se pudo copiar la clave');
+            }
+        }
+
+        function abrirModalCrear() {
+            document.getElementById('modal-alta').classList.remove('hidden');
+            document.getElementById('modal-alta').classList.add('flex');
+        }
+        function cerrarModalAlta() {
+            document.getElementById('modal-alta').classList.add('hidden');
+            document.getElementById('modal-alta').classList.remove('flex');
+        }
+        function abrirModalAplicativos() {
+            document.getElementById('modal-aplicativos').classList.remove('hidden');
+            document.getElementById('modal-aplicativos').classList.add('flex');
+        }
+        function cerrarModalAplicativos() {
+            document.getElementById('modal-aplicativos').classList.add('hidden');
+            document.getElementById('modal-aplicativos').classList.remove('flex');
+        }
+    </script>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/notificaciones.js"></script>
+</body>
+</html>
