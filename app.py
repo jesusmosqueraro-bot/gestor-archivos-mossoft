@@ -300,6 +300,16 @@ def desencriptar_texto(texto_cifrado, credencial_id=None):
         return legacy
     return "⚠️ No se pudo descifrar (revisa ENCRYPTION_KEY)"
 
+
+def _parsear_dias_rotacion(valor):
+    """Convierte el campo de formulario 'rotacion_dias' (texto, puede venir vacío) a un entero
+    positivo o None (sin política de rotación para esa credencial)."""
+    try:
+        dias = int(str(valor).strip())
+        return dias if dias > 0 else None
+    except (TypeError, ValueError):
+        return None
+
 # ☁️ CLOUDINARY
 cloudinary.config(
     cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
@@ -422,6 +432,15 @@ def init_db():
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS url_archivo TEXT DEFAULT '';",
                 "ALTER TABLE archivos ADD COLUMN IF NOT EXISTS nombre_original VARCHAR(255) DEFAULT '';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'activo';",
+                # 🔐 Auditoría de accesos: en qué credencial quedó registrada cada consulta/copia
+                # de clave (ver _revelar_credencial); NULL para el resto de acciones del log.
+                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS credencial_id INTEGER;",
+                # 🔁 Política de rotación de contraseñas (opcional, por credencial): cada cuántos
+                # días se debería cambiar, cuándo se rotó por última vez, y cuándo se avisó (una
+                # sola vez por ciclo) que ya toca — ver _revisar_recordatorios_rotacion().
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS rotacion_dias INTEGER;",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS fecha_ultima_rotacion VARCHAR(100);",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS rotacion_recordatorio_fecha VARCHAR(100);",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
                 # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
@@ -530,6 +549,17 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+            for col_credencial_sql in [
+                "ALTER TABLE logs ADD COLUMN credencial_id INTEGER;",
+                "ALTER TABLE credenciales ADD COLUMN rotacion_dias INTEGER;",
+                "ALTER TABLE credenciales ADD COLUMN fecha_ultima_rotacion TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN rotacion_recordatorio_fecha TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_credencial_sql)
+                    conn.commit()
+                except Exception:
+                    pass
             try:
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN estado TEXT DEFAULT 'activo';")
                 conn.commit()
@@ -625,13 +655,16 @@ def init_db():
 
 init_db()
 
-def registrar_log(usuario, accion, detalles=""):
+def registrar_log(usuario, accion, detalles="", credencial_id=None):
+    """credencial_id es opcional: solo se usa para marcar qué entradas del log son consultas a
+    la bóveda de Credenciales (ver _revelar_credencial), y así poder filtrar/armar la auditoría
+    de accesos por credencial sin tener que parsear el texto libre de 'detalles'."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
-        query = "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha) VALUES (?, ?, ?, ?)"
-        cursor.execute(query, (usuario, accion, detalles, fecha_actual))
+        query = "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id) VALUES (?, ?, ?, ?, ?)"
+        cursor.execute(query, (usuario, accion, detalles, fecha_actual, credencial_id))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -3822,30 +3855,97 @@ def pdf_proxy():
     except Exception as e:
         return f"Error obteniendo documento: {e}", 500
 
+def _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion):
+    """Calcula si a una credencial ya le toca rotar la contraseña, según su política opcional
+    (rotacion_dias) y la fecha del último cambio. Devuelve None si no tiene política configurada
+    — esa credencial simplemente no se hace seguimiento de rotación."""
+    if not rotacion_dias:
+        return None
+    fecha_base = _parsear_fecha_ticket(fecha_ultima_rotacion)
+    if not fecha_base:
+        return {'vencida': False, 'dias_transcurridos': 0, 'dias_limite': rotacion_dias}
+    ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    dias_transcurridos = (ahora - fecha_base).days
+    return {
+        'vencida': dias_transcurridos >= rotacion_dias,
+        'dias_transcurridos': dias_transcurridos,
+        'dias_limite': rotacion_dias
+    }
+
+
+def _revisar_recordatorios_rotacion():
+    """Recordatorio automático (una vez por ciclo) de rotación de contraseñas vencida: avisa por
+    campanita/correo a todo el equipo de soporte activo. Se limpia (puede volver a avisar) en
+    cuanto se cambia esa contraseña desde editar_credencial. Se llama de forma perezosa cada vez
+    que se visita la bóveda o la Auditoría — nunca debe tumbar esa página si algo falla."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, titulo, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' AND rotacion_dias IS NOT NULL AND rotacion_recordatorio_fecha IS NULL")
+        filas = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error revisando recordatorios de rotación: {e}")
+        return
+
+    for cred_id, titulo, rotacion_dias, fecha_ultima_rotacion in filas:
+        estado = _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion)
+        if not estado or not estado['vencida']:
+            continue
+
+        equipo = _equipo_soporte_activo()
+        url_cred = url_for('ver_credenciales')
+        mensaje = f"🔐 Toca rotar la contraseña de '{titulo}' (política de {rotacion_dias} días)"
+        asunto = f"[Arkiv] Rotación de contraseña pendiente: '{titulo}'"
+        cuerpo = (
+            f"La credencial '{titulo}' en la bóveda de Arkiv ya superó su política de rotación "
+            f"({rotacion_dias} días sin cambiarse). Por seguridad, cambia esa contraseña y actualízala en Arkiv.\n\n---\nArkiv"
+        )
+        crear_notificacion_para_varios([m['usuario'] for m in equipo], mensaje, url=url_cred, tipo='credencial')
+        for miembro in equipo:
+            if miembro['correo']:
+                threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto, cuerpo)).start()
+
+        try:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            fecha_act = obtener_fecha_actual()
+            q = "UPDATE credenciales SET rotacion_recordatorio_fecha = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET rotacion_recordatorio_fecha = ? WHERE id = ?"
+            cursor.execute(q, (fecha_act, cred_id))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Error marcando recordatorio de rotación de la credencial {cred_id}: {e}")
+
+
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
 @agente_o_admin_required
 def ver_credenciales():
+    # 🔐 Aviso perezoso de rotación de contraseñas vencida — ver _revisar_recordatorios_rotacion().
+    _revisar_recordatorios_rotacion()
+
     q_busqueda = request.args.get('q', '').strip().lower()
-    
+
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
+
     try:
-        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
+        # 🔒 Ya NO se trae ni se descifra password_cifrada aquí: la clave en texto plano solo
+        # se entrega a demanda, vía /credenciales/<id>/revelar, para que la auditoría de accesos
+        # registre consultas reales y no simplemente "abrió la página".
+        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
         rows = cursor.fetchall()
     except Exception:
         rows = []
 
     conn.close()
-    
+
     lista_credenciales = []
     for r in rows:
         try:
-            c_id, servicio, url, usuario, pass_enc, categoria, notas, fecha = r  # nombres locales; columnas reales: titulo/url_acceso/usuario_acceso/password_cifrada/area/fecha_creacion
-            pass_real = desencriptar_texto(pass_enc, c_id)
-
+            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion = r
             texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
             if not q_busqueda or q_busqueda in texto_full:
                 lista_credenciales.append({
@@ -3853,17 +3953,87 @@ def ver_credenciales():
                     'servicio': servicio,
                     'url': url or '',
                     'usuario': usuario,
-                    'password': pass_real,
                     'categoria': categoria or 'General',
                     'notas': notas or '',
-                    'fecha': fecha
+                    'fecha': fecha,
+                    'rotacion_dias': rotacion_dias,
+                    'rotacion': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion)
                 })
         except Exception as e_row:
             # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
             print(f"⚠️ Error procesando credencial {r[0] if r else '?'}: {e_row}")
             continue
-            
+
     return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
+
+
+@app.route('/credenciales/<int:cred_id>/revelar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def revelar_credencial(cred_id):
+    """Descifra la clave de una credencial puntual, a demanda, y deja constancia en el log
+    general (con credencial_id) de quién la consultó/copió y cuándo — la base de la Auditoría
+    de Accesos."""
+    accion = request.form.get('accion', 'ver')
+    accion_legible = 'copió' if accion == 'copiar' else 'vio'
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT titulo, password_cifrada FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada FROM credenciales WHERE id = ?"
+        cursor.execute(q, (cred_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando credencial {cred_id} para revelar: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    if not row:
+        return jsonify({'error': 'no encontrada'}), 404
+
+    titulo, pass_enc = row
+    pass_real = desencriptar_texto(pass_enc, cred_id)
+    registrar_log(session.get('username'), "Consulta de Credencial", f"Se {accion_legible} la clave de '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+    return jsonify({'password': pass_real})
+
+
+@app.route('/credenciales/auditoria')
+@login_required
+@agente_o_admin_required
+def auditoria_credenciales():
+    """Panel de auditoría de la bóveda: estado de rotación de cada credencial activa (según su
+    política opcional) y el historial reciente de consultas/copias de claves — quién, cuál
+    credencial y cuándo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, titulo, area, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY titulo ASC")
+        filas_cred = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando credenciales para auditoría: {e}")
+        filas_cred = []
+
+    rotacion = []
+    for c_id, titulo, area, rotacion_dias, fecha_ultima_rotacion in filas_cred:
+        rotacion.append({
+            'id': c_id, 'titulo': titulo, 'area': area or 'General',
+            'rotacion_dias': rotacion_dias,
+            'estado': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion)
+        })
+    # Vencidas primero, luego con política vigente, luego sin política configurada.
+    rotacion.sort(key=lambda c: (0 if (c['estado'] and c['estado']['vencida']) else (1 if c['estado'] else 2), c['titulo']))
+
+    try:
+        cursor.execute("SELECT usuario, detalles, fecha, credencial_id FROM logs WHERE credencial_id IS NOT NULL ORDER BY id DESC LIMIT 200")
+        filas_log = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando accesos a credenciales: {e}")
+        filas_log = []
+    conn.close()
+
+    accesos = [{'usuario': u, 'detalles': d, 'fecha': f, 'credencial_id': cid} for u, d, f, cid in filas_log]
+
+    return render_template('credenciales_auditoria.html', rotacion=rotacion, accesos=accesos)
 
 @app.route('/credenciales/crear', methods=['POST'])
 @login_required
@@ -3875,7 +4045,8 @@ def crear_credencial():
     password = request.form.get('password', '').strip()
     categoria = request.form.get('categoria', 'General').strip()
     notas = request.form.get('notas', '').strip()
-    
+    rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
+
     if servicio and usuario and password:
         try:
             pass_cifrada = encriptar_texto(password)
@@ -3883,8 +4054,10 @@ def crear_credencial():
 
             conn, db_type = get_db()
             cursor = conn.cursor()
-            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo')" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo')"
-            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act))
+            # 🔁 fecha_ultima_rotacion arranca igual a fecha_creacion: recién guardada, la
+            # clave "acaba de rotarse" para efectos del recordatorio de rotación.
+            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
+            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act))
             conn.commit()
             conn.close()
 
@@ -3904,18 +4077,23 @@ def editar_credencial(cred_id):
     password = request.form.get('password', '').strip()
     categoria = request.form.get('categoria', 'General').strip()
     notas = request.form.get('notas', '').strip()
-    
+    rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
+
     conn, db_type = get_db()
     cursor = conn.cursor()
 
     try:
         if password:
+            # 🔁 Se cambió la clave de verdad: cuenta como una rotación — se actualiza
+            # fecha_ultima_rotacion a ahora y se limpia el recordatorio ya enviado, para que
+            # el próximo aviso de "toca rotar" se calcule desde este momento en adelante.
             pass_cifrada = encriptar_texto(password)
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, cred_id))
+            fecha_act = obtener_fecha_actual()
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, cred_id))
         else:
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, cred_id))
 
         conn.commit()
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
