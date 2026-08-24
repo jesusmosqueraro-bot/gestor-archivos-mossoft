@@ -24,6 +24,7 @@
                 <i class="fa-solid fa-headset text-orange-400"></i> Configuración de Tickets
             </h1>
         </div>
+        {% include 'partials/campanita.html' %}
     </nav>
 
     <!-- SUB-NAV DEL MÓDULO -->
@@ -167,8 +168,13 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="tipo" value="categoria"/>
                     <input type="text" name="nombre" required maxlength="150" placeholder="Ej: Impresoras" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <select name="responsable" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin responsable asignado</option>
+                        {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}">{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
+                    </select>
                     <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar categoría</button>
                 </form>
+                <p class="text-[10px] text-slate-500 -mt-2 mb-2">Si asignas un responsable, los tickets de esta categoría se le asignarán automáticamente al crearse.</p>
 
                 {% if categorias %}
                 <div class="relative mb-2">
@@ -186,10 +192,16 @@
                             <i class="fa-solid fa-chevron-down text-slate-500 text-[10px] flex-none transition-transform"></i>
                         </button>
                         <div class="hidden px-3 pb-3">
-                            <form method="POST" action="/tickets/configuracion/{{ c.id }}/editar" class="flex items-center gap-2 mb-1.5">
+                            <form method="POST" action="/tickets/configuracion/{{ c.id }}/editar" class="flex flex-col gap-1.5 mb-1.5">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                <input type="text" name="nombre" value="{{ c.nombre }}" placeholder="Nombre" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
-                                <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" name="nombre" value="{{ c.nombre }}" placeholder="Nombre" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                                </div>
+                                <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <option value="" {% if not c.responsable %}selected{% endif %}>Sin responsable asignado</option>
+                                    {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == c.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
+                                </select>
                             </form>
                             <form method="POST" action="/tickets/configuracion/{{ c.id }}/eliminar" onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}?');" class="text-right">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -253,5 +265,6 @@
         </button>
     </form>
 
+    <script src="/static/js/notificaciones.js"></script>
 </body>
 </html>

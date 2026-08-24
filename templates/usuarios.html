@@ -30,10 +30,13 @@
                 </div>
             </div>
 
-            <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2">
-                <i class="fa-solid fa-user-plus text-xs"></i>
-                <span>Nuevo Usuario</span>
-            </button>
+            <div class="flex items-center gap-2">
+                <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-user-plus text-xs"></i>
+                    <span>Nuevo Usuario</span>
+                </button>
+                {% include 'partials/campanita.html' %}
+            </div>
         </div>
     </header>
 
@@ -290,5 +293,6 @@
         </button>
     </form>
 
+    <script src="/static/js/notificaciones.js"></script>
 </body>
 </html>

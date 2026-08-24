@@ -30,12 +30,15 @@
             </h1>
         </div>
 
-        {% if rol in ['admin', 'agente'] %}
-        <button onclick="abrirModalCrear()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-sky-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
-            <i class="fa-solid fa-plus"></i>
-            <span>Publicar Comunicado</span>
-        </button>
-        {% endif %}
+        <div class="flex items-center gap-2">
+            {% if rol in ['admin', 'agente'] %}
+            <button onclick="abrirModalCrear()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-sky-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>Publicar Comunicado</span>
+            </button>
+            {% endif %}
+            {% include 'partials/campanita.html' %}
+        </div>
     </nav>
 
     <!-- CONTENIDO -->
@@ -108,11 +111,16 @@
                         {% endif %}
 
                         <!-- PIE DE COMUNICADO Y ACCIONES -->
-                        <div class="pt-3 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
+                        <div class="pt-3 border-t border-slate-700/50 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
                             <span><i class="fa-regular fa-user text-slate-500"></i> Publicado por: <strong class="text-slate-300">{{ c.autor }}</strong></span>
 
                             {% if rol in ['admin', 'agente'] %}
                                 <div class="flex items-center gap-2">
+                                    {% if c.total_usuarios is defined %}
+                                    <button type="button" onclick="abrirModalLecturas({{ c.id }}, '{{ c.titulo|replace("'", "\\'") }}')" title="Ver quién lo ha leído" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
+                                        <i class="fa-solid fa-eye text-emerald-400"></i> {{ c.leidos }}/{{ c.total_usuarios }} leyeron
+                                    </button>
+                                    {% endif %}
                                     <button type="button" onclick='abrirModalEditar({{ c | tojson }})' class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">
                                         <i class="fa-solid fa-pen text-sky-400"></i> Editar
                                     </button>
@@ -258,6 +266,19 @@
         </div>
     </div>
 
+    <!-- MODAL LECTURAS (quién ha leído este comunicado) -->
+    <div id="modal-lecturas" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-3">
+                <h3 id="lecturas-titulo" class="text-sm font-bold text-white flex items-center gap-2"><i class="fa-solid fa-eye text-emerald-400"></i> Lecturas</h3>
+                <button onclick="cerrarModalLecturas()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="lecturas-cuerpo" class="overflow-y-auto text-xs space-y-4">
+                <p class="text-slate-500 text-center py-6">Cargando...</p>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Editores de texto enriquecido de "Publicar Comunicado" y "Editar Comunicado" (ver
         // /static/js/editor-enriquecido.js).
@@ -306,6 +327,46 @@
             document.getElementById('modal-editar').classList.add('hidden');
             document.getElementById('modal-editar').classList.remove('flex');
         }
+
+        function abrirModalLecturas(comId, titulo) {
+            document.getElementById('lecturas-titulo').innerHTML = '<i class="fa-solid fa-eye text-emerald-400"></i> Lecturas — ' + titulo;
+            document.getElementById('lecturas-cuerpo').innerHTML = '<p class="text-slate-500 text-center py-6">Cargando...</p>';
+            document.getElementById('modal-lecturas').classList.remove('hidden');
+            document.getElementById('modal-lecturas').classList.add('flex');
+
+            fetch('/comunicados/' + comId + '/lecturas')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var html = '';
+                    html += '<div><h4 class="font-bold text-emerald-400 uppercase tracking-wider text-[10px] mb-1.5">Ya lo leyeron (' + data.leyeron.length + ')</h4>';
+                    if (data.leyeron.length) {
+                        html += '<ul class="space-y-1">' + data.leyeron.map(function (u) {
+                            return '<li class="flex items-center justify-between bg-slate-900/50 rounded-lg px-2.5 py-1.5"><span class="text-slate-200">' + u.nombre + '</span><span class="text-slate-500 font-mono text-[10px]">' + u.fecha + '</span></li>';
+                        }).join('') + '</ul>';
+                    } else {
+                        html += '<p class="text-slate-500 text-center py-2">Todavía nadie lo ha leído.</p>';
+                    }
+                    html += '</div>';
+                    html += '<div><h4 class="font-bold text-amber-400 uppercase tracking-wider text-[10px] mb-1.5">Falta por leer (' + data.faltan.length + ')</h4>';
+                    if (data.faltan.length) {
+                        html += '<ul class="space-y-1">' + data.faltan.map(function (u) {
+                            return '<li class="bg-slate-900/50 rounded-lg px-2.5 py-1.5 text-slate-300">' + u.nombre + '</li>';
+                        }).join('') + '</ul>';
+                    } else {
+                        html += '<p class="text-slate-500 text-center py-2">Todos lo han leído.</p>';
+                    }
+                    html += '</div>';
+                    document.getElementById('lecturas-cuerpo').innerHTML = html;
+                })
+                .catch(function () {
+                    document.getElementById('lecturas-cuerpo').innerHTML = '<p class="text-rose-400 text-center py-6">No se pudo cargar la información.</p>';
+                });
+        }
+
+        function cerrarModalLecturas() {
+            document.getElementById('modal-lecturas').classList.add('hidden');
+            document.getElementById('modal-lecturas').classList.remove('flex');
+        }
     </script>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
@@ -318,5 +379,6 @@
         </button>
     </form>
 
+    <script src="/static/js/notificaciones.js"></script>
 </body>
 </html>

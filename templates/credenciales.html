@@ -25,10 +25,13 @@
             </h1>
         </div>
 
-        <button onclick="abrirModalCrear()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-blue-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
-            <i class="fa-solid fa-plus"></i>
-            <span>Nueva Credencial</span>
-        </button>
+        <div class="flex items-center gap-2">
+            <button onclick="abrirModalCrear()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-blue-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>Nueva Credencial</span>
+            </button>
+            {% include 'partials/campanita.html' %}
+        </div>
     </nav>
 
     <!-- CONTENIDO -->
@@ -259,5 +262,6 @@
         </button>
     </form>
 
+    <script src="/static/js/notificaciones.js"></script>
 </body>
 </html>
