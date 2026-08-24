@@ -704,6 +704,28 @@ def init_db():
                 cursor.execute(q_seed_app, (nombre_app,))
             conn.commit()
 
+        # 🩺 Sincroniza el catálogo de especialidades con la lista real de Preventiva. A
+        # diferencia del seed de aplicativos (que solo corre si la tabla está vacía), esta
+        # sincronización corre SIEMPRE en cada arranque, pero es idempotente: cada nombre se
+        # cruza contra lo que ya exista (sin importar mayúsculas/acentos) y solo se agrega si
+        # todavía no está — así no duplica lo que el equipo ya había cargado a mano desde el
+        # módulo (p. ej. "AUX. ADMINISTRATIVO", "PSICOLOGIA", "MEDICINA GENERAL"...). Quedan
+        # afuera las que ya cubre una especialidad existente en otra forma (p. ej. "Psicólogo"
+        # ya lo cubre "Psicología", "Facturación" ya lo cubre "Aux. Facturación").
+        especialidades_a_sincronizar = [
+            'JEFE DE ENFERMERIA', 'INFECTOLOGO', 'TRABAJADORA SOCIAL', 'BACTERIOLOGA ADMINISTRATIVA',
+            'ESPECIALISTA EN INFECTOLOGIA PEDIATRICA', 'AUXILIAR CONTABLE', 'INTERNISTA E INFECTOLOGO',
+            'TERAPIA RESPIRATORIA', 'FONOAUDIOLOGA', 'FISIOTERAPEUTA', 'AUXILIAR EN RADIOLOGIA ORAL',
+            'MEDICINA DOMICILIARIA', 'NEUROPSICOLOGIA', 'NUTRICIONISTA'
+        ]
+        q_check_esp = "SELECT id FROM especialidades_catalogo WHERE UPPER(nombre) = UPPER(%s)" if db_type == 'postgres' else "SELECT id FROM especialidades_catalogo WHERE UPPER(nombre) = UPPER(?)"
+        q_ins_esp = "INSERT INTO especialidades_catalogo (nombre) VALUES (%s)" if db_type == 'postgres' else "INSERT INTO especialidades_catalogo (nombre) VALUES (?)"
+        for nombre_esp in especialidades_a_sincronizar:
+            cursor.execute(q_check_esp, (nombre_esp,))
+            if not cursor.fetchone():
+                cursor.execute(q_ins_esp, (nombre_esp,))
+        conn.commit()
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             # Solo se ejecuta si la tabla usuarios está realmente vacía (instalación nueva).
@@ -779,11 +801,23 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# 🛡️ Más estricto que admin_required: exige la cuenta LITERAL 'admin' (super-admin), no
+# cualquier usuario con rol 'admin'. Usado en el Gestor de Base de Datos y los Respaldos —
+# ambos dan acceso directo a los datos crudos de toda la organización (incluidas otras
+# cuentas admin), así que quedan fuera del alcance de agentes y de admins comunes.
+def superadmin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('username') != 'admin': return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # 🧑‍💼 Rol "Agente": analista de soporte TI que resuelve PQRS/Tickets. Tiene el mismo nivel
 # de acceso operativo que Admin en (casi) todos los módulos — Gestor de Archivos, Comunicados,
-# Tickets/Soporte TI completo, Bóveda de Accesos, Papelera y Auditoría — con DOS excepciones
-# que quedan exclusivas del rol 'admin': Gestión de Usuarios y el Gestor de Base de Datos
-# (ambas siguen usando @admin_required, no este decorador).
+# Tickets/Soporte TI completo, Bóveda de Accesos, Papelera y Auditoría — con excepciones que
+# quedan exclusivas del rol 'admin' (Gestión de Usuarios, @admin_required) o, más estricto
+# todavía, de la cuenta super-admin literal 'admin' (Gestor de Base de Datos y Respaldos,
+# @superadmin_required — ni siquiera otros admins los ven).
 ROLES_CON_ACCESO_OPERATIVO = ('admin', 'agente')
 
 def agente_o_admin_required(f):
@@ -797,6 +831,7 @@ def agente_o_admin_required(f):
 @app.route('/admin/db', methods=['GET', 'POST'])
 @login_required
 @admin_required
+@superadmin_required
 def visor_db():
     tabla_seleccionada = request.args.get('tabla', 'usuarios')
     q_sql = request.form.get('sql', '').strip() or request.args.get('sql', '').strip()
@@ -815,16 +850,11 @@ def visor_db():
     mensaje_exito = None
     error_sql = None
 
-    # 🛡️ Ejecutar SQL libre aquí puede saltarse por completo las protecciones de
-    # jerarquía de administradores (editar_usuario, eliminar_usuario, etc.), ya que
-    # con una sola consulta cualquier Admin común podría auto-promoverse, editar la
-    # cuenta 'admin' o cambiarle la contraseña. Por eso, aunque la vista de tablas
-    # sigue abierta para todos los admins, ejecutar SQL personalizado queda
-    # restringido únicamente a la cuenta super-admin ('admin').
-    if q_sql and session.get('username') != 'admin':
-        registrar_log(session.get('username'), "SQL Manual Bloqueado", f"Intento de ejecutar SQL personalizado sin ser super-admin: {q_sql[:120]}")
-        q_sql = ''
-        error_sql = "Solo la cuenta 'admin' (super-admin) puede ejecutar consultas SQL personalizadas. Puedes seguir explorando las tablas normalmente."
+    # 🛡️ Todo el módulo (ver tablas y ejecutar SQL libre) está restringido a la cuenta
+    # super-admin ('admin') por @superadmin_required — ver ese decorador. Antes solo se
+    # restringía aquí la ejecución de SQL personalizado y la vista de tablas quedaba
+    # abierta a cualquier admin; ahora ni siquiera se llega a esta función sin ser
+    # super-admin, así que ya no hace falta ese chequeo adicional.
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -1033,6 +1063,7 @@ if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
 @app.route('/admin/respaldos')
 @login_required
 @admin_required
+@superadmin_required
 def ver_respaldos():
     disco_disponible = os.path.isdir(RESPALDOS_DIR) or _crear_dir_respaldos_silencioso()
     return render_template('respaldos.html', respaldos=_listar_respaldos(), respaldos_dir=RESPALDOS_DIR, disco_disponible=disco_disponible)
@@ -1049,6 +1080,7 @@ def _crear_dir_respaldos_silencioso():
 @app.route('/admin/respaldos/generar', methods=['POST'])
 @login_required
 @admin_required
+@superadmin_required
 def generar_respaldo():
     """Botón "Generar y descargar ahora": crea un respaldo manual, lo guarda en el disco
     (queda listado igual que los automáticos) y lo entrega de inmediato como descarga."""
@@ -1063,6 +1095,7 @@ def generar_respaldo():
 @app.route('/admin/respaldos/descargar/<nombre>')
 @login_required
 @admin_required
+@superadmin_required
 def descargar_respaldo(nombre):
     nombre_seguro = os.path.basename(nombre)
     ruta = os.path.join(RESPALDOS_DIR, nombre_seguro)
@@ -1075,6 +1108,7 @@ def descargar_respaldo(nombre):
 @app.route('/admin/respaldos/eliminar/<nombre>', methods=['POST'])
 @login_required
 @admin_required
+@superadmin_required
 def eliminar_respaldo(nombre):
     nombre_seguro = os.path.basename(nombre)
     ruta = os.path.join(RESPALDOS_DIR, nombre_seguro)
