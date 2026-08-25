@@ -470,6 +470,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, codigo_hash VARCHAR(255) NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion VARCHAR(100) NOT NULL, fecha_uso VARCHAR(100)
             )''')
+            # 📋 Plantillas de solicitud: administradas por el equipo de soporte (/tickets/plantillas)
+            # para acelerar la creación de tickets recurrentes — al elegir una en "Nueva Solicitud"
+            # se prellenan tipo, título, categoría, prioridad, área, sede y descripción, todo
+            # editable antes de enviar.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_plantillas (
+                id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, tipo VARCHAR(20) DEFAULT 'Incidente', categoria VARCHAR(50), prioridad VARCHAR(20) DEFAULT 'Media', area VARCHAR(100), sede VARCHAR(100), titulo VARCHAR(200) NOT NULL, descripcion TEXT NOT NULL, estado VARCHAR(20) DEFAULT 'activo', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -649,6 +656,10 @@ def init_db():
             # rama de Postgres.
             cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, codigo_hash TEXT NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion TEXT NOT NULL, fecha_uso TEXT
+            )''')
+            # 📋 Plantillas de solicitud. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_plantillas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo TEXT DEFAULT 'Incidente', categoria TEXT, prioridad TEXT DEFAULT 'Media', area TEXT, sede TEXT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, estado TEXT DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -2013,6 +2024,28 @@ def _config_ticket_lista(tipo_config):
         return []
 
 
+def _plantillas_ticket_activas():
+    """Plantillas de solicitud activas (administradas por el equipo de soporte en
+    /tickets/plantillas), usadas para prellenar 'Nueva Solicitud' — ver ver_tickets()."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nombre, tipo, categoria, prioridad, area, sede, titulo, descripcion FROM ticket_plantillas WHERE estado = 'activo' ORDER BY nombre ASC")
+        filas = [
+            {
+                'id': r[0], 'nombre': r[1], 'tipo': r[2] or 'Incidente', 'categoria': r[3] or '',
+                'prioridad': r[4] or 'Media', 'area': r[5] or '', 'sede': r[6] or '',
+                'titulo': r[7], 'descripcion': r[8]
+            }
+            for r in cursor.fetchall()
+        ]
+        conn.close()
+        return filas
+    except Exception as e:
+        print(f"⚠️ Error listando plantillas de ticket: {e}")
+        return []
+
+
 def _correo_de_usuario(username):
     """Busca el correo registrado de un usuario por su nombre de cuenta. Devuelve None si no
     existe o si algo falla (nunca debe tumbar el flujo del ticket que lo llama)."""
@@ -2597,7 +2630,7 @@ def ver_tickets():
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
         q_area=q_area, q_sede=q_sede,
         q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets,
-        telefono_usuario_actual=telefono_usuario_actual
+        telefono_usuario_actual=telefono_usuario_actual, plantillas=_plantillas_ticket_activas()
     )
 
 
@@ -3472,6 +3505,145 @@ def eliminar_configuracion_ticket(config_id):
         print(f"Error eliminando configuración de ticket: {e}")
     conn.close()
     return redirect(url_for('configuracion_tickets'))
+
+
+# 📋 PLANTILLAS DE SOLICITUD (solo equipo de soporte administra; cualquier usuario logueado
+# las usa): agilizan la creación de tickets recurrentes ("Solicitud de acceso a Kubapp",
+# "Instalación de impresora nueva"...) prellenando tipo, título, categoría, prioridad, área,
+# sede y descripción en el formulario de "Nueva Solicitud" — todo sigue siendo editable antes
+# de enviar, la plantilla solo ahorra escribir lo mismo una y otra vez.
+@app.route('/tickets/plantillas')
+@login_required
+@agente_o_admin_required
+def ver_plantillas_ticket():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre, tipo, categoria, prioridad, area, sede, titulo, descripcion FROM ticket_plantillas WHERE estado = 'activo' ORDER BY nombre ASC")
+    plantillas = [
+        {
+            'id': r[0], 'nombre': r[1], 'tipo': r[2] or 'Incidente', 'categoria': r[3] or '',
+            'prioridad': r[4] or 'Media', 'area': r[5] or '', 'sede': r[6] or '',
+            'titulo': r[7], 'descripcion': r[8]
+        }
+        for r in cursor.fetchall()
+    ]
+    conn.close()
+
+    nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+    nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
+    nombres_sedes = [s['nombre'] for s in _config_ticket_lista('sede')]
+
+    return render_template(
+        'tickets_plantillas.html', es_soporte=True, plantillas=plantillas,
+        tipos=TIPOS_TICKET, categorias=nombres_categorias, prioridades=PRIORIDADES_TICKET,
+        areas=nombres_areas, sedes=nombres_sedes
+    )
+
+
+def _validar_datos_plantilla_ticket(form):
+    """Valida y normaliza los campos de una plantilla (creación o edición), reutilizando las
+    mismas listas válidas de tipo/categoría/prioridad/área/sede que usa crear_ticket(), para que
+    una plantilla nunca pueda guardar una combinación que el formulario de ticket no aceptaría."""
+    nombre = form.get('nombre', '').strip()
+    tipo = form.get('tipo', 'Incidente').strip()
+    categoria = form.get('categoria', '').strip()
+    prioridad = form.get('prioridad', 'Media').strip()
+    area = form.get('area', '').strip()
+    sede = form.get('sede', '').strip()
+    titulo = form.get('titulo', '').strip()
+    descripcion = _sanitizar_html_enriquecido(form.get('descripcion', '').strip())
+
+    nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+    nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
+    nombres_sedes = [s['nombre'] for s in _config_ticket_lista('sede')]
+
+    if tipo not in TIPOS_TICKET:
+        tipo = 'Incidente'
+    if categoria not in nombres_categorias:
+        categoria = None
+    if prioridad not in PRIORIDADES_TICKET:
+        prioridad = 'Media'
+    area = area if area in nombres_areas else None
+    sede = sede if sede in nombres_sedes else None
+
+    es_valido = bool(nombre) and bool(titulo) and not _html_esta_vacio(descripcion)
+    return es_valido, {
+        'nombre': nombre, 'tipo': tipo, 'categoria': categoria, 'prioridad': prioridad,
+        'area': area, 'sede': sede, 'titulo': titulo, 'descripcion': descripcion
+    }
+
+
+@app.route('/tickets/plantillas/nuevo', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def crear_plantilla_ticket():
+    es_valido, datos = _validar_datos_plantilla_ticket(request.form)
+    if es_valido:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            fecha_actual = obtener_fecha_actual()
+            q = (
+                "INSERT INTO ticket_plantillas (nombre, tipo, categoria, prioridad, area, sede, titulo, descripcion, estado, creado_por, fecha_creacion) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)"
+                if db_type == 'postgres' else
+                "INSERT INTO ticket_plantillas (nombre, tipo, categoria, prioridad, area, sede, titulo, descripcion, estado, creado_por, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
+            )
+            cursor.execute(q, (
+                datos['nombre'], datos['tipo'], datos['categoria'], datos['prioridad'], datos['area'],
+                datos['sede'], datos['titulo'], datos['descripcion'], session.get('username'), fecha_actual
+            ))
+            conn.commit()
+            registrar_log(session.get('username'), "Plantilla de Ticket", f"Se creó la plantilla '{datos['nombre']}'")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error creando plantilla de ticket: {e}")
+        conn.close()
+    return redirect(url_for('ver_plantillas_ticket'))
+
+
+@app.route('/tickets/plantillas/<int:plantilla_id>/editar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def editar_plantilla_ticket(plantilla_id):
+    es_valido, datos = _validar_datos_plantilla_ticket(request.form)
+    if es_valido:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        try:
+            q = (
+                "UPDATE ticket_plantillas SET nombre = %s, tipo = %s, categoria = %s, prioridad = %s, area = %s, sede = %s, titulo = %s, descripcion = %s WHERE id = %s"
+                if db_type == 'postgres' else
+                "UPDATE ticket_plantillas SET nombre = ?, tipo = ?, categoria = ?, prioridad = ?, area = ?, sede = ?, titulo = ?, descripcion = ? WHERE id = ?"
+            )
+            cursor.execute(q, (
+                datos['nombre'], datos['tipo'], datos['categoria'], datos['prioridad'], datos['area'],
+                datos['sede'], datos['titulo'], datos['descripcion'], plantilla_id
+            ))
+            conn.commit()
+            registrar_log(session.get('username'), "Plantilla de Ticket", f"Se editó la plantilla '{datos['nombre']}' (#{plantilla_id})")
+        except Exception as e:
+            conn.rollback()
+            print(f"Error editando plantilla de ticket {plantilla_id}: {e}")
+        conn.close()
+    return redirect(url_for('ver_plantillas_ticket'))
+
+
+@app.route('/tickets/plantillas/<int:plantilla_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_plantilla_ticket(plantilla_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE ticket_plantillas SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_plantillas SET estado = 'eliminado' WHERE id = ?"
+        cursor.execute(q, (plantilla_id,))
+        conn.commit()
+        registrar_log(session.get('username'), "Plantilla de Ticket", f"Se eliminó la plantilla #{plantilla_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando plantilla de ticket {plantilla_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_plantillas_ticket'))
 
 
 # 📊 INDICADORES Y KPIS (solo equipo de soporte): panorama general del módulo de tickets —
