@@ -1,0 +1,8 @@
+<!-- 🛡️ SEGURIDAD DE LA CUENTA — botón compartido por todas las páginas autenticadas, junto al
+     buscador, el historial de sesiones y la campanita. Lleva a /perfil/2fa, donde cualquier
+     cuenta puede activar/desactivar la verificación en dos pasos (2FA). Se agregó porque el
+     único acceso anterior (un enlace pequeño dentro de "Cambiar contraseña") era difícil de
+     encontrar. -->
+<a href="{{ url_for('perfil_2fa') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs" title="Seguridad de la cuenta (verificación en dos pasos)">
+    <i class="fa-solid fa-shield-halved"></i>
+</a>
