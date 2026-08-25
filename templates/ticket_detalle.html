@@ -194,6 +194,9 @@
                     <i class="fa-solid fa-stopwatch text-orange-400"></i> SLA &mdash; Compromiso de Atención
                 </h3>
                 <span class="px-2.5 py-0.5 bg-{{ ticket.sla.color }}-500/10 text-{{ ticket.sla.color }}-400 border border-{{ ticket.sla.color }}-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ ticket.sla.texto }}</span>
+                {% if es_soporte and ticket.sla.estado == 'vencido' and ticket.asignado_a %}
+                <span title="El SLA venció y ya se avisó a los administradores para que intervengan" class="px-2.5 py-0.5 bg-rose-600/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold rounded-full uppercase tracking-wider"><i class="fa-solid fa-angles-up mr-1"></i>Escalado a supervisor</span>
+                {% endif %}
             </div>
 
             <!-- BARRA DE PROGRESO -->

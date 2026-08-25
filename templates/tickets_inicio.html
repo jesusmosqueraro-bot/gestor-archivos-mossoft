@@ -74,6 +74,19 @@
                 <span class="text-3xl font-extrabold text-white">{{ resumen.resueltos_por_mi or 0 }}</span>
             </a>
         </div>
+        {% if session.get('rol') == 'admin' and resumen.escalados %}
+        <a href="/tickets?cumplimiento=vencido" class="block bg-rose-600/10 border border-rose-500/40 rounded-3xl p-5 shadow-xl hover:border-rose-400/60 transition-all">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-rose-500/20 flex items-center justify-center flex-none">
+                    <i class="fa-solid fa-angles-up text-rose-400"></i>
+                </div>
+                <div>
+                    <span class="block text-rose-300 font-bold text-sm">{{ resumen.escalados }} solicitud{{ 'es' if resumen.escalados != 1 else '' }} escalada{{ 's' if resumen.escalados != 1 else '' }} por SLA vencido</span>
+                    <span class="block text-rose-400/70 text-[11px]">Asignadas a un agente y sin resolver a tiempo — ya se avisó a los administradores. Haz clic para revisarlas.</span>
+                </div>
+            </div>
+        </a>
+        {% endif %}
         {% else %}
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">

@@ -205,6 +205,9 @@
                             </td>
                             <td class="py-3.5 px-3">
                                 <span class="px-2.5 py-0.5 bg-{{ t.sla.color }}-500/10 text-{{ t.sla.color }}-400 border border-{{ t.sla.color }}-500/20 text-[10px] font-bold rounded-full whitespace-nowrap">{{ t.sla.texto }}</span>
+                                {% if es_soporte and t.cumplimiento == 'vencido' and t.asignado_a %}
+                                <span title="El SLA venció y ya se avisó a los administradores para que intervengan" class="ml-1 px-2 py-0.5 bg-rose-600/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold rounded-full whitespace-nowrap"><i class="fa-solid fa-angles-up mr-1"></i>Escalado</span>
+                                {% endif %}
                             </td>
                             <td class="py-3.5 px-3">
                                 <div class="flex items-center gap-2 w-24">
