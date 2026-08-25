@@ -4,7 +4,7 @@
    'slate' oscuro o un acento -300/-400 debe agregarse al script y regenerarse.
    ========================================================================= */
 
-html[data-theme="claro"] .text-slate-400 { color: #64748b !important; }
+html[data-theme="claro"] .text-slate-400 { color: #4b5563 !important; }
 html[data-theme="claro"] .text-white { color: #0f172a !important; }
 html[data-theme="claro"] .text-slate-100 { color: #0f172a !important; }
 html[data-theme="claro"] .text-slate-200 { color: #1e293b !important; }
@@ -38,15 +38,15 @@ html[data-theme="claro"] .text-indigo-400 { color: #4f46e5 !important; }
 html[data-theme="claro"] .text-rose-300 { color: #e11d48 !important; }
 html[data-theme="claro"] .text-sky-300 { color: #0284c7 !important; }
 html[data-theme="claro"] .text-cyan-300 { color: #0891b2 !important; }
-html[data-theme="claro"] .bg-slate-800 { background-color: #ffffff !important; }
+html[data-theme="claro"] .bg-slate-800 { background-color: #f8fafc !important; }
 html[data-theme="claro"] .bg-slate-700 { background-color: #e2e8f0 !important; }
-html[data-theme="claro"] .bg-slate-950 { background-color: #ffffff !important; }
-html[data-theme="claro"] .bg-slate-900 { background-color: #f8fafc !important; }
-html[data-theme="claro"] .bg-slate-800\/80 { background-color: rgba(255,255,255,0.85) !important; }
-html[data-theme="claro"] .bg-slate-800\/40 { background-color: rgba(255,255,255,0.85) !important; }
-html[data-theme="claro"] .bg-slate-800\/60 { background-color: rgba(255,255,255,0.85) !important; }
-html[data-theme="claro"] .bg-slate-800\/90 { background-color: rgba(255,255,255,0.9) !important; }
-html[data-theme="claro"] .bg-slate-800\/30 { background-color: rgba(255,255,255,0.85) !important; }
+html[data-theme="claro"] .bg-slate-950 { background-color: #f8fafc !important; }
+html[data-theme="claro"] .bg-slate-900 { background-color: #eef1f6 !important; }
+html[data-theme="claro"] .bg-slate-800\/80 { background-color: rgba(248,250,252,0.9) !important; }
+html[data-theme="claro"] .bg-slate-800\/40 { background-color: rgba(248,250,252,0.9) !important; }
+html[data-theme="claro"] .bg-slate-800\/60 { background-color: rgba(248,250,252,0.9) !important; }
+html[data-theme="claro"] .bg-slate-800\/90 { background-color: rgba(248,250,252,0.95) !important; }
+html[data-theme="claro"] .bg-slate-800\/30 { background-color: rgba(248,250,252,0.9) !important; }
 html[data-theme="claro"] .bg-slate-900\/30 { background-color: rgba(226,232,240,0.5) !important; }
 html[data-theme="claro"] .bg-slate-900\/40 { background-color: rgba(226,232,240,0.6000000000000001) !important; }
 html[data-theme="claro"] .bg-slate-900\/50 { background-color: rgba(226,232,240,0.7) !important; }
@@ -80,13 +80,13 @@ html[data-theme="claro"] .hover\:bg-slate-700\/60:hover { background-color: #f1f
 html[data-theme="claro"] .hover\:bg-slate-700\/30:hover { background-color: #f1f5f9 !important; }
 html[data-theme="claro"] .hover\:bg-slate-700\/50:hover { background-color: #f1f5f9 !important; }
 html[data-theme="claro"] .hover\:bg-slate-800\/30:hover { background-color: #f1f5f9 !important; }
-html[data-theme="claro"] .bg-\[#0b0f19\] { background-color: #f8fafc !important; }
+html[data-theme="claro"] .bg-\[#0b0f19\] { background-color: #eef1f6 !important; }
 html[data-theme="claro"] .bg-\[#1e293b\] { background-color: #e2e8f0 !important; }
 html[data-theme="claro"] .divide-slate-700\/40 > :not([hidden]) ~ :not([hidden]) { border-color: #cbd5e1 !important; }
 html[data-theme="claro"] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) { border-color: #e2e8f0 !important; }
 
 /* Fondo general por si algún contenedor no trae bg-slate-900 explícito */
-html[data-theme="claro"] body { background-color: #f8fafc !important; }
+html[data-theme="claro"] body { background-color: #eef1f6 !important; }
 
 /* El overlay oscuro de los modales (bg-slate-950/80, /90) se deja igual a propósito:
    un fondo oscuro semitransparente detrás de una tarjeta blanca se ve bien en ambos temas. */
@@ -101,10 +101,10 @@ html[data-theme="claro"] body { background-color: #f8fafc !important; }
    oscurece solo, con las mismas reglas genéricas de arriba — no hace falta nada
    especial para él. */
 html[data-theme="claro"] .banner-comunicado-oficial {
-    background-image: linear-gradient(to right, #ecfeff, #ffffff, #eff6ff) !important;
+    background-image: linear-gradient(to right, #ecfeff, #f8fafc, #eff6ff) !important;
     border-color: #a5f3fc !important;
 }
 html[data-theme="claro"] .banner-mesa-ayuda {
-    background-image: linear-gradient(to bottom right, #fff7ed, #ffffff, #ffffff) !important;
+    background-image: linear-gradient(to bottom right, #fff7ed, #f8fafc, #f8fafc) !important;
     border-color: #fed7aa !important;
 }
