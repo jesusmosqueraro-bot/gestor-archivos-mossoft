@@ -341,6 +341,11 @@ if not RECAPTCHA_SECRET_KEY:
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+# 🔒 Endpoints a los que SÍ puede entrar un usuario marcado con "debe cambiar su contraseña",
+# aunque todavía no la haya cambiado: la propia página/acción de cambio, cerrar sesión, y los
+# archivos estáticos (CSS/JS/imágenes) que esa página necesita para verse bien.
+ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', 'logout', 'static'}
+
 @app.before_request
 def validar_instancia_y_sesion():
     session.permanent = True
@@ -348,6 +353,8 @@ def validar_instancia_y_sesion():
         if session.get('instance_id') != SERVER_INSTANCE_ID:
             session.clear()
             return redirect(url_for('login', expirado='1'))
+        if session.get('debe_cambiar_password') and request.endpoint not in ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO:
+            return redirect(url_for('cambiar_password_perfil'))
 
 def get_db():
     if DATABASE_URL and psycopg2:
@@ -499,6 +506,11 @@ def init_db():
                 # elegida de especialidades_catalogo. Obligatoria para cuentas nuevas; las que ya
                 # existían quedan en NULL hasta que se editen.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS especialidad VARCHAR(150);",
+                # 🔒 Forzar cambio de contraseña: se marca en TRUE cuando un admin crea la cuenta
+                # o le reasigna la contraseña a otra persona (contraseña temporal conocida por el
+                # admin), para obligar a que la cambien en su próximo inicio de sesión antes de
+                # poder usar el resto de Arkiv. Se limpia a FALSE apenas la cambian.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN DEFAULT FALSE;",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -676,6 +688,12 @@ def init_db():
             try:
                 # 🩺 Especialidad/área del usuario. Ver comentario equivalente en la rama de Postgres.
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN especialidad TEXT;")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                # 🔒 Forzar cambio de contraseña. Ver comentario equivalente en la rama de Postgres.
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN debe_cambiar_password INTEGER DEFAULT 0;")
                 conn.commit()
             except Exception:
                 pass
@@ -4362,7 +4380,10 @@ def validar_codigo():
         # 🛡️ Se filtra por correo Y por el usuario que resolvió el paso 1: si en el futuro
         # dos cuentas volvieran a compartir el mismo correo, esto evita que una sola
         # recuperación cambie la clave de todas a la vez.
-        q_upd = "UPDATE usuarios SET password_hash = %s WHERE LOWER(TRIM(correo)) = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ? WHERE LOWER(TRIM(correo)) = ? AND usuario = ?"
+        # 🔒 Esta contraseña ya la eligió el propio usuario, así que se limpia
+        # debe_cambiar_password (si venía marcada de una contraseña temporal asignada por un
+        # admin, ya no aplica).
+        q_upd = "UPDATE usuarios SET password_hash = %s, debe_cambiar_password = FALSE WHERE LOWER(TRIM(correo)) = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0 WHERE LOWER(TRIM(correo)) = ? AND usuario = ?"
         cursor.execute(q_upd, (nuevo_hash, email_usuario, nombre_usuario))
         conn.commit()
         conn.close()
@@ -4396,7 +4417,7 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol, estado, tema FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -4427,6 +4448,7 @@ def login():
                     session['rol'] = user[2]
                     session['instance_id'] = SERVER_INSTANCE_ID
                     session['tema'] = user[4] or 'oscuro'
+                    session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
                     return redirect(url_for('bienvenida'))
             except Exception as db_err:
@@ -5460,7 +5482,9 @@ def gestion_usuarios():
                 nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
                 nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
                 nuevo_hash = generate_password_hash(nuevo_pass)
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?)"
+                # 🔒 debe_cambiar_password = TRUE: esta contraseña la eligió el admin (no el
+                # propio usuario), así que se obliga a cambiarla en el primer inicio de sesión.
+                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, TRUE)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, 1)"
                 cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad))
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
@@ -5596,7 +5620,9 @@ def editar_usuario(usuario_id):
 
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ? WHERE id = ?"
+            # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
+            # aquí, se obliga a cambiarla en su próximo inicio de sesión.
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, debe_cambiar_password = 1 WHERE id = ?"
             cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
@@ -5990,6 +6016,65 @@ def cambiar_tema():
     # por si el navegador no manda 'Referer').
     destino = request.referrer or url_for('bienvenida')
     return redirect(destino)
+
+
+@app.route('/perfil/cambiar_password', methods=['GET', 'POST'])
+@login_required
+def cambiar_password_perfil():
+    """Página de autoservicio para que un usuario cambie su propia contraseña. Cumple dos
+    propósitos: (1) es la puerta obligatoria a la que 'validar_instancia_y_sesion' redirige a
+    cualquier cuenta marcada con debe_cambiar_password=True (contraseña temporal asignada por
+    un admin), y (2) queda disponible para que cualquier usuario la use quiera cuando quiera,
+    tal como ya se lo promete el correo de bienvenida ("la puedes cambiar desde tu perfil")."""
+    obligatorio = bool(session.get('debe_cambiar_password'))
+    error = None
+
+    if request.method == 'POST':
+        password_actual = request.form.get('password_actual') or ''
+        password_nueva = request.form.get('password_nueva') or ''
+        password_confirmar = request.form.get('password_confirmar') or ''
+
+        if not password_actual or not password_nueva or not password_confirmar:
+            error = "Todos los campos son obligatorios."
+        elif len(password_nueva) < 8:
+            error = "La nueva contraseña debe tener al menos 8 caracteres."
+        elif password_nueva != password_confirmar:
+            error = "La nueva contraseña y su confirmación no coinciden."
+
+        if not error:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            try:
+                q_sel = "SELECT password_hash FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT password_hash FROM usuarios WHERE usuario = ?"
+                cursor.execute(q_sel, (session.get('username'),))
+                row = cursor.fetchone()
+                clave_db = str(row[0] or '') if row else ''
+
+                es_valida = False
+                if clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:'):
+                    es_valida = check_password_hash(clave_db, password_actual)
+                else:
+                    es_valida = hmac.compare_digest(clave_db, password_actual)
+
+                if not es_valida:
+                    error = "La contraseña actual no es correcta."
+                elif password_actual == password_nueva:
+                    error = "La nueva contraseña debe ser diferente a la actual."
+                else:
+                    nuevo_hash = generate_password_hash(password_nueva)
+                    q_upd = "UPDATE usuarios SET password_hash = %s, debe_cambiar_password = FALSE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0 WHERE usuario = ?"
+                    cursor.execute(q_upd, (nuevo_hash, session.get('username')))
+                    conn.commit()
+                    session['debe_cambiar_password'] = False
+                    registrar_log(session.get('username'), "Cambio de Contraseña", "El usuario cambió su propia contraseña.")
+                    conn.close()
+                    return redirect(url_for('bienvenida'))
+            except Exception as e:
+                conn.rollback()
+                error = "No se pudo actualizar la contraseña. Intenta de nuevo."
+            conn.close()
+
+    return render_template('cambiar_password.html', obligatorio=obligatorio, error=error)
 
 
 @app.route('/logout')
