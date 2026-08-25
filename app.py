@@ -6207,6 +6207,174 @@ def notificaciones_marcar_todas_leidas():
     return ('', 204)
 
 
+# 🔍 BUSCADOR GLOBAL — consultado por el modal de búsqueda disponible en la barra de
+# navegación de toda la aplicación (ver partials/buscador.html y static/js/buscador.js).
+# Cada categoría respeta EXACTAMENTE la misma regla de visibilidad que ya aplica su propia
+# página (Solicitudes: solo las propias si no es soporte; Bóveda/Colaboradores/Usuarios: solo
+# admin/agente o admin según corresponda; Gestor de Archivos: respeta 'visibilidad'), para que
+# el buscador nunca muestre algo que esa cuenta no podría ver entrando al módulo directamente.
+LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR = 6
+
+@app.route('/buscar/api')
+@login_required
+def buscar_global_api():
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return jsonify({'q': q, 'resultados': []})
+    q_norm = q.lower()
+
+    usuario = session.get('username')
+    rol = session.get('rol')
+    es_soporte = rol in ROLES_CON_ACCESO_OPERATIVO
+    es_admin = rol == 'admin'
+
+    resultados = []
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    # --- Solicitudes TI (tickets) ---
+    try:
+        query = "SELECT id, titulo, descripcion, tipo, estado, fecha_creacion FROM tickets WHERE COALESCE(eliminado, 0) = 0"
+        params = []
+        if not es_soporte:
+            query += " AND creado_por = %s" if db_type == 'postgres' else " AND creado_por = ?"
+            params.append(usuario)
+        query += " ORDER BY id DESC"
+        cursor.execute(query, tuple(params))
+        contador = 0
+        for tid, titulo, descripcion, tipo, estado, fecha_creacion in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            if q_norm in f"{titulo} {descripcion or ''}".lower():
+                contador += 1
+                resultados.append({
+                    'categoria': 'Solicitudes TI',
+                    'titulo': titulo,
+                    'subtitulo': f"{_codigo_ticket(tipo or 'Incidente', tid, fecha_creacion)} · {estado}",
+                    'url': url_for('ver_ticket', ticket_id=tid)
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en tickets (buscador global): {e}")
+
+    # --- Comunicados (visibles para cualquier cuenta logueada) ---
+    try:
+        cursor.execute("SELECT id, titulo, contenido, nivel FROM comunicados WHERE estado = 'activo' ORDER BY id DESC")
+        contador = 0
+        for c_id, titulo, contenido, nivel in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            if q_norm in f"{titulo} {contenido or ''}".lower():
+                contador += 1
+                resultados.append({
+                    'categoria': 'Comunicados',
+                    'titulo': titulo,
+                    'subtitulo': (nivel or '').capitalize(),
+                    'url': url_for('ver_comunicados')
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en comunicados (buscador global): {e}")
+
+    # --- Base de Conocimiento (visible para cualquier cuenta logueada) ---
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, url_documento FROM conocimiento_articulos WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC")
+        contador = 0
+        for a_id, titulo, descripcion, url_documento in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            if q_norm in f"{titulo} {descripcion or ''}".lower():
+                contador += 1
+                resultados.append({
+                    'categoria': 'Base de Conocimiento',
+                    'titulo': titulo,
+                    'subtitulo': descripcion or '',
+                    'url': url_documento or url_for('ver_conocimiento'),
+                    'externo': bool(url_documento)
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en base de conocimiento (buscador global): {e}")
+
+    # --- Gestor de Archivos (respeta 'visibilidad': un usuario Estándar no ve lo marcado 'admin') ---
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, categoria, tags, visibilidad FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        contador = 0
+        for g_id, titulo, descripcion, categoria, tags, visibilidad in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            if (visibilidad or 'todos') == 'admin' and not es_soporte:
+                continue
+            if q_norm in f"{titulo} {descripcion or ''} {tags or ''}".lower():
+                contador += 1
+                resultados.append({
+                    'categoria': 'Gestor de Archivos',
+                    'titulo': titulo,
+                    'subtitulo': categoria or 'General',
+                    'url': url_for('index', q=titulo)
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en galerías (buscador global): {e}")
+
+    # --- Bóveda de Accesos (solo admin/agente — NUNCA se busca ni se expone la contraseña) ---
+    if es_soporte:
+        try:
+            cursor.execute("SELECT id, titulo, usuario_acceso, area, notas FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado'")
+            contador = 0
+            for c_id, titulo, usuario_acceso, area, notas in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if q_norm in f"{titulo} {usuario_acceso or ''} {area or ''} {notas or ''}".lower():
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Bóveda de Accesos',
+                        'titulo': titulo,
+                        'subtitulo': area or 'General',
+                        'url': url_for('ver_credenciales', q=titulo)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en credenciales (buscador global): {e}")
+
+        # --- Accesos de Colaboradores (registro de aplicativos entregados, solo admin/agente) ---
+        try:
+            cursor.execute("SELECT id, colaborador, aplicativo, solicitado_por FROM credenciales_colaboradores ORDER BY id DESC")
+            contador = 0
+            for r_id, colaborador, aplicativo, solicitado_por in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if q_norm in f"{colaborador} {aplicativo} {solicitado_por or ''}".lower():
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Accesos de Colaboradores',
+                        'titulo': colaborador,
+                        'subtitulo': aplicativo,
+                        'url': url_for('ver_credenciales_colaboradores', q=colaborador)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en credenciales de colaboradores (buscador global): {e}")
+
+    # --- Usuarios (solo rol admin — y la cuenta 'admin' literal se oculta al resto de admins) ---
+    if es_admin:
+        try:
+            cursor.execute("SELECT usuario, nombre, correo, cedula FROM usuarios")
+            contador = 0
+            for u_usuario, u_nombre, u_correo, u_cedula in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if u_usuario == 'admin' and usuario != 'admin':
+                    continue
+                if q_norm in f"{u_usuario} {u_nombre or ''} {u_correo or ''} {u_cedula or ''}".lower():
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Usuarios',
+                        'titulo': u_nombre or u_usuario,
+                        'subtitulo': u_correo or u_usuario,
+                        'url': url_for('gestion_usuarios')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en usuarios (buscador global): {e}")
+
+    conn.close()
+    return jsonify({'q': q, 'resultados': resultados})
+
+
 @app.route('/')
 def home():
     return redirect(url_for('bienvenida')) if session.get('logged_in') else redirect(url_for('login'))
