@@ -100,7 +100,7 @@
 
     <!-- MODAL CREAR/EDITAR PLANTILLA (un solo modal reutilizado para ambos casos) -->
     <div id="modal-plantilla" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-3xl w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 id="titulo-modal-plantilla" class="text-base font-bold text-white">Nueva Plantilla</h3>
                 <button onclick="cerrarModalPlantilla()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
@@ -115,7 +115,7 @@
                     <p class="text-slate-500 text-[10px] mt-1">Es solo el nombre que verán en el selector al crear una solicitud — no aparece en el ticket.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
                         <select name="tipo" id="plantilla-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -128,9 +128,6 @@
                             {% for p in prioridades %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
                         </select>
                     </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
                         <select name="categoria" id="plantilla-categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -194,6 +191,7 @@
             cargarContenidoEnEditor(quillDescripcionPlantilla, 'input-descripcion-plantilla', '');
             document.getElementById('modal-plantilla').classList.remove('hidden');
             document.getElementById('modal-plantilla').classList.add('flex');
+            document.getElementById('modal-plantilla').scrollTop = 0;
         }
 
         function abrirModalEditarPlantilla(id) {
@@ -213,6 +211,7 @@
             cargarContenidoEnEditor(quillDescripcionPlantilla, 'input-descripcion-plantilla', p.descripcion || '');
             document.getElementById('modal-plantilla').classList.remove('hidden');
             document.getElementById('modal-plantilla').classList.add('flex');
+            document.getElementById('modal-plantilla').scrollTop = 0;
         }
 
         function cerrarModalPlantilla() {

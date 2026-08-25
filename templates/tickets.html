@@ -245,7 +245,7 @@
 
     <!-- MODAL CREAR SOLICITUD -->
     <div id="modal-ticket" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-3xl w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 class="text-base font-bold text-white">Nueva Solicitud de Soporte</h3>
                 <button onclick="cerrarModal()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
@@ -286,7 +286,7 @@
                     <input type="text" name="titulo" required placeholder="Ej: No puedo ingresar a mi correo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 {% if areas or sedes %}lg:grid-cols-4{% endif %} gap-3">
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
                         <select name="categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -299,10 +299,7 @@
                             {% for p in prioridades %}<option value="{{ p }}" {% if p == 'Media' %}selected{% endif %}>{{ p }}</option>{% endfor %}
                         </select>
                     </div>
-                </div>
-
-                {% if areas or sedes %}
-                <div class="grid grid-cols-2 gap-3">
+                    {% if areas or sedes %}
                     <div>
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
                         <select name="area" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -317,24 +314,26 @@
                             {% for s in sedes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
                         </select>
                     </div>
+                    {% endif %}
                 </div>
-                {% endif %}
 
-                {% if activos_inventario %}
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-boxes-stacked mr-1"></i>Activo relacionado (opcional)</label>
-                    <select name="activo_id" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                        <option value="">Sin especificar</option>
-                        {% for act in activos_inventario %}<option value="{{ act.id }}">{{ act.nombre }} ({{ act.tipo_activo }})</option>{% endfor %}
-                    </select>
-                    <p class="text-slate-500 text-[10px] mt-1">Si tu solicitud es sobre un equipo específico del inventario (un computador, una impresora...), selecciónalo aquí.</p>
-                </div>
-                {% endif %}
+                <div class="grid grid-cols-1 {% if activos_inventario %}lg:grid-cols-2{% endif %} gap-3">
+                    {% if activos_inventario %}
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-boxes-stacked mr-1"></i>Activo relacionado (opcional)</label>
+                        <select name="activo_id" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for act in activos_inventario %}<option value="{{ act.id }}">{{ act.nombre }} ({{ act.tipo_activo }})</option>{% endfor %}
+                        </select>
+                        <p class="text-slate-500 text-[10px] mt-1">Si tu solicitud es sobre un equipo específico del inventario (un computador, una impresora...), selecciónalo aquí.</p>
+                    </div>
+                    {% endif %}
 
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-phone mr-1"></i>Número de contacto</label>
-                    <input type="text" name="telefono_contacto" value="{{ telefono_usuario_actual or '' }}" placeholder="Ej: 3001234567" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <p class="text-slate-500 text-[10px] mt-1">Se usa este número para que el equipo de soporte se comunique contigo sobre esta solicitud. Puedes cambiarlo si para este caso hay que contactar a otra persona.</p>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-phone mr-1"></i>Número de contacto</label>
+                        <input type="text" name="telefono_contacto" value="{{ telefono_usuario_actual or '' }}" placeholder="Ej: 3001234567" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <p class="text-slate-500 text-[10px] mt-1">Se usa este número para que el equipo de soporte se comunique contigo sobre esta solicitud. Puedes cambiarlo si para este caso hay que contactar a otra persona.</p>
+                    </div>
                 </div>
 
                 <div>
@@ -373,8 +372,12 @@
         );
 
         function abrirModalCrear() {
-            document.getElementById('modal-ticket').classList.remove('hidden');
-            document.getElementById('modal-ticket').classList.add('flex');
+            const modal = document.getElementById('modal-ticket');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            // Siempre arranca desde arriba, para que "Usar una plantilla" quede visible de
+            // inmediato y no dependa del tamaño de la ventana ni de un scroll heredado.
+            modal.scrollTop = 0;
         }
         function cerrarModal() {
             document.getElementById('modal-ticket').classList.add('hidden');
