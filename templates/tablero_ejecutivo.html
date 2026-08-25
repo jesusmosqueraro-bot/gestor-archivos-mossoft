@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Tablero Ejecutivo</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+</head>
+<body class="pagina-acento-violet bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-chart-pie text-violet-400"></i> Tablero Ejecutivo
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/buscador.html' %}
+                {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div class="bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded-2xl p-4 text-xs flex items-start gap-2.5">
+            <i class="fa-solid fa-circle-info mt-0.5"></i>
+            <span>
+                Panorama general de Arkiv en una sola pantalla. Para el detalle completo de Solicitudes de Soporte
+                (gráficos, exportación a PDF/Excel) visita <a href="{{ url_for('indicadores_tickets') }}" class="underline font-bold hover:text-violet-200">Indicadores de Soporte TI</a>.
+            </span>
+        </div>
+
+        <!-- TARJETAS KPI -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-orange-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-headset mr-1 text-orange-400"></i>Solicitudes abiertas</p>
+                <p class="text-2xl font-extrabold text-white">{{ tickets_abiertos }}</p>
+                <p class="text-[10px] text-slate-500 mt-0.5">de {{ total_tickets }} en total</p>
+            </a>
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-rose-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-triangle-exclamation mr-1 text-rose-400"></i>SLA vencidos</p>
+                <p class="text-2xl font-extrabold text-rose-400">{{ tickets_vencidos }}</p>
+                {% if pct_sla_cumplido is not none %}
+                    <p class="text-[10px] text-slate-500 mt-0.5">{{ pct_sla_cumplido }}% cumplido en general</p>
+                {% else %}
+                    <p class="text-[10px] text-slate-500 mt-0.5">Sin solicitudes registradas</p>
+                {% endif %}
+            </a>
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-star mr-1 text-emerald-400"></i>Satisfacción promedio</p>
+                {% if promedio_calificacion %}
+                    <p class="text-2xl font-extrabold text-emerald-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5</span></p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin datos aún</p>
+                {% endif %}
+            </a>
+            <a href="{{ url_for('gestion_usuarios') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-purple-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-users mr-1 text-purple-400"></i>Usuarios activos</p>
+                <p class="text-2xl font-extrabold text-white">{{ total_usuarios_activos }}</p>
+                <p class="text-[10px] text-slate-500 mt-0.5">
+                    {{ usuarios_por_rol.get('admin', 0) }} admin · {{ usuarios_por_rol.get('agente', 0) }} agente · {{ usuarios_por_rol.get('estandar', 0) }} estándar
+                </p>
+            </a>
+        </div>
+
+        <!-- TENDENCIA DE SOLICITUDES -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3">Solicitudes de Soporte creadas — últimos 14 días</h3>
+            <div class="h-56"><canvas id="chart-tendencia"></canvas></div>
+        </div>
+
+        <!-- USO POR MÓDULO -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl overflow-x-auto">
+            <h3 class="text-sm font-bold text-white mb-4">Uso por módulo</h3>
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                    <tr>
+                        <th class="pb-3 px-4 font-bold">Módulo</th>
+                        <th class="pb-3 px-4 font-bold">Indicador clave</th>
+                        <th class="pb-3 px-4 font-bold"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-folder-open text-cyan-400 mr-2"></i>Instructivos y Archivos</td>
+                        <td class="py-3.5 px-4">{{ total_instructivos }} activos · {{ total_vistas }} vistas · {{ total_descargas }} descargas</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('index') }}" class="text-cyan-400 hover:text-cyan-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-bullhorn text-blue-400 mr-2"></i>Comunicados</td>
+                        <td class="py-3.5 px-4">{{ total_comunicados }} activos</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_comunicados') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-key text-emerald-400 mr-2"></i>Bóveda de Accesos</td>
+                        <td class="py-3.5 px-4">{{ total_credenciales }} credenciales · {{ total_accesos_colaboradores }} accesos de colaboradores</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_credenciales') }}" class="text-emerald-400 hover:text-emerald-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-boxes-stacked text-teal-400 mr-2"></i>Inventario de Activos</td>
+                        <td class="py-3.5 px-4">
+                            {{ total_activos_inventario }} activos
+                            {% if inventario_por_estado %} ({% for estado, cant in inventario_por_estado.items() %}{{ estado }}: {{ cant }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}
+                        </td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_inventario') }}" class="text-teal-400 hover:text-teal-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-users-gear text-purple-400 mr-2"></i>Usuarios</td>
+                        <td class="py-3.5 px-4">{{ total_usuarios_activos }} activos</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('gestion_usuarios') }}" class="text-purple-400 hover:text-purple-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+    <script>
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        new Chart(document.getElementById('chart-tendencia'), {
+            type: 'line',
+            data: {
+                labels: {{ dias_tendencia | map(attribute='fecha') | list | tojson }},
+                datasets: [{
+                    label: 'Solicitudes',
+                    data: {{ dias_tendencia | map(attribute='cantidad') | list | tojson }},
+                    borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.15)',
+                    fill: true, tension: 0.3, pointRadius: 3
+                }]
+            },
+            options: {
+                plugins: { legend: { display: false } },
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            }
+        });
+    </script>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+</body>
+</html>
