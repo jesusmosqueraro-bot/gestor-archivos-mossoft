@@ -170,8 +170,8 @@
     </main>
 
     <!-- Modal Crear Usuario -->
-    <div id="modalNuevoUsuario" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative">
+    <div id="modalNuevoUsuario" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-6xl w-full shadow-2xl relative my-4">
             <div class="flex items-center justify-between mb-6">
                 <h3 class="text-lg font-bold text-white flex items-center gap-2">
                     <i class="fa-solid fa-user-plus text-cyan-400"></i> Registrar Usuario
@@ -190,78 +190,84 @@
             <form method="POST" action="{{ url_for('gestion_usuarios') }}" class="space-y-4" autocomplete="off">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Primer Nombre *</label>
-                        <input type="text" name="primer_nombre" required autocomplete="off" value="{{ form_data.primer_nombre if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Segundo Nombre</label>
-                        <input type="text" name="segundo_nombre" autocomplete="off" value="{{ form_data.segundo_nombre if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                    </div>
-                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
+                    <div class="flex flex-col gap-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Primer Nombre *</label>
+                                <input type="text" name="primer_nombre" required autocomplete="off" value="{{ form_data.primer_nombre if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Segundo Nombre</label>
+                                <input type="text" name="segundo_nombre" autocomplete="off" value="{{ form_data.segundo_nombre if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                        </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Primer Apellido *</label>
-                        <input type="text" name="primer_apellido" required autocomplete="off" value="{{ form_data.primer_apellido if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Segundo Apellido</label>
-                        <input type="text" name="segundo_apellido" autocomplete="off" value="{{ form_data.segundo_apellido if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                    </div>
-                </div>
-                <p class="text-[10px] text-slate-500 -mt-2">El nombre de usuario para iniciar sesión se genera automáticamente (primer nombre + primer apellido). Si ya existe, se ajusta automáticamente.</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Primer Apellido *</label>
+                                <input type="text" name="primer_apellido" required autocomplete="off" value="{{ form_data.primer_apellido if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Segundo Apellido</label>
+                                <input type="text" name="segundo_apellido" autocomplete="off" value="{{ form_data.segundo_apellido if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-500 -mt-2">El nombre de usuario para iniciar sesión se genera automáticamente (primer nombre + primer apellido). Si ya existe, se ajusta automáticamente.</p>
 
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Correo Electrónico *</label>
-                    <input type="email" name="email" required autocomplete="off" value="{{ form_data.email if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Cédula</label>
-                        <input type="text" name="cedula" placeholder="N° de documento" autocomplete="off" value="{{ form_data.cedula if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Correo Electrónico *</label>
+                            <input type="email" name="email" required autocomplete="off" value="{{ form_data.email if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Teléfono de Contacto</label>
-                        <input type="text" name="telefono" placeholder="Ej: 3001234567" autocomplete="off" value="{{ form_data.telefono if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+
+                    <div class="flex flex-col gap-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Cédula</label>
+                                <input type="text" name="cedula" placeholder="N° de documento" autocomplete="off" value="{{ form_data.cedula if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Teléfono de Contacto</label>
+                                <input type="text" name="telefono" placeholder="Ej: 3001234567" autocomplete="off" value="{{ form_data.telefono if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-xs font-semibold text-slate-300 uppercase">Especialidad *</label>
+                                <button type="button" onclick="abrirModalEspecialidades()" class="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold">+ Administrar</button>
+                            </div>
+                            <select name="especialidad" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                                <option value="" disabled {% if not form_data or not form_data.especialidad %}selected{% endif %}>Selecciona...</option>
+                                {% for e in especialidades %}
+                                <option value="{{ e.nombre }}" {% if form_data and form_data.especialidad == e.nombre %}selected{% endif %}>{{ e.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not especialidades %}
+                            <p class="text-[10px] text-amber-400 mt-1">No hay especialidades registradas todavía. Usa "+ Administrar" para agregar la primera antes de crear el usuario.</p>
+                            {% endif %}
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Contraseña *</label>
+                            <input type="password" name="password" required autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Rol de Acceso</label>
+                            <select name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                                <option value="estandar" {% if form_data and form_data.rol == 'estandar' %}selected{% endif %}>Estándar (Solo lectura y descargas)</option>
+                                <option value="agente" {% if form_data and form_data.rol == 'agente' %}selected{% endif %}>Agente (Soporte TI / PQRS)</option>
+                                {% if session.get('username') == 'admin' %}
+                                <option value="admin" {% if form_data and form_data.rol == 'admin' %}selected{% endif %}>Administrador (Control total)</option>
+                                {% endif %}
+                            </select>
+                            {% if session.get('username') != 'admin' %}
+                            <p class="text-[10px] text-slate-500 mt-1">Solo el super-admin puede crear cuentas con rol Administrador.</p>
+                            {% endif %}
+                        </div>
                     </div>
-                </div>
-
-                <div>
-                    <div class="flex items-center justify-between mb-1">
-                        <label class="block text-xs font-semibold text-slate-300 uppercase">Especialidad *</label>
-                        <button type="button" onclick="abrirModalEspecialidades()" class="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold">+ Administrar</button>
-                    </div>
-                    <select name="especialidad" required class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                        <option value="" disabled {% if not form_data or not form_data.especialidad %}selected{% endif %}>Selecciona...</option>
-                        {% for e in especialidades %}
-                        <option value="{{ e.nombre }}" {% if form_data and form_data.especialidad == e.nombre %}selected{% endif %}>{{ e.nombre }}</option>
-                        {% endfor %}
-                    </select>
-                    {% if not especialidades %}
-                    <p class="text-[10px] text-amber-400 mt-1">No hay especialidades registradas todavía. Usa "+ Administrar" para agregar la primera antes de crear el usuario.</p>
-                    {% endif %}
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Contraseña *</label>
-                    <input type="password" name="password" required autocomplete="new-password" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Rol de Acceso</label>
-                    <select name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                        <option value="estandar" {% if form_data and form_data.rol == 'estandar' %}selected{% endif %}>Estándar (Solo lectura y descargas)</option>
-                        <option value="agente" {% if form_data and form_data.rol == 'agente' %}selected{% endif %}>Agente (Soporte TI / PQRS)</option>
-                        {% if session.get('username') == 'admin' %}
-                        <option value="admin" {% if form_data and form_data.rol == 'admin' %}selected{% endif %}>Administrador (Control total)</option>
-                        {% endif %}
-                    </select>
-                    {% if session.get('username') != 'admin' %}
-                    <p class="text-[10px] text-slate-500 mt-1">Solo el super-admin puede crear cuentas con rol Administrador.</p>
-                    {% endif %}
                 </div>
 
                 <div class="pt-2 flex gap-3">
@@ -383,7 +389,11 @@
     </div>
 
     <script>
-        function abrirModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.remove('hidden'); }
+        function abrirModalNuevoUsuario() {
+            var modal = document.getElementById('modalNuevoUsuario');
+            modal.classList.remove('hidden');
+            modal.scrollTop = 0;
+        }
         function cerrarModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.add('hidden'); }
 
         function abrirModalEspecialidades() { document.getElementById('modalEspecialidades').classList.remove('hidden'); }
