@@ -330,7 +330,7 @@ ALLOWED_EXTENSIONS = {
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 # 📧 URL DE TU GOOGLE APPS SCRIPT OFICIAL (PUERTO 443 HTTPS - SIN BLOQUEOS DE RENDER)
-GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbwSBbdv-2xl5ND3LjXbDZaXBpzD-mQNNLlFn2H0ih8T7RZouOhF6uEZlxHONsJHxxjq/exec")
+GMAIL_SCRIPT_URL = os.environ.get('GMAIL_SCRIPT_URL', "https://script.google.com/macros/s/AKfycbw81Lhduv86Y5vNWZ6hQ3XoHcRwmdIacKsRxBMfEJQ0uKlVPQx8zEiy-uEQoVWhjNuc/exec")
 
 # 🔑 CLAVE SECRETA DE RECAPTCHA V2
 # Nunca debe tener un valor real escrito en el código. Debe venir SIEMPRE de la variable
@@ -789,7 +789,7 @@ def init_db():
                 pass_inicial = base64.urlsafe_b64encode(os.urandom(9)).decode('utf-8')
                 print(f"🔑 Usuario admin creado. Contraseña inicial generada (cámbiala tras iniciar sesión): {pass_inicial}")
             query_admin = "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)"
-            cursor.execute(query_admin, ('admin', generate_password_hash(pass_inicial), 'jesus.mosqueraro@gmail.com', 'admin'))
+            cursor.execute(query_admin, ('admin', generate_password_hash(pass_inicial), 'notificacionesarkiv@gmail.com', 'admin'))
 
         conn.commit()
         conn.close()
