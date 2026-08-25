@@ -1770,6 +1770,29 @@ def _revisar_alertas_sla():
                 for miembro in equipo:
                     if miembro['correo']:
                         threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto, cuerpo)).start()
+
+            # 🚨 Escalamiento a supervisor: si el ticket ya está VENCIDO (no solo "próximo a
+            # vencer") y tiene un agente puntual asignado, el aviso de arriba solo llegó a ese
+            # agente — quien ya lo tenía y, evidentemente, no alcanzó a resolverlo a tiempo. Se
+            # escala avisando también a todos los admins activos (los "supervisores" de Arkiv,
+            # no hay un rol distinto todavía) para que puedan intervenir, reasignar o priorizar.
+            # Si el ticket no tiene agente asignado, los admins ya estaban en 'equipo' arriba —
+            # no hace falta escalar dos veces.
+            if bucket == 'vencido' and asignado_a:
+                admins = [a for a in _admins_activos() if a['usuario'] != asignado_a]
+                if admins:
+                    mensaje_escalado = f"🚨 Escalamiento SLA: la solicitud {codigo} sigue vencida (asignada a {asignado_a}): '{titulo}'"
+                    asunto_escalado = f"[Arkiv] Escalamiento SLA — solicitud {codigo} vencida"
+                    cuerpo_escalado = (
+                        f"La solicitud de soporte {codigo} ('{titulo}') superó su tiempo límite de resolución "
+                        f"y sigue asignada a '{asignado_a}' sin resolverse.\n\n"
+                        f"Se escala a tu cuenta como administrador para que la revises, reasignes o priorices "
+                        f"según corresponda.\n\nIngresa a Arkiv, módulo Solicitudes TI, para revisarla.\n\n---\nArkiv"
+                    )
+                    crear_notificacion_para_varios([a['usuario'] for a in admins], mensaje_escalado, url=url_ticket)
+                    for admin in admins:
+                        if admin['correo']:
+                            threading.Thread(target=enviar_correo_ticket, args=(admin['correo'], asunto_escalado, cuerpo_escalado)).start()
         conn.close()
     except Exception as e:
         print(f"⚠️ Error revisando alertas de SLA: {e}")
@@ -1848,6 +1871,22 @@ def _equipo_soporte_activo():
         return filas
     except Exception as e:
         print(f"⚠️ Error listando equipo de soporte: {e}")
+        return []
+
+
+def _admins_activos():
+    """Devuelve las cuentas activas con rol 'admin' — los 'supervisores' a quienes se
+    escala un ticket cuyo SLA ya venció y sigue sin resolverse (ver _revisar_alertas_sla).
+    Devuelve [] si algo falla."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT usuario, correo FROM usuarios WHERE estado = 'activo' AND rol = 'admin'")
+        filas = [{'usuario': r[0], 'correo': r[1]} for r in cursor.fetchall()]
+        conn.close()
+        return filas
+    except Exception as e:
+        print(f"⚠️ Error listando administradores activos: {e}")
         return []
 
 
@@ -2943,6 +2982,17 @@ def inicio_tickets():
             resumen['sin_asignar'] = cursor.fetchone()[0]
             cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE asignado_a = {ph} AND estado IN ('Resuelto', 'Cerrado') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['resueltos_por_mi'] = cursor.fetchone()[0]
+            if session.get('rol') == 'admin':
+                # 🚨 Cuántos tickets ASIGNADOS (a cualquier agente, no solo a mí) ya están
+                # escalados por SLA vencido — ver _revisar_alertas_sla(). Solo tiene sentido
+                # para el super-admin/admins: son los "supervisores" a quienes se escala.
+                ahora_str = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None).strftime(FORMATO_FECHA_TICKET)
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM tickets WHERE estado IN ('Abierto', 'En Proceso') AND COALESCE(eliminado, 0) = 0 "
+                    f"AND asignado_a IS NOT NULL AND asignado_a != '' AND sla_resolucion_limite IS NOT NULL AND sla_resolucion_limite < {ph}",
+                    (ahora_str,)
+                )
+                resumen['escalados'] = cursor.fetchone()[0]
         else:
             cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE creado_por = {ph} AND estado IN ('Abierto', 'En Proceso') AND COALESCE(eliminado, 0) = 0", (usuario,))
             resumen['mis_abiertos'] = cursor.fetchone()[0]
