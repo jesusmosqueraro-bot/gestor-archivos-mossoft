@@ -1,0 +1,7 @@
+<!-- 🕵️ HISTORIAL DE SESIONES — botón compartido por todas las páginas autenticadas, junto al
+     buscador y la campanita. Lleva a /perfil/historial-sesiones, donde cualquier cuenta ve sus
+     propios inicios/cierres de sesión (fecha, IP, dispositivo) y un admin puede además elegir
+     otra cuenta. No es un modal: es un enlace directo a esa página. -->
+<a href="{{ url_for('historial_sesiones') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs" title="Historial de sesiones">
+    <i class="fa-solid fa-clock-rotate-left"></i>
+</a>
