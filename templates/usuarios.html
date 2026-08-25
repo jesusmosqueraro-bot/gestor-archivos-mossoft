@@ -44,7 +44,7 @@
         </div>
     </header>
 
-    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {% if usuario_creado %}
         <div class="mb-5 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-2">
             <i class="fa-solid fa-circle-check"></i>
@@ -69,39 +69,39 @@
                 <table class="w-full text-left text-xs">
                     <thead class="bg-slate-950/80 border-b border-slate-800 uppercase tracking-wider text-slate-400 font-semibold">
                         <tr>
-                            <th class="px-6 py-4">Usuario</th>
-                            <th class="px-6 py-4">Nombre</th>
-                            <th class="px-6 py-4">Cédula</th>
-                            <th class="px-6 py-4">Especialidad</th>
-                            <th class="px-6 py-4">Correo Electrónico</th>
-                            <th class="px-6 py-4">Teléfono</th>
-                            <th class="px-6 py-4">Rol</th>
-                            <th class="px-6 py-4">Estado</th>
-                            <th class="px-6 py-4 text-right">Acciones</th>
+                            <th class="px-4 py-3">Usuario</th>
+                            <th class="px-4 py-3">Cédula</th>
+                            <th class="px-4 py-3">Especialidad</th>
+                            <th class="px-4 py-3">Correo Electrónico</th>
+                            <th class="px-4 py-3">Teléfono</th>
+                            <th class="px-4 py-3">Rol / Estado</th>
+                            <th class="px-4 py-3 text-right">Acciones</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-usuarios" class="divide-y divide-slate-800/60 text-slate-300">
                         {% for u in usuarios %}
                         <tr class="hover:bg-slate-800/30 transition-colors" data-cedula="{{ (u[7] or '')|lower }}">
-                            <td class="px-6 py-4 font-bold text-white flex items-center gap-2">
-                                <i class="fa-regular fa-user text-cyan-400"></i> {{ u[1] }}
+                            <td class="px-4 py-3">
+                                <div class="font-bold text-white flex items-center gap-2">
+                                    <i class="fa-regular fa-user text-cyan-400"></i> {{ u[1] }}
+                                </div>
+                                <div class="text-[11px] mt-0.5 {% if not u[5] %}text-slate-600 italic{% else %}text-slate-500{% endif %}">{{ u[5] or 'Sin nombre registrado' }}</div>
                             </td>
-                            <td class="px-6 py-4 {% if not u[5] %}text-slate-600 italic{% endif %}">{{ u[5] or 'Sin nombre registrado' }}</td>
-                            <td class="px-6 py-4 {% if not u[7] %}text-slate-600 italic{% endif %}">{{ u[7] or 'Sin registrar' }}</td>
-                            <td class="px-6 py-4 {% if not u[8] %}text-slate-600 italic{% endif %}">{{ u[8] or 'Sin asignar' }}</td>
-                            <td class="px-6 py-4">{{ u[2] }}</td>
-                            <td class="px-6 py-4 {% if not u[6] %}text-slate-600 italic{% endif %}">{{ u[6] or 'Sin registrar' }}</td>
-                            <td class="px-6 py-4">
-                                <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[3] == 'admin' %}bg-cyan-500/10 text-cyan-400 border border-cyan-500/20{% elif u[3] == 'agente' %}bg-orange-500/10 text-orange-400 border border-orange-500/20{% else %}bg-slate-800 text-slate-400{% endif %}">
-                                    {{ u[3] }}
-                                </span>
+                            <td class="px-4 py-3 {% if not u[7] %}text-slate-600 italic{% endif %}">{{ u[7] or 'Sin registrar' }}</td>
+                            <td class="px-4 py-3 {% if not u[8] %}text-slate-600 italic{% endif %}">{{ u[8] or 'Sin asignar' }}</td>
+                            <td class="px-4 py-3">{{ u[2] }}</td>
+                            <td class="px-4 py-3 {% if not u[6] %}text-slate-600 italic{% endif %}">{{ u[6] or 'Sin registrar' }}</td>
+                            <td class="px-4 py-3">
+                                <div class="flex flex-col gap-1 items-start">
+                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[3] == 'admin' %}bg-cyan-500/10 text-cyan-400 border border-cyan-500/20{% elif u[3] == 'agente' %}bg-orange-500/10 text-orange-400 border border-orange-500/20{% else %}bg-slate-800 text-slate-400{% endif %}">
+                                        {{ u[3] }}
+                                    </span>
+                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[4] == 'inactivo' %}bg-rose-500/10 text-rose-400 border border-rose-500/20{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% endif %}">
+                                        {% if u[4] == 'inactivo' %}Inactivo{% else %}Activo{% endif %}
+                                    </span>
+                                </div>
                             </td>
-                            <td class="px-6 py-4">
-                                <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[4] == 'inactivo' %}bg-rose-500/10 text-rose-400 border border-rose-500/20{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% endif %}">
-                                    {% if u[4] == 'inactivo' %}Inactivo{% else %}Activo{% endif %}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 text-right">
+                            <td class="px-4 py-3 text-right">
                                 {% set es_otro_admin = (u[3] == 'admin' and u[1] != session.get('username') and session.get('username') != 'admin') %}
                                 <div class="flex items-center justify-end gap-2">
                                     {% if not es_otro_admin %}
