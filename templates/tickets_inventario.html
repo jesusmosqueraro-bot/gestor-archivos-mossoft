@@ -356,7 +356,7 @@
     </div>
 
     <!-- MODAL ADJUNTOS DEL ACTIVO -->
-    <div id="modal-adjuntos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div id="modal-adjuntos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 id="modal-adjuntos-titulo" class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-paperclip text-cyan-400"></i> Adjuntos</h3>
@@ -377,7 +377,7 @@
     </div>
 
     <!-- Modal Catálogo de Tipos de activo -->
-    <div id="modal-tipos-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div id="modal-tipos-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-layer-group text-orange-400"></i> Tipos de activo</h3>
@@ -428,7 +428,7 @@
     </div>
 
     <!-- MODAL HISTORIAL DE TICKETS DEL ACTIVO -->
-    <div id="modal-historial-tickets" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div id="modal-historial-tickets" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
                 <div>
@@ -445,7 +445,7 @@
     </div>
 
     <!-- MODAL TRAZABILIDAD DEL ACTIVO -->
-    <div id="modal-trazabilidad" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div id="modal-trazabilidad" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
                 <div>
@@ -462,7 +462,7 @@
     </div>
 
     <!-- MODAL REEMPLAZAR ACTIVO -->
-    <div id="modal-reemplazar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div id="modal-reemplazar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-xl w-full p-6 shadow-2xl my-8">
             <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
                 <div>
@@ -654,6 +654,7 @@
 
             document.getElementById('modal-adjuntos').classList.remove('hidden');
             document.getElementById('modal-adjuntos').classList.add('flex');
+            document.getElementById('modal-adjuntos').scrollTop = 0;
         }
         function cerrarModalAdjuntos() {
             document.getElementById('modal-adjuntos').classList.add('hidden');
@@ -663,6 +664,7 @@
         function abrirModalTiposActivo() {
             document.getElementById('modal-tipos-activo').classList.remove('hidden');
             document.getElementById('modal-tipos-activo').classList.add('flex');
+            document.getElementById('modal-tipos-activo').scrollTop = 0;
         }
 
         function cerrarModalTiposActivo() {
@@ -711,6 +713,7 @@
 
             document.getElementById('modal-historial-tickets').classList.remove('hidden');
             document.getElementById('modal-historial-tickets').classList.add('flex');
+            document.getElementById('modal-historial-tickets').scrollTop = 0;
         }
         function cerrarModalHistorialTickets() {
             document.getElementById('modal-historial-tickets').classList.add('hidden');
@@ -759,6 +762,7 @@
 
             document.getElementById('modal-trazabilidad').classList.remove('hidden');
             document.getElementById('modal-trazabilidad').classList.add('flex');
+            document.getElementById('modal-trazabilidad').scrollTop = 0;
         }
         function cerrarModalTrazabilidad() {
             document.getElementById('modal-trazabilidad').classList.add('hidden');
@@ -816,6 +820,7 @@
             document.getElementById('input-reemplazo-estado').value = 'Baja';
             document.getElementById('modal-reemplazar').classList.remove('hidden');
             document.getElementById('modal-reemplazar').classList.add('flex');
+            document.getElementById('modal-reemplazar').scrollTop = 0;
         }
         function cerrarModalReemplazar() {
             document.getElementById('modal-reemplazar').classList.add('hidden');
