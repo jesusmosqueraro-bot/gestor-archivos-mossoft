@@ -3869,6 +3869,94 @@ def exportar_indicadores_tickets_xlsx():
     }, status=200)
 
 
+# 📈 TABLERO EJECUTIVO (solo Admin/gerencia): panorama de un vistazo de TODOS los módulos de
+# Arkiv en una sola pantalla — a diferencia de /tickets/indicadores (que profundiza solo en
+# Tickets, con gráficos y exportaciones a PDF/Excel/CSV, accesible también a agentes), este
+# tablero da un resumen liviano de cada módulo con un enlace directo al detalle de cada uno.
+# Reutiliza _calcular_indicadores_tickets() para no duplicar esa agregación.
+def _calcular_tablero_ejecutivo():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    ind_tickets = _calcular_indicadores_tickets()
+    total_tickets = ind_tickets['total']
+    tickets_vencidos = ind_tickets['por_cumplimiento'].get('vencido', 0)
+    pct_sla_cumplido = round((total_tickets - tickets_vencidos) / total_tickets * 100, 1) if total_tickets else None
+
+    try:
+        cursor.execute("SELECT rol, COUNT(*) FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' GROUP BY rol")
+        usuarios_por_rol = {rol: cant for rol, cant in cursor.fetchall()}
+    except Exception as e:
+        print(f"⚠️ Error calculando usuarios por rol (tablero ejecutivo): {e}")
+        usuarios_por_rol = {}
+    total_usuarios_activos = sum(usuarios_por_rol.values())
+
+    try:
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(vistas), 0), COALESCE(SUM(descargas), 0) FROM galerias WHERE estado = 'activo'")
+        total_instructivos, total_vistas, total_descargas = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error calculando Gestor de Archivos (tablero ejecutivo): {e}")
+        total_instructivos, total_vistas, total_descargas = 0, 0, 0
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM comunicados WHERE estado = 'activo'")
+        total_comunicados = cursor.fetchone()[0]
+    except Exception as e:
+        print(f"⚠️ Error calculando Comunicados (tablero ejecutivo): {e}")
+        total_comunicados = 0
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        total_credenciales = cursor.fetchone()[0]
+    except Exception as e:
+        print(f"⚠️ Error calculando Bóveda de Accesos (tablero ejecutivo): {e}")
+        total_credenciales = 0
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM credenciales_colaboradores WHERE estado = 'activo'")
+        total_accesos_colaboradores = cursor.fetchone()[0]
+    except Exception as e:
+        print(f"⚠️ Error calculando Accesos de Colaboradores (tablero ejecutivo): {e}")
+        total_accesos_colaboradores = 0
+
+    try:
+        cursor.execute("SELECT estado, COUNT(*) FROM activos_inventario WHERE COALESCE(eliminado, 0) = 0 GROUP BY estado")
+        inventario_por_estado = {estado or 'Sin estado': cant for estado, cant in cursor.fetchall()}
+    except Exception as e:
+        print(f"⚠️ Error calculando Inventario (tablero ejecutivo): {e}")
+        inventario_por_estado = {}
+    total_activos_inventario = sum(inventario_por_estado.values())
+
+    conn.close()
+
+    return {
+        'total_tickets': total_tickets,
+        'tickets_abiertos': ind_tickets['por_estado'].get('Abierto', 0) + ind_tickets['por_estado'].get('En Proceso', 0),
+        'tickets_vencidos': tickets_vencidos,
+        'pct_sla_cumplido': pct_sla_cumplido,
+        'promedio_calificacion': ind_tickets['promedio_calificacion'],
+        'dias_tendencia': ind_tickets['dias_tendencia'],
+        'usuarios_por_rol': usuarios_por_rol,
+        'total_usuarios_activos': total_usuarios_activos,
+        'total_instructivos': total_instructivos,
+        'total_vistas': total_vistas,
+        'total_descargas': total_descargas,
+        'total_comunicados': total_comunicados,
+        'total_credenciales': total_credenciales,
+        'total_accesos_colaboradores': total_accesos_colaboradores,
+        'inventario_por_estado': inventario_por_estado,
+        'total_activos_inventario': total_activos_inventario,
+    }
+
+
+@app.route('/tablero-ejecutivo')
+@login_required
+@admin_required
+def tablero_ejecutivo():
+    datos = _calcular_tablero_ejecutivo()
+    return render_template('tablero_ejecutivo.html', **datos)
+
+
 # 📦 INVENTARIO DE ACTIVOS DE TI (solo equipo de soporte): registro de equipos/activos y a
 # quién/qué sede están asignados. Reutiliza las Sedes configuradas en /tickets/configuracion.
 @app.route('/tickets/inventario')
