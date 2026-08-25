@@ -108,3 +108,22 @@ html[data-theme="claro"] .banner-mesa-ayuda {
     background-image: linear-gradient(to bottom right, #fff7ed, #f8fafc, #f8fafc) !important;
     border-color: #fed7aa !important;
 }
+
+/* Tarjetas del panel principal (bienvenida): en tema oscuro todas comparten el mismo
+   fondo neutro (bg-slate-900/80) y solo el ícono trae el color de acento. En tema
+   claro eso se veía plano/gris, así que aquí cada tarjeta recibe un fondo pastel
+   sólido a juego con su acento (en vez del gris genérico de .bg-slate-900\/80) y un
+   borde un poco más marcado del mismo tono. Van al final del archivo a propósito:
+   deben ganar por orden de cascada sobre las reglas genéricas de arriba, ya que
+   comparten el mismo nivel de especificidad. */
+html[data-theme="claro"] .card-acento-cyan     { background-color: #cffafe !important; border-color: #a5f3fc !important; }
+html[data-theme="claro"] .card-acento-blue     { background-color: #dbeafe !important; border-color: #bfdbfe !important; }
+html[data-theme="claro"] .card-acento-orange   { background-color: #ffedd5 !important; border-color: #fed7aa !important; }
+html[data-theme="claro"] .card-acento-emerald  { background-color: #d1fae5 !important; border-color: #a7f3d0 !important; }
+html[data-theme="claro"] .card-acento-fuchsia  { background-color: #fae8ff !important; border-color: #f5d0fe !important; }
+html[data-theme="claro"] .card-acento-purple   { background-color: #f3e8ff !important; border-color: #e9d5ff !important; }
+html[data-theme="claro"] .card-acento-rose     { background-color: #ffe4e6 !important; border-color: #fecdd3 !important; }
+html[data-theme="claro"] .card-acento-amber    { background-color: #fef3c7 !important; border-color: #fde68a !important; }
+html[data-theme="claro"] .card-acento-sky      { background-color: #e0f2fe !important; border-color: #bae6fd !important; }
+html[data-theme="claro"] .card-acento-indigo   { background-color: #e0e7ff !important; border-color: #c7d2fe !important; }
+html[data-theme="claro"] .card-acento-teal     { background-color: #ccfbf1 !important; border-color: #99f6e4 !important; }
