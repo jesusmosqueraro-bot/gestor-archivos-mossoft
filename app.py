@@ -544,7 +544,12 @@ def init_db():
                 # 📍 Dirección física y usuario responsable de cada Sede (solo aplican cuando
                 # tipo = 'sede'; para 'area'/'categoria' quedan en NULL sin usarse).
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS direccion TEXT;",
-                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS responsable VARCHAR(100);"
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS responsable VARCHAR(100);",
+                # 🕵️ Historial de sesiones: IP y dispositivo (navegador/SO detectados a partir del
+                # User-Agent) de cada inicio/cierre de sesión — ver registrar_log() y la ruta
+                # /perfil/historial-sesiones. NULL para el resto de acciones del log (no aplica).
+                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS ip VARCHAR(100);",
+                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dispositivo VARCHAR(255);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -740,6 +745,17 @@ def init_db():
                     conn.commit()
                 except Exception:
                     pass
+            # 🕵️ Historial de sesiones: IP y dispositivo detectados de cada inicio/cierre de
+            # sesión. Ver comentario equivalente en la rama de Postgres.
+            for col_log_sql in [
+                "ALTER TABLE logs ADD COLUMN ip TEXT;",
+                "ALTER TABLE logs ADD COLUMN dispositivo TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_log_sql)
+                    conn.commit()
+                except Exception:
+                    pass
 
         # Siembra las categorías de ticket por defecto la primera vez (instalación nueva o
         # actualización desde una versión sin `ticket_configuraciones`), para que la lista no
@@ -825,20 +841,75 @@ def init_db():
 
 init_db()
 
-def registrar_log(usuario, accion, detalles="", credencial_id=None):
+def registrar_log(usuario, accion, detalles="", credencial_id=None, ip=None, dispositivo=None):
     """credencial_id es opcional: solo se usa para marcar qué entradas del log son consultas a
     la bóveda de Credenciales (ver _revelar_credencial), y así poder filtrar/armar la auditoría
-    de accesos por credencial sin tener que parsear el texto libre de 'detalles'."""
+    de accesos por credencial sin tener que parsear el texto libre de 'detalles'.
+    ip/dispositivo son opcionales: solo se pasan desde login()/logout() para alimentar
+    /perfil/historial-sesiones (ver _obtener_ip_cliente/_detectar_dispositivo más abajo); el
+    resto de acciones del log los deja en NULL, que es justo lo que se espera de ellas."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
-        query = "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id) VALUES (?, ?, ?, ?, ?)"
-        cursor.execute(query, (usuario, accion, detalles, fecha_actual, credencial_id))
+        query = "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id, ip, dispositivo) VALUES (%s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO logs (usuario, accion, detalles, fecha, credencial_id, ip, dispositivo) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        cursor.execute(query, (usuario, accion, detalles, fecha_actual, credencial_id, ip, dispositivo))
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"Error registrando log: {e}")
+
+# 🕵️ HISTORIAL DE SESIONES — helpers usados por login()/logout() para registrar desde dónde se
+# conectó cada cuenta (ver /perfil/historial-sesiones más abajo). No son librerías de
+# fingerprinting: solo reconocen los patrones más comunes de User-Agent para mostrar algo
+# legible ("Chrome en Windows") en vez del header crudo.
+def _obtener_ip_cliente():
+    """Preferimos X-Forwarded-For (la IP real del visitante, que agrega el proxy de Render)
+    porque request.remote_addr, detrás de ese proxy, siempre muestra la IP interna del balanceador."""
+    xff = request.headers.get('X-Forwarded-For', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.remote_addr or ''
+
+def _detectar_dispositivo(user_agent):
+    if not user_agent:
+        return "Dispositivo desconocido"
+
+    if re.search(r'Windows', user_agent):
+        so = "Windows"
+    elif re.search(r'iPhone', user_agent):
+        so = "iPhone"
+    elif re.search(r'iPad', user_agent):
+        so = "iPad"
+    elif re.search(r'Android', user_agent):
+        so = "Android"
+    elif re.search(r'Mac OS X', user_agent):
+        so = "Mac"
+    elif re.search(r'Linux', user_agent):
+        so = "Linux"
+    else:
+        so = None
+
+    if re.search(r'Edg/', user_agent):
+        navegador = "Edge"
+    elif re.search(r'OPR/|Opera', user_agent):
+        navegador = "Opera"
+    elif re.search(r'Chrome/', user_agent) and 'Chromium' not in user_agent:
+        navegador = "Chrome"
+    elif re.search(r'Firefox/', user_agent):
+        navegador = "Firefox"
+    elif re.search(r'Safari/', user_agent) and 'Chrome/' not in user_agent:
+        navegador = "Safari"
+    else:
+        navegador = None
+
+    if navegador and so:
+        return f"{navegador} en {so}"
+    if navegador:
+        return navegador
+    if so:
+        return so
+    return user_agent[:60]
 
 # 📧 Bitácora de correos enviados (ver /logs/correos). Se llama desde enviar_correo_ticket y
 # enviar_correo_recuperacion, casi siempre dentro de un hilo aparte (threading.Thread), por eso
@@ -4490,7 +4561,7 @@ def login():
                     # ⚠️ user[3] es la columna "estado" (activo/inactivo). Un usuario bloqueado
                     # por un administrador no debe poder iniciar sesión aunque su clave sea correcta.
                     if (user[3] or 'activo') == 'inactivo':
-                        registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso de una cuenta desactivada.")
+                        registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso de una cuenta desactivada.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                         return render_template('login.html', error="Tu cuenta ha sido desactivada. Contacta a un administrador.")
                     session.permanent = True
                     session['logged_in'] = True
@@ -4499,7 +4570,7 @@ def login():
                     session['instance_id'] = SERVER_INSTANCE_ID
                     session['tema'] = user[4] or 'oscuro'
                     session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
-                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso")
+                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                     return redirect(url_for('bienvenida'))
             except Exception as db_err:
                 print(f"Error consultando usuario en BD: {db_err}")
@@ -6130,9 +6201,65 @@ def cambiar_password_perfil():
 @app.route('/logout')
 def logout():
     if session.get('username'):
-        registrar_log(session['username'], "Cierre de Sesión", "Cierre de sesión de usuario")
+        registrar_log(session['username'], "Cierre de Sesión", "Cierre de sesión de usuario", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
     session.clear()
     return redirect(url_for('login'))
+
+
+# 🕵️ HISTORIAL DE SESIONES — autoservicio de seguridad: cualquier cuenta logueada ve sus propios
+# inicios/cierres de sesión (fecha, IP, dispositivo) para detectar accesos que no reconoce. Un
+# admin, además, puede elegir cualquier otra cuenta en el selector (mismo criterio de "ve todo"
+# que ya tiene en /logs) — la cuenta 'admin' literal se oculta al resto de admins, igual que en
+# gestion_usuarios(). Cualquier otra cuenta solo puede ver la suya: el parámetro ?usuario= se
+# ignora por completo si quien consulta no es admin.
+ETIQUETAS_ACCION_HISTORIAL_SESIONES = {
+    'Inicio de Sesión': {'label': 'Inicio de sesión exitoso', 'icono': 'fa-right-to-bracket', 'color': 'emerald'},
+    'Inicio de Sesión Bloqueado': {'label': 'Intento bloqueado (cuenta inactiva)', 'icono': 'fa-ban', 'color': 'rose'},
+    'Cierre de Sesión': {'label': 'Cierre de sesión', 'icono': 'fa-arrow-right-from-bracket', 'color': 'slate'},
+}
+
+@app.route('/perfil/historial-sesiones')
+@login_required
+def historial_sesiones():
+    usuario_sesion = session.get('username')
+    es_admin = session.get('rol') == 'admin'
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    lista_usuarios = []
+    usuario_consultado = usuario_sesion
+    if es_admin:
+        cursor.execute("SELECT usuario FROM usuarios ORDER BY usuario ASC")
+        todos = [u[0] for u in cursor.fetchall() if u[0]]
+        lista_usuarios = todos if usuario_sesion == 'admin' else [u for u in todos if u != 'admin']
+        usuario_param = request.args.get('usuario', '').strip()
+        if usuario_param and (usuario_param in lista_usuarios or usuario_param == usuario_sesion):
+            usuario_consultado = usuario_param
+
+    marcador = '%s' if db_type == 'postgres' else '?'
+    placeholders_accion = ','.join([marcador] * len(ETIQUETAS_ACCION_HISTORIAL_SESIONES))
+    query = f"SELECT usuario, accion, ip, dispositivo, fecha FROM logs WHERE usuario = {marcador} AND accion IN ({placeholders_accion}) ORDER BY id DESC LIMIT 200"
+    cursor.execute(query, tuple([usuario_consultado] + list(ETIQUETAS_ACCION_HISTORIAL_SESIONES.keys())))
+    filas = cursor.fetchall()
+    conn.close()
+
+    eventos = []
+    for u_fila, accion, ip, dispositivo, fecha in filas:
+        meta = ETIQUETAS_ACCION_HISTORIAL_SESIONES.get(accion, {'label': accion, 'icono': 'fa-circle', 'color': 'slate'})
+        eventos.append({
+            'accion': accion, 'label': meta['label'], 'icono': meta['icono'], 'color': meta['color'],
+            'ip': ip or '—', 'dispositivo': dispositivo or '—', 'fecha': fecha
+        })
+
+    return render_template(
+        'historial_sesiones.html',
+        eventos=eventos,
+        es_admin=es_admin,
+        usuarios_opt=lista_usuarios,
+        usuario_consultado=usuario_consultado,
+        es_propio=(usuario_consultado == usuario_sesion)
+    )
 
 
 # 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
