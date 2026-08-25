@@ -3332,6 +3332,11 @@ def exportar_indicadores_tickets_pdf():
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics.charts.barcharts import VerticalBarChart
+    from reportlab.graphics.charts.linecharts import HorizontalLineChart
+    from reportlab.graphics.charts.piecharts import Pie
+    from reportlab.graphics.charts.legends import Legend
 
     ind = _calcular_indicadores_tickets()
     estilos = getSampleStyleSheet()
@@ -3354,6 +3359,84 @@ def exportar_indicadores_tickets_pdf():
         elementos.append(Spacer(1, 0.5 * cm))
         return elementos
 
+    # 📊 Los mismos gráficos que se ven en pantalla (Chart.js), redibujados aquí con
+    # reportlab.graphics para que el PDF descargado no sea solo tablas — un vistazo visual
+    # igual de rápido que el del dashboard, aunque en PDF no puede ser interactivo.
+    def grafico_barras(labels, valores, color_hex, ancho=16 * cm, alto=6 * cm):
+        if not labels:
+            return None
+        d = Drawing(ancho, alto)
+        bc = VerticalBarChart()
+        bc.x = 45
+        bc.y = 45
+        bc.height = alto - 60
+        bc.width = ancho - 65
+        bc.data = [valores]
+        bc.categoryAxis.categoryNames = [str(l)[:14] for l in labels]
+        bc.categoryAxis.labels.angle = 25
+        bc.categoryAxis.labels.dy = -12
+        bc.categoryAxis.labels.dx = -4
+        bc.categoryAxis.labels.fontSize = 7
+        bc.valueAxis.valueMin = 0
+        bc.valueAxis.labels.fontSize = 7
+        bc.bars[0].fillColor = colors.HexColor(color_hex)
+        bc.bars.strokeColor = None
+        bc.barLabelFormat = '%d'
+        bc.barLabels.fontSize = 7
+        bc.barLabels.nudge = 8
+        d.add(bc)
+        return d
+
+    def grafico_pie(labels, valores, colores_hex, ancho=16 * cm, alto=6 * cm):
+        if sum(valores) == 0:
+            return None
+        d = Drawing(ancho, alto)
+        pie = Pie()
+        pie.x = 60
+        pie.y = 20
+        pie.width = 130
+        pie.height = 130
+        pie.data = valores
+        pie.labels = [str(v) for v in valores]
+        pie.simpleLabels = True
+        pie.slices.strokeWidth = 0.75
+        pie.slices.strokeColor = colors.white
+        for i, c in enumerate(colores_hex):
+            pie.slices[i].fillColor = colors.HexColor(c)
+        d.add(pie)
+        leyenda = Legend()
+        leyenda.x = 230
+        leyenda.y = 100
+        leyenda.dx = 8
+        leyenda.dy = 8
+        leyenda.fontSize = 8
+        leyenda.alignment = 'right'
+        leyenda.colorNamePairs = [(colors.HexColor(c), l) for c, l in zip(colores_hex, labels)]
+        d.add(leyenda)
+        return d
+
+    def grafico_tendencia(dias, ancho=16 * cm, alto=6 * cm):
+        if not dias:
+            return None
+        d = Drawing(ancho, alto)
+        lc = HorizontalLineChart()
+        lc.x = 45
+        lc.y = 30
+        lc.height = alto - 50
+        lc.width = ancho - 65
+        lc.data = [[dia['cantidad'] for dia in dias]]
+        lc.categoryAxis.categoryNames = [dia['fecha'][5:] for dia in dias]
+        lc.categoryAxis.labels.angle = 30
+        lc.categoryAxis.labels.dy = -12
+        lc.categoryAxis.labels.fontSize = 6.5
+        lc.valueAxis.valueMin = 0
+        lc.valueAxis.labels.fontSize = 7
+        lc.lines[0].strokeColor = colors.HexColor('#f97316')
+        lc.lines[0].strokeWidth = 2
+        lc.lines[0].symbol = None
+        d.add(lc)
+        return d
+
     contenido = [
         Paragraph("Arkiv — Indicadores de Tickets de Soporte TI", estilos['Title']),
         Paragraph(f"Generado el {ahora_txt} (hora Colombia) — Total de solicitudes: {ind['total']}", estilos['Normal']),
@@ -3366,23 +3449,59 @@ def exportar_indicadores_tickets_pdf():
         ))
         contenido.append(Spacer(1, 0.5 * cm))
 
+    dias_tendencia = ind['dias_tendencia']
+    contenido.append(Paragraph("Solicitudes creadas — últimos 14 días", estilos['Heading3']))
+    g = grafico_tendencia(dias_tendencia)
+    if g:
+        contenido += [g, Spacer(1, 0.3 * cm)]
+
     contenido += tabla_conteos("Por estado", ind['por_estado'].items(), ('Estado', 'Cantidad'))
+    g = grafico_barras(list(ind['por_estado'].keys()), list(ind['por_estado'].values()), '#fb923c')
+    if g:
+        contenido += [g, Spacer(1, 0.5 * cm)]
+
     contenido += tabla_conteos("Por prioridad", ind['por_prioridad'].items(), ('Prioridad', 'Cantidad'))
+    g = grafico_barras(list(ind['por_prioridad'].keys()), list(ind['por_prioridad'].values()), '#38bdf8')
+    if g:
+        contenido += [g, Spacer(1, 0.5 * cm)]
+
     contenido += tabla_conteos("Por tipo", ind['por_tipo'].items(), ('Tipo', 'Cantidad'))
+
+    cumplimiento_items = list(ind['por_cumplimiento'].items())
     contenido += tabla_conteos(
         "Cumplimiento de SLA",
-        [(ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k), v) for k, v in ind['por_cumplimiento'].items()],
+        [(ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k), v) for k, v in cumplimiento_items],
         ('Estado de SLA', 'Cantidad')
     )
+    g = grafico_pie(
+        [ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k) for k, v in cumplimiento_items],
+        [v for k, v in cumplimiento_items],
+        ['#22d3ee', '#f59e0b', '#f43f5e', '#64748b']
+    )
+    if g:
+        contenido += [g, Spacer(1, 0.5 * cm)]
+
     if ind['por_categoria']:
-        contenido += tabla_conteos("Por categoría", sorted(ind['por_categoria'].items(), key=lambda x: x[1], reverse=True), ('Categoría', 'Cantidad'))
+        cat_ordenada = sorted(ind['por_categoria'].items(), key=lambda x: x[1], reverse=True)
+        contenido += tabla_conteos("Por categoría", cat_ordenada, ('Categoría', 'Cantidad'))
+        g = grafico_barras([k for k, v in cat_ordenada], [v for k, v in cat_ordenada], '#a78bfa')
+        if g:
+            contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['por_area']:
-        contenido += tabla_conteos("Por área", sorted(ind['por_area'].items(), key=lambda x: x[1], reverse=True), ('Área', 'Cantidad'))
+        area_ordenada = sorted(ind['por_area'].items(), key=lambda x: x[1], reverse=True)
+        contenido += tabla_conteos("Por área", area_ordenada, ('Área', 'Cantidad'))
+        g = grafico_barras([k for k, v in area_ordenada], [v for k, v in area_ordenada], '#818cf8')
+        if g:
+            contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['por_sede']:
-        contenido += tabla_conteos("Por sede", sorted(ind['por_sede'].items(), key=lambda x: x[1], reverse=True), ('Sede', 'Cantidad'))
+        sede_ordenada = sorted(ind['por_sede'].items(), key=lambda x: x[1], reverse=True)
+        contenido += tabla_conteos("Por sede", sede_ordenada, ('Sede', 'Cantidad'))
+        g = grafico_barras([k for k, v in sede_ordenada], [v for k, v in sede_ordenada], '#2dd4bf')
+        if g:
+            contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['top_agentes']:
         contenido += tabla_conteos("Top agentes (tickets resueltos/cerrados)", ind['top_agentes'], ('Agente', 'Tickets'))
-    contenido += tabla_conteos("Tendencia — solicitudes creadas por día (últimos 14 días)", [(d['fecha'], d['cantidad']) for d in ind['dias_tendencia']], ('Fecha', 'Cantidad'))
+    contenido += tabla_conteos("Tendencia — solicitudes creadas por día (últimos 14 días)", [(d['fecha'], d['cantidad']) for d in dias_tendencia], ('Fecha', 'Cantidad'))
 
     doc.build(contenido)
     buffer.seek(0)
@@ -3405,6 +3524,10 @@ def exportar_indicadores_tickets_xlsx():
     el listado completo de tickets."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.chart import BarChart, LineChart, DoughnutChart, Reference
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
+    from openpyxl.chart.shapes import GraphicalProperties
 
     ind = _calcular_indicadores_tickets()
     wb = openpyxl.Workbook()
@@ -3428,20 +3551,32 @@ def exportar_indicadores_tickets_xlsx():
         ))
         fila += 2
 
+    # 📊 Guardamos, por cada sección volcada, en qué filas quedó su encabezado y sus datos —
+    # así los gráficos nativos de Excel que se arman más abajo pueden referenciar exactamente
+    # esas celdas (Reference), en vez de duplicar los números a mano.
+    rangos_secciones = {}
+
     def volcar_seccion(titulo, datos, encabezados):
         nonlocal fila
         resumen.cell(row=fila, column=1, value=titulo).font = Font(bold=True, size=12)
         fila += 1
+        fila_encabezado = fila
         for col, texto in enumerate(encabezados, start=1):
             c = resumen.cell(row=fila, column=col, value=texto)
             c.fill = relleno_encabezado
             c.font = fuente_encabezado
         fila += 1
+        fila_inicio_datos = fila
+        datos = list(datos)
         for clave, valor in datos:
             resumen.cell(row=fila, column=1, value=clave)
             resumen.cell(row=fila, column=2, value=valor)
             fila += 1
+        fila_fin_datos = fila - 1
         fila += 1
+        rangos_secciones[titulo] = {
+            'encabezado': fila_encabezado, 'inicio': fila_inicio_datos, 'fin': fila_fin_datos, 'filas': len(datos)
+        }
 
     volcar_seccion('Por estado', ind['por_estado'].items(), ['Estado', 'Cantidad'])
     volcar_seccion('Por prioridad', ind['por_prioridad'].items(), ['Prioridad', 'Cantidad'])
@@ -3463,6 +3598,73 @@ def exportar_indicadores_tickets_xlsx():
 
     resumen.column_dimensions['A'].width = 32
     resumen.column_dimensions['B'].width = 14
+
+    # 📊 Hoja de "Gráficos": los mismos gráficos del dashboard (Chart.js), pero como gráficos
+    # NATIVOS de Excel (BarChart/DoughnutChart/LineChart) — a diferencia de una imagen pegada,
+    # estos son igual de interactivos que en el navegador: se puede pasar el mouse para ver el
+    # valor exacto, ocultar series desde la leyenda, cambiar el tipo de gráfico, y si alguien
+    # edita los números de la hoja "Resumen" el gráfico se actualiza solo.
+    graficos = wb.create_sheet('Gráficos', 1)
+    graficos.sheet_view.showGridLines = False
+    fila_grafico = 1
+
+    def agregar_grafico(chart, titulo):
+        nonlocal fila_grafico
+        chart.title = titulo
+        chart.width = 18
+        chart.height = 9
+        chart.style = 10
+        graficos.add_chart(chart, f'A{fila_grafico}')
+        fila_grafico += 19
+
+    r = rangos_secciones.get('Tendencia — últimos 14 días')
+    if r and r['filas']:
+        chart = LineChart()
+        chart.grouping = 'standard'
+        datos_ref = Reference(resumen, min_col=2, min_row=r['encabezado'], max_row=r['fin'])
+        cats_ref = Reference(resumen, min_col=1, min_row=r['inicio'], max_row=r['fin'])
+        chart.add_data(datos_ref, titles_from_data=True)
+        chart.set_categories(cats_ref)
+        chart.y_axis.majorGridlines = None
+        chart.series[0].graphicalProperties = GraphicalProperties(solidFill=None)
+        chart.series[0].graphicalProperties.line.solidFill = 'F97316'
+        chart.series[0].graphicalProperties.line.width = 22000
+        chart.series[0].smooth = False
+        agregar_grafico(chart, 'Solicitudes creadas — últimos 14 días')
+
+    r = rangos_secciones.get('Cumplimiento de SLA')
+    if r and r['filas']:
+        chart = DoughnutChart()
+        datos_ref = Reference(resumen, min_col=2, min_row=r['encabezado'], max_row=r['fin'])
+        cats_ref = Reference(resumen, min_col=1, min_row=r['inicio'], max_row=r['fin'])
+        chart.add_data(datos_ref, titles_from_data=True)
+        chart.set_categories(cats_ref)
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        # 🎨 Mismos colores que el donut de Chart.js en pantalla, en el mismo orden
+        # (vigente/próx. a vencer/vencido/cerrado).
+        colores_sla = ['22D3EE', 'F59E0B', 'F43F5E', '64748B']
+        chart.series[0].data_points = [
+            DataPoint(idx=i, spPr=GraphicalProperties(solidFill=c)) for i, c in enumerate(colores_sla[:r['filas']])
+        ]
+        agregar_grafico(chart, 'Cumplimiento de SLA')
+
+    colores_barras = {
+        'Por estado': 'FB923C', 'Por prioridad': '38BDF8',
+        'Por categoría': 'A78BFA', 'Por área': '818CF8', 'Por sede': '2DD4BF'
+    }
+    for titulo_seccion, color_hex in colores_barras.items():
+        r = rangos_secciones.get(titulo_seccion)
+        if r and r['filas']:
+            chart = BarChart()
+            chart.type = 'col'
+            datos_ref = Reference(resumen, min_col=2, min_row=r['encabezado'], max_row=r['fin'])
+            cats_ref = Reference(resumen, min_col=1, min_row=r['inicio'], max_row=r['fin'])
+            chart.add_data(datos_ref, titles_from_data=True)
+            chart.set_categories(cats_ref)
+            chart.legend = None
+            chart.series[0].graphicalProperties = GraphicalProperties(solidFill=color_hex)
+            agregar_grafico(chart, titulo_seccion)
 
     # 📋 Hoja de detalle: el mismo listado completo de tickets que ya ofrece la exportación CSV,
     # para tener ambas vistas (resumen y detalle) en un solo archivo.
