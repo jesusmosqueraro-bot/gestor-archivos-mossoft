@@ -39,8 +39,9 @@
             <span>
                 Aquí quedan registrados los inicios y cierres de sesión de tu cuenta (fecha, dirección IP y dispositivo).
                 Si ves un acceso que no reconoces, cambia tu contraseña de inmediato desde
-                <a href="{{ url_for('cambiar_password_perfil') }}" class="underline font-bold hover:text-sky-200">tu perfil</a>
-                y avisa a un administrador.
+                <a href="{{ url_for('cambiar_password_perfil') }}" class="underline font-bold hover:text-sky-200">tu perfil</a>,
+                avisa a un administrador y considera activar la
+                <a href="{{ url_for('perfil_2fa') }}" class="underline font-bold hover:text-sky-200">verificación en dos pasos</a>.
             </span>
         </div>
 

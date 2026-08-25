@@ -101,6 +101,11 @@
                                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if u[4] == 'inactivo' %}bg-rose-500/10 text-rose-400 border border-rose-500/20{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% endif %}">
                                         {% if u[4] == 'inactivo' %}Inactivo{% else %}Activo{% endif %}
                                     </span>
+                                    {% if u[9] %}
+                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center gap-1" title="Verificación en dos pasos activa">
+                                        <i class="fa-solid fa-shield-halved"></i> 2FA
+                                    </span>
+                                    {% endif %}
                                 </div>
                             </td>
                             <td class="px-4 py-3 text-right">
@@ -130,6 +135,15 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-slate-400 {% if u[4] == 'inactivo' %}hover:text-emerald-400{% else %}hover:text-amber-400{% endif %} transition-colors" title="{% if u[4] == 'inactivo' %}Desbloquear{% else %}Bloquear{% endif %}">
                                             <i class="fa-solid {% if u[4] == 'inactivo' %}fa-lock{% else %}fa-lock-open{% endif %}"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+
+                                    {% if u[9] and not es_otro_admin %}
+                                    <form method="POST" action="{{ url_for('admin_desactivar_2fa', usuario=u[1]) }}" onsubmit="return confirm('¿Desactivar la verificación en dos pasos de {{ u[1] }}? Úsalo solo si perdió acceso a su app autenticadora y a sus códigos de respaldo.')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors" title="Desactivar 2FA (recuperación por pérdida de dispositivo)">
+                                            <i class="fa-solid fa-shield-halved"></i>
                                         </button>
                                     </form>
                                     {% endif %}

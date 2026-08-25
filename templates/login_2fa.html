@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Verificación en dos pasos</title>
+    <!-- Favicon Unificado (Mineral Atemporal) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
+
+        <div class="text-center mb-6">
+            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-slate-900 flex items-center justify-center shadow-lg">
+                <i class="fa-solid fa-shield-halved text-2xl text-cyan-400"></i>
+            </div>
+            <h1 class="text-lg font-black text-slate-800 tracking-tight">Verificación en dos pasos</h1>
+            <div class="h-0.5 w-8 bg-slate-200 mx-auto my-2 rounded-full"></div>
+            <p class="text-[11px] text-slate-500 px-2">
+                Ingresa el código de 6 dígitos de tu app autenticadora para completar el inicio de sesión.
+            </p>
+        </div>
+
+        {% if error %}
+            <div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl font-medium text-center">
+                ⚠️ {{ error }}
+            </div>
+        {% endif %}
+
+        <form action="{{ url_for('login_2fa') }}" method="POST" class="flex flex-col gap-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <div>
+                <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Código de la app</label>
+                <input type="text" name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" autofocus class="w-full text-center text-lg tracking-[0.4em] p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-bold transition-all">
+            </div>
+
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/25 text-xs transition-all active:scale-[0.98]">
+                Verificar e ingresar →
+            </button>
+        </form>
+
+        <details class="mt-4 group">
+            <summary class="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer select-none list-none flex items-center justify-center gap-1">
+                <i class="fa-solid fa-key"></i> ¿Perdiste el acceso a tu app? Usa un código de respaldo
+            </summary>
+            <form action="{{ url_for('login_2fa') }}" method="POST" class="flex flex-col gap-3 mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="codigo_respaldo" placeholder="XXXX-XXXX" class="w-full text-center text-sm tracking-widest p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+                <button type="submit" class="w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all active:scale-[0.98]">
+                    Ingresar con código de respaldo
+                </button>
+            </form>
+        </details>
+
+        <div class="mt-6 pt-4 border-t border-slate-100 text-center">
+            <a href="{{ url_for('login') }}" class="text-[11px] text-slate-400 hover:text-slate-600 font-medium">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Volver a iniciar sesión
+            </a>
+        </div>
+
+    </div>
+
+</body>
+</html>

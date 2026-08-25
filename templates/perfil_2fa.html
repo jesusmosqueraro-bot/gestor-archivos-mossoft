@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARKIV - Verificación en dos pasos</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style> body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; } </style>
+</head>
+<body class="min-h-screen bg-[#0b0f19] text-slate-100 flex items-center justify-center p-4">
+
+    <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative">
+
+        <!-- Logo -->
+        <div class="flex justify-center mb-6">
+            <div class="w-14 h-14 rounded-2xl bg-[#1e293b] flex items-center justify-center shadow-lg border border-slate-700/50">
+                <i class="fa-solid fa-shield-halved text-2xl text-cyan-400"></i>
+            </div>
+        </div>
+
+        <h2 class="text-xl font-bold text-center text-white mb-1">Verificación en dos pasos</h2>
+        <p class="text-xs text-center text-slate-400 mb-6">
+            Añade una capa extra de seguridad a tu cuenta: además de tu contraseña, se pedirá un código de tu app autenticadora al iniciar sesión.
+        </p>
+
+        {% if error %}
+        <div class="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold text-center">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        {% if mostrar_codigos %}
+        <!-- ============ ESTADO: CÓDIGOS DE RESPALDO RECIÉN GENERADOS (se muestran UNA vez) ============ -->
+        <div class="p-3.5 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-start gap-2">
+            <i class="fa-solid fa-circle-check mt-0.5"></i>
+            <span>La verificación en dos pasos quedó activa. Guarda estos códigos de respaldo en un lugar seguro: cada uno solo se puede usar una vez y son la única forma de entrar si pierdes tu app autenticadora. No volverán a mostrarse.</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-6 font-mono">
+            {% for codigo in codigos_respaldo %}
+            <div class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-center text-sm text-white tracking-wider">{{ codigo }}</div>
+            {% endfor %}
+        </div>
+        <a href="{{ url_for('perfil_2fa') }}" class="block w-full text-center py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">
+            Ya guardé mis códigos, continuar
+        </a>
+
+        {% elif habilitado %}
+        <!-- ============ ESTADO: 2FA YA ACTIVO ============ -->
+        <div class="p-3.5 mb-6 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-center gap-2 justify-center">
+            <i class="fa-solid fa-circle-check"></i> La verificación en dos pasos está activa en tu cuenta
+        </div>
+
+        <form method="POST" action="{{ url_for('perfil_2fa_regenerar_respaldo') }}" class="space-y-3 mb-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Regenerar códigos de respaldo</label>
+            <p class="text-[11px] text-slate-500 -mt-2">Invalida los 10 códigos actuales y genera 10 nuevos. Útil si crees que alguien más pudo verlos.</p>
+            <input type="password" name="password_actual" required placeholder="Confirma tu contraseña actual" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+            <button type="submit" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all">
+                <i class="fa-solid fa-rotate mr-1"></i> Regenerar códigos de respaldo
+            </button>
+        </form>
+
+        <div class="border-t border-slate-800 pt-5">
+            <form method="POST" action="{{ url_for('perfil_2fa_desactivar') }}" class="space-y-3" onsubmit="return confirm('¿Desactivar la verificación en dos pasos? Tu cuenta quedará protegida solo con tu contraseña.')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <label class="block text-xs font-semibold text-rose-400 uppercase mb-1">Desactivar verificación en dos pasos</label>
+                <input type="password" name="password_actual" required placeholder="Confirma tu contraseña actual" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-rose-500">
+                <button type="submit" class="w-full py-2.5 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 text-rose-300 text-xs font-semibold rounded-xl transition-all">
+                    Desactivar 2FA
+                </button>
+            </form>
+        </div>
+
+        {% else %}
+        <!-- ============ ESTADO: CONFIGURAR 2FA POR PRIMERA VEZ ============ -->
+        <ol class="text-xs text-slate-300 space-y-3 mb-5">
+            <li class="flex gap-2">
+                <span class="shrink-0 w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-bold flex items-center justify-center">1</span>
+                <span>Escanea este código QR con Google Authenticator, Microsoft Authenticator, Authy u otra app compatible.</span>
+            </li>
+        </ol>
+
+        <div class="flex justify-center mb-3">
+            <div id="qr-2fa" class="bg-white p-3 rounded-2xl"></div>
+        </div>
+        <script>
+            new QRCode(document.getElementById("qr-2fa"), {
+                text: {{ otpauth_uri | tojson }},
+                width: 180, height: 180,
+                colorDark: "#0f172a", colorLight: "#ffffff"
+            });
+        </script>
+
+        <details class="mb-5">
+            <summary class="text-[11px] text-slate-400 hover:text-slate-300 cursor-pointer select-none text-center">¿No puedes escanear? Ingresa el código manualmente</summary>
+            <div class="mt-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-center text-xs text-slate-300 font-mono tracking-wider break-all">{{ secreto }}</div>
+        </details>
+
+        <ol start="2" class="text-xs text-slate-300 space-y-3 mb-4">
+            <li class="flex gap-2">
+                <span class="shrink-0 w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-bold flex items-center justify-center">2</span>
+                <span>Ingresa el código de 6 dígitos que te muestra la app para confirmar la activación.</span>
+            </li>
+        </ol>
+
+        <form method="POST" action="{{ url_for('perfil_2fa_confirmar') }}" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="text" name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" required class="w-full text-center text-lg tracking-[0.4em] p-3 border border-slate-800 bg-slate-950 rounded-xl focus:outline-none focus:border-cyan-500 text-white font-bold transition-all">
+            <button type="submit" class="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">
+                Activar verificación en dos pasos
+            </button>
+        </form>
+        {% endif %}
+
+        <div class="mt-6 text-center">
+            <a href="{{ url_for('bienvenida') }}" class="text-xs text-slate-400 hover:text-cyan-400 transition-colors">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Volver al inicio
+            </a>
+        </div>
+    </div>
+
+</body>
+</html>
