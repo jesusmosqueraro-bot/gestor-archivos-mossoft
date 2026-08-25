@@ -127,6 +127,7 @@ html[data-theme="claro"] .card-acento-amber    { background-color: #fef3c7 !impo
 html[data-theme="claro"] .card-acento-sky      { background-color: #e0f2fe !important; border-color: #bae6fd !important; }
 html[data-theme="claro"] .card-acento-indigo   { background-color: #e0e7ff !important; border-color: #c7d2fe !important; }
 html[data-theme="claro"] .card-acento-teal     { background-color: #ccfbf1 !important; border-color: #99f6e4 !important; }
+html[data-theme="claro"] .card-acento-violet   { background-color: #ede9fe !important; border-color: #ddd6fe !important; }
 
 /* Tarjetas/paneles del RESTO de páginas (Soporte TI, Bóveda de Accesos, Usuarios,
    Auditoría, Papelera, Respaldos, etc.): en tema oscuro todos los paneles comparten
@@ -200,3 +201,10 @@ html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/30,
 html[data-theme="claro"] .pagina-acento-indigo .bg-slate-900\/80  { background-color: #e0e7ff !important; }
 html[data-theme="claro"] .pagina-acento-indigo .border-slate-700\/60,
 html[data-theme="claro"] .pagina-acento-indigo .border-slate-800  { border-color: #c7d2fe !important; }
+
+html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-violet .bg-slate-900\/80  { background-color: #ede9fe !important; }
+html[data-theme="claro"] .pagina-acento-violet .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-violet .border-slate-800  { border-color: #ddd6fe !important; }
