@@ -377,6 +377,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
             )''')
+            # 📧 Bitácora de envíos de correo (tickets y recuperación de clave). NUNCA guarda el
+            # cuerpo del mensaje ni el código de verificación — solo asunto, destinatario, tipo
+            # y si se logró enviar, para poder auditar entregas sin exponer datos sensibles.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS correos_log (
+                id SERIAL PRIMARY KEY, fecha VARCHAR(100) NOT NULL, destinatario VARCHAR(200) NOT NULL, asunto VARCHAR(255) NOT NULL, tipo VARCHAR(30) NOT NULL, estado VARCHAR(20) NOT NULL, detalle_error TEXT
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(150) NOT NULL, url_acceso TEXT, usuario_acceso VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, area VARCHAR(100) DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
             )''')
@@ -546,6 +552,9 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS correos_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, destinatario TEXT NOT NULL, asunto TEXT NOT NULL, tipo TEXT NOT NULL, estado TEXT NOT NULL, detalle_error TEXT
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, url_acceso TEXT, usuario_acceso TEXT NOT NULL, password_cifrada TEXT NOT NULL, area TEXT DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
@@ -812,6 +821,24 @@ def registrar_log(usuario, accion, detalles="", credencial_id=None):
         conn.close()
     except Exception as e:
         print(f"Error registrando log: {e}")
+
+# 📧 Bitácora de correos enviados (ver /logs/correos). Se llama desde enviar_correo_ticket y
+# enviar_correo_recuperacion, casi siempre dentro de un hilo aparte (threading.Thread), por eso
+# abre su propia conexión en vez de reutilizar una del hilo principal.
+# 🛡️ NUNCA recibe ni guarda el cuerpo del correo ni el código de verificación — solo asunto,
+# destinatario, tipo y estado — para que este log se pueda mostrar a agentes/admins sin
+# exponer datos sensibles de recuperación de contraseña.
+def registrar_correo_log(destinatario, asunto, tipo, estado, detalle_error=None):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        fecha_actual = obtener_fecha_actual()
+        query = "INSERT INTO correos_log (fecha, destinatario, asunto, tipo, estado, detalle_error) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO correos_log (fecha, destinatario, asunto, tipo, estado, detalle_error) VALUES (?, ?, ?, ?, ?, ?)"
+        cursor.execute(query, (fecha_actual, destinatario, asunto, tipo, estado, detalle_error))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error registrando log de correo: {e}")
 
 def _migrar_password_a_hash(usuario, password_plano):
     """Re-guarda con hash una contraseña que todavía estaba en texto plano."""
@@ -4166,6 +4193,7 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         if requests:
             res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
             print(f"✅ EXITO: Correo enviado a {email_destino} vía Google Script. Status: {res.status_code}")
+            registrar_correo_log(email_destino, payload["asunto"], 'recuperacion', 'enviado')
             return True
         else:
             data_json = json.dumps(payload).encode('utf-8')
@@ -4173,11 +4201,15 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
             with urllib.request.urlopen(req, timeout=15) as response:
                 res_text = response.read().decode('utf-8')
                 print(f"✅ EXITO: Correo enviado a {email_destino} vía urllib. Respuesta: {res_text}")
+                registrar_correo_log(email_destino, payload["asunto"], 'recuperacion', 'enviado')
                 return True
 
     except Exception as e:
         print(f"❌ Error en envío vía Google Script: {e}")
         traceback.print_exc()
+        # 🛡️ El detalle guardado es solo el mensaje de la excepción (p. ej. timeout, error HTTP);
+        # el código de verificación vive únicamente en 'codigo' y jamás llega hasta aquí.
+        registrar_correo_log(email_destino, "Código de Verificación - Gestor de Archivos", 'recuperacion', 'error', str(e)[:300])
         return False
 
 
@@ -4198,9 +4230,11 @@ def enviar_correo_ticket(email_destino, asunto, cuerpo):
             with urllib.request.urlopen(req, timeout=15) as response:
                 response.read()
             print(f"✅ Correo de ticket enviado a {email_destino} vía urllib.")
+        registrar_correo_log(email_destino, asunto, 'ticket', 'enviado')
         return True
     except Exception as e:
         print(f"⚠️ Error enviando correo de ticket a {email_destino}: {e}")
+        registrar_correo_log(email_destino, asunto, 'ticket', 'error', str(e)[:300])
         return False
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
@@ -5745,6 +5779,129 @@ def exportar_logs_csv():
     
     fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
     filename = f"Arkiv_Auditoria_Logs_{fecha_filename}.csv"
+
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }
+
+    return Response(csv_bytes, headers=headers, status=200)
+
+# 📧 BITÁCORA DE CORREOS ENVIADOS (tickets + recuperación de clave)
+# 🛡️ Solo muestra fecha, destinatario, asunto, tipo, estado y (si falló) el mensaje de la
+# excepción de red/HTTP — nunca el cuerpo del correo ni el código de verificación, que no se
+# guardan en ningún lado desde que se generan en /recuperar (ver registrar_correo_log).
+@app.route('/logs/correos')
+@login_required
+@agente_o_admin_required
+def ver_logs_correos():
+    q_destinatario = request.args.get('destinatario', '').strip()
+    q_tipo = request.args.get('tipo', '').strip()
+    q_estado = request.args.get('estado', '').strip()
+    q_busqueda = request.args.get('q', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT DISTINCT destinatario FROM correos_log ORDER BY destinatario ASC")
+    destinatarios_opt = [d[0] for d in cursor.fetchall() if d[0]]
+
+    cursor.execute("SELECT DISTINCT tipo FROM correos_log ORDER BY tipo ASC")
+    tipos_opt = [t[0] for t in cursor.fetchall() if t[0]]
+
+    query = "SELECT fecha, destinatario, asunto, tipo, estado, detalle_error FROM correos_log WHERE 1=1"
+    params = []
+
+    if q_destinatario:
+        query += " AND destinatario = %s" if db_type == 'postgres' else " AND destinatario = ?"
+        params.append(q_destinatario)
+
+    if q_tipo:
+        query += " AND tipo = %s" if db_type == 'postgres' else " AND tipo = ?"
+        params.append(q_tipo)
+
+    if q_estado:
+        query += " AND estado = %s" if db_type == 'postgres' else " AND estado = ?"
+        params.append(q_estado)
+
+    if q_busqueda:
+        p_busq = f"%{q_busqueda}%"
+        if db_type == 'postgres':
+            query += " AND (destinatario ILIKE %s OR asunto ILIKE %s)"
+        else:
+            query += " AND (destinatario LIKE ? OR asunto LIKE ?)"
+        params.extend([p_busq, p_busq])
+
+    query += " ORDER BY id DESC LIMIT 500"
+
+    cursor.execute(query, tuple(params))
+    lista_correos = cursor.fetchall()
+    conn.close()
+
+    return render_template(
+        'logs_correos.html',
+        correos=lista_correos,
+        destinatarios_opt=destinatarios_opt,
+        tipos_opt=tipos_opt,
+        q_destinatario=q_destinatario,
+        q_tipo=q_tipo,
+        q_estado=q_estado,
+        q_busqueda=q_busqueda
+    )
+
+# 📊 EXPORTAR BITÁCORA DE CORREOS A EXCEL / CSV
+@app.route('/exportar_logs_correos_csv')
+@login_required
+@agente_o_admin_required
+def exportar_logs_correos_csv():
+    q_destinatario = request.args.get('destinatario', '').strip()
+    q_tipo = request.args.get('tipo', '').strip()
+    q_estado = request.args.get('estado', '').strip()
+    q_busqueda = request.args.get('q', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    query = "SELECT fecha, destinatario, asunto, tipo, estado, detalle_error FROM correos_log WHERE 1=1"
+    params = []
+
+    if q_destinatario:
+        query += " AND destinatario = %s" if db_type == 'postgres' else " AND destinatario = ?"
+        params.append(q_destinatario)
+
+    if q_tipo:
+        query += " AND tipo = %s" if db_type == 'postgres' else " AND tipo = ?"
+        params.append(q_tipo)
+
+    if q_estado:
+        query += " AND estado = %s" if db_type == 'postgres' else " AND estado = ?"
+        params.append(q_estado)
+
+    if q_busqueda:
+        p_busq = f"%{q_busqueda}%"
+        if db_type == 'postgres':
+            query += " AND (destinatario ILIKE %s OR asunto ILIKE %s)"
+        else:
+            query += " AND (destinatario LIKE ? OR asunto LIKE ?)"
+        params.extend([p_busq, p_busq])
+
+    query += " ORDER BY id DESC"
+
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['FECHA Y HORA', 'DESTINATARIO', 'ASUNTO', 'TIPO', 'ESTADO', 'DETALLE DEL ERROR'])
+
+    for row in rows:
+        writer.writerow(row)
+
+    csv_bytes = '﻿' + output.getvalue()
+
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    filename = f"Arkiv_Log_Correos_{fecha_filename}.csv"
 
     headers = {
         'Content-Type': 'text/csv; charset=utf-8',
