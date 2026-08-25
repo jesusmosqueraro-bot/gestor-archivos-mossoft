@@ -272,69 +272,82 @@
 
     <!-- MODAL NUEVO / EDITAR ACTIVO -->
     <div id="modal-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-6xl w-full p-6 shadow-2xl my-4">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 id="modal-activo-titulo" class="text-base font-bold text-white">Nuevo Activo</h3>
                 <button onclick="cerrarModalActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form id="form-activo" method="POST" action="/tickets/inventario/nuevo" class="flex flex-col gap-3 text-xs">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de Placa *</label>
-                    <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: 15011" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <p class="text-[10px] text-slate-500 mt-1">Debe ser único: no puede repetirse en dos activos activos a la vez.</p>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
-                        <select name="tipo_activo" id="input-activo-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                            {% for t in tipos_activo %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-                        </select>
+
+                <!-- Dos columnas en pantallas anchas: a la izquierda la identificación del
+                     activo (placa, tipo/estado, marca/modelo, serie), a la derecha a quién está
+                     asignado, la sede y observaciones — así el formulario corre en paralelo en
+                     vez de apilarse en una sola columna larga. -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">
+                    <div class="flex flex-col gap-3">
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de Placa *</label>
+                            <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: 15011" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <p class="text-[10px] text-slate-500 mt-1">Debe ser único: no puede repetirse en dos activos activos a la vez.</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                                <select name="tipo_activo" id="input-activo-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    {% for t in tipos_activo %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                                <select name="estado" id="input-activo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    {% for e in estados_activo %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Marca</label>
+                                <input type="text" name="marca" id="input-activo-marca" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Modelo</label>
+                                <input type="text" name="modelo" id="input-activo-modelo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
+                            <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
-                        <select name="estado" id="input-activo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                            {% for e in estados_activo %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
-                        </select>
+
+                    <div class="flex flex-col gap-3">
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a</label>
+                            <input type="text" name="asignado_a" id="input-activo-asignado" autocomplete="off" placeholder="Nombre del colaborador (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <div class="flex items-center gap-2 mt-1.5">
+                                <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
+                                    <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                                </button>
+                            </div>
+                            <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
+                            <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                            <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Sin especificar</option>
+                                {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="flex-1 flex flex-col">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
+                            <textarea name="observaciones" id="input-activo-observaciones" rows="2" class="w-full flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                        </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Marca</label>
-                        <input type="text" name="marca" id="input-activo-marca" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    </div>
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Modelo</label>
-                        <input type="text" name="modelo" id="input-activo-modelo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
-                    <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                </div>
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a</label>
-                    <input type="text" name="asignado_a" id="input-activo-asignado" autocomplete="off" placeholder="Nombre del colaborador (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <div class="flex items-center gap-2 mt-1.5">
-                        <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                        <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
-                            <i class="fa-solid fa-magnifying-glass"></i> Buscar
-                        </button>
-                    </div>
-                    <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
-                    <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
-                </div>
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
-                    <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                        <option value="">Sin especificar</option>
-                        {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
-                    <textarea name="observaciones" id="input-activo-observaciones" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
-                </div>
+
                 <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-orange-500/20 transition-all active:scale-95 mt-2">
                     <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar
                 </button>
@@ -530,6 +543,7 @@
             document.getElementById('input-activo-observaciones').value = '';
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
+            document.getElementById('modal-activo').scrollTop = 0;
         }
         function abrirModalEditar(activo) {
             document.getElementById('modal-activo-titulo').textContent = 'Editar Activo';
@@ -547,6 +561,7 @@
             document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
+            document.getElementById('modal-activo').scrollTop = 0;
         }
         function cerrarModalActivo() {
             document.getElementById('modal-activo').classList.add('hidden');
