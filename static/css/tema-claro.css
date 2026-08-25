@@ -127,3 +127,76 @@ html[data-theme="claro"] .card-acento-amber    { background-color: #fef3c7 !impo
 html[data-theme="claro"] .card-acento-sky      { background-color: #e0f2fe !important; border-color: #bae6fd !important; }
 html[data-theme="claro"] .card-acento-indigo   { background-color: #e0e7ff !important; border-color: #c7d2fe !important; }
 html[data-theme="claro"] .card-acento-teal     { background-color: #ccfbf1 !important; border-color: #99f6e4 !important; }
+
+/* Tarjetas/paneles del RESTO de páginas (Soporte TI, Bóveda de Accesos, Usuarios,
+   Auditoría, Papelera, Respaldos, etc.): en tema oscuro todos los paneles comparten
+   el mismo gris neutro (bg-slate-800/60, bg-slate-900/80, etc.) sin importar de qué
+   página se trate. En tema claro esto se veía plano/gris — igual que pasaba en las
+   tarjetas de "bienvenida" antes de darles color. Aquí cada PÁGINA recibe una clase
+   'pagina-acento-{color}' en el <body> (a juego con el ícono/color ya establecido
+   en su propio encabezado) y sus paneles genéricos pasan a un pastel sólido de ese
+   mismo color, en vez del gris genérico. Se dejan fuera a propósito: la barra de
+   navegación (bg-slate-800/80, bg-slate-900/60) y el botón flotante de tema
+   (bg-slate-800/90) — esos deben seguir neutros en todas las páginas. */
+html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-cyan .bg-slate-900\/80    { background-color: #cffafe !important; }
+html[data-theme="claro"] .pagina-acento-cyan .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-cyan .border-slate-800    { border-color: #a5f3fc !important; }
+
+html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-blue .bg-slate-900\/80    { background-color: #dbeafe !important; }
+html[data-theme="claro"] .pagina-acento-blue .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-blue .border-slate-800    { border-color: #bfdbfe !important; }
+
+html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-orange .bg-slate-900\/80  { background-color: #ffedd5 !important; }
+html[data-theme="claro"] .pagina-acento-orange .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-orange .border-slate-800  { border-color: #fed7aa !important; }
+
+html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-emerald .bg-slate-900\/80 { background-color: #d1fae5 !important; }
+html[data-theme="claro"] .pagina-acento-emerald .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-emerald .border-slate-800 { border-color: #a7f3d0 !important; }
+
+html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-900\/80 { background-color: #fae8ff !important; }
+html[data-theme="claro"] .pagina-acento-fuchsia .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-fuchsia .border-slate-800 { border-color: #f5d0fe !important; }
+
+html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-purple .bg-slate-900\/80  { background-color: #f3e8ff !important; }
+html[data-theme="claro"] .pagina-acento-purple .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-purple .border-slate-800  { border-color: #e9d5ff !important; }
+
+html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-rose .bg-slate-900\/80    { background-color: #ffe4e6 !important; }
+html[data-theme="claro"] .pagina-acento-rose .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-rose .border-slate-800    { border-color: #fecdd3 !important; }
+
+html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-sky .bg-slate-900\/80     { background-color: #e0f2fe !important; }
+html[data-theme="claro"] .pagina-acento-sky .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-sky .border-slate-800     { border-color: #bae6fd !important; }
+
+html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-indigo .bg-slate-900\/80  { background-color: #e0e7ff !important; }
+html[data-theme="claro"] .pagina-acento-indigo .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-indigo .border-slate-800  { border-color: #c7d2fe !important; }
