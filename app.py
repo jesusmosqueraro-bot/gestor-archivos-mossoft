@@ -4213,6 +4213,46 @@ def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
         return False
 
 
+# 👋📧 Correo de bienvenida al crear una cuenta nueva desde Gestión de Usuarios: le avisa al
+# usuario su nombre de usuario y contraseña temporal, y le pide cambiarla en su primer ingreso.
+# Se llama en un hilo aparte (threading.Thread) para no hacer esperar al admin que la creó.
+# 🛡️ La contraseña SÍ viaja en el cuerpo del correo (es la única forma de que el usuario la
+# reciba), pero NUNCA se guarda en correos_log — ahí solo queda el asunto genérico, igual que
+# con el código de recuperación (ver registrar_correo_log).
+def enviar_correo_bienvenida(email_destino, usuario, nombre_completo, password_temporal):
+    if not email_destino:
+        return False
+    asunto = "Bienvenido a Arkiv - Tu cuenta fue creada"
+    try:
+        cuerpo = (
+            f"Hola {nombre_completo},\n\n"
+            f"Se creó tu cuenta en el sistema ARKIV. Estos son tus datos de acceso:\n\n"
+            f"Usuario: {usuario}\n"
+            f"Contraseña temporal: {password_temporal}\n\n"
+            f"Por seguridad, te pedimos cambiar esta contraseña apenas inicies sesión por primera vez "
+            f"(la puedes cambiar desde tu perfil, o con la opción '¿Olvidaste tu contraseña?' del login).\n\n"
+            f"Ingresa aquí: https://gestor-archivos-mossoft-1.onrender.com/login\n\n"
+            "Si no esperabas este correo, contacta a tu administrador.\n"
+            "---\nEquipo de Soporte - ARKIV System"
+        )
+        payload = {"para": email_destino, "asunto": asunto, "cuerpo": cuerpo}
+        if requests:
+            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=15)
+            print(f"✅ Correo de bienvenida enviado a {email_destino}. Status: {res.status_code}")
+        else:
+            data_json = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=15) as response:
+                response.read()
+            print(f"✅ Correo de bienvenida enviado a {email_destino} vía urllib.")
+        registrar_correo_log(email_destino, asunto, 'bienvenida', 'enviado')
+        return True
+    except Exception as e:
+        print(f"⚠️ Error enviando correo de bienvenida a {email_destino}: {e}")
+        registrar_correo_log(email_destino, asunto, 'bienvenida', 'error', str(e)[:300])
+        return False
+
+
 # 🎫📧 Notificaciones por correo de Tickets: reutiliza el mismo webhook de Apps Script que ya
 # usa la recuperación de contraseña. Se llama siempre en un hilo aparte (threading.Thread)
 # desde las rutas de tickets para no hacer esperar al usuario a que el correo salga.
@@ -5425,6 +5465,22 @@ def gestion_usuarios():
                 conn.commit()
                 registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
                 conn.close()
+
+                # 👋 Correo de bienvenida (usuario + contraseña temporal) al correo del nuevo
+                # usuario, y notificación de campanita dentro de Arkiv para su propia cuenta.
+                # El correo se manda en un hilo aparte para no hacer esperar al admin.
+                threading.Thread(
+                    target=enviar_correo_bienvenida,
+                    args=(nuevo_email, nuevo_user, nombre_completo, nuevo_pass)
+                ).start()
+                crear_notificacion(
+                    nuevo_user,
+                    f"¡Bienvenido a Arkiv, {primer_nombre}! Tu cuenta ya está activa. Revisa tu correo "
+                    f"({nuevo_email}) para conocer tu contraseña temporal y recuerda cambiarla en tu "
+                    f"primer inicio de sesión.",
+                    tipo='bienvenida'
+                )
+
                 return redirect(url_for('gestion_usuarios', creado=nuevo_user))
             except Exception as e:
                 conn.rollback()
