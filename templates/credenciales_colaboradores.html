@@ -33,9 +33,12 @@
                 <i class="fa-solid fa-plus"></i>
                 <span>Nueva Alta</span>
             </button>
-            {% include 'partials/buscador.html' %}
+            <div class="flex items-center gap-2">
+                {% include 'partials/buscador.html' %}
                 {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/seguridad_boton.html' %}
                 {% include 'partials/campanita.html' %}
+            </div>
         </div>
     </nav>
 
