@@ -16,6 +16,8 @@ import hmac
 import traceback
 import time
 import decimal
+import secrets
+import pyotp
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -462,6 +464,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
                 id SERIAL PRIMARY KEY, colaborador VARCHAR(200) NOT NULL, aplicativo VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion VARCHAR(100), fecha_solicitud VARCHAR(100), analista_gestiona VARCHAR(150), solicitado_por VARCHAR(150), capacitado_por VARCHAR(150), medio_envio VARCHAR(30), estado VARCHAR(20) DEFAULT 'activo', fecha_deshabilitacion VARCHAR(100), deshabilitado_por VARCHAR(150), fecha_registro VARCHAR(100) NOT NULL, registrado_por VARCHAR(150) NOT NULL
             )''')
+            # 🔐 Códigos de respaldo (recuperación) de la verificación en dos pasos (2FA): se
+            # generan 10 de un solo uso al activar el 2FA, se guardan SOLO su hash (nunca el
+            # código en claro) y sirven para entrar si la persona pierde su app autenticadora.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, codigo_hash VARCHAR(255) NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion VARCHAR(100) NOT NULL, fecha_uso VARCHAR(100)
+            )''')
             conn.commit()
 
             for col_query in [
@@ -549,7 +557,11 @@ def init_db():
                 # User-Agent) de cada inicio/cierre de sesión — ver registrar_log() y la ruta
                 # /perfil/historial-sesiones. NULL para el resto de acciones del log (no aplica).
                 "ALTER TABLE logs ADD COLUMN IF NOT EXISTS ip VARCHAR(100);",
-                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dispositivo VARCHAR(255);"
+                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dispositivo VARCHAR(255);",
+                # 🔐 Verificación en dos pasos (2FA/TOTP): secreto TOTP de la cuenta (NULL hasta
+                # que se active) y si ya quedó confirmado/activo. Ver rutas /perfil/2fa*.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64);",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -632,6 +644,11 @@ def init_db():
             # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, colaborador TEXT NOT NULL, aplicativo TEXT NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion TEXT, fecha_solicitud TEXT, analista_gestiona TEXT, solicitado_por TEXT, capacitado_por TEXT, medio_envio TEXT, estado TEXT DEFAULT 'activo', fecha_deshabilitacion TEXT, deshabilitado_por TEXT, fecha_registro TEXT NOT NULL, registrado_por TEXT NOT NULL
+            )''')
+            # 🔐 Códigos de respaldo (recuperación) del 2FA. Ver comentario equivalente en la
+            # rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, codigo_hash TEXT NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion TEXT NOT NULL, fecha_uso TEXT
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -753,6 +770,17 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_log_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🔐 Verificación en dos pasos (2FA/TOTP). Ver comentario equivalente en la rama de
+            # Postgres.
+            for col_totp_sql in [
+                "ALTER TABLE usuarios ADD COLUMN totp_secret TEXT;",
+                "ALTER TABLE usuarios ADD COLUMN totp_habilitado INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_totp_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -910,6 +938,102 @@ def _detectar_dispositivo(user_agent):
     if so:
         return so
     return user_agent[:60]
+
+# 🔐 VERIFICACIÓN EN DOS PASOS (2FA/TOTP) — helpers usados por /perfil/2fa*, login() y
+# /login/2fa. El secreto TOTP y los códigos de respaldo (de un solo uso) permiten iniciar
+# sesión incluso si la persona pierde acceso a su app autenticadora (Google Authenticator,
+# Authy, etc.) mientras aún conserva alguno de sus 10 códigos de respaldo.
+NOMBRE_EMISOR_2FA = "Arkiv - Preventiva"
+
+
+def _normalizar_codigo_respaldo(codigo):
+    """Los códigos de respaldo se muestran como 'XXXX-XXXX' pero se aceptan con o sin guion,
+    en mayúsculas o minúsculas: se normalizan antes de hashear/comparar para que ambos formatos
+    funcionen igual."""
+    return re.sub(r'[^A-Z0-9]', '', (codigo or '').upper())
+
+
+def _generar_codigos_respaldo_2fa(usuario):
+    """Genera 10 códigos de respaldo nuevos para 'usuario', reemplazando cualquier lote previo
+    (al activar el 2FA por primera vez o al regenerarlos manualmente). Devuelve la lista de
+    códigos EN CLARO — es la única vez que existen en texto plano; en la base de datos solo se
+    guarda su hash, igual que las contraseñas."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_del = "DELETE FROM totp_codigos_respaldo WHERE usuario = %s" if db_type == 'postgres' else "DELETE FROM totp_codigos_respaldo WHERE usuario = ?"
+        cursor.execute(q_del, (usuario,))
+
+        codigos_planos = []
+        fecha_actual = obtener_fecha_actual()
+        q_ins = "INSERT INTO totp_codigos_respaldo (usuario, codigo_hash, usado, fecha_creacion) VALUES (%s, %s, 0, %s)" if db_type == 'postgres' else "INSERT INTO totp_codigos_respaldo (usuario, codigo_hash, usado, fecha_creacion) VALUES (?, ?, 0, ?)"
+        for _ in range(10):
+            crudo = secrets.token_hex(4).upper()  # 8 caracteres hexadecimales
+            codigo_formateado = f"{crudo[:4]}-{crudo[4:]}"
+            codigos_planos.append(codigo_formateado)
+            cursor.execute(q_ins, (usuario, generate_password_hash(crudo), fecha_actual))
+
+        conn.commit()
+        conn.close()
+        return codigos_planos
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error generando códigos de respaldo 2FA: {e}")
+        return []
+
+
+def _verificar_codigo_respaldo_2fa(usuario, codigo_ingresado):
+    """Verifica un código de respaldo de un solo uso. Si es válido lo marca como usado (no se
+    puede reutilizar) y devuelve True; en cualquier otro caso devuelve False."""
+    codigo_normalizado = _normalizar_codigo_respaldo(codigo_ingresado)
+    if not codigo_normalizado:
+        return False
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT id, codigo_hash FROM totp_codigos_respaldo WHERE usuario = %s AND usado = 0" if db_type == 'postgres' else "SELECT id, codigo_hash FROM totp_codigos_respaldo WHERE usuario = ? AND usado = 0"
+        cursor.execute(q_sel, (usuario,))
+        filas = cursor.fetchall()
+
+        for codigo_id, codigo_hash in filas:
+            if check_password_hash(codigo_hash, codigo_normalizado):
+                fecha_actual = obtener_fecha_actual()
+                q_upd = "UPDATE totp_codigos_respaldo SET usado = 1, fecha_uso = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE totp_codigos_respaldo SET usado = 1, fecha_uso = ? WHERE id = ?"
+                cursor.execute(q_upd, (fecha_actual, codigo_id))
+                conn.commit()
+                conn.close()
+                return True
+
+        conn.close()
+        return False
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error verificando código de respaldo 2FA: {e}")
+        return False
+
+
+def _desactivar_2fa_cuenta(usuario):
+    """Apaga el 2FA de una cuenta: limpia el secreto TOTP y borra sus códigos de respaldo. Lo
+    usan tanto /perfil/2fa/desactivar (el propio usuario, con su contraseña) como el admin desde
+    Gestión de Usuarios (recuperación por pérdida de dispositivo)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_upd = "UPDATE usuarios SET totp_secret = NULL, totp_habilitado = FALSE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET totp_secret = NULL, totp_habilitado = 0 WHERE usuario = ?"
+        cursor.execute(q_upd, (usuario,))
+        q_del = "DELETE FROM totp_codigos_respaldo WHERE usuario = %s" if db_type == 'postgres' else "DELETE FROM totp_codigos_respaldo WHERE usuario = ?"
+        cursor.execute(q_del, (usuario,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error desactivando 2FA: {e}")
+        return False
 
 # 📧 Bitácora de correos enviados (ver /logs/correos). Se llama desde enviar_correo_ticket y
 # enviar_correo_recuperacion, casi siempre dentro de un hilo aparte (threading.Thread), por eso
@@ -4626,7 +4750,7 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -4651,6 +4775,17 @@ def login():
                     if (user[3] or 'activo') == 'inactivo':
                         registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso de una cuenta desactivada.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                         return render_template('login.html', error="Tu cuenta ha sido desactivada. Contacta a un administrador.")
+
+                    # 🔐 Si la cuenta tiene activada la verificación en dos pasos, la sesión NO se
+                    # abre todavía: se guarda solo un marcador "pre-2FA" (session['logged_in']
+                    # sigue sin existir, así que validar_instancia_y_sesion la deja pasar de largo)
+                    # y se manda a /login/2fa a pedir el código de la app autenticadora.
+                    if len(user) > 6 and user[6]:
+                        session['pre_2fa_usuario'] = user[0]
+                        session['pre_2fa_expira'] = (datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp()
+                        session.pop('pre_2fa_intentos', None)
+                        return redirect(url_for('login_2fa'))
+
                     session.permanent = True
                     session['logged_in'] = True
                     session['username'] = user[0]
@@ -4671,6 +4806,80 @@ def login():
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
     return render_template('login.html', mensaje_expirado=mensaje_expirado)
+
+
+@app.route('/login/2fa', methods=['GET', 'POST'])
+def login_2fa():
+    """Segundo paso del inicio de sesión para las cuentas con 2FA activo. Solo es accesible tras
+    validar usuario/contraseña en /login (que deja el marcador 'pre_2fa_usuario' en la sesión,
+    con una ventana de 10 minutos para completarlo). No lleva @login_required porque, por
+    definición, la sesión todavía no está autenticada en este punto."""
+    usuario_pendiente = session.get('pre_2fa_usuario')
+    expira = session.get('pre_2fa_expira')
+
+    if not usuario_pendiente or not expira or datetime.now(timezone.utc).timestamp() > expira:
+        session.pop('pre_2fa_usuario', None)
+        session.pop('pre_2fa_expira', None)
+        session.pop('pre_2fa_intentos', None)
+        return redirect(url_for('login'))
+
+    error = None
+    if request.method == 'POST':
+        codigo = re.sub(r'\s+', '', request.form.get('codigo', '') or '')
+        codigo_respaldo = (request.form.get('codigo_respaldo') or '').strip()
+
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        query = "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret FROM usuarios WHERE usuario = ?"
+        cursor.execute(query, (usuario_pendiente,))
+        user = cursor.fetchone()
+        conn.close()
+
+        # 🛡️ Si la cuenta desapareció o fue bloqueada mientras esperaba el segundo paso, se
+        # corta el flujo en vez de dejarla completar el login.
+        if not user or (user[2] or 'activo') == 'inactivo':
+            session.pop('pre_2fa_usuario', None)
+            session.pop('pre_2fa_expira', None)
+            session.pop('pre_2fa_intentos', None)
+            return redirect(url_for('login'))
+
+        es_valido = False
+        via_respaldo = False
+        if codigo_respaldo:
+            es_valido = _verificar_codigo_respaldo_2fa(usuario_pendiente, codigo_respaldo)
+            via_respaldo = es_valido
+        elif codigo and user[5]:
+            es_valido = pyotp.TOTP(user[5]).verify(codigo, valid_window=1)
+
+        if es_valido:
+            session.pop('pre_2fa_usuario', None)
+            session.pop('pre_2fa_expira', None)
+            session.pop('pre_2fa_intentos', None)
+            session.permanent = True
+            session['logged_in'] = True
+            session['username'] = user[0]
+            session['rol'] = user[1]
+            session['instance_id'] = SERVER_INSTANCE_ID
+            session['tema'] = user[3] or 'oscuro'
+            session['debe_cambiar_password'] = bool(user[4])
+            detalle = "Inicio de sesión exitoso (código de respaldo 2FA)" if via_respaldo else "Inicio de sesión exitoso (verificación en dos pasos)"
+            registrar_log(user[0], "Inicio de Sesión", detalle, ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+            return redirect(url_for('bienvenida'))
+
+        # 🛡️ Límite de intentos: 5 códigos incorrectos consecutivos obligan a volver a
+        # ingresar usuario y contraseña, igual que en la recuperación de contraseña.
+        intentos = session.get('pre_2fa_intentos', 0) + 1
+        session['pre_2fa_intentos'] = intentos
+        if intentos >= 5:
+            registrar_log(usuario_pendiente, "Inicio de Sesión Bloqueado", "Demasiados intentos fallidos de verificación en dos pasos.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+            session.pop('pre_2fa_usuario', None)
+            session.pop('pre_2fa_expira', None)
+            session.pop('pre_2fa_intentos', None)
+            return render_template('login.html', error="Demasiados intentos fallidos. Vuelve a iniciar sesión.")
+
+        error = "El código ingresado no es válido. Verifica la hora de tu dispositivo o usa un código de respaldo."
+
+    return render_template('login_2fa.html', error=error)
 
 # 📊 RUTAS DE MÉTRICAS
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])
@@ -5722,9 +5931,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -5734,6 +5943,35 @@ def gestion_usuarios():
         usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas(),
         error_cedula=error_cedula
     )
+
+
+@app.route('/usuarios/<usuario>/2fa/desactivar', methods=['POST'])
+@login_required
+@admin_required
+def admin_desactivar_2fa(usuario):
+    """Permite a un admin desactivar el 2FA de OTRA cuenta — recuperación para cuando esa
+    persona perdió su dispositivo/app autenticadora y ya no puede generar códigos ni tiene a la
+    mano sus códigos de respaldo. No requiere la contraseña de esa cuenta (el admin no la
+    conoce); la protección aquí es que la acción exige sesión de administrador y queda auditada
+    en el log."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT usuario, rol FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol FROM usuarios WHERE usuario = ?"
+    cursor.execute(q_sel, (usuario,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return redirect(url_for('gestion_usuarios'))
+
+    # 🛡️ Misma protección que ya existe para editar/eliminar: solo el super-admin puede tocar
+    # la cuenta de otro admin (incluida la desactivación de su 2FA).
+    if row[1] == 'admin' and session.get('username') != 'admin' and row[0] != session.get('username'):
+        return redirect(url_for('gestion_usuarios'))
+
+    _desactivar_2fa_cuenta(usuario)
+    registrar_log(session['username'], "Desactivación Administrativa de 2FA", f"El administrador desactivó el 2FA de la cuenta '{usuario}' (recuperación por pérdida de dispositivo).")
+    return redirect(url_for('gestion_usuarios'))
 
 
 @app.route('/usuarios/buscar_cedula')
@@ -6284,6 +6522,122 @@ def cambiar_password_perfil():
             conn.close()
 
     return render_template('cambiar_password.html', obligatorio=obligatorio, error=error)
+
+
+@app.route('/perfil/2fa', methods=['GET'])
+@login_required
+def perfil_2fa():
+    """Página de autoservicio de verificación en dos pasos (2FA). Si la cuenta ya la tiene
+    activa, muestra su estado y las opciones de desactivar/regenerar códigos de respaldo. Si no,
+    genera (o reutiliza, mientras siga en la sesión) un secreto TOTP pendiente y muestra el
+    código QR + el formulario para confirmarlo con el primer código de 6 dígitos."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = "SELECT totp_habilitado FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT totp_habilitado FROM usuarios WHERE usuario = ?"
+    cursor.execute(q, (session['username'],))
+    row = cursor.fetchone()
+    conn.close()
+    habilitado = bool(row[0]) if row else False
+
+    if habilitado:
+        return render_template('perfil_2fa.html', habilitado=True, error=request.args.get('error'))
+
+    secreto_pendiente = session.get('totp_pendiente_secret')
+    if not secreto_pendiente:
+        secreto_pendiente = pyotp.random_base32()
+        session['totp_pendiente_secret'] = secreto_pendiente
+
+    otpauth_uri = pyotp.TOTP(secreto_pendiente).provisioning_uri(name=session['username'], issuer_name=NOMBRE_EMISOR_2FA)
+    return render_template(
+        'perfil_2fa.html', habilitado=False, secreto=secreto_pendiente, otpauth_uri=otpauth_uri,
+        error=request.args.get('error')
+    )
+
+
+@app.route('/perfil/2fa/confirmar', methods=['POST'])
+@login_required
+def perfil_2fa_confirmar():
+    """Confirma la activación: valida el primer código de 6 dígitos contra el secreto pendiente
+    guardado en la sesión y, si coincide, lo persiste en la cuenta y genera los 10 códigos de
+    respaldo (que se muestran UNA sola vez, en esta misma respuesta)."""
+    secreto_pendiente = session.get('totp_pendiente_secret')
+    codigo = re.sub(r'\s+', '', request.form.get('codigo', '') or '')
+
+    if not secreto_pendiente:
+        return redirect(url_for('perfil_2fa'))
+
+    if not codigo or not pyotp.TOTP(secreto_pendiente).verify(codigo, valid_window=1):
+        return redirect(url_for('perfil_2fa', error="El código ingresado no es válido. Inténtalo de nuevo."))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_upd = "UPDATE usuarios SET totp_secret = %s, totp_habilitado = TRUE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET totp_secret = ?, totp_habilitado = 1 WHERE usuario = ?"
+        cursor.execute(q_upd, (secreto_pendiente, session['username']))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return redirect(url_for('perfil_2fa', error="No se pudo activar la verificación en dos pasos. Intenta de nuevo."))
+
+    session.pop('totp_pendiente_secret', None)
+    codigos_respaldo = _generar_codigos_respaldo_2fa(session['username'])
+    registrar_log(session['username'], "Activación de 2FA", "El usuario activó la verificación en dos pasos en su cuenta.")
+    return render_template('perfil_2fa.html', habilitado=True, codigos_respaldo=codigos_respaldo, mostrar_codigos=True)
+
+
+@app.route('/perfil/2fa/regenerar_respaldo', methods=['POST'])
+@login_required
+def perfil_2fa_regenerar_respaldo():
+    """Invalida los códigos de respaldo actuales y genera 10 nuevos, mostrados una sola vez.
+    Requiere reconfirmar la contraseña actual: son códigos que permiten iniciar sesión sin la
+    app autenticadora, así que regenerarlos merece la misma verificación que desactivar el 2FA."""
+    password_actual = request.form.get('password_actual') or ''
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT password_hash, totp_habilitado FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT password_hash, totp_habilitado FROM usuarios WHERE usuario = ?"
+    cursor.execute(q_sel, (session['username'],))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not bool(row[1]):
+        return redirect(url_for('perfil_2fa'))
+
+    clave_db = str(row[0] or '')
+    es_valida = check_password_hash(clave_db, password_actual) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else hmac.compare_digest(clave_db, password_actual)
+    if not es_valida:
+        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.")
+
+    codigos_respaldo = _generar_codigos_respaldo_2fa(session['username'])
+    registrar_log(session['username'], "Regeneración de Códigos de Respaldo 2FA", "El usuario regeneró sus códigos de respaldo del 2FA.")
+    return render_template('perfil_2fa.html', habilitado=True, codigos_respaldo=codigos_respaldo, mostrar_codigos=True)
+
+
+@app.route('/perfil/2fa/desactivar', methods=['POST'])
+@login_required
+def perfil_2fa_desactivar():
+    """Desactiva el 2FA de la propia cuenta. Requiere la contraseña actual: sin esta
+    confirmación, cualquiera que dejara una sesión abierta podría apagar la protección sin
+    saber la contraseña."""
+    password_actual = request.form.get('password_actual') or ''
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT password_hash FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT password_hash FROM usuarios WHERE usuario = ?"
+    cursor.execute(q_sel, (session['username'],))
+    row = cursor.fetchone()
+    conn.close()
+
+    clave_db = str(row[0] or '') if row else ''
+    es_valida = check_password_hash(clave_db, password_actual) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else hmac.compare_digest(clave_db, password_actual)
+
+    if not es_valida:
+        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.")
+
+    _desactivar_2fa_cuenta(session['username'])
+    session.pop('totp_pendiente_secret', None)
+    registrar_log(session['username'], "Desactivación de 2FA", "El usuario desactivó la verificación en dos pasos en su cuenta.")
+    return redirect(url_for('perfil_2fa'))
 
 
 @app.route('/logout')
