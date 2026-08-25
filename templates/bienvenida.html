@@ -113,7 +113,7 @@
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             
             <!-- 1. Gestor de Instructivos -->
-            <a href="{{ url_for('index') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('index') }}" class="group card-acento-cyan bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-folder-open"></i>
@@ -128,7 +128,7 @@
             </a>
 
             <!-- 2. Novedades y Comunicados -->
-            <a href="{{ url_for('ver_comunicados') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-blue-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_comunicados') }}" class="group card-acento-blue bg-slate-900/80 border border-slate-800 hover:border-blue-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-bullhorn"></i>
@@ -143,7 +143,7 @@
             </a>
 
             <!-- 3. Soporte TI / Tickets -->
-            <a href="{{ url_for('inicio_tickets') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-orange-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('inicio_tickets') }}" class="group card-acento-orange bg-slate-900/80 border border-slate-800 hover:border-orange-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-orange-500/10 text-orange-400 border border-orange-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-headset"></i>
@@ -159,7 +159,7 @@
 
             {% if rol in ['admin', 'agente'] %}
             <!-- 4. Bóveda de Accesos (Admin/Agente) -->
-            <a href="{{ url_for('ver_credenciales') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_credenciales') }}" class="group card-acento-emerald bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-key"></i>
@@ -174,7 +174,7 @@
             </a>
 
             <!-- 4.5 Altas de Credenciales de Colaboradores (Admin/Agente) -->
-            <a href="{{ url_for('ver_credenciales_colaboradores') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-fuchsia-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_credenciales_colaboradores') }}" class="group card-acento-fuchsia bg-slate-900/80 border border-slate-800 hover:border-fuchsia-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-id-card-clip"></i>
@@ -191,7 +191,7 @@
 
             {% if rol == 'admin' %}
             <!-- 5. Gestión de Usuarios (Solo Admin) -->
-            <a href="{{ url_for('gestion_usuarios') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-purple-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('gestion_usuarios') }}" class="group card-acento-purple bg-slate-900/80 border border-slate-800 hover:border-purple-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-users-gear"></i>
@@ -208,7 +208,7 @@
 
             {% if rol in ['admin', 'agente'] %}
             <!-- 6. Papelera de Reciclaje (Admin/Agente) -->
-            <a href="{{ url_for('ver_papelera') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_papelera') }}" class="group card-acento-rose bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-trash-can"></i>
@@ -223,7 +223,7 @@
             </a>
 
             <!-- 7. Auditoría y Logs (Admin/Agente) -->
-            <a href="{{ url_for('ver_logs') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_logs') }}" class="group card-acento-amber bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-shield-halved"></i>
@@ -238,7 +238,7 @@
             </a>
 
             <!-- 7b. Log de Correos Enviados (Admin/Agente) -->
-            <a href="{{ url_for('ver_logs_correos') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-sky-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_logs_correos') }}" class="group card-acento-sky bg-slate-900/80 border border-slate-800 hover:border-sky-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-envelope-circle-check"></i>
@@ -255,7 +255,7 @@
 
             {% if session.get('username') == 'admin' %}
             <!-- 8. Gestor de Base de Datos (Solo super-admin: no lo ven agentes ni otros admins) -->
-            <a href="{{ url_for('visor_db') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('visor_db') }}" class="group card-acento-indigo bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-database"></i>
@@ -270,7 +270,7 @@
             </a>
 
             <!-- 9. Respaldos de Base de Datos (Solo super-admin: no lo ven agentes ni otros admins) -->
-            <a href="{{ url_for('ver_respaldos') }}" class="group bg-slate-900/80 border border-slate-800 hover:border-teal-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+            <a href="{{ url_for('ver_respaldos') }}" class="group card-acento-teal bg-slate-900/80 border border-slate-800 hover:border-teal-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
                         <i class="fa-solid fa-server"></i>
