@@ -51,6 +51,7 @@
             <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
             <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
             <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
             {% endif %}
         </div>
     </div>
@@ -250,6 +251,17 @@
             <form method="POST" action="/tickets/crear" enctype="multipart/form-data" class="flex flex-col gap-3 text-xs">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
+                {% if plantillas %}
+                <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                    <label class="block text-slate-400 font-bold mb-1.5 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-copy mr-1"></i>Usar una plantilla (opcional)</label>
+                    <select id="selector-plantilla-ticket" onchange="aplicarPlantillaTicket(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin plantilla — empezar en blanco</option>
+                        {% for p in plantillas %}<option value="{{ p.id }}">{{ p.nombre }}</option>{% endfor %}
+                    </select>
+                    <p class="text-slate-500 text-[10px] mt-1">Prellena el resto del formulario; puedes editar cualquier campo antes de enviar.</p>
+                </div>
+                {% endif %}
+
                 <div>
                     <label class="block text-slate-400 font-bold mb-1.5 uppercase tracking-wider text-[10px]">Tipo de solicitud *</label>
                     <div class="grid grid-cols-2 gap-2">
@@ -386,6 +398,38 @@
         if (new URLSearchParams(window.location.search).get('crear')) {
             abrirModalCrear();
         }
+
+        // 📋 Plantillas de solicitud (ver /tickets/plantillas): al elegir una del selector se
+        // prellenan tipo, título, categoría, prioridad, área, sede y descripción — todo sigue
+        // siendo editable antes de enviar la solicitud.
+        {% if plantillas %}
+        const PLANTILLAS_TICKET = {{ plantillas | tojson }};
+
+        function aplicarPlantillaTicket(idStr) {
+            if (!idStr) return;
+            const id = parseInt(idStr, 10);
+            const p = PLANTILLAS_TICKET.find(function (x) { return x.id === id; });
+            if (!p) return;
+
+            const radioTipo = document.querySelector('input[name="tipo"][value="' + p.tipo + '"]');
+            if (radioTipo) {
+                radioTipo.checked = true;
+                radioTipo.dispatchEvent(new Event('change'));
+            }
+
+            const form = document.querySelector('#modal-ticket form');
+            const setSelect = function (name, valor) {
+                const el = form.querySelector('[name="' + name + '"]');
+                if (el) el.value = valor || '';
+            };
+            form.querySelector('[name="titulo"]').value = p.titulo || '';
+            setSelect('categoria', p.categoria);
+            setSelect('prioridad', p.prioridad || 'Media');
+            setSelect('area', p.area);
+            setSelect('sede', p.sede);
+            cargarContenidoEnEditor(quillDescripcionTicket, 'input-descripcion-ticket', p.descripcion || '');
+        }
+        {% endif %}
     </script>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Plantillas de Ticket</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <!-- Editor de texto enriquecido (Quill) para la descripción de la plantilla -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/editor-quill.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+    <script src="/static/js/editor-enriquecido.js"></script>
+</head>
+<body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-copy text-orange-400"></i> Plantillas de Ticket
+            </h1>
+        </div>
+        {% include 'partials/buscador.html' %}
+                {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/campanita.html' %}
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+                <h2 class="text-xl font-extrabold text-white mb-1">Plantillas de Solicitud</h2>
+                <p class="text-sm text-slate-400 max-w-2xl">Acelera la creación de tickets recurrentes: cualquier usuario puede elegir una plantilla al crear una solicitud y se le prellenan el tipo, título, categoría, prioridad, área, sede y descripción (todo sigue siendo editable antes de enviarla).</p>
+            </div>
+            <button onclick="abrirModalNuevaPlantilla()" class="flex-none bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all flex items-center gap-2">
+                <i class="fa-solid fa-plus"></i> Nueva plantilla
+            </button>
+        </div>
+
+        {% if plantillas %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {% for p in plantillas %}
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 shadow-xl flex flex-col gap-2">
+                <div class="flex items-start justify-between gap-2">
+                    <h3 class="text-sm font-bold text-white leading-snug">{{ p.nombre }}</h3>
+                    <div class="flex items-center gap-1 flex-none">
+                        <button onclick='abrirModalEditarPlantilla({{ p.id }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <form method="POST" action="{{ url_for('eliminar_plantilla_ticket', plantilla_id=p.id) }}" onsubmit="return confirmarEliminarPlantilla(event, {{ p.id }});">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>
+                        </form>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider {% if p.tipo == 'Requerimiento' %}bg-sky-500/10 text-sky-400 border border-sky-500/20{% else %}bg-rose-500/10 text-rose-400 border border-rose-500/20{% endif %}">{{ p.tipo }}</span>
+                    {% if p.categoria %}<span class="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20">{{ p.categoria }}</span>{% endif %}
+                    <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-300">{{ p.prioridad }}</span>
+                    {% if p.area %}<span class="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">{{ p.area }}</span>{% endif %}
+                    {% if p.sede %}<span class="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-teal-500/10 text-teal-400 border border-teal-500/20">{{ p.sede }}</span>{% endif %}
+                </div>
+                <p class="text-xs text-slate-300 font-semibold">{{ p.titulo }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-10 text-center text-slate-500 text-sm">
+            Todavía no hay plantillas creadas. Usa "Nueva plantilla" para crear la primera.
+        </div>
+        {% endif %}
+
+    </main>
+
+    <!-- MODAL CREAR/EDITAR PLANTILLA (un solo modal reutilizado para ambos casos) -->
+    <div id="modal-plantilla" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="titulo-modal-plantilla" class="text-base font-bold text-white">Nueva Plantilla</h3>
+                <button onclick="cerrarModalPlantilla()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-plantilla" method="POST" action="{{ url_for('crear_plantilla_ticket') }}" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre de la plantilla *</label>
+                    <input type="text" name="nombre" id="plantilla-nombre" required maxlength="150" placeholder="Ej: Solicitud de acceso a Kubapp" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <p class="text-slate-500 text-[10px] mt-1">Es solo el nombre que verán en el selector al crear una solicitud — no aparece en el ticket.</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                        <select name="tipo" id="plantilla-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            {% for t in tipos %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Prioridad</label>
+                        <select name="prioridad" id="plantilla-prioridad" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            {% for p in prioridades %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Categoría</label>
+                        <select name="categoria" id="plantilla-categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                        <select name="area" id="plantilla-area" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">Sin especificar</option>
+                            {% for a in areas %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                {% if sedes %}
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                    <select name="sede" id="plantilla-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin especificar</option>
+                        {% for s in sedes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título de la solicitud *</label>
+                    <input type="text" name="titulo" id="plantilla-titulo" required maxlength="200" placeholder="Ej: Solicito acceso a Kubapp" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción *</label>
+                    <div id="editor-descripcion-plantilla" class="bg-slate-900 text-slate-200"></div>
+                    <textarea name="descripcion" id="input-descripcion-plantilla" class="hidden"></textarea>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalPlantilla()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" id="btn-guardar-plantilla" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold shadow-lg shadow-orange-500/25">Guardar plantilla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Datos de las plantillas ya creadas, para poblar el modal de edición sin recargar la
+        // página (evita tener que crear un editor Quill independiente por cada tarjeta).
+        const PLANTILLAS_TICKET = {{ plantillas | tojson }};
+
+        const quillDescripcionPlantilla = crearEditorEnriquecido(
+            'editor-descripcion-plantilla', 'input-descripcion-plantilla',
+            'Contenido que traerá la solicitud al elegir esta plantilla...'
+        );
+
+        function abrirModalNuevaPlantilla() {
+            document.getElementById('titulo-modal-plantilla').textContent = 'Nueva Plantilla';
+            document.getElementById('btn-guardar-plantilla').textContent = 'Guardar plantilla';
+            document.getElementById('form-plantilla').action = "{{ url_for('crear_plantilla_ticket') }}";
+            document.getElementById('form-plantilla').reset();
+            cargarContenidoEnEditor(quillDescripcionPlantilla, 'input-descripcion-plantilla', '');
+            document.getElementById('modal-plantilla').classList.remove('hidden');
+            document.getElementById('modal-plantilla').classList.add('flex');
+        }
+
+        function abrirModalEditarPlantilla(id) {
+            const p = PLANTILLAS_TICKET.find(function (x) { return x.id === id; });
+            if (!p) return;
+            document.getElementById('titulo-modal-plantilla').textContent = 'Editar Plantilla';
+            document.getElementById('btn-guardar-plantilla').textContent = 'Guardar cambios';
+            document.getElementById('form-plantilla').action = '/tickets/plantillas/' + id + '/editar';
+            document.getElementById('plantilla-nombre').value = p.nombre || '';
+            document.getElementById('plantilla-tipo').value = p.tipo || 'Incidente';
+            document.getElementById('plantilla-prioridad').value = p.prioridad || 'Media';
+            document.getElementById('plantilla-categoria').value = p.categoria || '';
+            document.getElementById('plantilla-area').value = p.area || '';
+            const selectSede = document.getElementById('plantilla-sede');
+            if (selectSede) selectSede.value = p.sede || '';
+            document.getElementById('plantilla-titulo').value = p.titulo || '';
+            cargarContenidoEnEditor(quillDescripcionPlantilla, 'input-descripcion-plantilla', p.descripcion || '');
+            document.getElementById('modal-plantilla').classList.remove('hidden');
+            document.getElementById('modal-plantilla').classList.add('flex');
+        }
+
+        function cerrarModalPlantilla() {
+            document.getElementById('modal-plantilla').classList.add('hidden');
+            document.getElementById('modal-plantilla').classList.remove('flex');
+        }
+
+        function confirmarEliminarPlantilla(event, id) {
+            const p = PLANTILLAS_TICKET.find(function (x) { return x.id === id; });
+            const nombre = p ? p.nombre : 'esta plantilla';
+            return confirm('¿Eliminar la plantilla "' + nombre + '"?');
+        }
+    </script>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+</body>
+</html>
