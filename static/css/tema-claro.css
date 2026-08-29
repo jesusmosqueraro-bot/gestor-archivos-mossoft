@@ -208,3 +208,10 @@ html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/30,
 html[data-theme="claro"] .pagina-acento-violet .bg-slate-900\/80  { background-color: #ede9fe !important; }
 html[data-theme="claro"] .pagina-acento-violet .border-slate-700\/60,
 html[data-theme="claro"] .pagina-acento-violet .border-slate-800  { border-color: #ddd6fe !important; }
+
+html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/60,
+html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/40,
+html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/30,
+html[data-theme="claro"] .pagina-acento-amber .bg-slate-900\/80   { background-color: #fef3c7 !important; }
+html[data-theme="claro"] .pagina-acento-amber .border-slate-700\/60,
+html[data-theme="claro"] .pagina-acento-amber .border-slate-800   { border-color: #fde68a !important; }
