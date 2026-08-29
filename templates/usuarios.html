@@ -133,6 +133,10 @@
                                     </span>
                                     {% endif %}
 
+                                    <button onclick='abrirModalDocumentos({{ u[1] | tojson }}, {{ (u[5] or u[1]) | tojson }})' class="p-1.5 text-slate-400 hover:text-teal-400 transition-colors" title="Documentos y vencimientos">
+                                        <i class="fa-solid fa-file-medical"></i>
+                                    </button>
+
                                     {% if u[1] != 'admin' and u[1] != session.get('username') and not es_otro_admin %}
                                     <form method="POST" action="{{ url_for('toggle_estado_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('{% if u[4] == 'inactivo' %}¿Desbloquear al usuario {{ u[1] }}?{% else %}¿Bloquear al usuario {{ u[1] }}? No podrá iniciar sesión mientras esté bloqueado.{% endif %}')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -388,6 +392,70 @@
         </div>
     </div>
 
+    <!-- Modal Documentos y Vencimientos por Empleado -->
+    <div id="modal-documentos-empleado" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden items-start justify-center p-4 overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl relative my-4">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-file-medical text-teal-400"></i>
+                    Documentos de <span id="doc-empleado-nombre" class="text-teal-400"></span>
+                </h3>
+                <button onclick="cerrarModalDocumentos()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div id="lista-documentos-empleado" class="space-y-2 mb-6 max-h-64 overflow-y-auto pr-1">
+                <p class="text-slate-500 text-xs text-center py-4">Cargando...</p>
+            </div>
+
+            <div class="border-t border-slate-800 pt-5">
+                <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">Registrar nuevo documento</h4>
+                <form id="form-documento-empleado" method="POST" action="{{ url_for('documentos_empleado_subir') }}" enctype="multipart/form-data" class="space-y-3 text-xs">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="usuario" id="doc-empleado-usuario" value="">
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo de Documento *</label>
+                            <input type="text" name="tipo_documento" required placeholder="Ej: Certificado, Curso, Examen médico..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Título *</label>
+                            <input type="text" name="titulo" required placeholder="Nombre del documento" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción</label>
+                        <textarea name="descripcion" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de Emisión</label>
+                            <input type="date" name="fecha_emision" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de Vencimiento</label>
+                            <input type="date" name="fecha_vencimiento" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Archivo Adjunto (Opcional)</label>
+                        <input type="file" name="archivo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-300 text-xs">
+                    </div>
+
+                    <div class="flex justify-end gap-2 pt-1">
+                        <button type="button" onclick="cerrarModalDocumentos()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                        <button type="submit" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl font-bold shadow-lg shadow-teal-500/20">Guardar Documento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         function abrirModalNuevoUsuario() {
             var modal = document.getElementById('modalNuevoUsuario');
@@ -438,6 +506,73 @@
         // automáticamente para que el admin vea el error y no tenga que reescribir todo.
         document.addEventListener('DOMContentLoaded', abrirModalNuevoUsuario);
         {% endif %}
+
+        // 📅 Documentos y vencimientos por empleado -----------------------------------------
+        function abrirModalDocumentos(usuario, nombre) {
+            document.getElementById('doc-empleado-usuario').value = usuario;
+            document.getElementById('doc-empleado-nombre').innerText = nombre || usuario;
+            document.getElementById('form-documento-empleado').action = "{{ url_for('documentos_empleado_subir') }}";
+            var modal = document.getElementById('modal-documentos-empleado');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            modal.scrollTop = 0;
+            cargarDocumentosEmpleado(usuario);
+        }
+
+        function cerrarModalDocumentos() {
+            var modal = document.getElementById('modal-documentos-empleado');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function _escapeHtmlDoc(texto) {
+            var div = document.createElement('div');
+            div.textContent = texto || '';
+            return div.innerHTML;
+        }
+
+        function cargarDocumentosEmpleado(usuario) {
+            var lista = document.getElementById('lista-documentos-empleado');
+            lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Cargando...</p>';
+            fetch(`/usuarios/${encodeURIComponent(usuario)}/documentos`)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var docs = data.documentos || [];
+                    if (!docs.length) {
+                        lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Todavía no hay documentos registrados para este empleado.</p>';
+                        return;
+                    }
+                    lista.innerHTML = docs.map(function (d) {
+                        var badge = '';
+                        if (d.estado_vencimiento === 'vencido') {
+                            badge = '<span class="px-2 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[9px] font-bold rounded-full uppercase">Vencido</span>';
+                        } else if (d.estado_vencimiento === 'proximo_a_vencer') {
+                            badge = '<span class="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-bold rounded-full uppercase">Próximo a vencer</span>';
+                        } else if (d.fecha_vencimiento) {
+                            badge = '<span class="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold rounded-full uppercase">Vigente</span>';
+                        }
+                        var verLink = d.url_archivo ? '<a href="' + d.url_archivo + '" target="_blank" class="text-slate-400 hover:text-teal-400 p-1" title="Ver archivo"><i class="fa-solid fa-eye"></i></a>' : '';
+                        return '<div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-2 text-xs">' +
+                            '<div class="min-w-0">' +
+                                '<div class="flex items-center gap-2 flex-wrap">' +
+                                    '<span class="text-slate-200 font-bold truncate">' + _escapeHtmlDoc(d.titulo) + '</span>' + badge +
+                                '</div>' +
+                                '<div class="text-slate-500 text-[10px] mt-0.5">' + _escapeHtmlDoc(d.tipo_documento) +
+                                    (d.fecha_vencimiento ? ' · Vence: ' + _escapeHtmlDoc(d.fecha_vencimiento) : ' · Sin vencimiento') + '</div>' +
+                            '</div>' +
+                            '<div class="flex items-center gap-1 shrink-0">' + verLink +
+                                '<form method="POST" action="/documentos_empleado/eliminar/' + d.id + '" onsubmit="return confirm(\'¿Eliminar este documento?\')">' +
+                                    '<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>' +
+                                    '<button type="submit" class="text-slate-400 hover:text-rose-400 p-1" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>' +
+                                '</form>' +
+                            '</div>' +
+                        '</div>';
+                    }).join('');
+                })
+                .catch(function () {
+                    lista.innerHTML = '<p class="text-rose-400 text-xs text-center py-4">No se pudieron cargar los documentos.</p>';
+                });
+        }
     </script>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la

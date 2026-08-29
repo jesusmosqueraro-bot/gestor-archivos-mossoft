@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Vencimiento de Documentos</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+</head>
+<body class="pagina-acento-amber bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif whitespace-nowrap">
+                <i class="fa-solid fa-calendar-xmark text-amber-400"></i> Vencimiento de Documentos
+            </h1>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap">
+            <a href="{{ url_for('index') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-folder-open"></i>
+                <span class="hidden sm:inline">Instructivos</span>
+            </a>
+            <a href="{{ url_for('gestion_usuarios') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-users-gear"></i>
+                <span class="hidden sm:inline">Usuarios</span>
+            </a>
+            <div class="flex items-center gap-2">
+                {% include 'partials/buscador.html' %}
+                {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/seguridad_boton.html' %}
+                {% include 'partials/campanita.html' %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- RESUMEN -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="bg-rose-500/10 border border-rose-500/20 rounded-3xl p-5 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-extrabold text-white">{{ total_vencidos }}</div>
+                    <div class="text-xs text-rose-300 font-semibold uppercase tracking-wider">Documentos vencidos</div>
+                </div>
+            </div>
+            <div class="bg-amber-500/10 border border-amber-500/20 rounded-3xl p-5 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-clock"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-extrabold text-white">{{ total_proximos }}</div>
+                    <div class="text-xs text-amber-300 font-semibold uppercase tracking-wider">Próximos a vencer (30 días)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BARRA DE FILTROS -->
+        <form method="GET" action="{{ url_for('ver_vencimientos') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Origen</label>
+                <select name="origen" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <option value="">Todos los orígenes</option>
+                    <option value="institucional" {% if filtro_origen == 'institucional' %}selected{% endif %}>Instructivos institucionales</option>
+                    <option value="empleado" {% if filtro_origen == 'empleado' %}selected{% endif %}>Documentos de empleado</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <option value="">Todos los estados</option>
+                    <option value="vencido" {% if filtro_estado == 'vencido' %}selected{% endif %}>Vencido</option>
+                    <option value="proximo_a_vencer" {% if filtro_estado == 'proximo_a_vencer' %}selected{% endif %}>Próximo a vencer</option>
+                    <option value="vigente" {% if filtro_estado == 'vigente' %}selected{% endif %}>Vigente</option>
+                </select>
+            </div>
+        </form>
+
+        <!-- TABLA -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                    <tr>
+                        <th class="pb-3 px-4 font-bold">Origen</th>
+                        <th class="pb-3 px-4 font-bold">Documento</th>
+                        <th class="pb-3 px-4 font-bold">Detalle</th>
+                        <th class="pb-3 px-4 font-bold">Vencimiento</th>
+                        <th class="pb-3 px-4 font-bold">Estado</th>
+                        <th class="pb-3 px-4 font-bold text-right">Ir</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% if items %}
+                        {% for i in items %}
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3.5 px-4">
+                                <span class="px-2.5 py-0.5 {% if i.origen == 'institucional' %}bg-cyan-500/10 text-cyan-400 border-cyan-500/20{% else %}bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20{% endif %} border text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">
+                                    {{ i.origen_label }}
+                                </span>
+                            </td>
+                            <td class="py-3.5 px-4 font-bold text-white">{{ i.titulo }}</td>
+                            <td class="py-3.5 px-4 text-slate-400">{{ i.detalle or '—' }}</td>
+                            <td class="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
+                                <i class="fa-regular fa-calendar text-slate-500 mr-1.5"></i>{{ i.fecha_vencimiento }}
+                            </td>
+                            <td class="py-3.5 px-4">
+                                {% if i.estado == 'vencido' %}
+                                <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> Vencido
+                                </span>
+                                {% elif i.estado == 'proximo_a_vencer' %}
+                                <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                    <i class="fa-solid fa-clock"></i> Próximo a vencer
+                                </span>
+                                {% else %}
+                                <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                    <i class="fa-solid fa-calendar-check"></i> Vigente
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-4 text-right">
+                                <a href="{{ i.url }}" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors" title="Ir al módulo">
+                                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-10 text-slate-500 font-bold">
+                                No hay documentos con vencimiento registrado que coincidan con el filtro.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
+        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+</body>
+</html>
