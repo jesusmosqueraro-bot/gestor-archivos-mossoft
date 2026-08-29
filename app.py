@@ -560,6 +560,21 @@ def init_db():
                 # 🔗 Activo de Inventario al que se refiere este ticket (opcional). Permite, desde
                 # el activo, ver el historial completo de solicitudes que se le han abierto.
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE SET NULL;",
+                # ⏸️ Fecha desde la que el ticket entró en estado 'Pendiente' (pausa de SLA). Se
+                # usa para congelar la barra de progreso y, al salir de Pendiente, para calcular
+                # cuántas horas estuvo pausado y correr el límite de resolución esa misma cantidad.
+                # NULL cuando el ticket nunca ha estado pausado o ya se reanudó.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_pausado_desde VARCHAR(100);",
+                # 🔗 Ticket ya Resuelto/Cerrado que el usuario asocia a este (p. ej. un caso nuevo
+                # relacionado con uno ya cerrado, o un duplicado que hace referencia al original).
+                # Puramente informativo, no afecta el flujo ni el SLA del ticket referenciado.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ticket_relacionado_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL;",
+                # 🙋 Usuario real para quien es la solicitud, cuando quien la crea es un agente
+                # actuando en nombre de otra persona (p. ej. sube un PQRS a nombre de un usuario).
+                # Cuando es NULL, el beneficiario es 'creado_por' (el caso normal: el usuario crea
+                # su propio ticket). Se usa para decidir quién puede calificar el servicio, de modo
+                # que el agente que resuelve el caso no pueda calificarse a sí mismo.
+                "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solicitante_real VARCHAR(150);",
                 # 📢 Fecha en que se envió (una sola vez) el recordatorio automático de lectura
                 # pendiente de este comunicado — ver _revisar_recordatorios_lectura(). NULL
                 # mientras no se haya enviado ninguno (automático o manual) todavía.
@@ -764,7 +779,10 @@ def init_db():
                 "ALTER TABLE tickets ADD COLUMN telefono_contacto TEXT;",
                 "ALTER TABLE tickets ADD COLUMN sla_alerta_nivel TEXT;",
                 "ALTER TABLE tickets ADD COLUMN eliminado INTEGER DEFAULT 0;",
-                "ALTER TABLE tickets ADD COLUMN activo_id INTEGER REFERENCES activos_inventario(id);"
+                "ALTER TABLE tickets ADD COLUMN activo_id INTEGER REFERENCES activos_inventario(id);",
+                "ALTER TABLE tickets ADD COLUMN sla_pausado_desde TEXT;",
+                "ALTER TABLE tickets ADD COLUMN ticket_relacionado_id INTEGER REFERENCES tickets(id);",
+                "ALTER TABLE tickets ADD COLUMN solicitante_real TEXT;"
             ]:
                 try:
                     cursor.execute(col_ticket_sql)
@@ -1785,7 +1803,7 @@ def destruir_comunicado(com_id):
 # 🎫 MÓDULO DE SOPORTE TI (TICKETS / SOLICITUDES INTERNAS)
 CATEGORIAS_TICKET = ['Hardware', 'Software', 'Acceso/Credenciales', 'Red/Internet', 'Otro']
 PRIORIDADES_TICKET = ['Baja', 'Media', 'Alta', 'Urgente']
-ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Resuelto', 'Cerrado', 'Cancelado']
+ESTADOS_TICKET = ['Abierto', 'En Proceso', 'Pendiente', 'Resuelto', 'Cerrado', 'Cancelado']
 TIPOS_TICKET = ['Incidente', 'Requerimiento']
 # Metadatos de cada tipo para pintar las tarjetas de selección y las insignias (inspirado
 # en la mesa de ayuda externa que ya usa la organización: distingue "algo se rompió" de
@@ -1878,6 +1896,14 @@ def _calcular_sla_ticket(ticket):
     de ayuda externa con su 'Compromiso con el usuario'). Devuelve un dict listo para pintar:
     {'estado': 'en_tiempo'|'vencido'|'cumplido'|'incumplido'|'sin_datos', 'texto': ..., 'color': ...}
     """
+    # ⏸️ Mientras el ticket está en 'Pendiente' el conteo de SLA queda en pausa (puede que el
+    # agente esté esperando información del usuario y no sea justo que el caso se "queme" por
+    # eso). Se corta aquí, antes de comparar contra el límite, para que no aparezca ni vencido
+    # ni próximo a vencer mientras dure la pausa — ver también _progreso_ticket() y
+    # _revisar_alertas_sla(), que respetan el mismo estado.
+    if ticket.get('estado') == 'Pendiente':
+        return {'estado': 'pausado', 'texto': 'SLA en pausa (Pendiente)', 'color': 'slate'}
+
     limite = _parsear_fecha_ticket(ticket.get('sla_resolucion_limite'))
     if not limite:
         return {'estado': 'sin_datos', 'texto': 'Sin datos de SLA', 'color': 'slate'}
@@ -1938,7 +1964,15 @@ def _progreso_ticket(ticket):
         return 0
 
     cumplida = _parsear_fecha_ticket(ticket.get('sla_resolucion_cumplida'))
-    fin = cumplida if (ticket.get('estado') in ('Resuelto', 'Cerrado') and cumplida) else datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    pausado_desde = _parsear_fecha_ticket(ticket.get('sla_pausado_desde'))
+    if cumplida and ticket.get('estado') in ('Resuelto', 'Cerrado'):
+        fin = cumplida
+    elif ticket.get('estado') == 'Pendiente' and pausado_desde:
+        # ⏸️ Congela la barra en el momento en que entró a Pendiente, en vez de dejarla seguir
+        # avanzando hacia el 100% mientras el SLA está en pausa (ver _calcular_sla_ticket()).
+        fin = pausado_desde
+    else:
+        fin = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
 
     horas_transcurridas = (fin - creado).total_seconds() / 3600
     return max(0, min(100, round(horas_transcurridas / horas_totales * 100)))
@@ -1959,7 +1993,7 @@ def _revisar_alertas_sla():
         cursor.execute(
             "SELECT id, titulo, tipo, prioridad, estado, asignado_a, fecha_creacion, "
             "sla_resolucion_limite, sla_resolucion_cumplida, sla_alerta_nivel FROM tickets "
-            "WHERE estado NOT IN ('Resuelto', 'Cerrado', 'Cancelado') AND COALESCE(eliminado, 0) = 0"
+            "WHERE estado NOT IN ('Resuelto', 'Cerrado', 'Cancelado', 'Pendiente') AND COALESCE(eliminado, 0) = 0"
         )
         filas = cursor.fetchall()
 
@@ -2727,7 +2761,7 @@ def ver_tickets():
     nombres_areas = [a['nombre'] for a in areas_config]
     nombres_sedes = [s['nombre'] for s in sedes_config]
 
-    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida, area, sede FROM tickets WHERE COALESCE(eliminado, 0) = 0"
+    query = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_resolucion_limite, sla_resolucion_cumplida, area, sede, sla_pausado_desde FROM tickets WHERE COALESCE(eliminado, 0) = 0"
     params = []
 
     if not es_soporte:
@@ -2788,7 +2822,7 @@ def ver_tickets():
                 'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
                 'codigo': _codigo_ticket(tipo_t, r[0], r[9]),
                 'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12],
-                'area': r[13], 'sede': r[14]
+                'area': r[13], 'sede': r[14], 'sla_pausado_desde': r[15]
             }
             t['sla'] = _calcular_sla_ticket(t)
             t['cumplimiento'] = _bucket_cumplimiento_ticket(t)
@@ -2801,6 +2835,14 @@ def ver_tickets():
     conteos_cumplimiento = {'vigente': 0, 'proximo_a_vencer': 0, 'vencido': 0, 'cerrado': 0}
     for t in tickets:
         conteos_cumplimiento[t['cumplimiento']] = conteos_cumplimiento.get(t['cumplimiento'], 0) + 1
+
+    # 🔗 Tickets ya Resueltos/Cerrados que se pueden asociar a una solicitud nueva (ver
+    # crear_ticket) — se arma ANTES del filtro de pestaña de arriba, sobre la misma lista que ya
+    # respeta el permiso (un usuario estándar solo ve los suyos, ver filtro 'creado_por' arriba).
+    tickets_cerrados = [
+        {'id': t['id'], 'codigo': t['codigo'], 'titulo': t['titulo']}
+        for t in tickets if t['estado'] in ('Resuelto', 'Cerrado')
+    ]
 
     # 📂 La pestaña por defecto ("Activos") ya NO incluye Resueltos/Cerrados/Cancelados — esos
     # quedan disponibles únicamente en la pestaña "Cerrados" (el historial). Antes se mostraban
@@ -2819,11 +2861,21 @@ def ver_tickets():
     perfil_actual = _info_usuario(session.get('username'))
     telefono_usuario_actual = perfil_actual['telefono'] if perfil_actual else None
 
+    # 🙋 Lista de usuarios para "¿Para quién es esta solicitud?" (ver crear_ticket) — solo la
+    # necesita el equipo de soporte, para poder subir un caso a nombre de otra persona.
+    usuarios_lista = []
+    if es_soporte:
+        usuarios_lista = sorted(
+            [{'usuario': u, 'nombre': n} for u, n in nombres_usuarios.items() if u != session.get('username')],
+            key=lambda x: x['nombre'].lower()
+        )
+
     return render_template(
         'tickets.html', tickets=tickets, es_soporte=es_soporte,
         categorias=nombres_categorias, prioridades=PRIORIDADES_TICKET, estados=ESTADOS_TICKET,
         tipos=TIPOS_TICKET, tipos_info=TIPOS_TICKET_INFO,
         areas=nombres_areas, sedes=nombres_sedes, activos_inventario=activos_inventario,
+        tickets_cerrados=tickets_cerrados, usuarios_lista=usuarios_lista,
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
         q_area=q_area, q_sede=q_sede,
         q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets,
@@ -2845,6 +2897,8 @@ def crear_ticket():
     sede = request.form.get('sede', '').strip()
     telefono_contacto = request.form.get('telefono_contacto', '').strip() or None
     activo_id_raw = request.form.get('activo_id', '').strip()
+    ticket_relacionado_id_raw = request.form.get('ticket_relacionado_id', '').strip()
+    solicitante_real_raw = request.form.get('solicitante_real', '').strip()
 
     nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
     nombres_areas = [a['nombre'] for a in _config_ticket_lista('area')]
@@ -2878,6 +2932,47 @@ def crear_ticket():
                 activo_id = int(activo_id_raw)
             conn_chk.close()
 
+        # 🔗 Ticket relacionado (opcional): un caso ya Resuelto/Cerrado que el usuario quiere
+        # dejar referenciado (p. ej. un duplicado, o un caso nuevo que continúa uno anterior).
+        # Se valida que exista, no esté eliminado y ya esté cerrado, igual que con activo_id. Un
+        # usuario estándar solo puede asociar tickets QUE ÉL MISMO CREÓ (evita que referencie —
+        # y así deje visible el título de— un ticket ajeno armando el POST a mano); el equipo de
+        # soporte, que ya puede ver cualquier ticket, puede asociar cualquiera.
+        es_soporte_creador = (session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
+        ticket_relacionado_id = None
+        if ticket_relacionado_id_raw.isdigit():
+            conn_chk2, db_type_chk2 = get_db()
+            cur_chk2 = conn_chk2.cursor()
+            ph_chk2 = '%s' if db_type_chk2 == 'postgres' else '?'
+            if es_soporte_creador:
+                cur_chk2.execute(
+                    f"SELECT id FROM tickets WHERE id = {ph_chk2} AND COALESCE(eliminado, 0) = 0 "
+                    f"AND estado IN ('Resuelto', 'Cerrado')", (int(ticket_relacionado_id_raw),)
+                )
+            else:
+                cur_chk2.execute(
+                    f"SELECT id FROM tickets WHERE id = {ph_chk2} AND COALESCE(eliminado, 0) = 0 "
+                    f"AND estado IN ('Resuelto', 'Cerrado') AND creado_por = {ph_chk2}",
+                    (int(ticket_relacionado_id_raw), session.get('username'))
+                )
+            if cur_chk2.fetchone():
+                ticket_relacionado_id = int(ticket_relacionado_id_raw)
+            conn_chk2.close()
+
+        # 🙋 Solicitante real (opcional, solo lo puede fijar el equipo de soporte): cuando un
+        # agente sube el caso a nombre de otro usuario (PQRS), este es quien debe poder
+        # calificar el servicio al final — no el agente que lo está resolviendo. Se valida que
+        # sea un usuario real y distinto de quien está creando el ticket.
+        solicitante_real = None
+        if es_soporte_creador and solicitante_real_raw and solicitante_real_raw != session.get('username'):
+            conn_chk3, db_type_chk3 = get_db()
+            cur_chk3 = conn_chk3.cursor()
+            ph_chk3 = '%s' if db_type_chk3 == 'postgres' else '?'
+            cur_chk3.execute(f"SELECT usuario FROM usuarios WHERE usuario = {ph_chk3}", (solicitante_real_raw,))
+            if cur_chk3.fetchone():
+                solicitante_real = solicitante_real_raw
+            conn_chk3.close()
+
         horas_sla = SLA_HORAS_POR_PRIORIDAD.get(prioridad, SLA_HORAS_POR_PRIORIDAD['Media'])
         sla_respuesta_limite = _calcular_limite_sla(fecha_act, horas_sla['respuesta'])
         sla_resolucion_limite = _calcular_limite_sla(fecha_act, horas_sla['resolucion'])
@@ -2901,12 +2996,12 @@ def crear_ticket():
         cursor = conn.cursor()
         try:
             if db_type == 'postgres':
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s) RETURNING id"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id, ticket_relacionado_id, solicitante_real) VALUES (%s, %s, %s, %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s, %s, %s) RETURNING id"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id, ticket_relacionado_id, solicitante_real))
                 nuevo_id = cursor.fetchone()[0]
             else:
-                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
-                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id))
+                q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones, area, sede, telefono_contacto, activo_id, ticket_relacionado_id, solicitante_real) VALUES (?, ?, ?, ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"
+                cursor.execute(q_ins, (titulo, descripcion, tipo, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite, area, sede, telefono_contacto, activo_id, ticket_relacionado_id, solicitante_real))
                 nuevo_id = cursor.lastrowid
 
             if archivos_subidos:
@@ -2968,7 +3063,7 @@ def ver_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id FROM tickets WHERE id = ?"
+    q_sel = "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id, sla_pausado_desde, ticket_relacionado_id, solicitante_real FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_respuesta_cumplida, sla_resolucion_cumplida, sla_modificaciones, calificacion, calificacion_fecha, area, sede, telefono_contacto, activo_id, sla_pausado_desde, ticket_relacionado_id, solicitante_real FROM tickets WHERE id = ?"
     cursor.execute(q_sel, (ticket_id,))
     row = cursor.fetchone()
 
@@ -2988,9 +3083,14 @@ def ver_ticket(ticket_id):
         'sla_respuesta_cumplida': row[13], 'sla_resolucion_cumplida': row[14],
         'sla_modificaciones': row[15] or 0,
         'calificacion': row[16], 'calificacion_fecha': row[17],
-        'area': row[18], 'sede': row[19], 'telefono_contacto': row[20], 'activo_id': row[21]
+        'area': row[18], 'sede': row[19], 'telefono_contacto': row[20], 'activo_id': row[21],
+        'sla_pausado_desde': row[22], 'ticket_relacionado_id': row[23], 'solicitante_real': row[24]
     }
     ticket['sla'] = _calcular_sla_ticket(ticket)
+    # 🙋 Beneficiario real de la solicitud: normalmente quien la creó, salvo que un agente la
+    # haya subido a nombre de otra persona (ver crear_ticket) — ese es quien debe poder
+    # calificar el servicio al cierre, nunca el agente que la resuelve (ver calificar_ticket()).
+    ticket['beneficiario'] = ticket['solicitante_real'] or ticket['creado_por']
 
     # 💻 Si el ticket quedó vinculado a un activo del inventario, se muestra en el detalle
     # (nombre, tipo y estado actual) con enlace directo a Inventario.
@@ -3003,6 +3103,21 @@ def ver_ticket(ticket_id):
         fila_activo = cursor.fetchone()
         if fila_activo:
             ticket['activo'] = {'id': fila_activo[0], 'nombre': fila_activo[1], 'tipo_activo': fila_activo[2], 'estado': fila_activo[3]}
+
+    # 🔗 Si el usuario asoció este ticket a uno ya Resuelto/Cerrado (ver crear_ticket), se
+    # muestra aquí con enlace directo — puramente informativo.
+    ticket['relacionado'] = None
+    if ticket['ticket_relacionado_id']:
+        cursor.execute(
+            "SELECT id, titulo, tipo, estado, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id, titulo, tipo, estado, fecha_creacion FROM tickets WHERE id = ?",
+            (ticket['ticket_relacionado_id'],)
+        )
+        fila_rel = cursor.fetchone()
+        if fila_rel:
+            ticket['relacionado'] = {
+                'id': fila_rel[0], 'titulo': fila_rel[1], 'estado': fila_rel[3],
+                'codigo': _codigo_ticket(fila_rel[2] or 'Incidente', fila_rel[0], fila_rel[4])
+            }
 
     # 🧑 La mayor cantidad de información posible sobre quién levantó la solicitud: nombre
     # completo, correo y teléfono registrados en su perfil de Arkiv (si los tiene). Si el
@@ -3076,6 +3191,35 @@ def ver_ticket(ticket_id):
         calificacion_max=CALIFICACION_MAX, session_username=session.get('username'),
         whatsapp_url=whatsapp_url
     )
+
+
+@app.route('/tickets/<int:ticket_id>/duplicar_datos')
+@login_required
+def duplicar_datos_ticket(ticket_id):
+    """Datos mínimos de un ticket ya existente para prellenar el formulario de 'Nueva
+    Solicitud' cuando el usuario elige 'Duplicar' desde el detalle (ver botón en
+    ticket_detalle.html y el manejo de '?duplicar=' en tickets.html). Respeta el mismo permiso
+    de visibilidad que ver_ticket(): solo quien puede ver el ticket original puede duplicarlo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT titulo, descripcion, tipo, categoria, prioridad, area, sede, activo_id, creado_por, estado, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, tipo, categoria, prioridad, area, sede, activo_id, creado_por, estado, fecha_creacion FROM tickets WHERE id = ?"
+    cursor.execute(q_sel, (ticket_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not _puede_ver_ticket(row[8]):
+        return jsonify({'error': 'No encontrado'}), 404
+
+    titulo, descripcion, tipo, categoria, prioridad, area, sede, activo_id, creado_por, estado, fecha_creacion = row
+    return jsonify({
+        'titulo': titulo, 'descripcion': descripcion, 'tipo': tipo or 'Incidente',
+        'categoria': categoria, 'prioridad': prioridad, 'area': area, 'sede': sede,
+        'activo_id': activo_id,
+        # Solo se sugiere auto-asociar el original si ya está Resuelto/Cerrado (ver
+        # crear_ticket, que valida esto mismo del lado del servidor de todas formas).
+        'ticket_relacionado_sugerido': ticket_id if estado in ('Resuelto', 'Cerrado') else None,
+        'codigo': _codigo_ticket(tipo or 'Incidente', ticket_id, fecha_creacion)
+    })
 
 
 @app.route('/tickets/<int:ticket_id>/comentar', methods=['POST'])
@@ -3175,7 +3319,7 @@ def actualizar_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = ?"
+        q_sel = "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion, sla_resolucion_limite, sla_pausado_desde FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, prioridad, asignado_a, sla_respuesta_cumplida, sla_resolucion_cumplida, creado_por, titulo, tipo, fecha_creacion, sla_resolucion_limite, sla_pausado_desde FROM tickets WHERE id = ?"
         cursor.execute(q_sel, (ticket_id,))
         row = cursor.fetchone()
         if not row:
@@ -3183,7 +3327,8 @@ def actualizar_ticket(ticket_id):
             return redirect(url_for('ver_tickets'))
 
         (estado_old, prioridad_old, asignado_old, respuesta_cumplida_old, resolucion_cumplida_old,
-         creado_por, titulo_ticket, tipo_ticket, fecha_creacion_ticket) = row
+         creado_por, titulo_ticket, tipo_ticket, fecha_creacion_ticket, resolucion_limite_old,
+         pausado_desde_old) = row
         estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
@@ -3212,8 +3357,36 @@ def actualizar_ticket(ticket_id):
         else:
             resolucion_cumplida_final = None
 
-        q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s, sla_respuesta_cumplida = %s, sla_resolucion_cumplida = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ?, sla_respuesta_cumplida = ?, sla_resolucion_cumplida = ? WHERE id = ?"
-        cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, respuesta_cumplida_final, resolucion_cumplida_final, ticket_id))
+        # ⏸️ Pausa/reanudación del SLA de resolución para el estado 'Pendiente' (ver
+        # _calcular_sla_ticket() y _progreso_ticket()). Al entrar se guarda desde cuándo quedó
+        # pausado; al salir se corre el límite de resolución exactamente la cantidad de horas
+        # que estuvo pausado, para que ese tiempo de espera no cuente en contra del agente, y se
+        # limpia 'sla_alerta_nivel' (mismo patrón que modificar_sla_ticket) para que pueda volver
+        # a avisar si el nuevo límite se acerca.
+        pausa_iniciada = estado_final == 'Pendiente' and estado_old != 'Pendiente'
+        pausa_reanudada = estado_old == 'Pendiente' and estado_final != 'Pendiente'
+        resolucion_limite_final = resolucion_limite_old
+        alerta_nivel_final = None
+        limpiar_alerta = False
+        if pausa_iniciada:
+            pausado_desde_final = fecha_act
+        elif pausa_reanudada:
+            pausado_desde_final = None
+            inicio_pausa = _parsear_fecha_ticket(pausado_desde_old)
+            fin_pausa = _parsear_fecha_ticket(fecha_act)
+            if inicio_pausa and fin_pausa and resolucion_limite_old:
+                horas_pausa = max(0, (fin_pausa - inicio_pausa).total_seconds() / 3600)
+                resolucion_limite_final = _calcular_limite_sla(resolucion_limite_old, horas_pausa)
+                limpiar_alerta = True
+        else:
+            pausado_desde_final = pausado_desde_old
+
+        if limpiar_alerta:
+            q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s, sla_respuesta_cumplida = %s, sla_resolucion_cumplida = %s, sla_resolucion_limite = %s, sla_pausado_desde = %s, sla_alerta_nivel = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ?, sla_respuesta_cumplida = ?, sla_resolucion_cumplida = ?, sla_resolucion_limite = ?, sla_pausado_desde = ?, sla_alerta_nivel = ? WHERE id = ?"
+            cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, respuesta_cumplida_final, resolucion_cumplida_final, resolucion_limite_final, pausado_desde_final, alerta_nivel_final, ticket_id))
+        else:
+            q_upd = "UPDATE tickets SET estado = %s, prioridad = %s, asignado_a = %s, fecha_actualizacion = %s, sla_respuesta_cumplida = %s, sla_resolucion_cumplida = %s, sla_resolucion_limite = %s, sla_pausado_desde = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET estado = ?, prioridad = ?, asignado_a = ?, fecha_actualizacion = ?, sla_respuesta_cumplida = ?, sla_resolucion_cumplida = ?, sla_resolucion_limite = ?, sla_pausado_desde = ? WHERE id = ?"
+            cursor.execute(q_upd, (estado_final, prioridad_final, asignado_final, fecha_act, respuesta_cumplida_final, resolucion_cumplida_final, resolucion_limite_final, pausado_desde_final, ticket_id))
 
         cambios = []
         if estado_final != estado_old:
@@ -3222,6 +3395,8 @@ def actualizar_ticket(ticket_id):
             cambios.append(f"prioridad: '{prioridad_old}' → '{prioridad_final}'")
         if asignado_final != asignado_old:
             cambios.append(f"asignado a: '{asignado_old or 'nadie'}' → '{asignado_final or 'nadie'}'")
+        if pausa_reanudada and resolucion_limite_final != resolucion_limite_old:
+            cambios.append("SLA de resolución extendido automáticamente por el tiempo en 'Pendiente'")
 
         usuario = session.get('username')
         if cambios:
@@ -3359,16 +3534,21 @@ def calificar_ticket(ticket_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT creado_por, estado, calificacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, calificacion FROM tickets WHERE id = ?"
+        q_sel = "SELECT creado_por, estado, calificacion, solicitante_real FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT creado_por, estado, calificacion, solicitante_real FROM tickets WHERE id = ?"
         cursor.execute(q_sel, (ticket_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
             return redirect(url_for('ver_tickets'))
 
-        creado_por, estado_actual, calificacion_previa = row
+        creado_por, estado_actual, calificacion_previa, solicitante_real = row
+        # 🙋 Quien califica es el BENEFICIARIO real de la solicitud, no necesariamente quien la
+        # creó: si un agente la subió a nombre de otra persona (ver crear_ticket), es esa
+        # persona quien debe poder calificar — así el agente que resuelve el caso no puede
+        # calificarse a sí mismo (bug reportado por Tomás).
+        beneficiario = solicitante_real or creado_por
         puede_calificar = (
-            session.get('username') == creado_por and
+            session.get('username') == beneficiario and
             estado_actual in ('Resuelto', 'Cerrado') and
             not calificacion_previa and
             CALIFICACION_MIN <= calificacion <= CALIFICACION_MAX
@@ -7183,12 +7363,18 @@ def buscar_global_api():
         for tid, titulo, descripcion, tipo, estado, fecha_creacion in cursor.fetchall():
             if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                 break
-            if q_norm in f"{titulo} {descripcion or ''}".lower():
+            codigo = _codigo_ticket(tipo or 'Incidente', tid, fecha_creacion)
+            # 🔎 Además de título/descripción, se puede buscar por el número de ticket: el
+            # código completo ('IN-2026-000042'), por similitud (p. ej. '42' encuentra el
+            # '000042' dentro del código, o encuentra el id 1042 por contener '42'), o el id
+            # exacto — así el botón Buscar también sirve para ubicar un ticket puntual.
+            texto_busqueda = f"{titulo} {descripcion or ''} {codigo} {tid}".lower()
+            if q_norm in texto_busqueda:
                 contador += 1
                 resultados.append({
                     'categoria': 'Solicitudes TI',
                     'titulo': titulo,
-                    'subtitulo': f"{_codigo_ticket(tipo or 'Incidente', tid, fecha_creacion)} · {estado}",
+                    'subtitulo': f"{codigo} · {estado}",
                     'url': url_for('ver_ticket', ticket_id=tid)
                 })
     except Exception as e:
