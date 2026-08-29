@@ -348,9 +348,20 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
-                    <select name="estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <select name="estado" {% if ticket.estado == 'Cerrado' %}disabled{% endif %} class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60">
                         {% for e in estados %}<option value="{{ e }}" {% if e == ticket.estado %}selected{% endif %}>{{ e }}</option>{% endfor %}
                     </select>
+                    {# El desplegable solo ofrece los próximos estados válidos (ver
+                       _estados_disponibles_ticket en app.py): no se puede saltar directo a
+                       'Resuelto' sin pasar antes por 'En Proceso', ni a 'Cerrado' sin pasar
+                       antes por 'Resuelto' — y una vez 'Cerrado' queda bloqueado. #}
+                    {% if ticket.estado == 'Cerrado' %}
+                        <p class="text-slate-500 text-[10px] mt-1">Cerrado es el último estado: ya no se puede modificar.</p>
+                    {% elif ticket.estado in ['Abierto', 'Pendiente'] %}
+                        <p class="text-slate-500 text-[10px] mt-1">Para marcar "Resuelto" primero debe pasar por "En Proceso".</p>
+                    {% elif ticket.estado == 'En Proceso' %}
+                        <p class="text-slate-500 text-[10px] mt-1">Para "Cerrado" primero debe marcarse "Resuelto".</p>
+                    {% endif %}
                 </div>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Prioridad</label>
