@@ -477,6 +477,14 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_plantillas (
                 id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, tipo VARCHAR(20) DEFAULT 'Incidente', categoria VARCHAR(50), prioridad VARCHAR(20) DEFAULT 'Media', area VARCHAR(100), sede VARCHAR(100), titulo VARCHAR(200) NOT NULL, descripcion TEXT NOT NULL, estado VARCHAR(20) DEFAULT 'activo', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL
             )''')
+            # 📅 Vencimiento de documentos por empleado (certificaciones, cursos, exámenes
+            # médicos ocupacionales, licencias...): un registro por documento/colaborador,
+            # independiente de los instructivos institucionales de 'galerias'. 'alerta_nivel'
+            # guarda el último aviso ya enviado ('proximo_a_vencer'/'vencido') para no repetir
+            # la misma notificación — ver _revisar_alertas_vencimientos().
+            cursor.execute('''CREATE TABLE IF NOT EXISTS documentos_empleado (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo_documento VARCHAR(150) NOT NULL, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_archivo TEXT DEFAULT '', nombre_original VARCHAR(255) DEFAULT '', fecha_emision VARCHAR(20), fecha_vencimiento VARCHAR(20), alerta_nivel VARCHAR(20), estado VARCHAR(20) DEFAULT 'activo', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -568,7 +576,14 @@ def init_db():
                 # 🔐 Verificación en dos pasos (2FA/TOTP): secreto TOTP de la cuenta (NULL hasta
                 # que se active) y si ya quedó confirmado/activo. Ver rutas /perfil/2fa*.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64);",
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE;"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE;",
+                # 📅 Vencimiento de documentos institucionales (Instructivos y Archivos): fecha
+                # opcional en la que el instructivo/documento deja de estar vigente (ej. una
+                # política o certificado con renovación periódica). 'alerta_vencimiento_nivel'
+                # guarda el último aviso ya enviado, igual que sla_alerta_nivel en Tickets — ver
+                # _revisar_alertas_vencimientos().
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(20);",
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS alerta_vencimiento_nivel VARCHAR(20);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -660,6 +675,11 @@ def init_db():
             # 📋 Plantillas de solicitud. Ver comentario equivalente en la rama de Postgres.
             cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_plantillas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo TEXT DEFAULT 'Incidente', categoria TEXT, prioridad TEXT DEFAULT 'Media', area TEXT, sede TEXT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, estado TEXT DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL
+            )''')
+            # 📅 Vencimiento de documentos por empleado. Ver comentario equivalente en la rama
+            # de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS documentos_empleado (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo_documento TEXT NOT NULL, titulo TEXT NOT NULL, descripcion TEXT, url_archivo TEXT DEFAULT '', nombre_original TEXT DEFAULT '', fecha_emision TEXT, fecha_vencimiento TEXT, alerta_nivel TEXT, estado TEXT DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -792,6 +812,17 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_totp_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 📅 Vencimiento de documentos institucionales. Ver comentario equivalente en la
+            # rama de Postgres.
+            for col_venc_sql in [
+                "ALTER TABLE galerias ADD COLUMN fecha_vencimiento TEXT;",
+                "ALTER TABLE galerias ADD COLUMN alerta_vencimiento_nivel TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_venc_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -2140,6 +2171,172 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
     de soporte), sin duplicar destinatarios."""
     for u in set(u for u in (usuarios or []) if u):
         crear_notificacion(u, mensaje, url=url, tipo=tipo)
+
+
+# 📅 VENCIMIENTO DE DOCUMENTOS (institucionales en 'galerias' y por empleado en
+# 'documentos_empleado') -----------------------------------------------------------------
+# Umbral de días antes del vencimiento en el que un documento pasa a "Próximo a vencer".
+UMBRAL_DIAS_VENCIMIENTO_PROXIMO = 30
+
+
+def _bucket_vencimiento(fecha_vencimiento_str):
+    """Clasifica una fecha de vencimiento (texto 'YYYY-MM-DD') en None (sin vencimiento o
+    vigente y lejos de vencer), 'proximo_a_vencer' (dentro del umbral) o 'vencido' (ya pasó).
+    Nunca lanza excepción: una fecha vacía o mal formada se trata como "sin vencimiento"."""
+    if not fecha_vencimiento_str:
+        return None
+    try:
+        fecha_venc = datetime.strptime(str(fecha_vencimiento_str)[:10], '%Y-%m-%d')
+    except Exception:
+        return None
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    dias_restantes = (fecha_venc - hoy).total_seconds() / 86400
+    if dias_restantes < 0:
+        return 'vencido'
+    if dias_restantes <= UMBRAL_DIAS_VENCIMIENTO_PROXIMO:
+        return 'proximo_a_vencer'
+    return None
+
+
+def _revisar_alertas_vencimientos():
+    """Revisa documentos institucionales (galerias) y por empleado (documentos_empleado) con
+    fecha de vencimiento, y avisa (campanita + correo) la primera vez que uno entra en
+    'Próximo a vencer' o se escala a 'Vencido' — mismo patrón perezoso que _revisar_alertas_sla
+    (no hay scheduler aparte en Render, así que esto se llama cada vez que alguien visita el
+    listado de Instructivos o el panel de Vencimientos). El nivel ya avisado se guarda por
+    documento para no repetir el mismo aviso una y otra vez."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+
+        # --- Documentos institucionales (galerias) ---
+        try:
+            cursor.execute(
+                "SELECT id, titulo, fecha_vencimiento, alerta_vencimiento_nivel FROM galerias "
+                "WHERE COALESCE(estado, 'activo') != 'eliminado' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento != ''"
+            )
+            filas_galerias = cursor.fetchall()
+        except Exception as e:
+            print(f"⚠️ Error listando galerías con vencimiento: {e}")
+            filas_galerias = []
+
+        equipo = None
+        for galeria_id, titulo, fecha_venc, nivel_previo in filas_galerias:
+            bucket = _bucket_vencimiento(fecha_venc)
+            if bucket not in ('proximo_a_vencer', 'vencido'):
+                continue
+            if bucket == nivel_previo or (bucket == 'proximo_a_vencer' and nivel_previo == 'vencido'):
+                continue
+
+            q_upd = ("UPDATE galerias SET alerta_vencimiento_nivel = %s WHERE id = %s" if db_type == 'postgres'
+                      else "UPDATE galerias SET alerta_vencimiento_nivel = ? WHERE id = ?")
+            cursor.execute(q_upd, (bucket, galeria_id))
+            conn.commit()
+
+            if equipo is None:
+                equipo = _equipo_soporte_activo()
+            url_doc = url_for('index')
+            if bucket == 'vencido':
+                mensaje = f"⛔ El instructivo '{titulo}' ya venció (fecha límite {fecha_venc})"
+                asunto = f"[Arkiv] Documento vencido — '{titulo}'"
+                cuerpo_estado = "ya superó"
+            else:
+                mensaje = f"⏳ El instructivo '{titulo}' está próximo a vencer (fecha límite {fecha_venc})"
+                asunto = f"[Arkiv] Documento próximo a vencer — '{titulo}'"
+                cuerpo_estado = "está por superar"
+            cuerpo = (
+                f"El instructivo/documento '{titulo}' {cuerpo_estado} su fecha de vencimiento ({fecha_venc}).\n\n"
+                f"Ingresa a Arkiv, módulo Instructivos y Archivos, para revisarlo y renovarlo si corresponde.\n\n---\nArkiv"
+            )
+            crear_notificacion_para_varios([m['usuario'] for m in equipo], mensaje, url=url_doc, tipo='vencimiento')
+            for miembro in equipo:
+                if miembro['correo']:
+                    threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto, cuerpo)).start()
+
+        # --- Documentos por empleado (documentos_empleado) ---
+        try:
+            cursor.execute(
+                "SELECT id, usuario, titulo, tipo_documento, fecha_vencimiento, alerta_nivel FROM documentos_empleado "
+                "WHERE COALESCE(estado, 'activo') = 'activo' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento != ''"
+            )
+            filas_empleado = cursor.fetchall()
+        except Exception as e:
+            print(f"⚠️ Error listando documentos de empleado con vencimiento: {e}")
+            filas_empleado = []
+
+        admins_cache = None
+        for doc_id, usuario_doc, titulo, tipo_doc, fecha_venc, nivel_previo in filas_empleado:
+            bucket = _bucket_vencimiento(fecha_venc)
+            if bucket not in ('proximo_a_vencer', 'vencido'):
+                continue
+            if bucket == nivel_previo or (bucket == 'proximo_a_vencer' and nivel_previo == 'vencido'):
+                continue
+
+            q_upd = ("UPDATE documentos_empleado SET alerta_nivel = %s WHERE id = %s" if db_type == 'postgres'
+                      else "UPDATE documentos_empleado SET alerta_nivel = ? WHERE id = ?")
+            cursor.execute(q_upd, (bucket, doc_id))
+            conn.commit()
+
+            if admins_cache is None:
+                admins_cache = _equipo_soporte_activo()
+            url_doc = url_for('ver_vencimientos')
+            if bucket == 'vencido':
+                mensaje = f"⛔ El documento '{titulo}' ({tipo_doc}) de {usuario_doc} ya venció (fecha límite {fecha_venc})"
+                asunto = f"[Arkiv] Documento vencido — '{titulo}'"
+                cuerpo_estado = "ya superó"
+            else:
+                mensaje = f"⏳ El documento '{titulo}' ({tipo_doc}) de {usuario_doc} está próximo a vencer (fecha límite {fecha_venc})"
+                asunto = f"[Arkiv] Documento próximo a vencer — '{titulo}'"
+                cuerpo_estado = "está por superar"
+            cuerpo = (
+                f"El documento '{titulo}' ({tipo_doc}) {cuerpo_estado} su fecha de vencimiento ({fecha_venc}).\n\n"
+                f"Ingresa a Arkiv, módulo Vencimiento de Documentos, para revisarlo y gestionar su renovación.\n\n---\nArkiv"
+            )
+            destinatarios = set([usuario_doc] + [m['usuario'] for m in admins_cache])
+            crear_notificacion_para_varios(list(destinatarios), mensaje, url=url_doc, tipo='vencimiento')
+            correo_empleado = _correo_de_usuario(usuario_doc)
+            if correo_empleado:
+                threading.Thread(target=enviar_correo_ticket, args=(correo_empleado, asunto, cuerpo)).start()
+            for miembro in admins_cache:
+                if miembro['correo']:
+                    threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], asunto, cuerpo)).start()
+
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error revisando alertas de vencimiento de documentos: {e}")
+
+
+def _subir_archivo_a_cloudinary(file):
+    """Sube un único archivo a Cloudinary aplicando las mismas reglas que /subir y
+    /editar_galeria según su extensión (video/pdf/comprimido/imagen). Devuelve (url,
+    nombre_original) o (None, None) si el archivo no viene, no es válido, o falla la subida."""
+    if not file or not file.filename or not archivo_permitido(file.filename):
+        return None, None
+    try:
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext in ['mp4', 'mov', 'webm', 'avi']:
+            upload_result = cloudinary.uploader.upload_large(
+                file.stream, resource_type="video", filename=file.filename,
+                use_filename=True, unique_filename=True, chunk_size=6000000, timeout=600
+            )
+        elif ext == 'pdf':
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="image", format="pdf",
+                use_filename=True, unique_filename=True, timeout=60
+            )
+        elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
+            upload_result = cloudinary.uploader.upload_large(
+                file.stream, resource_type="raw", filename=file.filename,
+                use_filename=True, unique_filename=True, chunk_size=6000000, timeout=600
+            )
+        else:
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="image", use_filename=True, unique_filename=True, timeout=60
+            )
+        return upload_result['secure_url'], file.filename
+    except Exception as e:
+        print(f"⚠️ Error subiendo el archivo '{file.filename}' a Cloudinary: {e}")
+        return None, None
 
 
 def _marcar_comunicado_leido(comunicado_id, usuario):
@@ -7162,20 +7359,26 @@ def index():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
+
     # 👁️ Un usuario Estándar solo debe ver instructivos marcados como 'todos'; Admin y Agente
     # ven absolutamente todo (incluidos los marcados 'admin'), sin filtrar por visibilidad.
     puede_ver_todo = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
 
+    # 🔔 Aviso perezoso de vencimiento de documentos — ver _revisar_alertas_vencimientos().
+    # Solo tiene sentido para quien ya puede gestionar instructivos (evita que un usuario
+    # Estándar dispare envíos de correo con cada visita al listado).
+    if puede_ver_todo:
+        _revisar_alertas_vencimientos()
+
     try:
-        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas, visibilidad FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
+        cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags, vistas, descargas, visibilidad, fecha_vencimiento FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
         rows = cursor.fetchall()
     except Exception:
         try:
             conn.rollback()
             cursor.execute("SELECT id, titulo, descripcion, fecha_subida, categoria, tipo, tags FROM galerias WHERE COALESCE(estado, 'activo') != 'eliminado'")
             raw_rows = cursor.fetchall()
-            rows = [r + (0, 0, 'todos') for r in raw_rows]
+            rows = [r + (0, 0, 'todos', None) for r in raw_rows]
         except Exception:
             rows = []
 
@@ -7200,6 +7403,7 @@ def index():
         vistas = r[7] if len(r) > 7 and r[7] is not None else 0
         descargas = r[8] if len(r) > 8 and r[8] is not None else 0
         visibilidad = r[9] if len(r) > 9 and r[9] else 'todos'
+        fecha_vencimiento = r[10] if len(r) > 10 else None
 
         # 👁️ Si es un usuario Estándar y este instructivo quedó marcado "Solo Admin", ni
         # siquiera entra a construir el item: no debe aparecer en su listado ni en las
@@ -7232,6 +7436,8 @@ def index():
             'vistas': vistas,
             'descargas': descargas,
             'visibilidad': visibilidad,
+            'fecha_vencimiento': fecha_vencimiento or '',
+            'vencimiento_estado': _bucket_vencimiento(fecha_vencimiento),
             'archivos': archivos
         }
 
@@ -7275,6 +7481,9 @@ def subir_archivo():
     visibilidad = request.form.get('visibilidad', 'todos').strip()
     if visibilidad not in ('todos', 'admin'):
         visibilidad = 'todos'
+    # 📅 Vencimiento (opcional): fecha a partir de la cual este instructivo se considera
+    # vencido. Vacío = sin vencimiento (comportamiento igual al de siempre).
+    fecha_vencimiento = (request.form.get('fecha_vencimiento') or '').strip() or None
 
     galeria_id = str(uuid.uuid4())[:8]
     fecha_actual = obtener_fecha_actual()
@@ -7345,8 +7554,8 @@ def subir_archivo():
             cursor = conn.cursor()
             # 'area' es NOT NULL en Neon sin valor por defecto: reutilizamos la categoría
             # elegida, ya que hoy no hay un campo separado de área en el formulario.
-            q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo', %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo', ?)"
-            cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags, visibilidad))
+            q_galeria = "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad, fecha_vencimiento) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO galerias (id, titulo, descripcion, fecha_subida, categoria, area, tipo, tags, vistas, descargas, estado, visibilidad, fecha_vencimiento) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'activo', ?, ?)"
+            cursor.execute(q_galeria, (galeria_id, titulo, descripcion, fecha_actual, categoria, categoria, tipo, tags, visibilidad, fecha_vencimiento))
 
             # 'nombre_original' y 'url_archivo' son NOT NULL en Neon sin valor por defecto.
             # Se llenan junto con 'filename' (que se conserva por compatibilidad con lecturas existentes).
@@ -7374,17 +7583,20 @@ def editar_galeria(galeria_id):
     nueva_visibilidad = (request.form.get('visibilidad') or 'todos').strip()
     if nueva_visibilidad not in ('todos', 'admin'):
         nueva_visibilidad = 'todos'
+    # 📅 Vencimiento (opcional): vacío = sin vencimiento.
+    nueva_fecha_vencimiento = (request.form.get('fecha_vencimiento') or '').strip() or None
     nuevos_archivos = request.files.getlist('nuevos_archivos')
 
     conn, db_type = get_db()
     cursor = conn.cursor()
 
     try:
-        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad FROM galerias WHERE id = ?"
+        q_sel = "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad, fecha_vencimiento FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, descripcion, categoria, tipo, tags, visibilidad, fecha_vencimiento FROM galerias WHERE id = ?"
         cursor.execute(q_sel, (galeria_id,))
         antiguo = cursor.fetchone()
 
         cambios = []
+        fecha_vencimiento_cambio = False
         if antiguo:
             tit_old = (antiguo[0] or '').strip()
             desc_old = (antiguo[1] or '').strip()
@@ -7392,6 +7604,7 @@ def editar_galeria(galeria_id):
             tipo_old = (antiguo[3] or 'Instructivo').strip()
             tags_old = (antiguo[4] or '').strip()
             visibilidad_old = (antiguo[5] or 'todos').strip()
+            venc_old = (antiguo[6] or '').strip() or None
 
             if tit_old != nuevo_titulo:
                 cambios.append(f"Título: '{tit_old}' ➔ '{nuevo_titulo}'")
@@ -7405,9 +7618,18 @@ def editar_galeria(galeria_id):
                 cambios.append(f"Tags: '{tags_old}' ➔ '{nuevos_tags}'")
             if visibilidad_old != nueva_visibilidad:
                 cambios.append(f"Visibilidad: '{visibilidad_old}' ➔ '{nueva_visibilidad}'")
+            if venc_old != nueva_fecha_vencimiento:
+                cambios.append(f"Vencimiento: '{venc_old or 'Sin definir'}' ➔ '{nueva_fecha_vencimiento or 'Sin definir'}'")
+                fecha_vencimiento_cambio = True
 
-        q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s, visibilidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ?, visibilidad = ? WHERE id = ?"
-        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, nueva_visibilidad, galeria_id))
+        # 🔔 Si cambió la fecha de vencimiento, se limpia el nivel de alerta ya avisado para
+        # que _revisar_alertas_vencimientos() pueda volver a avisar si la nueva fecha se
+        # acerca otra vez — mismo patrón que extender_sla_ticket con sla_alerta_nivel.
+        if fecha_vencimiento_cambio:
+            q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s, visibilidad = %s, fecha_vencimiento = %s, alerta_vencimiento_nivel = NULL WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ?, visibilidad = ?, fecha_vencimiento = ?, alerta_vencimiento_nivel = NULL WHERE id = ?"
+        else:
+            q_upd = "UPDATE galerias SET titulo = %s, descripcion = %s, categoria = %s, tipo = %s, tags = %s, visibilidad = %s, fecha_vencimiento = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET titulo = ?, descripcion = ?, categoria = ?, tipo = ?, tags = ?, visibilidad = ?, fecha_vencimiento = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_titulo, nueva_desc, nueva_cat, nuevo_tipo, nuevos_tags, nueva_visibilidad, nueva_fecha_vencimiento, galeria_id))
         
         archivos_agregados = 0
         for file in nuevos_archivos:
@@ -7504,6 +7726,204 @@ def eliminar_galeria(galeria_id):
 
     conn.close()
     return redirect(url_for('index'))
+
+
+# 📅 VENCIMIENTO DE DOCUMENTOS -------------------------------------------------------------
+# Panel de reporte/filtro consolidado (institucionales + por empleado) y la gestión de
+# documentos por empleado (subir/editar/eliminar), enlazada desde Gestión de Usuarios.
+
+@app.route('/vencimientos')
+@login_required
+@agente_o_admin_required
+def ver_vencimientos():
+    """Panel consolidado de vencimiento de documentos: instructivos institucionales
+    ('galerias') y documentos por empleado ('documentos_empleado') en una sola vista,
+    filtrable por origen y por estado (vencido / próximo a vencer / vigente)."""
+    _revisar_alertas_vencimientos()
+
+    filtro_origen = request.args.get('origen', '').strip()
+    filtro_estado = request.args.get('estado', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    items = []
+
+    try:
+        cursor.execute(
+            "SELECT id, titulo, fecha_vencimiento FROM galerias "
+            "WHERE COALESCE(estado, 'activo') != 'eliminado' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento != ''"
+        )
+        for galeria_id, titulo, fecha_venc in cursor.fetchall():
+            items.append({
+                'origen': 'institucional', 'origen_label': 'Instructivo institucional',
+                'titulo': titulo, 'detalle': '', 'fecha_vencimiento': fecha_venc,
+                'estado': _bucket_vencimiento(fecha_venc) or 'vigente',
+                'url': url_for('index'),
+            })
+    except Exception as e:
+        print(f"⚠️ Error listando galerías para el panel de vencimientos: {e}")
+
+    try:
+        cursor.execute(
+            "SELECT d.id, d.titulo, d.tipo_documento, d.usuario, d.fecha_vencimiento, COALESCE(u.nombre, d.usuario) "
+            "FROM documentos_empleado d LEFT JOIN usuarios u ON u.usuario = d.usuario "
+            "WHERE COALESCE(d.estado, 'activo') = 'activo' AND d.fecha_vencimiento IS NOT NULL AND d.fecha_vencimiento != ''"
+        )
+        for doc_id, titulo, tipo_doc, usuario_doc, fecha_venc, nombre_doc in cursor.fetchall():
+            items.append({
+                'origen': 'empleado', 'origen_label': 'Documento de empleado',
+                'titulo': titulo, 'detalle': f"{tipo_doc} · {nombre_doc or usuario_doc}",
+                'fecha_vencimiento': fecha_venc,
+                'estado': _bucket_vencimiento(fecha_venc) or 'vigente',
+                'url': url_for('gestion_usuarios'),
+            })
+    except Exception as e:
+        print(f"⚠️ Error listando documentos de empleado para el panel de vencimientos: {e}")
+
+    conn.close()
+
+    if filtro_origen in ('institucional', 'empleado'):
+        items = [i for i in items if i['origen'] == filtro_origen]
+    if filtro_estado in ('vencido', 'proximo_a_vencer', 'vigente'):
+        items = [i for i in items if i['estado'] == filtro_estado]
+
+    orden_estado = {'vencido': 0, 'proximo_a_vencer': 1, 'vigente': 2}
+    items.sort(key=lambda i: (orden_estado.get(i['estado'], 3), i['fecha_vencimiento']))
+
+    total_vencidos = sum(1 for i in items if i['estado'] == 'vencido')
+    total_proximos = sum(1 for i in items if i['estado'] == 'proximo_a_vencer')
+
+    return render_template(
+        'vencimientos.html', items=items, filtro_origen=filtro_origen, filtro_estado=filtro_estado,
+        total_vencidos=total_vencidos, total_proximos=total_proximos, rol=session.get('rol')
+    )
+
+
+@app.route('/usuarios/<usuario>/documentos')
+@login_required
+@admin_required
+def documentos_empleado_listar(usuario):
+    """JSON con los documentos (no eliminados) de un empleado puntual — usado por el modal
+    de 'Documentos' en Gestión de Usuarios para pintar la lista sin recargar la página."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT id, tipo_documento, titulo, descripcion, url_archivo, nombre_original, fecha_emision, fecha_vencimiento FROM documentos_empleado "
+             "WHERE usuario = %s AND COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC") if db_type == 'postgres' else \
+            ("SELECT id, tipo_documento, titulo, descripcion, url_archivo, nombre_original, fecha_emision, fecha_vencimiento FROM documentos_empleado "
+             "WHERE usuario = ? AND COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC")
+        cursor.execute(q, (usuario,))
+        docs = [{
+            'id': r[0], 'tipo_documento': r[1], 'titulo': r[2], 'descripcion': r[3] or '',
+            'url_archivo': r[4] or '', 'nombre_original': r[5] or '', 'fecha_emision': r[6] or '',
+            'fecha_vencimiento': r[7] or '', 'estado_vencimiento': _bucket_vencimiento(r[7]) or 'vigente',
+        } for r in cursor.fetchall()]
+        conn.close()
+        return {'documentos': docs}
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error listando documentos de '{usuario}': {e}")
+        return {'documentos': []}
+
+
+@app.route('/documentos_empleado/subir', methods=['POST'])
+@login_required
+@admin_required
+def documentos_empleado_subir():
+    usuario_doc = (request.form.get('usuario') or '').strip()
+    tipo_documento = (request.form.get('tipo_documento') or '').strip() or 'Documento'
+    titulo = (request.form.get('titulo') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip()
+    fecha_emision = (request.form.get('fecha_emision') or '').strip() or None
+    fecha_vencimiento = (request.form.get('fecha_vencimiento') or '').strip() or None
+    archivo = request.files.get('archivo')
+
+    if not usuario_doc or not titulo:
+        return redirect(url_for('gestion_usuarios'))
+
+    url_archivo, nombre_original = _subir_archivo_a_cloudinary(archivo)
+    fecha_actual = obtener_fecha_actual()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_ins = ("INSERT INTO documentos_empleado (usuario, tipo_documento, titulo, descripcion, url_archivo, nombre_original, fecha_emision, fecha_vencimiento, estado, creado_por, fecha_creacion) "
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)") if db_type == 'postgres' else \
+                ("INSERT INTO documentos_empleado (usuario, tipo_documento, titulo, descripcion, url_archivo, nombre_original, fecha_emision, fecha_vencimiento, estado, creado_por, fecha_creacion) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)")
+        cursor.execute(q_ins, (usuario_doc, tipo_documento, titulo, descripcion, url_archivo or '', nombre_original or '', fecha_emision, fecha_vencimiento, session['username'], fecha_actual))
+        conn.commit()
+        registrar_log(session['username'], "Documento de Empleado Registrado", f"'{titulo}' ({tipo_documento}) para {usuario_doc}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error guardando documento de empleado '{titulo}' para '{usuario_doc}': {e}")
+    conn.close()
+
+    return redirect(url_for('gestion_usuarios'))
+
+
+@app.route('/documentos_empleado/editar/<int:doc_id>', methods=['POST'])
+@login_required
+@admin_required
+def documentos_empleado_editar(doc_id):
+    tipo_documento = (request.form.get('tipo_documento') or '').strip() or 'Documento'
+    titulo = (request.form.get('titulo') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip()
+    fecha_emision = (request.form.get('fecha_emision') or '').strip() or None
+    fecha_vencimiento = (request.form.get('fecha_vencimiento') or '').strip() or None
+    archivo = request.files.get('archivo')
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT fecha_vencimiento, url_archivo, nombre_original FROM documentos_empleado WHERE id = %s" if db_type == 'postgres' else "SELECT fecha_vencimiento, url_archivo, nombre_original FROM documentos_empleado WHERE id = ?"
+        cursor.execute(q_sel, (doc_id,))
+        antiguo = cursor.fetchone()
+        venc_old = (antiguo[0] or '').strip() if antiguo else None
+        url_actual = antiguo[1] if antiguo else ''
+        nombre_actual = antiguo[2] if antiguo else ''
+
+        url_nueva, nombre_nuevo = _subir_archivo_a_cloudinary(archivo)
+        if not url_nueva:
+            url_nueva, nombre_nuevo = url_actual, nombre_actual
+
+        # 🔔 Si cambió la fecha de vencimiento, se limpia el nivel de alerta para que pueda
+        # volver a avisar si la nueva fecha se acerca otra vez.
+        if venc_old != fecha_vencimiento:
+            q_upd = ("UPDATE documentos_empleado SET tipo_documento = %s, titulo = %s, descripcion = %s, fecha_emision = %s, fecha_vencimiento = %s, url_archivo = %s, nombre_original = %s, alerta_nivel = NULL WHERE id = %s") if db_type == 'postgres' else \
+                    ("UPDATE documentos_empleado SET tipo_documento = ?, titulo = ?, descripcion = ?, fecha_emision = ?, fecha_vencimiento = ?, url_archivo = ?, nombre_original = ?, alerta_nivel = NULL WHERE id = ?")
+        else:
+            q_upd = ("UPDATE documentos_empleado SET tipo_documento = %s, titulo = %s, descripcion = %s, fecha_emision = %s, fecha_vencimiento = %s, url_archivo = %s, nombre_original = %s WHERE id = %s") if db_type == 'postgres' else \
+                    ("UPDATE documentos_empleado SET tipo_documento = ?, titulo = ?, descripcion = ?, fecha_emision = ?, fecha_vencimiento = ?, url_archivo = ?, nombre_original = ? WHERE id = ?")
+        cursor.execute(q_upd, (tipo_documento, titulo, descripcion, fecha_emision, fecha_vencimiento, url_nueva, nombre_nuevo, doc_id))
+        conn.commit()
+        registrar_log(session['username'], "Documento de Empleado Editado", f"Documento #{doc_id}: '{titulo}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error editando documento de empleado {doc_id}: {e}")
+    conn.close()
+
+    return redirect(url_for('gestion_usuarios'))
+
+
+@app.route('/documentos_empleado/eliminar/<int:doc_id>', methods=['POST'])
+@login_required
+@admin_required
+def documentos_empleado_eliminar(doc_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_upd = "UPDATE documentos_empleado SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE documentos_empleado SET estado = 'eliminado' WHERE id = ?"
+        cursor.execute(q_upd, (doc_id,))
+        conn.commit()
+        registrar_log(session['username'], "Documento de Empleado Eliminado", f"Documento #{doc_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error eliminando documento de empleado {doc_id}: {e}")
+    conn.close()
+
+    return redirect(url_for('gestion_usuarios'))
+
 
 if __name__ == '__main__':
     # 🛡️ debug=False: este bloque no lo usa producción (Render arranca con gunicorn,
