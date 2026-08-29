@@ -139,6 +139,8 @@
                                 <span class="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Abierto</span>
                             {% elif t.estado == 'En Proceso' %}
                                 <span class="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">En Proceso</span>
+                            {% elif t.estado == 'Pendiente' %}
+                                <span class="px-2 py-0.5 bg-slate-600/20 text-slate-300 border border-slate-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Pendiente</span>
                             {% elif t.estado == 'Resuelto' %}
                                 <span class="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Resuelto</span>
                             {% else %}

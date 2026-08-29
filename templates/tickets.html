@@ -201,6 +201,8 @@
                                     <span class="px-2.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-circle-dot mr-1"></i>Abierto</span>
                                 {% elif t.estado == 'En Proceso' %}
                                     <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-spinner mr-1"></i>En Proceso</span>
+                                {% elif t.estado == 'Pendiente' %}
+                                    <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-300 border border-slate-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-pause mr-1"></i>Pendiente</span>
                                 {% elif t.estado == 'Resuelto' %}
                                     <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-check mr-1"></i>Resuelto</span>
                                 {% elif t.estado == 'Cancelado' %}
@@ -336,6 +338,28 @@
                             <p class="text-slate-500 text-[10px] mt-1">Si tu solicitud es sobre un equipo específico del inventario (un computador, una impresora...), selecciónalo aquí.</p>
                         </div>
                         {% endif %}
+
+                        {% if tickets_cerrados %}
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-link mr-1"></i>Ticket relacionado (opcional)</label>
+                            <select name="ticket_relacionado_id" id="input-ticket-relacionado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Sin especificar</option>
+                                {% for tc in tickets_cerrados %}<option value="{{ tc.id }}">{{ tc.codigo }} — {{ tc.titulo }}</option>{% endfor %}
+                            </select>
+                            <p class="text-slate-500 text-[10px] mt-1">Si este caso continúa o hace referencia a una solicitud ya Resuelta/Cerrada, selecciónala aquí.</p>
+                        </div>
+                        {% endif %}
+
+                        {% if usuarios_lista %}
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-user-check mr-1"></i>¿Para quién es esta solicitud? (opcional)</label>
+                            <select name="solicitante_real" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Es para mí (quien crea la solicitud)</option>
+                                {% for u in usuarios_lista %}<option value="{{ u.usuario }}">{{ u.nombre }}</option>{% endfor %}
+                            </select>
+                            <p class="text-slate-500 text-[10px] mt-1">Si estás subiendo este caso a nombre de otra persona (PQRS), selecciónala: será ella quien pueda calificar el servicio al cierre, no tú.</p>
+                        </div>
+                        {% endif %}
                     </div>
 
                     <div class="flex flex-col gap-3">
@@ -415,6 +439,46 @@
         if (new URLSearchParams(window.location.search).get('crear')) {
             abrirModalCrear();
         }
+
+        // 📋 Duplicar ticket (ver botón "Duplicar" en ticket_detalle.html: /tickets?duplicar=<id>):
+        // abre el mismo modal de "Nueva Solicitud" y lo prellena con los datos del ticket
+        // original (título, descripción, tipo, categoría, prioridad, área, sede, activo), para
+        // que el usuario solo tenga que revisar y enviar — el envío crea un ticket
+        // independiente y nuevo (POST normal a /tickets/crear), que llega a la bandeja de los
+        // agentes como cualquier otra solicitud.
+        (function () {
+            const idDuplicar = new URLSearchParams(window.location.search).get('duplicar');
+            if (!idDuplicar) return;
+            fetch('/tickets/' + idDuplicar + '/duplicar_datos')
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) return;
+                    abrirModalCrear();
+                    const form = document.querySelector('#modal-ticket form');
+                    const radioTipo = form.querySelector('input[name="tipo"][value="' + (d.tipo || 'Incidente') + '"]');
+                    if (radioTipo) {
+                        radioTipo.checked = true;
+                        radioTipo.dispatchEvent(new Event('change'));
+                    }
+                    form.querySelector('[name="titulo"]').value = d.titulo ? ('Copia de: ' + d.titulo) : '';
+                    const setSelect = function (name, valor) {
+                        const el = form.querySelector('[name="' + name + '"]');
+                        if (el && valor) el.value = valor;
+                    };
+                    setSelect('categoria', d.categoria);
+                    setSelect('prioridad', d.prioridad);
+                    setSelect('area', d.area);
+                    setSelect('sede', d.sede);
+                    setSelect('activo_id', d.activo_id);
+                    // Solo se auto-selecciona si el original ya está Resuelto/Cerrado (el
+                    // servidor valida esto de nuevo en crear_ticket, así que si no aparece en
+                    // el desplegable — p. ej. era de otro usuario — el campo queda vacío).
+                    if (d.ticket_relacionado_sugerido) {
+                        setSelect('ticket_relacionado_id', String(d.ticket_relacionado_sugerido));
+                    }
+                    cargarContenidoEnEditor(quillDescripcionTicket, 'input-descripcion-ticket', d.descripcion || '');
+                });
+        })();
 
         // 📋 Plantillas de solicitud (ver /tickets/plantillas): al elegir una del selector se
         // prellenan tipo, título, categoría, prioridad, área, sede y descripción — todo sigue
