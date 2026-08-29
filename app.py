@@ -1872,6 +1872,29 @@ def _puede_ver_ticket(creado_por):
     return session.get('rol') in ROLES_CON_ACCESO_OPERATIVO or session.get('username') == creado_por
 
 
+def _estados_disponibles_ticket(estado_actual):
+    """Estados que se pueden elegir desde el estado ACTUAL del ticket — usada tanto para
+    filtrar el desplegable de 'Gestionar Solicitud' en ticket_detalle.html (ver ver_ticket) como
+    para validar el cambio del lado del servidor (ver actualizar_ticket), así ambos quedan
+    siempre sincronizados con una sola regla.
+
+    No se puede saltar directo a 'Resuelto' sin que el ticket haya pasado antes por
+    'En Proceso' (guardando ese cambio primero), ni a 'Cerrado' sin haber pasado antes por
+    'Resuelto' — pedido explícito de Tomás para no permitir cerrar/resolver casos que nunca se
+    empezaron a atender. Una vez 'Cerrado' el ticket queda bloqueado: debe ser el último estado,
+    sin más cambios posibles desde este formulario."""
+    if estado_actual == 'Cerrado':
+        return ['Cerrado']
+    disponibles = []
+    for e in ESTADOS_TICKET:
+        if e == 'Resuelto' and estado_actual not in ('En Proceso', 'Resuelto'):
+            continue
+        if e == 'Cerrado' and estado_actual not in ('Resuelto', 'Cerrado'):
+            continue
+        disponibles.append(e)
+    return disponibles
+
+
 def _parsear_fecha_ticket(fecha_str):
     """Convierte el formato de fecha usado en todo el módulo ('YYYY-MM-DD HH:MM:SS') a
     datetime. Devuelve None si el valor está vacío o no tiene el formato esperado."""
@@ -3185,7 +3208,7 @@ def ver_ticket(ticket_id):
     return render_template(
         'ticket_detalle.html', ticket=ticket, comentarios=comentarios,
         es_soporte=es_soporte, agentes=agentes, creador_info=creador_info,
-        estados=ESTADOS_TICKET, prioridades=PRIORIDADES_TICKET,
+        estados=_estados_disponibles_ticket(ticket['estado']), prioridades=PRIORIDADES_TICKET,
         whatsapp_tiene_numero=whatsapp_tiene_numero,
         max_modificaciones_sla=MAX_MODIFICACIONES_SLA, motivos_sla=MOTIVOS_MODIFICACION_SLA,
         calificacion_max=CALIFICACION_MAX, session_username=session.get('username'),
@@ -3329,7 +3352,13 @@ def actualizar_ticket(ticket_id):
         (estado_old, prioridad_old, asignado_old, respuesta_cumplida_old, resolucion_cumplida_old,
          creado_por, titulo_ticket, tipo_ticket, fecha_creacion_ticket, resolucion_limite_old,
          pausado_desde_old) = row
-        estado_final = nuevo_estado if nuevo_estado in ESTADOS_TICKET else estado_old
+        # 🔒 No se puede saltar directo a 'Resuelto' sin pasar antes por 'En Proceso', ni a
+        # 'Cerrado' sin pasar antes por 'Resuelto'; una vez 'Cerrado' el ticket queda bloqueado
+        # (debe ser el último estado). Se valida SIEMPRE del lado del servidor — el desplegable
+        # de ticket_detalle.html ya solo ofrece las opciones permitidas (ver ver_ticket()), pero
+        # esto es lo que de verdad lo hace cumplir aunque alguien arme el POST a mano. Misma
+        # regla en _estados_disponibles_ticket(), para no tener dos criterios distintos.
+        estado_final = nuevo_estado if nuevo_estado in _estados_disponibles_ticket(estado_old) else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
 
