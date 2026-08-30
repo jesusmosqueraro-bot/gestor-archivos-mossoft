@@ -683,7 +683,16 @@ def init_db():
                 # guarda el último aviso ya enviado, igual que sla_alerta_nivel en Tickets — ver
                 # _revisar_alertas_vencimientos().
                 "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(20);",
-                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS alerta_vencimiento_nivel VARCHAR(20);"
+                "ALTER TABLE galerias ADD COLUMN IF NOT EXISTS alerta_vencimiento_nivel VARCHAR(20);",
+                # 🔒 Bloqueo automático por intentos fallidos de inicio de sesión (distinto del
+                # bloqueo manual que ya maneja 'estado'): 'intentos_fallidos_login' cuenta los
+                # fallos de contraseña consecutivos y se reinicia en cada acierto;
+                # 'bloqueado_por_intentos' se enciende al llegar a UMBRAL_INTENTOS_FALLIDOS_LOGIN
+                # y bloquea el acceso aunque la clave sea correcta, hasta que un admin lo
+                # desbloquee (ver desbloquear_intentos_usuario) o la propia persona recupere su
+                # clave por correo (ver validar_codigo).
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intentos_fallidos_login INTEGER DEFAULT 0;",
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS bloqueado_por_intentos BOOLEAN DEFAULT FALSE;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -938,6 +947,17 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_venc_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🔒 Bloqueo automático por intentos fallidos de inicio de sesión. Ver comentario
+            # equivalente en la rama de Postgres.
+            for col_bloqueo_sql in [
+                "ALTER TABLE usuarios ADD COLUMN intentos_fallidos_login INTEGER DEFAULT 0;",
+                "ALTER TABLE usuarios ADD COLUMN bloqueado_por_intentos INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_bloqueo_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -1222,6 +1242,73 @@ def _migrar_password_a_hash(usuario, password_plano):
         conn.close()
     except Exception as e:
         print(f"Error migrando password a hash para {usuario}: {e}")
+
+# 🔒 BLOQUEO AUTOMÁTICO POR INTENTOS FALLIDOS DE INICIO DE SESIÓN
+# Es un candado aparte del 'estado' (activo/inactivo), que sigue siendo del resorte exclusivo
+# de un admin (ver toggle_estado_usuario): este otro lo enciende el propio sistema de login,
+# sin intervención humana, tras varios fallos de contraseña seguidos — y se apaga por
+# cualquiera de dos caminos: un admin lo desbloquea manualmente desde Gestión de Usuarios
+# (ver desbloquear_intentos_usuario), o la propia persona recupera el acceso cambiando su
+# contraseña por el flujo de correo (ver validar_codigo). Cualquiera de los dos reinicia el
+# contador para que fallos ya superados no se acumulen hacia un futuro bloqueo.
+UMBRAL_INTENTOS_FALLIDOS_LOGIN = 3
+
+def _registrar_intento_fallido_login(usuario):
+    """Suma un intento fallido de contraseña para 'usuario'. Si con este llega (o ya venía)
+    al umbral, deja/mantiene la cuenta bloqueada. Devuelve True si la cuenta queda (o ya
+    estaba) bloqueada por intentos, False si todavía tiene margen."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_sel = "SELECT COALESCE(intentos_fallidos_login, 0), COALESCE(bloqueado_por_intentos, FALSE) FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT COALESCE(intentos_fallidos_login, 0), COALESCE(bloqueado_por_intentos, 0) FROM usuarios WHERE usuario = ?"
+        cursor.execute(q_sel, (usuario,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        intentos_actuales = (row[0] or 0) + 1
+        ya_estaba_bloqueada = bool(row[1])
+
+        if ya_estaba_bloqueada:
+            # Ya estaba bloqueada de antes: solo se deja constancia del intento nuevo, sin
+            # volver a "bloquear" ni repetir el registro de auditoría del bloqueo.
+            q_upd = "UPDATE usuarios SET intentos_fallidos_login = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = ? WHERE usuario = ?"
+            cursor.execute(q_upd, (intentos_actuales, usuario))
+            conn.commit()
+            conn.close()
+            return True
+
+        if intentos_actuales >= UMBRAL_INTENTOS_FALLIDOS_LOGIN:
+            q_upd = "UPDATE usuarios SET intentos_fallidos_login = %s, bloqueado_por_intentos = TRUE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = ?, bloqueado_por_intentos = 1 WHERE usuario = ?"
+            cursor.execute(q_upd, (intentos_actuales, usuario))
+            conn.commit()
+            conn.close()
+            registrar_log(usuario, "Cuenta Bloqueada por Intentos", f"Se bloqueó la cuenta tras {intentos_actuales} intentos fallidos consecutivos de inicio de sesión.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+            return True
+
+        q_upd = "UPDATE usuarios SET intentos_fallidos_login = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = ? WHERE usuario = ?"
+        cursor.execute(q_upd, (intentos_actuales, usuario))
+        conn.commit()
+        conn.close()
+        return False
+    except Exception as e:
+        print(f"⚠️ Error registrando intento fallido de login para {usuario}: {e}")
+        return False
+
+def _resetear_intentos_fallidos_login(usuario):
+    """Limpia el contador de intentos fallidos (sin tocar 'bloqueado_por_intentos': ese solo
+    lo apaga un admin o el flujo de recuperación de clave). Se llama tras una contraseña
+    correcta, para que fallos viejos ya superados no se acumulen hacia un futuro bloqueo."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "UPDATE usuarios SET intentos_fallidos_login = 0 WHERE usuario = %s AND COALESCE(intentos_fallidos_login, 0) != 0" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = 0 WHERE usuario = ? AND COALESCE(intentos_fallidos_login, 0) != 0"
+        cursor.execute(q, (usuario,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error reiniciando intentos fallidos de login para {usuario}: {e}")
 
 def verificar_recaptcha(response_token):
     if not response_token: return False
@@ -5390,8 +5477,11 @@ def validar_codigo():
         # recuperación cambie la clave de todas a la vez.
         # 🔒 Esta contraseña ya la eligió el propio usuario, así que se limpia
         # debe_cambiar_password (si venía marcada de una contraseña temporal asignada por un
-        # admin, ya no aplica).
-        q_upd = "UPDATE usuarios SET password_hash = %s, debe_cambiar_password = FALSE WHERE LOWER(TRIM(correo)) = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0 WHERE LOWER(TRIM(correo)) = ? AND usuario = ?"
+        # admin, ya no aplica). También se limpia un eventual bloqueo por intentos fallidos
+        # (ver UMBRAL_INTENTOS_FALLIDOS_LOGIN): probar el código que llegó a su correo ya
+        # demuestra que es el dueño legítimo de la cuenta, así que este es uno de los dos
+        # caminos válidos para recuperar el acceso (el otro es que un admin lo desbloquee).
+        q_upd = "UPDATE usuarios SET password_hash = %s, debe_cambiar_password = FALSE, bloqueado_por_intentos = FALSE, intentos_fallidos_login = 0 WHERE LOWER(TRIM(correo)) = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, bloqueado_por_intentos = 0, intentos_fallidos_login = 0 WHERE LOWER(TRIM(correo)) = ? AND usuario = ?"
         cursor.execute(q_upd, (nuevo_hash, email_usuario, nombre_usuario))
         conn.commit()
         conn.close()
@@ -5425,7 +5515,7 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -5444,7 +5534,19 @@ def login():
                         if es_valida:
                             _migrar_password_a_hash(user[0], password)
 
+                # 🔒 Mensaje de bloqueo por intentos fallidos. Igual que con "cuenta desactivada"
+                # abajo, esto solo se revela a quien YA acertó la contraseña — así no se le
+                # confirma a un tercero que adivina contraseñas si una cuenta está bloqueada o no.
+                if es_valida and len(user) > 8 and user[8]:
+                    registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso (con contraseña correcta) a una cuenta bloqueada por intentos fallidos.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+                    return render_template('login.html', error="Tu cuenta quedó bloqueada por varios intentos fallidos de inicio de sesión. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
+
                 if es_valida:
+                    # Contraseña correcta y cuenta no bloqueada por intentos: se rompió la racha
+                    # de fallos, así que el contador se reinicia (si tenía alguno acumulado).
+                    if len(user) > 7 and user[7]:
+                        _resetear_intentos_fallidos_login(user[0])
+
                     # ⚠️ user[3] es la columna "estado" (activo/inactivo). Un usuario bloqueado
                     # por un administrador no debe poder iniciar sesión aunque su clave sea correcta.
                     if (user[3] or 'activo') == 'inactivo':
@@ -5470,6 +5572,11 @@ def login():
                     session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                     return redirect(url_for('bienvenida'))
+                elif user:
+                    # 🔒 Contraseña incorrecta en una cuenta que sí existe: cuenta como intento
+                    # fallido hacia el bloqueo automático (ver UMBRAL_INTENTOS_FALLIDOS_LOGIN).
+                    if _registrar_intento_fallido_login(user[0]):
+                        return render_template('login.html', error="Contraseña incorrecta. Por seguridad, la cuenta quedó bloqueada tras varios intentos fallidos. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
             except Exception as db_err:
                 print(f"Error consultando usuario en BD: {db_err}")
 
@@ -7050,9 +7157,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -7320,6 +7427,35 @@ def toggle_estado_usuario(usuario_id):
     except Exception as e:
         conn.rollback()
         print(f"Error cambiando estado del usuario {usuario_id}: {e}")
+
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
+# 🔓 DESBLOQUEAR CUENTA (BLOQUEADA AUTOMÁTICAMENTE POR INTENTOS FALLIDOS DE LOGIN)
+# Distinto de toggle_estado_usuario de arriba: ese es el bloqueo MANUAL que decide un admin
+# (columna 'estado'); este es el bloqueo AUTOMÁTICO que dispara el propio sistema de login
+# tras varios fallos de contraseña seguidos (columna 'bloqueado_por_intentos', ver
+# UMBRAL_INTENTOS_FALLIDOS_LOGIN). El otro camino para que se apague solo es que la propia
+# persona recupere su clave por correo (ver validar_codigo).
+@app.route('/usuarios/desbloquear_intentos/<int:usuario_id>', methods=['POST'])
+@login_required
+@admin_required
+def desbloquear_intentos_usuario(usuario_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT usuario FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+
+        if row:
+            q_upd = "UPDATE usuarios SET bloqueado_por_intentos = FALSE, intentos_fallidos_login = 0 WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET bloqueado_por_intentos = 0, intentos_fallidos_login = 0 WHERE id = ?"
+            cursor.execute(q_upd, (usuario_id,))
+            conn.commit()
+            registrar_log(session['username'], "Desbloqueo por Intentos Fallidos", f"El administrador desbloqueó manualmente la cuenta '{row[0]}' (bloqueada por intentos fallidos de inicio de sesión).")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error desbloqueando por intentos al usuario {usuario_id}: {e}")
 
     conn.close()
     return redirect(url_for('gestion_usuarios'))
@@ -7777,6 +7913,8 @@ ETIQUETAS_ACCION_HISTORIAL_SESIONES = {
     'Inicio de Sesión': {'label': 'Inicio de sesión exitoso', 'icono': 'fa-right-to-bracket', 'color': 'emerald'},
     'Inicio de Sesión Bloqueado': {'label': 'Intento bloqueado (cuenta inactiva)', 'icono': 'fa-ban', 'color': 'rose'},
     'Cierre de Sesión': {'label': 'Cierre de sesión', 'icono': 'fa-arrow-right-from-bracket', 'color': 'slate'},
+    'Cuenta Bloqueada por Intentos': {'label': 'Cuenta bloqueada por varios intentos fallidos', 'icono': 'fa-ban', 'color': 'rose'},
+    'Desbloqueo por Intentos Fallidos': {'label': 'Un administrador desbloqueó la cuenta', 'icono': 'fa-unlock-keyhole', 'color': 'emerald'},
 }
 
 @app.route('/perfil/historial-sesiones')
