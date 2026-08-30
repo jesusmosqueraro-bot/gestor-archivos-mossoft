@@ -3621,6 +3621,15 @@ def actualizar_ticket(ticket_id):
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
 
+        # 🔒 Un ticket 'Cerrado' ya no se puede reasignar a otra persona: el caso quedó resuelto
+        # y cerrado, así que cambiar después quién quedó como responsable no aporta nada y podía
+        # usarse para mover casos cerrados de un agente a otro sin dejar rastro real de quién lo
+        # atendió. Se ignora cualquier valor que llegue en 'asignado_a' y se conserva el que ya
+        # tenía — igual que con el estado, se valida del lado del servidor sin importar si el
+        # select de la plantilla también quedó deshabilitado.
+        if estado_old == 'Cerrado':
+            asignado_final = asignado_old
+
         # 👤 Si el ticket se resuelve/cierra sin que nadie quedara asignado (el agente cambió
         # el estado pero dejó el selector "Asignar a" en "Sin asignar"), se asigna
         # automáticamente a quien hizo el cambio. Sin esto, "Top agentes por solicitudes
@@ -3728,18 +3737,35 @@ def eliminar_ticket(ticket_id):
     deja el ticket visible como parte del historial. Pensada para los tickets de prueba,
     duplicados o creados por error que el equipo pidió poder limpiar antes de operar en serio
     (ver seguimiento de Solvyx). Solo el super-admin la tiene disponible, precisamente porque
-    no se puede deshacer desde la interfaz."""
+    no se puede deshacer desde la interfaz.
+
+    🛡️ Dos reglas adicionales para que esto no se use para borrar casos que ya alguien está
+    atendiendo: (1) si el ticket ya tiene un responsable asignado, no se puede eliminar —
+    borrarlo perdería el rastro de lo que ese agente ya gestionó; el único camino ahí es el
+    flujo normal de estados. (2) si todavía NO tiene responsable, se exige justificar por qué
+    se elimina (mínimo 10 caracteres); el motivo queda registrado en Auditoría y Logs."""
+    motivo_eliminacion = request.form.get('motivo_eliminacion', '').strip()
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT titulo FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM tickets WHERE id = ?"
+        q_sel = "SELECT titulo, asignado_a FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, asignado_a FROM tickets WHERE id = ?"
         cursor.execute(q_sel, (ticket_id,))
         row = cursor.fetchone()
         if row:
+            titulo, asignado_a = row[0], row[1]
+
+            if asignado_a:
+                conn.close()
+                return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+            if len(motivo_eliminacion) < 10:
+                conn.close()
+                return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
             q_upd = "UPDATE tickets SET eliminado = 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET eliminado = 1 WHERE id = ?"
             cursor.execute(q_upd, (ticket_id,))
             conn.commit()
-            registrar_log(session.get('username'), "Eliminación de Ticket", f"Se eliminó el ticket #{ticket_id} ('{row[0]}')")
+            registrar_log(session.get('username'), "Eliminación de Ticket", f"Se eliminó el ticket #{ticket_id} ('{titulo}') — Motivo: {motivo_eliminacion}")
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error eliminando ticket {ticket_id}: {e}")
