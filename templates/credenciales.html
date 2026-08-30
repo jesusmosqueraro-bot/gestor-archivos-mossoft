@@ -92,6 +92,16 @@
                                         <span class="inline-block px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
                                             {{ item.categoria }}
                                         </span>
+                                        {% if item.es_personal %}
+                                        <span title="Solo la ve el dueño, quien la comparta puntualmente y los administradores" class="inline-block px-2.5 py-0.5 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                            <i class="fa-solid fa-lock"></i> Personal
+                                        </span>
+                                        {% endif %}
+                                        {% if item.compartida_conmigo %}
+                                        <span title="{{ item.propietario }} la compartió contigo" class="inline-block px-2.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                            <i class="fa-solid fa-share-nodes"></i> Compartida contigo
+                                        </span>
+                                        {% endif %}
                                         {% if item.rotacion %}
                                             {% if item.rotacion.vencida %}
                                             <span title="Lleva {{ item.rotacion.dias_transcurridos }} días sin rotar (política: {{ item.rotacion.dias_limite }} días)" class="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 text-rose-400 border border-rose-500/25 text-[10px] font-bold rounded-full">
@@ -197,16 +207,25 @@
                             <span><i class="fa-regular fa-clock text-slate-500"></i> {{ item.fecha }}</span>
                             
                             <div class="flex items-center gap-1">
+                                {% if item.es_personal and item.puede_gestionar %}
+                                <button data-id="{{ item.id }}" data-titulo="{{ item.servicio }}" onclick="abrirCompartir(this.dataset.id, this.dataset.titulo)" title="Compartir puntualmente" class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-cyan-400 rounded-lg transition-colors">
+                                    <i class="fa-solid fa-share-nodes"></i>
+                                </button>
+                                {% endif %}
+                                {% if item.puede_gestionar %}
                                 <button onclick='abrirModalEditar({{ item | tojson }})' class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-blue-400 rounded-lg transition-colors">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
-                                
+
                                 <form action="/credenciales/eliminar/{{ item.id }}" method="POST" onsubmit="return confirm('¿Seguro deseas mover este acceso a la papelera?')">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="p-1.5 hover:bg-slate-700 text-slate-300 hover:text-red-400 rounded-lg transition-colors">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
+                                {% else %}
+                                <span title="Ítem personal de {{ item.propietario }} — solo el dueño o un administrador puede editarlo" class="text-[10px] text-slate-500 italic px-1"><i class="fa-solid fa-eye"></i> Solo lectura</span>
+                                {% endif %}
                             </div>
                         </div>
 
@@ -243,6 +262,17 @@
                     </button>
                 </div>
                 <input type="hidden" name="tipo_item" id="input-tipo-item" value="credencial">
+
+                <div id="selector-visibilidad" class="grid grid-cols-2 gap-2 bg-slate-900 border border-slate-700 rounded-xl p-1">
+                    <button type="button" id="btn-vis-equipo" onclick="cambiarVisibilidad('equipo')" class="py-1.5 rounded-lg font-bold text-[11px] transition-all bg-blue-600 text-white">
+                        <i class="fa-solid fa-users"></i> Equipo
+                    </button>
+                    <button type="button" id="btn-vis-personal" onclick="cambiarVisibilidad('personal')" class="py-1.5 rounded-lg font-bold text-[11px] transition-all text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-lock"></i> Personal
+                    </button>
+                </div>
+                <input type="hidden" name="visibilidad" id="input-visibilidad" value="equipo">
+                <p id="visibilidad-ayuda" class="text-[10px] text-slate-500">Visible para todo el equipo de soporte y administradores.</p>
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre del Aplicativo / Servicio *</label>
@@ -334,6 +364,35 @@
                 <button onclick="cerrarHistorial()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div id="historial-lista" class="space-y-2 text-xs"></div>
+        </div>
+    </div>
+
+    <!-- MODAL COMPARTIR ÍTEM PERSONAL -->
+    <div id="modal-compartir" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Compartir — <span id="compartir-titulo"></span></h3>
+                <button onclick="cerrarCompartir()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <p class="text-[11px] text-slate-500 mb-3">
+                La persona con quien compartas podrá ver y copiar este ítem, pero no editarlo, eliminarlo ni compartirlo con alguien más.
+            </p>
+
+            {% if equipo_para_compartir %}
+            <div class="flex items-center gap-2 mb-4">
+                <select id="compartir-select-usuario" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {% for u in equipo_para_compartir %}
+                    <option value="{{ u }}">{{ u }}</option>
+                    {% endfor %}
+                </select>
+                <button onclick="compartirConSeleccionado()" class="shrink-0 px-3 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs">Compartir</button>
+            </div>
+            {% else %}
+            <p class="text-[11px] text-slate-500 mb-4 italic">No hay más colaboradores activos con quién compartir.</p>
+            {% endif %}
+
+            <div id="compartir-lista" class="space-y-2 text-xs"></div>
         </div>
     </div>
 
@@ -626,6 +685,100 @@
             btnNota.classList.toggle('text-slate-400', !esNota);
         }
 
+        // 🔒 Alterna entre visibilidad "Equipo" (comportamiento de siempre) y "Personal"
+        // (solo el dueño, quien reciba una compartición puntual, y los administradores) en el
+        // formulario de creación/edición.
+        function cambiarVisibilidad(vis) {
+            document.getElementById('input-visibilidad').value = vis;
+            const esPersonal = vis === 'personal';
+            const btnEquipo = document.getElementById('btn-vis-equipo');
+            const btnPersonal = document.getElementById('btn-vis-personal');
+            btnEquipo.classList.toggle('bg-blue-600', !esPersonal);
+            btnEquipo.classList.toggle('text-white', !esPersonal);
+            btnEquipo.classList.toggle('text-slate-400', esPersonal);
+            btnPersonal.classList.toggle('bg-blue-600', esPersonal);
+            btnPersonal.classList.toggle('text-white', esPersonal);
+            btnPersonal.classList.toggle('text-slate-400', !esPersonal);
+            document.getElementById('visibilidad-ayuda').innerText = esPersonal
+                ? 'Solo tú (y los administradores) pueden verlo, salvo que lo compartas puntualmente.'
+                : 'Visible para todo el equipo de soporte y administradores.';
+        }
+
+        // 🤝 Compartir puntualmente un ítem personal con otro miembro del equipo (solo lectura
+        // para quien recibe la compartición — ver /credenciales/<id>/compartir en app.py).
+        let _compartirCredIdActual = null;
+
+        async function abrirCompartir(credId, titulo) {
+            _compartirCredIdActual = credId;
+            document.getElementById('compartir-titulo').innerText = titulo;
+            document.getElementById('modal-compartir').classList.remove('hidden');
+            document.getElementById('modal-compartir').classList.add('flex');
+            await cargarComparticiones(credId);
+        }
+
+        async function cargarComparticiones(credId) {
+            const lista = document.getElementById('compartir-lista');
+            lista.innerHTML = '<p class="text-slate-500 italic">Cargando…</p>';
+            try {
+                const resp = await fetch(`/credenciales/${credId}/compartidos`);
+                if (!resp.ok) throw new Error('No autorizado');
+                const data = await resp.json();
+                const compartidos = data.compartidos || [];
+                lista.innerHTML = compartidos.length
+                    ? compartidos.map(c => `
+                        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <p class="text-slate-200 font-bold truncate">${escaparHtml(c.usuario)}</p>
+                                <p class="text-[10px] text-slate-500">Desde ${escaparHtml(c.fecha)}</p>
+                            </div>
+                            <button data-usuario="${escaparAtributo(c.usuario)}" onclick="quitarComparticion(this.dataset.usuario)" title="Quitar acceso" class="shrink-0 p-1.5 text-slate-400 hover:text-red-400"><i class="fa-solid fa-user-slash"></i></button>
+                        </div>`).join('')
+                    : '<p class="text-slate-500 italic">Todavía no se ha compartido con nadie.</p>';
+            } catch (e) {
+                lista.innerHTML = '<p class="text-rose-400 italic">No se pudo cargar la lista de comparticiones.</p>';
+            }
+        }
+
+        async function compartirConSeleccionado() {
+            const select = document.getElementById('compartir-select-usuario');
+            const usuario = select ? select.value : '';
+            if (!usuario || !_compartirCredIdActual) return;
+            try {
+                const resp = await fetch(`/credenciales/${_compartirCredIdActual}/compartir`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                    body: `usuario=${encodeURIComponent(usuario)}`
+                });
+                if (!resp.ok) throw new Error('No se pudo compartir');
+                mostrarToast(`Compartido con ${usuario}`);
+                await cargarComparticiones(_compartirCredIdActual);
+            } catch (e) {
+                mostrarToast('No se pudo compartir el ítem');
+            }
+        }
+
+        async function quitarComparticion(usuario) {
+            if (!_compartirCredIdActual) return;
+            try {
+                const resp = await fetch(`/credenciales/${_compartirCredIdActual}/descompartir`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                    body: `usuario=${encodeURIComponent(usuario)}`
+                });
+                if (!resp.ok) throw new Error('No se pudo quitar');
+                mostrarToast(`Se quitó el acceso de ${usuario}`);
+                await cargarComparticiones(_compartirCredIdActual);
+            } catch (e) {
+                mostrarToast('No se pudo quitar la compartición');
+            }
+        }
+
+        function cerrarCompartir() {
+            document.getElementById('modal-compartir').classList.add('hidden');
+            document.getElementById('modal-compartir').classList.remove('flex');
+            _compartirCredIdActual = null;
+        }
+
         // 🧩 Filas dinámicas de campos personalizados en el formulario (nombre + valor).
         function agregarCampoPersonalizado(nombre = '', valor = '') {
             const cont = document.getElementById('lista-campos-personalizados');
@@ -721,6 +874,7 @@
             document.getElementById('pass-help').classList.add('hidden');
             document.getElementById('lista-campos-personalizados').innerHTML = '';
             cambiarTipoItem('credencial');
+            cambiarVisibilidad('equipo');
             actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
@@ -742,6 +896,7 @@
             document.getElementById('input-contenido-seguro').value = '';
             document.getElementById('lista-campos-personalizados').innerHTML = '';
             cambiarTipoItem(item.tipo_item || 'credencial');
+            cambiarVisibilidad(item.visibilidad || 'equipo');
             actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
