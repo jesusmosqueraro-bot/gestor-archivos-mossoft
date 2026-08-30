@@ -3,7 +3,7 @@
      su comportamiento (consultar /notificaciones/resumen, pintar el contador y la lista,
      marcar como leídas) vive en /static/js/notificaciones.js, que cada plantilla debe
      cargar una sola vez antes de cerrar el body. -->
-<div class="relative" id="wrapper-notificaciones">
+<div class="relative" id="wrapper-notificaciones" data-csrf-token="{{ csrf_token() }}">
     <button type="button" id="btn-notificaciones" onclick="toggleNotificaciones()" class="relative bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs" title="Notificaciones">
         <i class="fa-solid fa-bell"></i>
         <span id="badge-notificaciones" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">0</span>
