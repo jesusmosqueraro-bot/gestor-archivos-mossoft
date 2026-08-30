@@ -9,6 +9,7 @@ import unicodedata
 import re
 import io
 import csv
+import gzip
 import threading
 import base64
 import hashlib
@@ -1515,6 +1516,76 @@ def _guardar_respaldo_en_disco(prefijo='manual'):
         return None
 
 
+# 📧 Copia de los respaldos fuera de Render: además de quedar guardados en el disco
+# persistente (RESPALDOS_DIR), cada respaldo (manual o automático) se envía también por
+# correo a RESPALDO_EMAIL_DESTINO, reutilizando el mismo webhook de Apps Script que ya usan
+# los demás correos del sistema (ver GMAIL_SCRIPT_URL, más abajo). Así, si algo le pasa a la
+# cuenta de Render o al disco persistente mismo, sigue existiendo una copia totalmente
+# independiente. El archivo se comprime con gzip antes de codificarlo en base64 (los
+# respaldos son JSON — comprimen muy bien) para no acercarse al límite de adjuntos de Gmail.
+#
+# ⚠️ El Apps Script detrás de GMAIL_SCRIPT_URL hoy solo sabe recibir {para, asunto, cuerpo} —
+# hay que agregarle el manejo de 'adjunto_nombre' / 'adjunto_tipo' / 'adjunto_base64' para que
+# el adjunto realmente llegue (instrucciones aparte). Mientras eso no se haga, el correo sale
+# pero sin el archivo adjunto.
+RESPALDO_EMAIL_DESTINO = os.environ.get('RESPALDO_EMAIL_DESTINO', 'notificacionesarkiv@gmail.com')
+RESPALDO_EMAIL_MAX_MB = 20  # Margen bajo el límite real de Gmail (25 MB), pensando en el overhead de base64.
+
+
+def _enviar_respaldo_por_correo(ruta_archivo):
+    """Comprime el respaldo ya guardado en disco y lo envía como adjunto a
+    RESPALDO_EMAIL_DESTINO. No borra ni modifica el archivo original en RESPALDOS_DIR — esto
+    es solo una copia adicional fuera de Render. Se llama siempre en un hilo aparte (ver los
+    dos puntos de llamada: el botón manual y el hilo del respaldo diario) para no demorar la
+    respuesta ni el propio ciclo de respaldo si el correo tarda o falla."""
+    if not RESPALDO_EMAIL_DESTINO:
+        return False
+    nombre_original = os.path.basename(ruta_archivo)
+    asunto = f"Respaldo Arkiv - {nombre_original}"
+    try:
+        with open(ruta_archivo, 'rb') as f:
+            contenido = f.read()
+        comprimido = gzip.compress(contenido)
+        tamano_mb = len(comprimido) / (1024 * 1024)
+        if tamano_mb > RESPALDO_EMAIL_MAX_MB:
+            print(f"⚠️ Respaldo '{nombre_original}' pesa {tamano_mb:.1f} MB comprimido — supera el límite de "
+                  f"{RESPALDO_EMAIL_MAX_MB} MB para enviarlo por correo. Se guardó en el disco pero NO se envió copia por correo.")
+            registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'omitido',
+                                  f"Adjunto de {tamano_mb:.1f} MB supera el límite de {RESPALDO_EMAIL_MAX_MB} MB")
+            return False
+        adjunto_base64 = base64.b64encode(comprimido).decode('ascii')
+        cuerpo = (
+            "Respaldo automático de la base de datos de Arkiv.\n\n"
+            f"Archivo: {nombre_original}.gz\n"
+            f"Tamaño comprimido: {tamano_mb:.2f} MB\n\n"
+            "Este correo se genera automáticamente como copia de seguridad fuera de Render.\n"
+            "---\nEquipo de Soporte - ARKIV System"
+        )
+        payload = {
+            "para": RESPALDO_EMAIL_DESTINO,
+            "asunto": asunto,
+            "cuerpo": cuerpo,
+            "adjunto_nombre": f"{nombre_original}.gz",
+            "adjunto_tipo": "application/gzip",
+            "adjunto_base64": adjunto_base64,
+        }
+        if requests:
+            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=30)
+            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO}. Status: {res.status_code}")
+        else:
+            data_json = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response.read()
+            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO} vía urllib.")
+        registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'enviado')
+        return True
+    except Exception as e:
+        print(f"⚠️ Error enviando copia por correo del respaldo '{nombre_original}': {e}")
+        registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'error', str(e)[:300])
+        return False
+
+
 def _listar_respaldos():
     """Lista los archivos de respaldo ya guardados en RESPALDOS_DIR, más recientes primero.
     Devuelve [] si la carpeta no existe todavía (nunca se ha generado un respaldo, o el
@@ -1589,6 +1660,7 @@ def _respaldo_diario_automatico():
                 with open(marcador, 'w', encoding='utf-8') as f:
                     json.dump(datos, f, ensure_ascii=False)
                 print(f"✅ Respaldo automático diario generado: {marcador}")
+                threading.Thread(target=_enviar_respaldo_por_correo, args=(marcador,), daemon=True).start()
                 _limpiar_respaldos_viejos()
         except Exception as e:
             print(f"⚠️ Error en el hilo de respaldo automático: {e}")
@@ -1605,7 +1677,7 @@ if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
 @superadmin_required
 def ver_respaldos():
     disco_disponible = os.path.isdir(RESPALDOS_DIR) or _crear_dir_respaldos_silencioso()
-    return render_template('respaldos.html', respaldos=_listar_respaldos(), respaldos_dir=RESPALDOS_DIR, disco_disponible=disco_disponible)
+    return render_template('respaldos.html', respaldos=_listar_respaldos(), respaldos_dir=RESPALDOS_DIR, disco_disponible=disco_disponible, respaldo_email_destino=RESPALDO_EMAIL_DESTINO)
 
 
 def _crear_dir_respaldos_silencioso():
@@ -1628,6 +1700,7 @@ def generar_respaldo():
         flash("No se pudo generar el respaldo: la carpeta de respaldos no está disponible (¿el disco persistente de Render ya está montado en /var/data?).", "error")
         return redirect(url_for('ver_respaldos'))
     registrar_log(session.get('username'), "Respaldo de Base de Datos", f"Respaldo manual generado: {os.path.basename(ruta)}")
+    threading.Thread(target=_enviar_respaldo_por_correo, args=(ruta,), daemon=True).start()
     return send_file(ruta, as_attachment=True, download_name=os.path.basename(ruta))
 
 
