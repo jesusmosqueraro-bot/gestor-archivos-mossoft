@@ -7357,14 +7357,14 @@ def editar_usuario(usuario_id):
                 return redirect(url_for('gestion_usuarios', error_cedula=nueva_cedula))
 
         es_superadmin = (session.get('username') == 'admin')
-        es_propio = (user_target == session.get('username'))
 
         # 🛡️ Solo la cuenta 'admin' (super-admin) puede editar los datos (correo, rol o
-        # contraseña) de OTRA cuenta con rol 'admin'. Esto protege tanto a la cuenta literal
-        # 'admin' como a cualquier otro admin frente a sus pares — un admin comprometido o
-        # malicioso ya no puede tomar control de otra cuenta admin. Cada admin conserva la
-        # posibilidad de editar sus propios datos.
-        if rol_target == 'admin' and not es_superadmin and not es_propio:
+        # contraseña) de una cuenta con rol 'admin' o 'agente' — incluida la PROPIA cuenta de
+        # quien edita. Esto protege a las cuentas admin/agente frente a sus pares (y frente a
+        # sí mismas): un admin o agente comprometido o malicioso ya no puede tomar control de
+        # otra cuenta admin/agente, ni cambiarse sus propias credenciales desde este panel.
+        # Un admin/agente (no super-admin) solo puede editar cuentas con rol 'estandar'.
+        if rol_target in ('admin', 'agente') and not es_superadmin:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
@@ -7457,8 +7457,10 @@ def eliminar_usuario(usuario_id):
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
-        # 🛡️ Solo la cuenta 'admin' (super-admin) puede eliminar a OTRA cuenta con rol 'admin'.
-        if rol_target == 'admin' and session.get('username') != 'admin':
+        # 🛡️ Solo la cuenta 'admin' (super-admin) puede eliminar a OTRA cuenta con rol
+        # 'admin' o 'agente'. Sin esto, un admin al que ya se le bloquea desactivar a otro
+        # admin/agente podría eludir esa protección eliminándolo directamente.
+        if rol_target in ('admin', 'agente') and session.get('username') != 'admin':
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
@@ -7493,9 +7495,9 @@ def toggle_estado_usuario(usuario_id):
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
 
-            # 🛡️ Solo la cuenta 'admin' (super-admin) puede bloquear/desbloquear a OTRA
-            # cuenta con rol 'admin'.
-            if rol_target == 'admin' and session.get('username') != 'admin':
+            # 🛡️ Solo la cuenta 'admin' (super-admin) puede bloquear/desbloquear una
+            # cuenta con rol 'admin' o 'agente' — incluida la PROPIA cuenta de quien actúa.
+            if rol_target in ('admin', 'agente') and session.get('username') != 'admin':
                 conn.close()
                 return redirect(url_for('gestion_usuarios'))
 
