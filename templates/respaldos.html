@@ -70,6 +70,7 @@
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 text-xs text-slate-400 leading-relaxed space-y-1.5">
             <p><i class="fa-solid fa-circle-info text-indigo-400 mr-1.5"></i> Cada respaldo es un archivo <span class="font-mono text-slate-300">.json</span> con todas las tablas de la base de datos (usuarios, tickets, comunicados, credenciales, etc.). Los archivos adjuntos (imágenes, PDFs) NO se incluyen aquí: esos ya viven aparte, en Cloudinary.</p>
             <p><i class="fa-solid fa-clock-rotate-left text-indigo-400 mr-1.5"></i> Además del botón manual, Arkiv genera automáticamente un respaldo diario y lo guarda aquí mismo. Los automáticos con más de {{ 30 }} días se eliminan solos; los manuales se conservan hasta que los borres tú.</p>
+            <p><i class="fa-solid fa-paper-plane text-indigo-400 mr-1.5"></i> Cada vez que se genera un respaldo (manual o automático), Arkiv también envía una copia comprimida por correo a <span class="font-mono text-slate-300">{{ respaldo_email_destino }}</span> — una copia totalmente independiente de Render, por si algo le pasa a la cuenta o al disco.</p>
         </div>
 
         <!-- LISTA DE RESPALDOS -->
