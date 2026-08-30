@@ -66,6 +66,16 @@ except Exception:
     bleach = None
     CSSSanitizer = None
 
+# anthropic: SDK oficial de Claude, usado solo para sugerir la clasificación (tipo/categoría/
+# prioridad) de un ticket nuevo — ver _clasificar_ticket_con_ia(). Si no está instalado, o si
+# no hay ANTHROPIC_API_KEY configurada en las variables de entorno de Render, el botón
+# "Clasificar con IA" simplemente no se muestra (ver _ia_clasificacion_disponible()); nunca
+# tumba la app ni bloquea la creación manual de tickets.
+try:
+    import anthropic
+except Exception:
+    anthropic = None
+
 app = Flask(__name__)
 # 🔐 SECRET_KEY: nunca debe tener un valor real escrito en el código (quedaría expuesto en GitHub).
 # Si no está seteada en las variables de entorno de Render, se genera una aleatoria en cada arranque.
@@ -2863,6 +2873,19 @@ def _html_esta_vacio(html):
     return not texto_plano.strip()
 
 
+def _html_a_texto_plano(html):
+    """Igual que _html_esta_vacio pero devolviendo el texto en vez de un booleano — se usa
+    para mandarle a la IA de clasificación (ver _clasificar_ticket_con_ia) solo el contenido
+    real de la descripción, sin las etiquetas que agrega el editor Quill."""
+    if not html:
+        return ''
+    if bleach:
+        texto_plano = bleach.clean(html, tags=[], attributes={}, strip=True)
+    else:
+        texto_plano = re.sub(r'<[^>]+>', '', html)
+    return texto_plano.strip()
+
+
 def _mapa_nombres_usuarios():
     """Devuelve {usuario: nombre_para_mostrar} de TODOS los usuarios (activos o no), para
     resolver en bloque el alias/nombre real de quien publicó algo (comunicados, tickets, etc.)
@@ -3161,8 +3184,103 @@ def ver_tickets():
         q_estado=q_estado, q_prioridad=q_prioridad, q_categoria=q_categoria, q_tipo=q_tipo, q_busqueda=q_busqueda,
         q_area=q_area, q_sede=q_sede,
         q_cumplimiento=q_cumplimiento, conteos_cumplimiento=conteos_cumplimiento, total_tickets=total_tickets,
-        telefono_usuario_actual=telefono_usuario_actual, plantillas=_plantillas_ticket_activas()
+        telefono_usuario_actual=telefono_usuario_actual, plantillas=_plantillas_ticket_activas(),
+        ia_disponible=_ia_clasificacion_disponible()
     )
+
+
+# 🤖 CLASIFICACIÓN DE TICKETS CON IA (Anthropic Claude) --------------------------------------
+# Sugiere Tipo / Categoría / Prioridad a partir de lo que el usuario ya escribió en "Nueva
+# Solicitud", antes de enviarla — igual que el "Clasificar con IA" de Solvyx que Tomás pidió
+# imitar. Deliberadamente NO sugiere "Área": en Arkiv esa es el área física/organizacional de
+# quien reporta (no una categoría de soporte), así que no tiene sentido que la IA la adivine.
+# Requiere la variable de entorno ANTHROPIC_API_KEY en Render (ver _ia_clasificacion_disponible);
+# sin ella, el botón simplemente no aparece — nunca bloquea la creación manual del ticket.
+MODELO_IA_CLASIFICACION_TICKET = 'claude-haiku-4-5-20251001'
+
+
+def _ia_clasificacion_disponible():
+    return bool(anthropic) and bool(os.environ.get('ANTHROPIC_API_KEY'))
+
+
+def _clasificar_ticket_con_ia(titulo, descripcion_texto, categorias_disponibles):
+    """Le pide a Claude Haiku que sugiera tipo/categoría/prioridad para un ticket nuevo, a
+    partir del título y la descripción en texto plano (ya sin el HTML del editor). Devuelve un
+    dict {tipo, categoria, prioridad, confianza (0-100), explicacion} o None si la IA no está
+    disponible o la respuesta no se pudo interpretar — nunca lanza, para que un problema con el
+    proveedor de IA no le impida a nadie crear el ticket manualmente."""
+    if not _ia_clasificacion_disponible():
+        return None
+    try:
+        cliente = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        categorias_txt = ', '.join(f'"{c}"' for c in categorias_disponibles)
+        prompt = (
+            "Eres un asistente que clasifica solicitudes de soporte TI para una IPS de salud "
+            "en Colombia. Con base en el título y la descripción de abajo, responde ÚNICAMENTE "
+            "un objeto JSON (sin texto adicional, sin bloque de código markdown) con "
+            "exactamente estas claves:\n"
+            '- "tipo": uno de "Incidente" o "Requerimiento" (Incidente = algo que dejó de '
+            'funcionar o está fallando; Requerimiento = una solicitud nueva, como crear un '
+            "acceso o instalar algo)\n"
+            f'- "categoria": exactamente uno de estos valores, sin inventar otros: [{categorias_txt}]\n'
+            '- "prioridad": uno de "Baja", "Media", "Alta" o "Urgente" (Urgente solo si '
+            "impide totalmente trabajar o afecta la atención de pacientes)\n"
+            '- "confianza": un número entero de 0 a 100\n'
+            '- "explicacion": una sola frase corta en español explicando el porqué\n\n'
+            f"Título: {titulo}\n"
+            f"Descripción: {descripcion_texto}\n"
+        )
+        respuesta = cliente.messages.create(
+            model=MODELO_IA_CLASIFICACION_TICKET,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        texto = (respuesta.content[0].text or '').strip()
+        # Por si Claude envuelve el JSON en ```json ... ``` a pesar de la instrucción de no
+        # hacerlo — se limpia antes de parsear en vez de fallar.
+        if texto.startswith('```'):
+            texto = texto.strip('`')
+            if texto.lower().startswith('json'):
+                texto = texto[4:]
+        datos = json.loads(texto.strip())
+
+        tipo = datos.get('tipo') if datos.get('tipo') in TIPOS_TICKET else 'Incidente'
+        categoria = datos.get('categoria')
+        if categoria not in categorias_disponibles:
+            categoria = categorias_disponibles[0] if categorias_disponibles else 'Otro'
+        prioridad = datos.get('prioridad') if datos.get('prioridad') in PRIORIDADES_TICKET else 'Media'
+        try:
+            confianza = max(0, min(100, int(datos.get('confianza', 0))))
+        except (TypeError, ValueError):
+            confianza = 0
+        explicacion = str(datos.get('explicacion', '')).strip()[:300]
+
+        return {
+            'tipo': tipo, 'categoria': categoria, 'prioridad': prioridad,
+            'confianza': confianza, 'explicacion': explicacion,
+        }
+    except Exception as e:
+        print(f"⚠️ Error clasificando ticket con IA: {e}")
+        return None
+
+
+@app.route('/tickets/clasificar_ia', methods=['POST'])
+@login_required
+def clasificar_ticket_ia():
+    """Endpoint AJAX consultado por el botón 'Clasificar con IA' del modal de Nueva Solicitud
+    (ver static/js/tickets.js). Devuelve JSON — nunca un 500 — para que si la IA falla, el
+    usuario simplemente siga llenando el formulario a mano."""
+    titulo = request.form.get('titulo', '').strip()
+    descripcion_texto = _html_a_texto_plano(request.form.get('descripcion', ''))
+
+    if len(titulo) < 3 or len(descripcion_texto) < 10:
+        return jsonify({'ok': False, 'error': 'Escribe un título y una descripción un poco más completos.'}), 400
+
+    nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+    resultado = _clasificar_ticket_con_ia(titulo, descripcion_texto, nombres_categorias)
+    if not resultado:
+        return jsonify({'ok': False, 'error': 'La IA no está disponible en este momento. Puedes clasificar el ticket manualmente.'}), 503
+    return jsonify({'ok': True, **resultado})
 
 
 @app.route('/tickets/crear', methods=['POST'])

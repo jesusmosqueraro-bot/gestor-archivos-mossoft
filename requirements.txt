@@ -11,3 +11,4 @@ tinycss2
 reportlab
 openpyxl
 pyotp==2.10.0
+anthropic
