@@ -53,7 +53,15 @@ function cargarNotificaciones() {
 }
 
 function marcarTodasLeidas() {
-    fetch('/notificaciones/marcar_todas_leidas', { method: 'POST' }).then(function () {
+    // 🛡️ La app valida CSRF real en todo POST (ver CSRFProtect en app.py); esta llamada no
+    // manda ningún <form>, así que el token va como header — si no, Flask-WTF la rechaza en
+    // silencio (redirige) y el fetch la da por buena sin haber marcado nada como leído.
+    var wrapper = document.getElementById('wrapper-notificaciones');
+    var token = wrapper ? wrapper.getAttribute('data-csrf-token') : '';
+    fetch('/notificaciones/marcar_todas_leidas', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': token || '' }
+    }).then(function () {
         cargarNotificaciones();
     });
 }
