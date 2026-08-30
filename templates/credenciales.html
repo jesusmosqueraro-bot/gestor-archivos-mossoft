@@ -47,11 +47,25 @@
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
 
         <!-- BUSCADOR -->
-        <div class="mb-6">
-            <form method="GET" action="/credenciales" class="relative max-w-md">
+        <div class="mb-6 flex flex-wrap items-center gap-3">
+            <form method="GET" action="/credenciales" class="relative max-w-md flex-1 min-w-[220px]">
                 <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                 <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Buscar por aplicación, usuario o categoría..." class="w-full bg-slate-800/90 border border-slate-700/70 rounded-2xl pl-11 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all">
+                {% if q_etiqueta %}<input type="hidden" name="etiqueta" value="{{ q_etiqueta }}">{% endif %}
             </form>
+
+            {% if todas_las_etiquetas %}
+            <form method="GET" action="/credenciales" class="flex items-center gap-2">
+                {% if q_busqueda %}<input type="hidden" name="q" value="{{ q_busqueda }}">{% endif %}
+                <i class="fa-solid fa-tags text-slate-500 text-xs"></i>
+                <select name="etiqueta" onchange="this.form.submit()" class="bg-slate-800/90 border border-slate-700/70 rounded-2xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                    <option value="">Todas las etiquetas</option>
+                    {% for et in todas_las_etiquetas %}
+                    <option value="{{ et }}" {% if q_etiqueta and q_etiqueta.lower() == et.lower() %}selected{% endif %}>{{ et }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% endif %}
         </div>
 
         <!-- NOTIFICACIÓN TOAST -->
@@ -122,6 +136,16 @@
                                     </div>
                                 </div>
                             </div>
+
+                            {% if item.etiquetas %}
+                                <div class="flex flex-wrap gap-1 mb-3">
+                                    {% for et in item.etiquetas %}
+                                    <span class="inline-block px-2 py-0.5 bg-slate-700/50 text-slate-300 border border-slate-600/40 text-[10px] font-medium rounded-full">
+                                        <i class="fa-solid fa-tag text-slate-500 mr-1"></i>{{ et }}
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
 
                             {% if item.notas %}
                                 <p class="text-[11px] text-slate-400 mb-4 line-clamp-2 italic">
@@ -199,8 +223,22 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña *</label>
-                    <input type="text" name="password" id="input-password" placeholder="Escribe la contraseña..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono">
+                    <div class="flex items-center gap-1.5">
+                        <input type="text" name="password" id="input-password" oninput="actualizarFortaleza()" placeholder="Escribe la contraseña..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono">
+                        <button type="button" onclick="generarPassword()" title="Generar contraseña segura" class="shrink-0 p-2.5 bg-slate-700 hover:bg-blue-600 text-slate-200 hover:text-white rounded-xl transition-all">
+                            <i class="fa-solid fa-dice"></i>
+                        </button>
+                    </div>
                     <span id="pass-help" class="text-[10px] text-slate-500 hidden">Deja en blanco si no deseas cambiar la clave actual.</span>
+                    <div id="pass-fortaleza-barra" class="h-1 rounded-full bg-slate-700 mt-1.5 overflow-hidden">
+                        <div id="pass-fortaleza-relleno" class="h-full w-0 rounded-full transition-all"></div>
+                    </div>
+                    <span id="pass-fortaleza-texto" class="text-[10px] text-slate-500"></span>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Etiquetas</label>
+                    <input type="text" name="etiquetas" id="input-etiquetas" placeholder="Separadas por coma. Ej: producción, crítico" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
 
                 <div>
@@ -230,10 +268,31 @@
         // cada vez que el usuario alterna mostrar/ocultar la misma credencial.
         const clavesReveladas = {};
 
-        function copiarTexto(texto, campo) {
+        // 🧹 Auto-borrado del portapapeles: 20s después de copiar algo sensible (usuario o
+        // clave), se limpia el portapapeles solo. El "token" evita que un borrado programado
+        // por una copia vieja termine borrando algo que el usuario copió después.
+        let _clipboardToken = 0;
+        function copiarConAutoBorrado(texto, mensaje) {
             navigator.clipboard.writeText(texto).then(() => {
-                mostrarToast(`${campo} copiado al portapapeles`);
+                mostrarToast(mensaje);
+                const miToken = ++_clipboardToken;
+                setTimeout(async () => {
+                    if (miToken !== _clipboardToken) return; // ya se copió algo más después
+                    try {
+                        const actual = await navigator.clipboard.readText();
+                        if (actual === texto) {
+                            await navigator.clipboard.writeText('');
+                        }
+                    } catch (e) {
+                        // Sin permiso de lectura del portapapeles (o navegador no lo soporta):
+                        // no pasa nada, simplemente no se puede auto-limpiar en este caso.
+                    }
+                }, 20000);
             });
+        }
+
+        function copiarTexto(texto, campo) {
+            copiarConAutoBorrado(texto, `${campo} copiado al portapapeles (se borrará solo en 20s)`);
         }
 
         function mostrarToast(msg) {
@@ -289,11 +348,84 @@
         async function copiarClave(credId) {
             try {
                 const clave = await revelarClave(credId, 'copiar');
-                await navigator.clipboard.writeText(clave);
-                mostrarToast('Contraseña copiada al portapapeles');
+                copiarConAutoBorrado(clave, 'Contraseña copiada al portapapeles (se borrará sola en 20s)');
             } catch (e) {
                 mostrarToast('No se pudo copiar la clave');
             }
+        }
+
+        // 🎲 Generador de contraseñas seguras — usa crypto.getRandomValues (sin librerías
+        // externas ni llamadas al servidor) para elegir caracteres al azar de forma segura.
+        function generarPassword(longitud = 16) {
+            const sets = {
+                minus: 'abcdefghijkmnopqrstuvwxyz',
+                mayus: 'ABCDEFGHJKLMNPQRSTUVWXYZ',
+                num: '23456789',
+                simb: '!@#$%^&*()-_=+[]{}'
+            };
+            const todos = sets.minus + sets.mayus + sets.num + sets.simb;
+            const random = new Uint32Array(longitud);
+            crypto.getRandomValues(random);
+
+            let resultado = [
+                sets.minus[random[0] % sets.minus.length],
+                sets.mayus[random[1] % sets.mayus.length],
+                sets.num[random[2] % sets.num.length],
+                sets.simb[random[3] % sets.simb.length],
+            ];
+            for (let i = 4; i < longitud; i++) {
+                resultado.push(todos[random[i] % todos.length]);
+            }
+            // Mezcla el resultado (Fisher-Yates con crypto.getRandomValues) para que los 4
+            // caracteres "garantizados" no queden siempre al inicio.
+            const idx = new Uint32Array(resultado.length);
+            crypto.getRandomValues(idx);
+            for (let i = resultado.length - 1; i > 0; i--) {
+                const j = idx[i] % (i + 1);
+                [resultado[i], resultado[j]] = [resultado[j], resultado[i]];
+            }
+
+            const claveFinal = resultado.join('');
+            const input = document.getElementById('input-password');
+            input.value = claveFinal;
+            input.type = 'text';
+            actualizarFortaleza();
+            mostrarToast('Contraseña generada — recuerda guardar los cambios');
+        }
+
+        // 💪 Medidor de fortaleza — heurística simple y local (longitud + variedad de tipos de
+        // carácter), solo para orientar visualmente; el análisis real de débiles/repetidas vive
+        // en el servidor (ver /credenciales/auditoria).
+        function actualizarFortaleza() {
+            const valor = document.getElementById('input-password').value;
+            const relleno = document.getElementById('pass-fortaleza-relleno');
+            const texto = document.getElementById('pass-fortaleza-texto');
+
+            if (!valor) {
+                relleno.style.width = '0%';
+                relleno.className = 'h-full w-0 rounded-full transition-all';
+                texto.innerText = '';
+                return;
+            }
+
+            let puntos = 0;
+            if (valor.length >= 8) puntos++;
+            if (valor.length >= 12) puntos++;
+            if (/[a-z]/.test(valor) && /[A-Z]/.test(valor)) puntos++;
+            if (/[0-9]/.test(valor)) puntos++;
+            if (/[^A-Za-z0-9]/.test(valor)) puntos++;
+
+            const niveles = [
+                { min: 0, ancho: '15%', color: 'bg-rose-500', label: 'Muy débil' },
+                { min: 2, ancho: '40%', color: 'bg-rose-500', label: 'Débil' },
+                { min: 3, ancho: '65%', color: 'bg-amber-500', label: 'Aceptable' },
+                { min: 4, ancho: '85%', color: 'bg-emerald-500', label: 'Fuerte' },
+                { min: 5, ancho: '100%', color: 'bg-emerald-500', label: 'Muy fuerte' },
+            ];
+            const nivel = [...niveles].reverse().find(n => puntos >= n.min);
+            relleno.style.width = nivel.ancho;
+            relleno.className = `h-full rounded-full transition-all ${nivel.color}`;
+            texto.innerText = nivel.label;
         }
 
         function abrirModalCrear() {
@@ -302,6 +434,7 @@
             document.getElementById('form-credencial').reset();
             document.getElementById('input-password').required = true;
             document.getElementById('pass-help').classList.add('hidden');
+            actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
         }
@@ -316,8 +449,10 @@
             document.getElementById('input-password').value = '';
             document.getElementById('input-password').required = false;
             document.getElementById('pass-help').classList.remove('hidden');
+            document.getElementById('input-etiquetas').value = item.etiquetas_texto || '';
             document.getElementById('input-rotacion-dias').value = item.rotacion_dias || '';
             document.getElementById('input-notas').value = item.notas;
+            actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
         }

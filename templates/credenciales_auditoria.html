@@ -40,6 +40,44 @@
             configurada) y el historial reciente de quién consultó o copió cada clave desde la bóveda.
         </p>
 
+        <!-- SEGURIDAD DE CONTRASEÑAS -->
+        <section>
+            <h2 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-shield-halved text-rose-400"></i> Seguridad de contraseñas
+            </h2>
+
+            <p class="text-[11px] text-slate-500 mb-3">
+                Análisis local: ninguna contraseña sale de Arkiv para esta revisión (sin consultas a bases de filtraciones externas).
+            </p>
+
+            {% if not seguridad %}
+            <div class="bg-slate-900/40 border border-slate-800 rounded-3xl p-10 text-center">
+                <i class="fa-solid fa-shield-check text-3xl text-emerald-500/70 mb-3 block"></i>
+                <p class="text-xs text-slate-400">No se detectaron contraseñas débiles ni repetidas entre las credenciales activas.</p>
+            </div>
+            {% else %}
+            <div class="space-y-2">
+                {% for c in seguridad %}
+                <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                    <h3 class="text-sm font-bold text-white truncate">{{ c.titulo }}</h3>
+                    <div class="shrink-0 flex items-center gap-1.5">
+                        {% if c.debil %}
+                        <span class="px-2.5 py-1 bg-rose-500/15 text-rose-400 border border-rose-500/25 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Débil
+                        </span>
+                        {% endif %}
+                        {% if c.repetida %}
+                        <span class="px-2.5 py-1 bg-amber-500/15 text-amber-400 border border-amber-500/25 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-copy"></i> Repetida
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+
         <!-- ESTADO DE ROTACIÓN -->
         <section>
             <h2 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
