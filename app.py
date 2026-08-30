@@ -454,6 +454,12 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_historial (
                 id SERIAL PRIMARY KEY, credencial_id INTEGER NOT NULL REFERENCES credenciales(id) ON DELETE CASCADE, password_cifrada TEXT NOT NULL, fecha_cambio VARCHAR(100) NOT NULL, cambiado_por VARCHAR(100)
             )''')
+            # 🔐 Bóveda Fase 3 — comparticiones puntuales de un ítem 'personal' (ver columna
+            # visibilidad en credenciales) con otro miembro del equipo. Un ítem 'equipo' (el
+            # comportamiento de siempre) no necesita filas aquí: lo ve todo admin/agente.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_compartidas (
+                id SERIAL PRIMARY KEY, credencial_id INTEGER NOT NULL REFERENCES credenciales(id) ON DELETE CASCADE, usuario VARCHAR(100) NOT NULL, fecha_compartido VARCHAR(100) NOT NULL, compartido_por VARCHAR(100)
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
             )''')
@@ -584,6 +590,13 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS tipo_item VARCHAR(20) DEFAULT 'credencial';",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS contenido_seguro TEXT;",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS campos_personalizados TEXT;",
+                # 🔐 Bóveda Fase 3 — bóvedas personales: 'propietario' es quien creó el ítem;
+                # 'visibilidad' es 'equipo' (todo admin/agente lo ve, el comportamiento de
+                # siempre — y el valor por defecto, así que nada existente cambia) o 'personal'
+                # (solo el dueño, quienes tengan comparticiones puntuales en
+                # credenciales_compartidas, y los admin —que conservan acceso de auditoría—).
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS propietario VARCHAR(100);",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS visibilidad VARCHAR(20) DEFAULT 'equipo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
                 # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
@@ -700,6 +713,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_historial (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, credencial_id INTEGER NOT NULL, password_cifrada TEXT NOT NULL, fecha_cambio TEXT NOT NULL, cambiado_por TEXT, FOREIGN KEY(credencial_id) REFERENCES credenciales(id) ON DELETE CASCADE
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_compartidas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, credencial_id INTEGER NOT NULL, usuario TEXT NOT NULL, fecha_compartido TEXT NOT NULL, compartido_por TEXT, FOREIGN KEY(credencial_id) REFERENCES credenciales(id) ON DELETE CASCADE
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
             )''')
@@ -796,7 +812,9 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN etiquetas TEXT;",
                 "ALTER TABLE credenciales ADD COLUMN tipo_item TEXT DEFAULT 'credencial';",
                 "ALTER TABLE credenciales ADD COLUMN contenido_seguro TEXT;",
-                "ALTER TABLE credenciales ADD COLUMN campos_personalizados TEXT;"
+                "ALTER TABLE credenciales ADD COLUMN campos_personalizados TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN propietario TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN visibilidad TEXT DEFAULT 'equipo';"
             ]:
                 try:
                     cursor.execute(col_credencial_sql)
@@ -5813,6 +5831,65 @@ def _analizar_seguridad_credenciales():
     return problemas
 
 
+def _compartidos_por_credencial():
+    """Bóveda Fase 3 — trae de una sola consulta todas las comparticiones puntuales vigentes,
+    agrupadas por credencial_id, para no hacer una consulta aparte por cada ítem al armar la
+    lista de la bóveda o al validar permisos."""
+    mapa = {}
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT credencial_id, usuario FROM credenciales_compartidas")
+        for cred_id, usuario in cursor.fetchall():
+            mapa.setdefault(cred_id, set()).add(usuario)
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error listando comparticiones de la bóveda: {e}")
+    return mapa
+
+
+def _usuarios_compartidos_credencial(cred_id):
+    """Como _compartidos_por_credencial pero para UN solo ítem — usado en las rutas que ya
+    conocen el ID (revelar, historial) y no necesitan traer la tabla completa."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT usuario FROM credenciales_compartidas WHERE credencial_id = %s" if db_type == 'postgres' else "SELECT usuario FROM credenciales_compartidas WHERE credencial_id = ?"
+        cursor.execute(q, (cred_id,))
+        usuarios = {r[0] for r in cursor.fetchall()}
+        conn.close()
+        return usuarios
+    except Exception as e:
+        print(f"⚠️ Error listando comparticiones de la credencial {cred_id}: {e}")
+        return set()
+
+
+def _puede_ver_credencial_item(propietario, visibilidad, username, rol, usuarios_compartidos=None):
+    """Bóveda Fase 3 — un ítem 'equipo' (o sin visibilidad definida, es decir cualquier ítem
+    creado antes de esta fase) lo sigue viendo cualquier admin/agente, exactamente como hasta
+    ahora. Un ítem 'personal' solo lo ve su dueño, alguien con quien se compartió puntualmente,
+    o un admin (que conserva acceso de auditoría sobre toda la bóveda por defecto)."""
+    if (visibilidad or 'equipo') != 'personal':
+        return True
+    if rol == 'admin':
+        return True
+    if username and username == propietario:
+        return True
+    if usuarios_compartidos and username in usuarios_compartidos:
+        return True
+    return False
+
+
+def _puede_gestionar_credencial_item(propietario, visibilidad, username, rol):
+    """Bóveda Fase 3 — editar, eliminar, y administrar las comparticiones de un ítem 'personal'
+    queda reservado a su dueño y a un admin: una compartición da acceso de solo consulta, no de
+    edición (igual que compartir un ítem en 1Password/Bitwarden). Los ítems 'equipo' siguen
+    gestionables por cualquier admin/agente, como siempre."""
+    if (visibilidad or 'equipo') != 'personal':
+        return True
+    return rol == 'admin' or (username and username == propietario)
+
+
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
@@ -5832,19 +5909,32 @@ def ver_credenciales():
         # también cifrados) aquí: todo texto sensible se entrega a demanda, vía
         # /credenciales/<id>/revelar, para que la auditoría de accesos registre consultas reales
         # y no simplemente "abrió la página".
-        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
+        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
         rows = cursor.fetchall()
     except Exception:
         rows = []
 
     conn.close()
 
+    # 🔐 Bóveda Fase 3 — quién soy y qué comparticiones existen, para filtrar los ítems
+    # 'personal' que no me corresponden ANTES de que lleguen siquiera a la plantilla.
+    username_actual = session.get('username')
+    rol_actual = session.get('rol')
+    es_admin_actual = rol_actual == 'admin'
+    compartidos_map = _compartidos_por_credencial()
+
     lista_credenciales = []
     todas_las_etiquetas = set()
     for r in rows:
         try:
-            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto, tipo_item, contenido_seguro, campos_personalizados = r
+            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad = r
             tipo_item = tipo_item or 'credencial'
+            visibilidad = visibilidad or 'equipo'
+            usuarios_compartidos = compartidos_map.get(c_id, set())
+
+            if not _puede_ver_credencial_item(propietario, visibilidad, username_actual, rol_actual, usuarios_compartidos):
+                continue
+
             etiquetas = _lista_etiquetas(etiquetas_texto)
             todas_las_etiquetas.update(etiquetas)
             texto_full = f"{servicio} {usuario} {categoria} {notas} {etiquetas_texto or ''}".lower()
@@ -5866,15 +5956,25 @@ def ver_credenciales():
                     'tipo_item': tipo_item,
                     'es_nota': tipo_item == 'nota_segura',
                     'tiene_campos': bool(campos_personalizados),
+                    'visibilidad': visibilidad,
+                    'es_personal': visibilidad == 'personal',
+                    'propietario': propietario or '',
+                    'es_propio': bool(propietario) and propietario == username_actual,
+                    'compartida_conmigo': visibilidad == 'personal' and propietario != username_actual and username_actual in usuarios_compartidos,
+                    'puede_gestionar': _puede_gestionar_credencial_item(propietario, visibilidad, username_actual, rol_actual),
                 })
         except Exception as e_row:
             # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
             print(f"⚠️ Error procesando credencial {r[0] if r else '?'}: {e_row}")
             continue
 
+    # 🔐 Con quién se puede compartir un ítem personal: el resto del equipo de soporte activo.
+    equipo_para_compartir = [m['usuario'] for m in _equipo_soporte_activo() if m['usuario'] != username_actual]
+
     return render_template(
         'credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda,
-        q_etiqueta=q_etiqueta, todas_las_etiquetas=sorted(todas_las_etiquetas, key=str.lower)
+        q_etiqueta=q_etiqueta, todas_las_etiquetas=sorted(todas_las_etiquetas, key=str.lower),
+        equipo_para_compartir=sorted(equipo_para_compartir, key=str.lower), es_admin_actual=es_admin_actual
     )
 
 
@@ -5893,7 +5993,7 @@ def revelar_credencial(cred_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE id = ?"
+        q = "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad FROM credenciales WHERE id = ?"
         cursor.execute(q, (cred_id,))
         row = cursor.fetchone()
         conn.close()
@@ -5904,8 +6004,13 @@ def revelar_credencial(cred_id):
     if not row:
         return jsonify({'error': 'no encontrada'}), 404
 
-    titulo, pass_enc, tipo_item, contenido_cifrado, campos_cifrados = row
+    titulo, pass_enc, tipo_item, contenido_cifrado, campos_cifrados, propietario, visibilidad = row
     tipo_item = tipo_item or 'credencial'
+
+    # 🔐 Bóveda Fase 3 — un ítem 'personal' del que no soy dueño/admin/compartición no se revela,
+    # sin importar que se conozca su ID directamente.
+    if not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol'), _usuarios_compartidos_credencial(cred_id)):
+        return jsonify({'error': 'no autorizado'}), 403
 
     if accion == 'ver_campos':
         campos_json = desencriptar_texto(campos_cifrados, cred_id) if campos_cifrados else ''
@@ -5932,6 +6037,17 @@ def historial_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        q_cred = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+        cursor.execute(q_cred, (cred_id,))
+        fila_cred = cursor.fetchone()
+        if not fila_cred:
+            conn.close()
+            return jsonify({'error': 'no encontrada'}), 404
+        propietario, visibilidad = fila_cred
+        if not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol'), _usuarios_compartidos_credencial(cred_id)):
+            conn.close()
+            return jsonify({'error': 'no autorizado'}), 403
+
         q = "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = %s ORDER BY id DESC" if db_type == 'postgres' else "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = ? ORDER BY id DESC"
         cursor.execute(q, (cred_id,))
         filas = cursor.fetchall()
@@ -5951,7 +6067,7 @@ def revelar_historial_credencial(historial_id):
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = %s" if db_type == 'postgres' else "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = ?"
+        q = "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo, c.propietario, c.visibilidad FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = %s" if db_type == 'postgres' else "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo, c.propietario, c.visibilidad FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = ?"
         cursor.execute(q, (historial_id,))
         row = cursor.fetchone()
         conn.close()
@@ -5962,7 +6078,10 @@ def revelar_historial_credencial(historial_id):
     if not row:
         return jsonify({'error': 'no encontrado'}), 404
 
-    credencial_id, pass_enc, fecha_cambio, titulo = row
+    credencial_id, pass_enc, fecha_cambio, titulo, propietario, visibilidad = row
+    if not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol'), _usuarios_compartidos_credencial(credencial_id)):
+        return jsonify({'error': 'no autorizado'}), 403
+
     pass_real = desencriptar_texto(pass_enc)
     registrar_log(session.get('username'), "Consulta de Credencial", f"Consultó una clave anterior (del {fecha_cambio}) del historial de '{titulo}' (ID {credencial_id})", credencial_id=credencial_id)
     return jsonify({'password': pass_real})
@@ -6037,6 +6156,13 @@ def crear_credencial():
     usuario_final = usuario or ('—' if es_nota else '')
     password_final = '' if es_nota else password
 
+    # 🔐 Bóveda Fase 3 — 'equipo' (por defecto, el comportamiento de siempre: lo ve todo
+    # admin/agente) o 'personal' (solo yo, quien admin, y a quien comparta puntualmente).
+    visibilidad = request.form.get('visibilidad', 'equipo').strip()
+    if visibilidad not in ('equipo', 'personal'):
+        visibilidad = 'equipo'
+    propietario = session.get('username')
+
     if servicio and (es_nota or (usuario_final and password_final)):
         try:
             pass_cifrada = encriptar_texto(password_final)
@@ -6048,8 +6174,8 @@ def crear_credencial():
             cursor = conn.cursor()
             # 🔁 fecha_ultima_rotacion arranca igual a fecha_creacion: recién guardada, la
             # clave "acaba de rotarse" para efectos del recordatorio de rotación.
-            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)"
-            cursor.execute(q_ins, (servicio, url, usuario_final, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados))
+            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q_ins, (servicio, url, usuario_final, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, propietario, visibilidad))
             conn.commit()
             conn.close()
 
@@ -6086,10 +6212,27 @@ def editar_credencial(cred_id):
     if es_nota and not usuario:
         usuario = '—'
 
+    visibilidad = request.form.get('visibilidad', 'equipo').strip()
+    if visibilidad not in ('equipo', 'personal'):
+        visibilidad = 'equipo'
+
     conn, db_type = get_db()
     cursor = conn.cursor()
 
     try:
+        # 🔐 Bóveda Fase 3 — solo el dueño de un ítem 'personal' (o un admin) puede editarlo;
+        # una compartición solo da acceso de consulta, no de edición.
+        q_check = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+        cursor.execute(q_check, (cred_id,))
+        fila_actual = cursor.fetchone()
+        if not fila_actual:
+            conn.close()
+            return redirect(url_for('ver_credenciales'))
+        propietario_actual, visibilidad_actual = fila_actual
+        if not _puede_gestionar_credencial_item(propietario_actual, visibilidad_actual, session.get('username'), session.get('rol')):
+            conn.close()
+            return jsonify({'error': 'no autorizado para editar este ítem personal'}), 403
+
         # 📜 Bóveda Fase 2 — si de verdad se está cambiando la clave de un ítem que YA era una
         # credencial (nunca para notas seguras, que no tienen clave real), la clave vieja se
         # guarda en el historial ANTES de sobrescribirla (ver historial_credencial /
@@ -6108,11 +6251,11 @@ def editar_credencial(cred_id):
             # el próximo aviso de "toca rotar" se calcule desde este momento en adelante.
             pass_cifrada = encriptar_texto('' if es_nota else password)
             fecha_act = obtener_fecha_actual()
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s, visibilidad=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=?, visibilidad=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, visibilidad, cred_id))
         else:
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=?, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s, visibilidad=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=?, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=?, visibilidad=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, visibilidad, cred_id))
 
         conn.commit()
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
@@ -6129,14 +6272,145 @@ def editar_credencial(cred_id):
 def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
+
+    # 🔐 Bóveda Fase 3 — igual que editar: solo el dueño de un ítem 'personal' o un admin
+    # pueden mandarlo a la papelera; una compartición no alcanza para eso.
+    q_check = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_check, (cred_id,))
+    fila_actual = cursor.fetchone()
+    if not fila_actual:
+        conn.close()
+        return redirect(url_for('ver_credenciales'))
+    if not _puede_gestionar_credencial_item(fila_actual[0], fila_actual[1], session.get('username'), session.get('rol')):
+        conn.close()
+        return jsonify({'error': 'no autorizado para eliminar este ítem personal'}), 403
+
     q_upd = "UPDATE credenciales SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'eliminado' WHERE id = ?"
     cursor.execute(q_upd, (cred_id,))
     conn.commit()
     conn.close()
-    
+
     registrar_log(session['username'], "Eliminación de Credencial", f"Se envió a la papelera la credencial ID '{cred_id}'")
     return redirect(url_for('ver_credenciales'))
+
+
+@app.route('/credenciales/<int:cred_id>/compartidos')
+@login_required
+@agente_o_admin_required
+def compartidos_credencial(cred_id):
+    """Lista con quién está compartido puntualmente un ítem personal — visible para cualquiera
+    que ya pueda ver el ítem (dueño, compartidos, y admin), para que quede claro quién más
+    tiene acceso."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_cred = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_cred, (cred_id,))
+    fila_cred = cursor.fetchone()
+    if not fila_cred:
+        conn.close()
+        return jsonify({'error': 'no encontrada'}), 404
+    propietario, visibilidad = fila_cred
+
+    q = "SELECT usuario, fecha_compartido FROM credenciales_compartidas WHERE credencial_id = %s ORDER BY fecha_compartido DESC" if db_type == 'postgres' else "SELECT usuario, fecha_compartido FROM credenciales_compartidas WHERE credencial_id = ? ORDER BY fecha_compartido DESC"
+    cursor.execute(q, (cred_id,))
+    filas = cursor.fetchall()
+    conn.close()
+
+    usuarios_compartidos = {u for u, _ in filas}
+    if not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol'), usuarios_compartidos):
+        return jsonify({'error': 'no autorizado'}), 403
+
+    return jsonify({
+        'propietario': propietario or '',
+        'puede_gestionar': _puede_gestionar_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')),
+        'compartidos': [{'usuario': u, 'fecha': f} for u, f in filas],
+    })
+
+
+@app.route('/credenciales/<int:cred_id>/compartir', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def compartir_credencial(cred_id):
+    """Comparte puntualmente un ítem 'personal' con otro miembro activo del equipo de soporte
+    (admin/agente) — solo el dueño del ítem o un admin pueden hacerlo. Un ítem 'equipo' no
+    necesita esto: ya lo ve todo el mundo."""
+    usuario_destino = (request.form.get('usuario') or '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_cred = "SELECT titulo, propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_cred, (cred_id,))
+    fila_cred = cursor.fetchone()
+    if not fila_cred:
+        conn.close()
+        return jsonify({'error': 'no encontrada'}), 404
+    titulo, propietario, visibilidad = fila_cred
+
+    if not _puede_gestionar_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
+        conn.close()
+        return jsonify({'error': 'no autorizado'}), 403
+    if (visibilidad or 'equipo') != 'personal':
+        conn.close()
+        return jsonify({'error': "solo los ítems personales se pueden compartir puntualmente"}), 400
+
+    # 🛡️ Solo se puede compartir con una cuenta activa del equipo de soporte (admin/agente) —
+    # las mismas que ya tienen acceso a la Bóveda; no tendría sentido compartir con nadie más.
+    equipo_valido = {m['usuario'] for m in _equipo_soporte_activo()}
+    if not usuario_destino or usuario_destino not in equipo_valido or usuario_destino == propietario:
+        conn.close()
+        return jsonify({'error': 'usuario inválido'}), 400
+
+    try:
+        q_check = "SELECT id FROM credenciales_compartidas WHERE credencial_id = %s AND usuario = %s" if db_type == 'postgres' else "SELECT id FROM credenciales_compartidas WHERE credencial_id = ? AND usuario = ?"
+        cursor.execute(q_check, (cred_id, usuario_destino))
+        if not cursor.fetchone():
+            q_ins = "INSERT INTO credenciales_compartidas (credencial_id, usuario, fecha_compartido, compartido_por) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales_compartidas (credencial_id, usuario, fecha_compartido, compartido_por) VALUES (?, ?, ?, ?)"
+            cursor.execute(q_ins, (cred_id, usuario_destino, obtener_fecha_actual(), session.get('username')))
+            conn.commit()
+            registrar_log(session['username'], "Edición de Credencial", f"Compartió '{titulo}' (ID {cred_id}) con {usuario_destino}", credencial_id=cred_id)
+        conn.close()
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error compartiendo credencial {cred_id}: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    return jsonify({'ok': True})
+
+
+@app.route('/credenciales/<int:cred_id>/descompartir', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def descompartir_credencial(cred_id):
+    """Quita la compartición puntual de un ítem personal con un usuario dado — solo el dueño o
+    un admin pueden hacerlo."""
+    usuario_destino = (request.form.get('usuario') or '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_cred = "SELECT titulo, propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_cred, (cred_id,))
+    fila_cred = cursor.fetchone()
+    if not fila_cred:
+        conn.close()
+        return jsonify({'error': 'no encontrada'}), 404
+    titulo, propietario, visibilidad = fila_cred
+
+    if not _puede_gestionar_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
+        conn.close()
+        return jsonify({'error': 'no autorizado'}), 403
+
+    try:
+        q_del = "DELETE FROM credenciales_compartidas WHERE credencial_id = %s AND usuario = %s" if db_type == 'postgres' else "DELETE FROM credenciales_compartidas WHERE credencial_id = ? AND usuario = ?"
+        cursor.execute(q_del, (cred_id, usuario_destino))
+        conn.commit()
+        conn.close()
+        registrar_log(session['username'], "Edición de Credencial", f"Quitó la compartición de '{titulo}' (ID {cred_id}) con {usuario_destino}", credencial_id=cred_id)
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error quitando compartición de credencial {cred_id}: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    return jsonify({'ok': True})
 
 
 # 🪪 MÓDULO ALTAS Y BAJAS DE CREDENCIALES DE COLABORADORES — bitácora de qué credenciales se
