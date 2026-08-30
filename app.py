@@ -312,6 +312,31 @@ def _parsear_dias_rotacion(valor):
     except (TypeError, ValueError):
         return None
 
+
+def _normalizar_etiquetas(valor):
+    """Convierte el campo de formulario 'etiquetas' (texto libre separado por comas) a una
+    cadena limpia lista para guardar: recorta espacios, descarta vacías y quita duplicados
+    (sin importar mayúsculas/minúsculas), conservando el orden de aparición."""
+    if not valor:
+        return ''
+    vistas = set()
+    limpias = []
+    for cruda in str(valor).split(','):
+        etiqueta = cruda.strip()
+        clave = etiqueta.lower()
+        if etiqueta and clave not in vistas:
+            vistas.add(clave)
+            limpias.append(etiqueta)
+    return ', '.join(limpias)
+
+
+def _lista_etiquetas(etiquetas_texto):
+    """Convierte la cadena guardada en 'etiquetas' de vuelta a una lista, para mostrarla como
+    chips en la interfaz o para armar el filtro de etiquetas disponibles."""
+    if not etiquetas_texto:
+        return []
+    return [e.strip() for e in etiquetas_texto.split(',') if e.strip()]
+
 # ☁️ CLOUDINARY
 cloudinary.config(
     cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
@@ -512,6 +537,11 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS rotacion_dias INTEGER;",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS fecha_ultima_rotacion VARCHAR(100);",
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS rotacion_recordatorio_fecha VARCHAR(100);",
+                # 🏷️ Etiquetas múltiples (además de 'area', que sigue siendo la categoría única de
+                # siempre): texto separado por comas, normalizado en crear_credencial/
+                # editar_credencial (ver _normalizar_etiquetas). Permite organizar más fino sin
+                # romper el filtro por categoría que ya existe.
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS etiquetas TEXT;",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
                 # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
@@ -717,7 +747,8 @@ def init_db():
                 "ALTER TABLE logs ADD COLUMN credencial_id INTEGER;",
                 "ALTER TABLE credenciales ADD COLUMN rotacion_dias INTEGER;",
                 "ALTER TABLE credenciales ADD COLUMN fecha_ultima_rotacion TEXT;",
-                "ALTER TABLE credenciales ADD COLUMN rotacion_recordatorio_fecha TEXT;"
+                "ALTER TABLE credenciales ADD COLUMN rotacion_recordatorio_fecha TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN etiquetas TEXT;"
             ]:
                 try:
                     cursor.execute(col_credencial_sql)
@@ -5670,6 +5701,67 @@ def _revisar_recordatorios_rotacion():
             print(f"⚠️ Error marcando recordatorio de rotación de la credencial {cred_id}: {e}")
 
 
+# 🔓 Lista corta de contraseñas extremadamente comunes/genéricas, para el análisis de
+# seguridad local de la bóveda (ver _analizar_seguridad_credenciales). Todo en minúsculas.
+CONTRASENAS_COMUNES_DEBILES = {
+    '123456', '12345678', '123456789', '1234567890', '1234567', '12345',
+    'password', 'contraseña', 'contrasena', 'qwerty', 'qwerty123', 'admin',
+    'admin123', '111111', '000000', 'abc123', 'iloveyou', 'letmein', 'welcome',
+    'monkey', 'dragon', 'password1', 'password123', 'clave123', 'clave1234',
+    'usuario', 'root', 'toor', 'test', 'test123', '1q2w3e4r', 'qazwsx',
+    'asdfgh', 'zxcvbn', 'cambiar123', 'temporal123',
+}
+UMBRAL_LONGITUD_CLAVE_DEBIL = 8
+
+
+def _password_es_debil(password_plano):
+    """Heurística local para marcar una contraseña como débil: muy corta o coincide con una de
+    las contraseñas más comunes/genéricas conocidas. Deliberadamente simple y sin depender de
+    ningún servicio externo (ver _analizar_seguridad_credenciales)."""
+    if not password_plano or len(password_plano) < UMBRAL_LONGITUD_CLAVE_DEBIL:
+        return True
+    return password_plano.lower() in CONTRASENAS_COMUNES_DEBILES
+
+
+def _analizar_seguridad_credenciales():
+    """Revisa TODAS las credenciales activas de la bóveda buscando contraseñas débiles (muy
+    cortas o genéricas) o repetidas (la misma clave usada en más de un ítem). Todo el análisis
+    ocurre DENTRO del servidor: ninguna contraseña —ni siquiera cifrada o como hash— se envía a
+    ningún servicio externo (nada de comprobar contra bases de filtraciones públicas tipo
+    'Have I Been Pwned'): son credenciales reales de servidores/bases de datos de producción y
+    no es prudente que salga ni un fragmento de ellas de Arkiv. Devuelve solo banderas (débil
+    sí/no, repetida sí/no) por credencial — nunca la contraseña real, ni siquiera en este
+    reporte interno de auditoría."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, titulo, password_cifrada FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo'")
+        filas = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error analizando seguridad de la bóveda: {e}")
+        return []
+
+    resultado = {}
+    por_password = {}
+    for cred_id, titulo, pass_enc in filas:
+        try:
+            pass_plano = desencriptar_texto(pass_enc, cred_id)
+        except Exception:
+            continue
+        resultado[cred_id] = {'id': cred_id, 'titulo': titulo, 'debil': _password_es_debil(pass_plano), 'repetida': False}
+        por_password.setdefault(pass_plano, []).append(cred_id)
+
+    for ids_repetidos in por_password.values():
+        if len(ids_repetidos) > 1:
+            for cred_id in ids_repetidos:
+                resultado[cred_id]['repetida'] = True
+
+    problemas = [r for r in resultado.values() if r['debil'] or r['repetida']]
+    problemas.sort(key=lambda r: r['titulo'].lower())
+    return problemas
+
+
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
@@ -5679,6 +5771,7 @@ def ver_credenciales():
     _revisar_recordatorios_rotacion()
 
     q_busqueda = request.args.get('q', '').strip().lower()
+    q_etiqueta = request.args.get('etiqueta', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -5687,7 +5780,7 @@ def ver_credenciales():
         # 🔒 Ya NO se trae ni se descifra password_cifrada aquí: la clave en texto plano solo
         # se entrega a demanda, vía /credenciales/<id>/revelar, para que la auditoría de accesos
         # registre consultas reales y no simplemente "abrió la página".
-        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
+        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion, etiquetas FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -5695,10 +5788,15 @@ def ver_credenciales():
     conn.close()
 
     lista_credenciales = []
+    todas_las_etiquetas = set()
     for r in rows:
         try:
-            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion = r
-            texto_full = f"{servicio} {usuario} {categoria} {notas}".lower()
+            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto = r
+            etiquetas = _lista_etiquetas(etiquetas_texto)
+            todas_las_etiquetas.update(etiquetas)
+            texto_full = f"{servicio} {usuario} {categoria} {notas} {etiquetas_texto or ''}".lower()
+            if q_etiqueta and q_etiqueta.lower() not in [e.lower() for e in etiquetas]:
+                continue
             if not q_busqueda or q_busqueda in texto_full:
                 lista_credenciales.append({
                     'id': c_id,
@@ -5709,14 +5807,19 @@ def ver_credenciales():
                     'notas': notas or '',
                     'fecha': fecha,
                     'rotacion_dias': rotacion_dias,
-                    'rotacion': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion)
+                    'rotacion': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion),
+                    'etiquetas_texto': etiquetas_texto or '',
+                    'etiquetas': etiquetas,
                 })
         except Exception as e_row:
             # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
             print(f"⚠️ Error procesando credencial {r[0] if r else '?'}: {e_row}")
             continue
 
-    return render_template('credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda)
+    return render_template(
+        'credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda,
+        q_etiqueta=q_etiqueta, todas_las_etiquetas=sorted(todas_las_etiquetas, key=str.lower)
+    )
 
 
 @app.route('/credenciales/<int:cred_id>/revelar', methods=['POST'])
@@ -5785,7 +5888,9 @@ def auditoria_credenciales():
 
     accesos = [{'usuario': u, 'detalles': d, 'fecha': f, 'credencial_id': cid} for u, d, f, cid in filas_log]
 
-    return render_template('credenciales_auditoria.html', rotacion=rotacion, accesos=accesos)
+    seguridad = _analizar_seguridad_credenciales()
+
+    return render_template('credenciales_auditoria.html', rotacion=rotacion, accesos=accesos, seguridad=seguridad)
 
 @app.route('/credenciales/crear', methods=['POST'])
 @login_required
@@ -5798,6 +5903,7 @@ def crear_credencial():
     categoria = request.form.get('categoria', 'General').strip()
     notas = request.form.get('notas', '').strip()
     rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
+    etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
 
     if servicio and usuario and password:
         try:
@@ -5808,8 +5914,8 @@ def crear_credencial():
             cursor = conn.cursor()
             # 🔁 fecha_ultima_rotacion arranca igual a fecha_creacion: recién guardada, la
             # clave "acaba de rotarse" para efectos del recordatorio de rotación.
-            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
-            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act))
+            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
+            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act, etiquetas))
             conn.commit()
             conn.close()
 
@@ -5830,6 +5936,7 @@ def editar_credencial(cred_id):
     categoria = request.form.get('categoria', 'General').strip()
     notas = request.form.get('notas', '').strip()
     rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
+    etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -5841,11 +5948,11 @@ def editar_credencial(cred_id):
             # el próximo aviso de "toca rotar" se calcule desde este momento en adelante.
             pass_cifrada = encriptar_texto(password)
             fecha_act = obtener_fecha_actual()
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL, etiquetas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL, etiquetas=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, etiquetas, cred_id))
         else:
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s, etiquetas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=?, etiquetas=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, etiquetas, cred_id))
 
         conn.commit()
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
