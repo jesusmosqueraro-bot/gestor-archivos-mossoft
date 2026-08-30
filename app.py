@@ -1571,7 +1571,7 @@ def _enviar_respaldo_por_correo(ruta_archivo):
         }
         if requests:
             res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=30)
-            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO}. Status: {res.status_code}")
+            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO}. Status: {res.status_code} | Respuesta del script: {res.text[:300]!r}")
         else:
             data_json = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
