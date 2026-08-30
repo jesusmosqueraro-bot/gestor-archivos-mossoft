@@ -84,6 +84,11 @@
                             <div class="flex items-start justify-between gap-3 mb-3">
                                 <div>
                                     <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                                        {% if item.es_nota %}
+                                        <span class="inline-block px-2.5 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                                            <i class="fa-solid fa-note-sticky"></i> Nota segura
+                                        </span>
+                                        {% endif %}
                                         <span class="inline-block px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
                                             {{ item.categoria }}
                                         </span>
@@ -109,6 +114,22 @@
                                 {% endif %}
                             </div>
 
+                            {% if item.es_nota %}
+                            <div class="my-4 bg-slate-900/50 p-3.5 rounded-2xl border border-slate-800">
+                                <div class="flex items-center justify-between text-xs mb-2">
+                                    <span class="text-slate-400 text-[11px] font-medium">Contenido:</span>
+                                    <div class="flex items-center gap-1.5">
+                                        <button onclick="toggleNota({{ item.id }}, this)" title="Ver contenido" class="text-slate-400 hover:text-amber-400 p-1 transition-colors">
+                                            <i class="fa-regular fa-eye"></i>
+                                        </button>
+                                        <button onclick="copiarNota({{ item.id }})" title="Copiar contenido" class="text-slate-400 hover:text-emerald-400 p-1 transition-colors">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <p id="nota-{{ item.id }}" class="text-[11px] text-slate-500 italic">•••• (haz clic en el ojo para ver)</p>
+                            </div>
+                            {% else %}
                             <div class="space-y-2.5 my-4 bg-slate-900/50 p-3.5 rounded-2xl border border-slate-800">
                                 <div class="flex items-center justify-between text-xs">
                                     <span class="text-slate-400 text-[11px] font-medium">Usuario:</span>
@@ -136,6 +157,24 @@
                                     </div>
                                 </div>
                             </div>
+                            {% endif %}
+
+                            {% if item.tiene_campos %}
+                                <div class="mb-3">
+                                    <button onclick="toggleCamposPersonalizados({{ item.id }}, this)" class="text-[11px] text-slate-400 hover:text-blue-400 font-bold flex items-center gap-1">
+                                        <i class="fa-solid fa-list-check"></i> Campos personalizados <i class="fa-solid fa-chevron-down text-[9px]"></i>
+                                    </button>
+                                    <div id="campos-{{ item.id }}" class="hidden mt-2 space-y-1 bg-slate-900/50 p-2.5 rounded-xl border border-slate-800"></div>
+                                </div>
+                            {% endif %}
+
+                            {% if not item.es_nota %}
+                                <div class="mb-3">
+                                    <button data-id="{{ item.id }}" data-titulo="{{ item.servicio }}" onclick="abrirHistorial(this.dataset.id, this.dataset.titulo)" class="text-[11px] text-slate-400 hover:text-blue-400 font-bold flex items-center gap-1">
+                                        <i class="fa-solid fa-clock-rotate-left"></i> Historial de claves
+                                    </button>
+                                </div>
+                            {% endif %}
 
                             {% if item.etiquetas %}
                                 <div class="flex flex-wrap gap-1 mb-3">
@@ -186,7 +225,7 @@
 
     <!-- MODAL CREAR / EDITAR -->
     <div id="modal-credencial" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 id="modal-titulo" class="text-base font-bold text-white">Nueva Credencial</h3>
                 <button onclick="cerrarModal()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
@@ -194,6 +233,17 @@
 
             <form id="form-credencial" method="POST" action="/credenciales/crear" class="flex flex-col gap-3 text-xs">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div id="selector-tipo-item" class="grid grid-cols-2 gap-2 bg-slate-900 border border-slate-700 rounded-xl p-1">
+                    <button type="button" id="btn-tipo-credencial" onclick="cambiarTipoItem('credencial')" class="py-1.5 rounded-lg font-bold text-[11px] transition-all bg-blue-600 text-white">
+                        <i class="fa-solid fa-key"></i> Credencial
+                    </button>
+                    <button type="button" id="btn-tipo-nota" onclick="cambiarTipoItem('nota_segura')" class="py-1.5 rounded-lg font-bold text-[11px] transition-all text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-note-sticky"></i> Nota segura
+                    </button>
+                </div>
+                <input type="hidden" name="tipo_item" id="input-tipo-item" value="credencial">
+
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre del Aplicativo / Servicio *</label>
                     <input type="text" name="servicio" id="input-servicio" required placeholder="Ej: Servidor Render, SURA, BD Postgres..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -210,12 +260,18 @@
                             <option value="Correos">Correos</option>
                         </select>
                     </div>
-                    <div>
+                    <div id="campo-url-wrap">
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Enlace Web (URL)</label>
                         <input type="url" name="url" id="input-url" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
                 </div>
 
+                <div id="bloque-nota" class="hidden">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contenido de la nota</label>
+                    <textarea name="contenido_seguro" id="input-contenido-seguro" rows="4" placeholder="Texto sensible: respuestas de seguridad, códigos de recuperación, licencias..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"></textarea>
+                </div>
+
+                <div id="bloque-credencial" class="flex flex-col gap-3">
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Usuario / Correo *</label>
                     <input type="text" name="usuario" id="input-usuario" required placeholder="admin@empresa.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono">
@@ -237,14 +293,24 @@
                 </div>
 
                 <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Rotar cada (días)</label>
+                    <input type="number" min="1" name="rotacion_dias" id="input-rotacion-dias" placeholder="Ej: 90 (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <span class="text-[10px] text-slate-500">Si la dejas en blanco, esta credencial no tendrá recordatorio de rotación.</span>
+                </div>
+                </div>
+
+                <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Etiquetas</label>
                     <input type="text" name="etiquetas" id="input-etiquetas" placeholder="Separadas por coma. Ej: producción, crítico" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
 
                 <div>
-                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Rotar cada (días)</label>
-                    <input type="number" min="1" name="rotacion_dias" id="input-rotacion-dias" placeholder="Ej: 90 (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <span class="text-[10px] text-slate-500">Si la dejas en blanco, esta credencial no tendrá recordatorio de rotación.</span>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px]">Campos personalizados</label>
+                        <button type="button" onclick="agregarCampoPersonalizado()" class="text-[10px] text-blue-400 hover:text-blue-300 font-bold"><i class="fa-solid fa-plus"></i> Agregar</button>
+                    </div>
+                    <div id="lista-campos-personalizados" class="flex flex-col gap-1.5"></div>
+                    <span class="text-[10px] text-slate-500">Para datos extra como preguntas de seguridad, licencias o códigos de recuperación.</span>
                 </div>
 
                 <div>
@@ -260,6 +326,17 @@
         </div>
     </div>
 
+    <!-- MODAL HISTORIAL DE CONTRASEÑAS -->
+    <div id="modal-historial" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Historial de claves — <span id="historial-titulo"></span></h3>
+                <button onclick="cerrarHistorial()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="historial-lista" class="space-y-2 text-xs"></div>
+        </div>
+    </div>
+
     <!-- SCRIPTS INTERACTIVOS -->
     <script>
         const CSRF_TOKEN = "{{ csrf_token() }}";
@@ -267,6 +344,11 @@
         // volver a llamar al backend -y así no registrar una nueva consulta en la auditoría-
         // cada vez que el usuario alterna mostrar/ocultar la misma credencial.
         const clavesReveladas = {};
+        // Igual que clavesReveladas, pero para el contenido de notas seguras y para los campos
+        // personalizados ya descifrados (por credencial) — así tampoco se re-consulta ni se
+        // vuelve a auditar cada vez que se abre/cierra el mismo panel.
+        const notasReveladas = {};
+        const camposRevelados = {};
 
         // 🧹 Auto-borrado del portapapeles: 20s después de copiar algo sensible (usuario o
         // clave), se limpia el portapapeles solo. El "token" evita que un borrado programado
@@ -354,6 +436,209 @@
             }
         }
 
+        // 📝 Notas seguras — mismo endpoint /revelar que las credenciales, pero la respuesta trae
+        // 'contenido' en vez de 'password' (ver revelar_credencial en app.py).
+        async function revelarNota(credId, accion) {
+            if (notasReveladas[credId] !== undefined) {
+                return notasReveladas[credId];
+            }
+            const resp = await fetch(`/credenciales/${credId}/revelar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                body: `accion=${encodeURIComponent(accion)}`
+            });
+            if (!resp.ok) throw new Error('No se pudo obtener la nota');
+            const data = await resp.json();
+            notasReveladas[credId] = data.contenido;
+            return data.contenido;
+        }
+
+        async function toggleNota(credId, btn) {
+            const p = document.getElementById(`nota-${credId}`);
+            const icon = btn.querySelector('i');
+            const oculto = icon.classList.contains('fa-eye');
+            if (oculto) {
+                try {
+                    const contenido = await revelarNota(credId, 'ver');
+                    p.innerText = contenido || '(vacía)';
+                    p.classList.remove('italic', 'text-slate-500');
+                } catch (e) {
+                    mostrarToast('No se pudo obtener la nota');
+                    return;
+                }
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                p.innerText = '•••• (haz clic en el ojo para ver)';
+                p.classList.add('italic', 'text-slate-500');
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        async function copiarNota(credId) {
+            try {
+                const contenido = await revelarNota(credId, 'copiar');
+                copiarConAutoBorrado(contenido, 'Contenido copiado al portapapeles (se borrará solo en 20s)');
+            } catch (e) {
+                mostrarToast('No se pudo copiar el contenido');
+            }
+        }
+
+        // 🧩 Campos personalizados — se descifran todos juntos la primera vez que se abre el
+        // panel de un ítem, y luego quedan cacheados en memoria (camposRevelados) igual que las
+        // claves y las notas.
+        async function revelarCamposPersonalizados(credId) {
+            if (camposRevelados[credId] !== undefined) {
+                return camposRevelados[credId];
+            }
+            const resp = await fetch(`/credenciales/${credId}/revelar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                body: 'accion=ver_campos'
+            });
+            if (!resp.ok) throw new Error('No se pudieron obtener los campos');
+            const data = await resp.json();
+            camposRevelados[credId] = data.campos || [];
+            return camposRevelados[credId];
+        }
+
+        async function toggleCamposPersonalizados(credId, btn) {
+            const cont = document.getElementById(`campos-${credId}`);
+            const chevron = btn.querySelector('.fa-chevron-down, .fa-chevron-up');
+            if (!cont.classList.contains('hidden')) {
+                cont.classList.add('hidden');
+                if (chevron) { chevron.classList.remove('fa-chevron-up'); chevron.classList.add('fa-chevron-down'); }
+                return;
+            }
+            try {
+                const campos = await revelarCamposPersonalizados(credId);
+                cont.innerHTML = campos.length
+                    ? campos.map(c => `
+                        <div class="flex items-center justify-between gap-2 text-[11px]">
+                            <span class="text-slate-400 font-medium truncate">${escaparHtml(c.nombre)}:</span>
+                            <div class="flex items-center gap-1 font-mono text-slate-200">
+                                <span class="truncate max-w-[140px]">${escaparHtml(c.valor)}</span>
+                                <button onclick="copiarTexto('${escaparJsString(c.valor)}', '${escaparJsString(c.nombre)}')" title="Copiar" class="text-slate-400 hover:text-blue-400 p-1"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </div>`).join('')
+                    : '<p class="text-slate-500 italic">Sin campos personalizados.</p>';
+                cont.classList.remove('hidden');
+                if (chevron) { chevron.classList.remove('fa-chevron-down'); chevron.classList.add('fa-chevron-up'); }
+            } catch (e) {
+                mostrarToast('No se pudieron obtener los campos personalizados');
+            }
+        }
+
+        // Escapado para contenido de TEXTO (innerText/innerHTML de un nodo, no atributos).
+        function escaparHtml(texto) {
+            const div = document.createElement('div');
+            div.innerText = texto == null ? '' : String(texto);
+            return div.innerHTML;
+        }
+        // Escapado para un valor puesto directamente en un atributo HTML (ej. value="...").
+        function escaparAtributo(texto) {
+            return (texto == null ? '' : String(texto))
+                .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        // Escapado para un valor insertado como literal de cadena JS ('...') DENTRO de un
+        // atributo HTML (ej. onclick="fn('...')"): primero escapa para JS, luego para HTML.
+        function escaparJsString(texto) {
+            const jsEscapado = (texto == null ? '' : String(texto)).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return escaparAtributo(jsEscapado);
+        }
+
+        // 📜 Historial de contraseñas anteriores — la lista (fechas/quién) no revela ninguna
+        // clave; cada clave puntual del historial se descifra solo si se pide explícitamente,
+        // con su propio registro de auditoría (ver revelar_historial_credencial en app.py).
+        async function abrirHistorial(credId, titulo) {
+            document.getElementById('historial-titulo').innerText = titulo;
+            const lista = document.getElementById('historial-lista');
+            lista.innerHTML = '<p class="text-slate-500 italic">Cargando…</p>';
+            document.getElementById('modal-historial').classList.remove('hidden');
+            document.getElementById('modal-historial').classList.add('flex');
+            try {
+                const resp = await fetch(`/credenciales/${credId}/historial`);
+                const data = await resp.json();
+                const historial = data.historial || [];
+                lista.innerHTML = historial.length
+                    ? historial.map(h => `
+                        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <p class="text-slate-200 font-mono" id="hist-pass-${h.id}">••••••••</p>
+                                <p class="text-[10px] text-slate-500">${escaparHtml(h.fecha_cambio)} · ${escaparHtml(h.cambiado_por)}</p>
+                            </div>
+                            <button onclick="revelarHistorialEntrada(${h.id})" title="Ver clave" class="shrink-0 p-1.5 text-slate-400 hover:text-amber-400"><i class="fa-regular fa-eye"></i></button>
+                        </div>`).join('')
+                    : '<p class="text-slate-500 italic">Esta credencial no tiene claves anteriores registradas.</p>';
+            } catch (e) {
+                lista.innerHTML = '<p class="text-rose-400 italic">No se pudo cargar el historial.</p>';
+            }
+        }
+
+        function cerrarHistorial() {
+            document.getElementById('modal-historial').classList.add('hidden');
+            document.getElementById('modal-historial').classList.remove('flex');
+        }
+
+        const historialRevelado = {};
+        async function revelarHistorialEntrada(historialId) {
+            const p = document.getElementById(`hist-pass-${historialId}`);
+            try {
+                if (historialRevelado[historialId] === undefined) {
+                    const resp = await fetch(`/credenciales/historial/${historialId}/revelar`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                        body: ''
+                    });
+                    if (!resp.ok) throw new Error('No se pudo revelar');
+                    const data = await resp.json();
+                    historialRevelado[historialId] = data.password;
+                }
+                p.innerText = historialRevelado[historialId];
+            } catch (e) {
+                mostrarToast('No se pudo obtener esa clave anterior');
+            }
+        }
+
+        // 🔀 Alterna entre "Credencial" y "Nota segura" en el formulario de creación/edición.
+        function cambiarTipoItem(tipo) {
+            document.getElementById('input-tipo-item').value = tipo;
+            const esNota = tipo === 'nota_segura';
+            document.getElementById('bloque-credencial').classList.toggle('hidden', esNota);
+            document.getElementById('bloque-nota').classList.toggle('hidden', !esNota);
+            document.getElementById('campo-url-wrap').classList.toggle('hidden', esNota);
+            document.getElementById('input-usuario').required = !esNota;
+            // 🔒 La clave solo es obligatoria al CREAR una credencial normal (nunca en una nota
+            // segura, ni al editar — ahí sigue siendo opcional para no forzar un cambio de
+            // clave). Sin esto, el campo oculto de clave podía quedar marcado "required" y
+            // bloquear en silencio el guardado de una nota segura nueva.
+            const esCreacion = document.getElementById('form-credencial').action.includes('/credenciales/crear');
+            document.getElementById('input-password').required = esCreacion && !esNota;
+
+            const btnCred = document.getElementById('btn-tipo-credencial');
+            const btnNota = document.getElementById('btn-tipo-nota');
+            btnCred.classList.toggle('bg-blue-600', !esNota);
+            btnCred.classList.toggle('text-white', !esNota);
+            btnCred.classList.toggle('text-slate-400', esNota);
+            btnNota.classList.toggle('bg-blue-600', esNota);
+            btnNota.classList.toggle('text-white', esNota);
+            btnNota.classList.toggle('text-slate-400', !esNota);
+        }
+
+        // 🧩 Filas dinámicas de campos personalizados en el formulario (nombre + valor).
+        function agregarCampoPersonalizado(nombre = '', valor = '') {
+            const cont = document.getElementById('lista-campos-personalizados');
+            const fila = document.createElement('div');
+            fila.className = 'flex items-center gap-1.5';
+            fila.innerHTML = `
+                <input type="text" name="campo_nombre[]" placeholder="Nombre (ej: Pregunta secreta)" value="${escaparAtributo(nombre)}" class="w-1/2 bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-[11px]">
+                <input type="text" name="campo_valor[]" placeholder="Valor" value="${escaparAtributo(valor)}" class="w-1/2 bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-[11px] font-mono">
+                <button type="button" onclick="this.parentElement.remove()" class="shrink-0 p-1.5 text-slate-400 hover:text-red-400"><i class="fa-solid fa-trash-can"></i></button>
+            `;
+            cont.appendChild(fila);
+        }
+
         // 🎲 Generador de contraseñas seguras — usa crypto.getRandomValues (sin librerías
         // externas ni llamadas al servidor) para elegir caracteres al azar de forma segura.
         function generarPassword(longitud = 16) {
@@ -434,27 +719,51 @@
             document.getElementById('form-credencial').reset();
             document.getElementById('input-password').required = true;
             document.getElementById('pass-help').classList.add('hidden');
+            document.getElementById('lista-campos-personalizados').innerHTML = '';
+            cambiarTipoItem('credencial');
             actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
         }
 
-        function abrirModalEditar(item) {
-            document.getElementById('modal-titulo').innerText = 'Editar Credencial';
+        async function abrirModalEditar(item) {
+            document.getElementById('modal-titulo').innerText = item.es_nota ? 'Editar Nota Segura' : 'Editar Credencial';
             document.getElementById('form-credencial').action = `/credenciales/editar/${item.id}`;
             document.getElementById('input-servicio').value = item.servicio;
             document.getElementById('input-categoria').value = item.categoria;
             document.getElementById('input-url').value = item.url;
-            document.getElementById('input-usuario').value = item.usuario;
+            document.getElementById('input-usuario').value = item.es_nota ? '' : item.usuario;
             document.getElementById('input-password').value = '';
             document.getElementById('input-password').required = false;
             document.getElementById('pass-help').classList.remove('hidden');
             document.getElementById('input-etiquetas').value = item.etiquetas_texto || '';
             document.getElementById('input-rotacion-dias').value = item.rotacion_dias || '';
             document.getElementById('input-notas').value = item.notas;
+            document.getElementById('input-contenido-seguro').value = '';
+            document.getElementById('lista-campos-personalizados').innerHTML = '';
+            cambiarTipoItem(item.tipo_item || 'credencial');
             actualizarFortaleza();
             document.getElementById('modal-credencial').classList.remove('hidden');
             document.getElementById('modal-credencial').classList.add('flex');
+
+            // 🔓 Al editar, el contenido de la nota y los campos personalizados se descifran de
+            // una vez para poder mostrarlos en el formulario — igual que ver la clave, esto
+            // queda registrado en la auditoría de accesos.
+            if (item.es_nota) {
+                try {
+                    document.getElementById('input-contenido-seguro').value = await revelarNota(item.id, 'ver');
+                } catch (e) {
+                    mostrarToast('No se pudo cargar el contenido de la nota');
+                }
+            }
+            if (item.tiene_campos) {
+                try {
+                    const campos = await revelarCamposPersonalizados(item.id);
+                    campos.forEach(c => agregarCampoPersonalizado(c.nombre, c.valor));
+                } catch (e) {
+                    mostrarToast('No se pudieron cargar los campos personalizados');
+                }
+            }
         }
 
         function cerrarModal() {
