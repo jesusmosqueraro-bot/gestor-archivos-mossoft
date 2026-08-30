@@ -1255,8 +1255,10 @@ UMBRAL_INTENTOS_FALLIDOS_LOGIN = 3
 
 def _registrar_intento_fallido_login(usuario):
     """Suma un intento fallido de contraseña para 'usuario'. Si con este llega (o ya venía)
-    al umbral, deja/mantiene la cuenta bloqueada. Devuelve True si la cuenta queda (o ya
-    estaba) bloqueada por intentos, False si todavía tiene margen."""
+    al umbral, deja/mantiene la cuenta bloqueada. Devuelve (bloqueada, intentos_restantes):
+    'bloqueada' es True si la cuenta queda (o ya estaba) bloqueada por intentos;
+    'intentos_restantes' es cuántos fallos más admite antes de bloquearse (0 si ya está
+    bloqueada) — se usa para mostrar el contador de intentos en la pantalla de login."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
@@ -1265,7 +1267,7 @@ def _registrar_intento_fallido_login(usuario):
         row = cursor.fetchone()
         if not row:
             conn.close()
-            return False
+            return False, UMBRAL_INTENTOS_FALLIDOS_LOGIN
 
         intentos_actuales = (row[0] or 0) + 1
         ya_estaba_bloqueada = bool(row[1])
@@ -1277,7 +1279,7 @@ def _registrar_intento_fallido_login(usuario):
             cursor.execute(q_upd, (intentos_actuales, usuario))
             conn.commit()
             conn.close()
-            return True
+            return True, 0
 
         if intentos_actuales >= UMBRAL_INTENTOS_FALLIDOS_LOGIN:
             q_upd = "UPDATE usuarios SET intentos_fallidos_login = %s, bloqueado_por_intentos = TRUE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = ?, bloqueado_por_intentos = 1 WHERE usuario = ?"
@@ -1285,16 +1287,16 @@ def _registrar_intento_fallido_login(usuario):
             conn.commit()
             conn.close()
             registrar_log(usuario, "Cuenta Bloqueada por Intentos", f"Se bloqueó la cuenta tras {intentos_actuales} intentos fallidos consecutivos de inicio de sesión.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
-            return True
+            return True, 0
 
         q_upd = "UPDATE usuarios SET intentos_fallidos_login = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET intentos_fallidos_login = ? WHERE usuario = ?"
         cursor.execute(q_upd, (intentos_actuales, usuario))
         conn.commit()
         conn.close()
-        return False
+        return False, (UMBRAL_INTENTOS_FALLIDOS_LOGIN - intentos_actuales)
     except Exception as e:
         print(f"⚠️ Error registrando intento fallido de login para {usuario}: {e}")
-        return False
+        return False, UMBRAL_INTENTOS_FALLIDOS_LOGIN
 
 def _resetear_intentos_fallidos_login(usuario):
     """Limpia el contador de intentos fallidos (sin tocar 'bloqueado_por_intentos': ese solo
@@ -5575,8 +5577,15 @@ def login():
                 elif user:
                     # 🔒 Contraseña incorrecta en una cuenta que sí existe: cuenta como intento
                     # fallido hacia el bloqueo automático (ver UMBRAL_INTENTOS_FALLIDOS_LOGIN).
-                    if _registrar_intento_fallido_login(user[0]):
+                    # El contador de intentos restantes se muestra en el propio mensaje de
+                    # error, para que la persona sepa cuántas oportunidades le quedan antes de
+                    # que se bloquee la cuenta.
+                    bloqueada, intentos_restantes = _registrar_intento_fallido_login(user[0])
+                    if bloqueada:
                         return render_template('login.html', error="Contraseña incorrecta. Por seguridad, la cuenta quedó bloqueada tras varios intentos fallidos. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
+                    if intentos_restantes == 1:
+                        return render_template('login.html', error="Usuario o contraseña incorrectos. Te queda 1 intento antes de que la cuenta se bloquee por seguridad.")
+                    return render_template('login.html', error=f"Usuario o contraseña incorrectos. Te quedan {intentos_restantes} intentos antes de que la cuenta se bloquee por seguridad.")
             except Exception as db_err:
                 print(f"Error consultando usuario en BD: {db_err}")
 
