@@ -10,8 +10,14 @@
     </button>
     <div id="dropdown-notificaciones" class="hidden absolute right-0 mt-2 w-80 max-w-[90vw] bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
         <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-700/60">
-            <span class="text-xs font-bold text-white">Notificaciones</span>
-            <button type="button" onclick="marcarTodasLeidas()" class="text-[10px] text-sky-400 hover:text-sky-300 font-bold">Marcar todas leídas</button>
+            <span id="titulo-notificaciones" class="text-xs font-bold text-white">Notificaciones</span>
+            <div class="flex items-center gap-3">
+                <button type="button" id="btn-marcar-leidas" onclick="marcarTodasLeidas()" class="text-[10px] text-sky-400 hover:text-sky-300 font-bold">Marcar todas leídas</button>
+                <button type="button" id="btn-vaciar-papelera" onclick="vaciarPapelera()" class="hidden text-[10px] text-rose-400 hover:text-rose-300 font-bold">Vaciar papelera</button>
+                <button type="button" id="btn-ver-papelera" onclick="toggleVistaPapelera()" title="Ver papelera de notificaciones" class="text-slate-400 hover:text-slate-200">
+                    <i class="fa-solid fa-trash-can text-xs"></i>
+                </button>
+            </div>
         </div>
         <div id="lista-notificaciones" class="max-h-80 overflow-y-auto divide-y divide-slate-700/40">
             <p class="text-slate-500 text-center text-[11px] py-6">Cargando...</p>
