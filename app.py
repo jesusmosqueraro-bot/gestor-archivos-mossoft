@@ -337,6 +337,33 @@ def _lista_etiquetas(etiquetas_texto):
         return []
     return [e.strip() for e in etiquetas_texto.split(',') if e.strip()]
 
+
+def _serializar_campos_personalizados(nombres, valores):
+    """Bóveda Fase 2 — arma la lista de campos personalizados (nombre/valor) enviada desde el
+    formulario (como dos listas paralelas, una por cada fila que el usuario agregó con JS) y la
+    convierte a JSON listo para cifrar. Descarta filas sin nombre; conserva el orden capturado."""
+    campos = []
+    for nombre, valor in zip(nombres or [], valores or []):
+        nombre = (nombre or '').strip()
+        valor = (valor or '').strip()
+        if nombre:
+            campos.append({'nombre': nombre, 'valor': valor})
+    return json.dumps(campos, ensure_ascii=False) if campos else ''
+
+
+def _campos_personalizados_desde_json(texto_json):
+    """Inverso de _serializar_campos_personalizados: interpreta el JSON ya descifrado y regresa
+    la lista de {nombre, valor}. Nunca deja tumbar la vista si el JSON quedó corrupto/vacío."""
+    if not texto_json:
+        return []
+    try:
+        campos = json.loads(texto_json)
+        if isinstance(campos, list):
+            return [{'nombre': c.get('nombre', ''), 'valor': c.get('valor', '')} for c in campos if isinstance(c, dict)]
+    except (TypeError, ValueError):
+        pass
+    return []
+
 # ☁️ CLOUDINARY
 cloudinary.config(
     cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
@@ -419,6 +446,13 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(150) NOT NULL, url_acceso TEXT, usuario_acceso VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, area VARCHAR(100) DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(50) DEFAULT 'activo'
+            )''')
+            # 📜 Historial de contraseñas anteriores de cada credencial (Bóveda Fase 2): se guarda
+            # una fila cada vez que editar_credencial() cambia la clave de verdad, ANTES de
+            # sobrescribirla, para poder consultar (con su propio audit-log) qué clave se usaba
+            # antes. Solo aplica a items tipo 'credencial' (no a notas seguras).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_historial (
+                id SERIAL PRIMARY KEY, credencial_id INTEGER NOT NULL REFERENCES credenciales(id) ON DELETE CASCADE, password_cifrada TEXT NOT NULL, fecha_cambio VARCHAR(100) NOT NULL, cambiado_por VARCHAR(100)
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
@@ -542,6 +576,14 @@ def init_db():
                 # editar_credencial (ver _normalizar_etiquetas). Permite organizar más fino sin
                 # romper el filtro por categoría que ya existe.
                 "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS etiquetas TEXT;",
+                # 📝 Bóveda Fase 2 — 'nota_segura' (contenido_seguro cifrado, sin usuario/clave
+                # reales: se guardan valores placeholder en usuario_acceso/password_cifrada para
+                # no romper sus columnas NOT NULL) y campos personalizados (JSON cifrado, lista de
+                # {nombre, valor} por credencial). tipo_item distingue una credencial normal de
+                # una nota segura; el resto de la app sigue asumiendo 'credencial' si no está.
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS tipo_item VARCHAR(20) DEFAULT 'credencial';",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS contenido_seguro TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN IF NOT EXISTS campos_personalizados TEXT;",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo';",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(200);",
                 # 📞 Teléfono de contacto del usuario: opcional, se usa para prellenar el número
@@ -655,6 +697,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, url_acceso TEXT, usuario_acceso TEXT NOT NULL, password_cifrada TEXT NOT NULL, area TEXT DEFAULT 'General', notas TEXT, fecha_creacion VARCHAR(100) NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, credencial_id INTEGER NOT NULL, password_cifrada TEXT NOT NULL, fecha_cambio TEXT NOT NULL, cambiado_por TEXT, FOREIGN KEY(credencial_id) REFERENCES credenciales(id) ON DELETE CASCADE
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
             )''')
@@ -748,7 +793,10 @@ def init_db():
                 "ALTER TABLE credenciales ADD COLUMN rotacion_dias INTEGER;",
                 "ALTER TABLE credenciales ADD COLUMN fecha_ultima_rotacion TEXT;",
                 "ALTER TABLE credenciales ADD COLUMN rotacion_recordatorio_fecha TEXT;",
-                "ALTER TABLE credenciales ADD COLUMN etiquetas TEXT;"
+                "ALTER TABLE credenciales ADD COLUMN etiquetas TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN tipo_item TEXT DEFAULT 'credencial';",
+                "ALTER TABLE credenciales ADD COLUMN contenido_seguro TEXT;",
+                "ALTER TABLE credenciales ADD COLUMN campos_personalizados TEXT;"
             ]:
                 try:
                     cursor.execute(col_credencial_sql)
@@ -5664,7 +5712,7 @@ def _revisar_recordatorios_rotacion():
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, titulo, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' AND rotacion_dias IS NOT NULL AND rotacion_recordatorio_fecha IS NULL")
+        cursor.execute("SELECT id, titulo, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(tipo_item, 'credencial') = 'credencial' AND rotacion_dias IS NOT NULL AND rotacion_recordatorio_fecha IS NULL")
         filas = cursor.fetchall()
         conn.close()
     except Exception as e:
@@ -5735,7 +5783,10 @@ def _analizar_seguridad_credenciales():
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, titulo, password_cifrada FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo'")
+        # 📝 Las notas seguras (tipo_item = 'nota_segura') no tienen clave real — se excluyen
+        # aquí para no marcarlas como "débil" (su password_cifrada queda vacío) ni agruparlas
+        # entre sí como "repetida" solo por compartir ese vacío.
+        cursor.execute("SELECT id, titulo, password_cifrada FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(tipo_item, 'credencial') = 'credencial'")
         filas = cursor.fetchall()
         conn.close()
     except Exception as e:
@@ -5777,10 +5828,11 @@ def ver_credenciales():
     cursor = conn.cursor()
 
     try:
-        # 🔒 Ya NO se trae ni se descifra password_cifrada aquí: la clave en texto plano solo
-        # se entrega a demanda, vía /credenciales/<id>/revelar, para que la auditoría de accesos
-        # registre consultas reales y no simplemente "abrió la página".
-        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion, etiquetas FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
+        # 🔒 Ya NO se trae ni se descifra password_cifrada (ni contenido_seguro/campos_personalizados,
+        # también cifrados) aquí: todo texto sensible se entrega a demanda, vía
+        # /credenciales/<id>/revelar, para que la auditoría de accesos registre consultas reales
+        # y no simplemente "abrió la página".
+        cursor.execute("SELECT id, titulo, url_acceso, usuario_acceso, area, notas, fecha_creacion, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
         rows = cursor.fetchall()
     except Exception:
         rows = []
@@ -5791,7 +5843,8 @@ def ver_credenciales():
     todas_las_etiquetas = set()
     for r in rows:
         try:
-            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto = r
+            c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto, tipo_item, contenido_seguro, campos_personalizados = r
+            tipo_item = tipo_item or 'credencial'
             etiquetas = _lista_etiquetas(etiquetas_texto)
             todas_las_etiquetas.update(etiquetas)
             texto_full = f"{servicio} {usuario} {categoria} {notas} {etiquetas_texto or ''}".lower()
@@ -5810,6 +5863,9 @@ def ver_credenciales():
                     'rotacion': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion),
                     'etiquetas_texto': etiquetas_texto or '',
                     'etiquetas': etiquetas,
+                    'tipo_item': tipo_item,
+                    'es_nota': tipo_item == 'nota_segura',
+                    'tiene_campos': bool(campos_personalizados),
                 })
         except Exception as e_row:
             # No dejar que una fila con datos inconsistentes tumbe toda la bóveda.
@@ -5826,15 +5882,18 @@ def ver_credenciales():
 @login_required
 @agente_o_admin_required
 def revelar_credencial(cred_id):
-    """Descifra la clave de una credencial puntual, a demanda, y deja constancia en el log
-    general (con credencial_id) de quién la consultó/copió y cuándo — la base de la Auditoría
-    de Accesos."""
+    """Descifra el contenido sensible de un ítem de la bóveda a demanda, y deja constancia en el
+    log general (con credencial_id) de quién lo consultó/copió y cuándo — la base de la
+    Auditoría de Accesos. Según 'accion' revela cosas distintas:
+      - 'ver'/'copiar' (default): la clave (credencial normal) o el contenido (nota segura).
+      - 'ver_campos': los campos personalizados del ítem (lista nombre/valor).
+    Nunca revela más de un tipo de dato sensible por llamada."""
     accion = request.form.get('accion', 'ver')
     accion_legible = 'copió' if accion == 'copiar' else 'vio'
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT titulo, password_cifrada FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada FROM credenciales WHERE id = ?"
+        q = "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, campos_personalizados FROM credenciales WHERE id = ?"
         cursor.execute(q, (cred_id,))
         row = cursor.fetchone()
         conn.close()
@@ -5845,9 +5904,67 @@ def revelar_credencial(cred_id):
     if not row:
         return jsonify({'error': 'no encontrada'}), 404
 
-    titulo, pass_enc = row
+    titulo, pass_enc, tipo_item, contenido_cifrado, campos_cifrados = row
+    tipo_item = tipo_item or 'credencial'
+
+    if accion == 'ver_campos':
+        campos_json = desencriptar_texto(campos_cifrados, cred_id) if campos_cifrados else ''
+        registrar_log(session.get('username'), "Consulta de Credencial", f"Consultó los campos personalizados de '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+        return jsonify({'campos': _campos_personalizados_desde_json(campos_json)})
+
+    if tipo_item == 'nota_segura':
+        contenido_real = desencriptar_texto(contenido_cifrado, cred_id) if contenido_cifrado else ''
+        registrar_log(session.get('username'), "Consulta de Credencial", f"Se {accion_legible} el contenido de la nota segura '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+        return jsonify({'contenido': contenido_real})
+
     pass_real = desencriptar_texto(pass_enc, cred_id)
     registrar_log(session.get('username'), "Consulta de Credencial", f"Se {accion_legible} la clave de '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+    return jsonify({'password': pass_real})
+
+
+@app.route('/credenciales/<int:cred_id>/historial')
+@login_required
+@agente_o_admin_required
+def historial_credencial(cred_id):
+    """Lista (sin descifrar ninguna clave) las entradas del historial de contraseñas anteriores
+    de una credencial — quién la cambió y cuándo. Cada clave puntual solo se descifra a demanda
+    vía /credenciales/historial/<id>/revelar (auditado igual que revelar_credencial)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = %s ORDER BY id DESC" if db_type == 'postgres' else "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = ? ORDER BY id DESC"
+        cursor.execute(q, (cred_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando historial de credencial {cred_id}: {e}")
+        filas = []
+    conn.close()
+    return jsonify({'historial': [{'id': h_id, 'fecha_cambio': fecha, 'cambiado_por': quien or '—'} for h_id, fecha, quien in filas]})
+
+
+@app.route('/credenciales/historial/<int:historial_id>/revelar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def revelar_historial_credencial(historial_id):
+    """Descifra puntualmente UNA clave anterior del historial (nunca la lista completa de una
+    vez), dejando el mismo rastro de auditoría que revelar_credencial."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = %s" if db_type == 'postgres' else "SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = ?"
+        cursor.execute(q, (historial_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando historial {historial_id}: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    if not row:
+        return jsonify({'error': 'no encontrado'}), 404
+
+    credencial_id, pass_enc, fecha_cambio, titulo = row
+    pass_real = desencriptar_texto(pass_enc)
+    registrar_log(session.get('username'), "Consulta de Credencial", f"Consultó una clave anterior (del {fecha_cambio}) del historial de '{titulo}' (ID {credencial_id})", credencial_id=credencial_id)
     return jsonify({'password': pass_real})
 
 
@@ -5862,7 +5979,8 @@ def auditoria_credenciales():
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT id, titulo, area, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY titulo ASC")
+        # 📝 Las notas seguras no tienen clave que rotar, así que no aparecen en este panel.
+        cursor.execute("SELECT id, titulo, area, rotacion_dias, fecha_ultima_rotacion FROM credenciales WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(tipo_item, 'credencial') = 'credencial' ORDER BY titulo ASC")
         filas_cred = cursor.fetchall()
     except Exception as e:
         print(f"⚠️ Error listando credenciales para auditoría: {e}")
@@ -5905,21 +6023,40 @@ def crear_credencial():
     rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
     etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
 
-    if servicio and usuario and password:
+    # 📝 Bóveda Fase 2 — tipo_item distingue una credencial normal de una nota segura (sin
+    # usuario/clave reales: se guarda un placeholder en usuario_acceso y password_cifrada queda
+    # vacío, ya que esas columnas siguen siendo NOT NULL). campos_personalizados aplica a
+    # cualquiera de los dos tipos.
+    tipo_item = request.form.get('tipo_item', 'credencial').strip()
+    if tipo_item not in ('credencial', 'nota_segura'):
+        tipo_item = 'credencial'
+    es_nota = tipo_item == 'nota_segura'
+    contenido_seguro = request.form.get('contenido_seguro', '').strip()
+    campos_json = _serializar_campos_personalizados(request.form.getlist('campo_nombre[]'), request.form.getlist('campo_valor[]'))
+
+    usuario_final = usuario or ('—' if es_nota else '')
+    password_final = '' if es_nota else password
+
+    if servicio and (es_nota or (usuario_final and password_final)):
         try:
-            pass_cifrada = encriptar_texto(password)
+            pass_cifrada = encriptar_texto(password_final)
+            contenido_cifrado = encriptar_texto(contenido_seguro)
+            campos_cifrados = encriptar_texto(campos_json)
             fecha_act = obtener_fecha_actual()
 
             conn, db_type = get_db()
             cursor = conn.cursor()
             # 🔁 fecha_ultima_rotacion arranca igual a fecha_creacion: recién guardada, la
             # clave "acaba de rotarse" para efectos del recordatorio de rotación.
-            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
-            cursor.execute(q_ins, (servicio, url, usuario, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act, etiquetas))
+            q_ins = "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados) VALUES (%s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, rotacion_dias, fecha_ultima_rotacion, etiquetas, tipo_item, contenido_seguro, campos_personalizados) VALUES (?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q_ins, (servicio, url, usuario_final, pass_cifrada, categoria, notas, fecha_act, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados))
             conn.commit()
             conn.close()
 
-            registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
+            if es_nota:
+                registrar_log(session['username'], "Guardado de Credencial", f"Se registró la nota segura '{servicio}'")
+            else:
+                registrar_log(session['username'], "Guardado de Credencial", f"Se registró el acceso para el aplicativo '{servicio}'")
         except Exception as e:
             print(f"⚠️ Error guardando credencial '{servicio}': {e}")
 
@@ -5938,21 +6075,44 @@ def editar_credencial(cred_id):
     rotacion_dias = _parsear_dias_rotacion(request.form.get('rotacion_dias', ''))
     etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
 
+    tipo_item = request.form.get('tipo_item', 'credencial').strip()
+    if tipo_item not in ('credencial', 'nota_segura'):
+        tipo_item = 'credencial'
+    es_nota = tipo_item == 'nota_segura'
+    contenido_seguro = request.form.get('contenido_seguro', '').strip()
+    contenido_cifrado = encriptar_texto(contenido_seguro)
+    campos_json = _serializar_campos_personalizados(request.form.getlist('campo_nombre[]'), request.form.getlist('campo_valor[]'))
+    campos_cifrados = encriptar_texto(campos_json)
+    if es_nota and not usuario:
+        usuario = '—'
+
     conn, db_type = get_db()
     cursor = conn.cursor()
 
     try:
+        # 📜 Bóveda Fase 2 — si de verdad se está cambiando la clave de un ítem que YA era una
+        # credencial (nunca para notas seguras, que no tienen clave real), la clave vieja se
+        # guarda en el historial ANTES de sobrescribirla (ver historial_credencial /
+        # revelar_historial_credencial).
+        if password and not es_nota:
+            q_old = "SELECT password_cifrada, COALESCE(tipo_item, 'credencial') FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT password_cifrada, COALESCE(tipo_item, 'credencial') FROM credenciales WHERE id = ?"
+            cursor.execute(q_old, (cred_id,))
+            fila_vieja = cursor.fetchone()
+            if fila_vieja and fila_vieja[0] and fila_vieja[1] == 'credencial':
+                q_hist = "INSERT INTO credenciales_historial (credencial_id, password_cifrada, fecha_cambio, cambiado_por) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales_historial (credencial_id, password_cifrada, fecha_cambio, cambiado_por) VALUES (?, ?, ?, ?)"
+                cursor.execute(q_hist, (cred_id, fila_vieja[0], obtener_fecha_actual(), session.get('username')))
+
         if password:
             # 🔁 Se cambió la clave de verdad: cuenta como una rotación — se actualiza
             # fecha_ultima_rotacion a ahora y se limpia el recordatorio ya enviado, para que
             # el próximo aviso de "toca rotar" se calcule desde este momento en adelante.
-            pass_cifrada = encriptar_texto(password)
+            pass_cifrada = encriptar_texto('' if es_nota else password)
             fecha_act = obtener_fecha_actual()
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL, etiquetas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL, etiquetas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, etiquetas, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, area=%s, notas=%s, rotacion_dias=%s, fecha_ultima_rotacion=%s, rotacion_recordatorio_fecha=NULL, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, area=?, notas=?, rotacion_dias=?, fecha_ultima_rotacion=?, rotacion_recordatorio_fecha=NULL, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, categoria, notas, rotacion_dias, fecha_act, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, cred_id))
         else:
-            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s, etiquetas=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=?, etiquetas=? WHERE id=?"
-            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, etiquetas, cred_id))
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, area=%s, notas=%s, rotacion_dias=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s, campos_personalizados=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, area=?, notas=?, rotacion_dias=?, etiquetas=?, tipo_item=?, contenido_seguro=?, campos_personalizados=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, categoria, notas, rotacion_dias, etiquetas, tipo_item, contenido_cifrado, campos_cifrados, cred_id))
 
         conn.commit()
         registrar_log(session['username'], "Edición de Credencial", f"Se actualizó la credencial ID '{cred_id}' ({servicio})")
