@@ -519,7 +519,7 @@ def init_db():
             # 🔔 Notificaciones internas (campanita): se generan en los mismos puntos donde ya
             # sale un correo (ticket creado, comentado, cambio de estado).
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
-                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo VARCHAR(50) DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha VARCHAR(100) NOT NULL
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo VARCHAR(50) DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activa', fecha VARCHAR(100) NOT NULL
             )''')
             # 🆔 Catálogo de aplicativos/herramientas para los que se crean credenciales a los
             # colaboradores (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx...). Administrable:
@@ -703,7 +703,13 @@ def init_db():
                 # desbloquee (ver desbloquear_intentos_usuario) o la propia persona recupere su
                 # clave por correo (ver validar_codigo).
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intentos_fallidos_login INTEGER DEFAULT 0;",
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS bloqueado_por_intentos BOOLEAN DEFAULT FALSE;"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS bloqueado_por_intentos BOOLEAN DEFAULT FALSE;",
+                # 🗑️ Papelera de notificaciones: 'activa' = visible en la campanita, 'archivada' =
+                # movida a la papelera (se conserva, pero deja de contar para el badge de no
+                # leídas y de aparecer en la lista principal) hasta que la persona la restaure o
+                # la elimine definitivamente desde ahí. Ver /notificaciones/<id>/archivar,
+                # /restaurar, /eliminar y /notificaciones/papelera/vaciar.
+                "ALTER TABLE notificaciones ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activa';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -774,7 +780,7 @@ def init_db():
             # 🔔 Notificaciones internas (campanita): se generan en los mismos puntos donde ya
             # sale un correo (ticket creado, comentado, cambio de estado).
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo TEXT DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, fecha TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo TEXT DEFAULT 'ticket', mensaje TEXT NOT NULL, url TEXT DEFAULT '', leida INTEGER DEFAULT 0, estado TEXT DEFAULT 'activa', fecha TEXT NOT NULL
             )''')
             # 🆔 Catálogo de aplicativos/herramientas para los que se crean credenciales a los
             # colaboradores (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx...). Administrable:
@@ -969,6 +975,15 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_bloqueo_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🗑️ Papelera de notificaciones. Ver comentario equivalente en la rama de Postgres.
+            for col_notif_estado_sql in [
+                "ALTER TABLE notificaciones ADD COLUMN estado TEXT DEFAULT 'activa';"
+            ]:
+                try:
+                    cursor.execute(col_notif_estado_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -8199,24 +8214,32 @@ def historial_sesiones():
 @login_required
 def notificaciones_resumen():
     """JSON con el contador de no leídas y las últimas notificaciones del usuario en sesión —
-    consultado periódicamente por la campanita en la barra de navegación."""
+    consultado periódicamente por la campanita en la barra de navegación.
+
+    🗑️ Acepta ?vista=activas (por defecto) o ?vista=papelera: la campanita reutiliza esta
+    misma ruta para pintar tanto la lista principal como la papelera, cambiando solo el
+    'estado' que filtra. El contador de no leídas ('no_leidas') SIEMPRE se calcula sobre las
+    activas — así el badge no cambia mientras alguien está mirando la papelera."""
     usuario = session.get('username')
+    vista = 'papelera' if request.args.get('vista') == 'papelera' else 'activas'
+    estado_filtro = 'archivada' if vista == 'papelera' else 'activa'
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_count = "SELECT COUNT(*) FROM notificaciones WHERE usuario = %s AND leida = 0" if db_type == 'postgres' else "SELECT COUNT(*) FROM notificaciones WHERE usuario = ? AND leida = 0"
+        q_count = "SELECT COUNT(*) FROM notificaciones WHERE usuario = %s AND leida = 0 AND COALESCE(estado, 'activa') = 'activa'" if db_type == 'postgres' else "SELECT COUNT(*) FROM notificaciones WHERE usuario = ? AND leida = 0 AND COALESCE(estado, 'activa') = 'activa'"
         cursor.execute(q_count, (usuario,))
         no_leidas = cursor.fetchone()[0]
 
-        q_lista = "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = %s ORDER BY id DESC LIMIT 10" if db_type == 'postgres' else "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = ? ORDER BY id DESC LIMIT 10"
-        cursor.execute(q_lista, (usuario,))
+        q_lista = ("SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = %s AND COALESCE(estado, 'activa') = %s ORDER BY id DESC LIMIT 30" if db_type == 'postgres'
+                   else "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = ? AND COALESCE(estado, 'activa') = ? ORDER BY id DESC LIMIT 30")
+        cursor.execute(q_lista, (usuario, estado_filtro))
         recientes = [{'id': r[0], 'tipo': r[1], 'mensaje': r[2], 'url': r[3], 'leida': bool(r[4]), 'fecha': r[5]} for r in cursor.fetchall()]
         conn.close()
-        return {'no_leidas': no_leidas, 'recientes': recientes}
+        return {'no_leidas': no_leidas, 'recientes': recientes, 'vista': vista}
     except Exception as e:
         conn.close()
         print(f"⚠️ Error obteniendo resumen de notificaciones de '{usuario}': {e}")
-        return {'no_leidas': 0, 'recientes': []}
+        return {'no_leidas': 0, 'recientes': [], 'vista': vista}
 
 
 @app.route('/notificaciones/<int:notif_id>/ir')
@@ -8257,6 +8280,100 @@ def notificaciones_marcar_todas_leidas():
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error marcando todas las notificaciones de '{usuario}' como leídas: {e}")
+    conn.close()
+    return ('', 204)
+
+
+# 🗑️ PAPELERA DE NOTIFICACIONES ------------------------------------------------------------
+# Dos niveles pensados para que nada se borre por accidente: "archivar" es reversible (saca la
+# notificación de la lista principal y del badge, pero se conserva en /notificaciones/papelera
+# para consultarla o restaurarla después) y "eliminar" es definitivo (solo se puede hacer
+# DESDE la papelera, nunca desde la lista principal, como último candado de seguridad).
+
+@app.route('/notificaciones/<int:notif_id>/archivar', methods=['POST'])
+@login_required
+def notificacion_archivar(notif_id):
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE notificaciones SET estado = 'archivada' WHERE id = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE notificaciones SET estado = 'archivada' WHERE id = ? AND usuario = ?"
+        cursor.execute(q, (notif_id, usuario))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error archivando notificación {notif_id} de '{usuario}': {e}")
+    conn.close()
+    return ('', 204)
+
+
+@app.route('/notificaciones/<int:notif_id>/restaurar', methods=['POST'])
+@login_required
+def notificacion_restaurar(notif_id):
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE notificaciones SET estado = 'activa' WHERE id = %s AND usuario = %s" if db_type == 'postgres' else "UPDATE notificaciones SET estado = 'activa' WHERE id = ? AND usuario = ?"
+        cursor.execute(q, (notif_id, usuario))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error restaurando notificación {notif_id} de '{usuario}': {e}")
+    conn.close()
+    return ('', 204)
+
+
+@app.route('/notificaciones/<int:notif_id>/eliminar', methods=['POST'])
+@login_required
+def notificacion_eliminar(notif_id):
+    """Borrado definitivo — solo permitido si la notificación ya está en la papelera
+    ('archivada'), para que nadie borre algo sin verlo primero en la papelera."""
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "DELETE FROM notificaciones WHERE id = %s AND usuario = %s AND estado = 'archivada'" if db_type == 'postgres' else "DELETE FROM notificaciones WHERE id = ? AND usuario = ? AND estado = 'archivada'"
+        cursor.execute(q, (notif_id, usuario))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error eliminando notificación {notif_id} de '{usuario}': {e}")
+    conn.close()
+    return ('', 204)
+
+
+@app.route('/notificaciones/archivar_todas', methods=['POST'])
+@login_required
+def notificaciones_archivar_todas():
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE notificaciones SET estado = 'archivada' WHERE usuario = %s AND COALESCE(estado, 'activa') = 'activa'" if db_type == 'postgres' else "UPDATE notificaciones SET estado = 'archivada' WHERE usuario = ? AND COALESCE(estado, 'activa') = 'activa'"
+        cursor.execute(q, (usuario,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error archivando todas las notificaciones de '{usuario}': {e}")
+    conn.close()
+    return ('', 204)
+
+
+@app.route('/notificaciones/papelera/vaciar', methods=['POST'])
+@login_required
+def notificaciones_papelera_vaciar():
+    """Elimina definitivamente TODAS las notificaciones archivadas de la persona en sesión."""
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "DELETE FROM notificaciones WHERE usuario = %s AND estado = 'archivada'" if db_type == 'postgres' else "DELETE FROM notificaciones WHERE usuario = ? AND estado = 'archivada'"
+        cursor.execute(q, (usuario,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error vaciando la papelera de notificaciones de '{usuario}': {e}")
     conn.close()
     return ('', 204)
 
