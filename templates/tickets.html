@@ -391,6 +391,43 @@
                     </div>
                 </div>
 
+                {% if ia_disponible %}
+                <!-- 🤖 Clasificación con IA (Anthropic Claude, ver /tickets/clasificar_ia en app.py):
+                     lee el título + la descripción que el usuario ya escribió y sugiere Tipo,
+                     Categoría y Prioridad. Nunca es obligatorio ni bloquea el envío manual —
+                     si la IA falla o el usuario prefiere no usarla, el formulario funciona
+                     exactamente igual que antes. -->
+                <div id="panel-ia-ticket" class="bg-violet-500/5 border border-violet-500/30 rounded-2xl p-4">
+                    <div id="ia-ticket-inicial" class="flex flex-col gap-2">
+                        <p class="text-violet-300 font-bold flex items-center gap-1.5"><i class="fa-solid fa-wand-magic-sparkles"></i> ¿Dejas que la IA clasifique por ti?</p>
+                        <p class="text-slate-400 text-[11px]">Completa el título y la descripción (mínimo 10 caracteres) y la IA sugerirá el tipo, la categoría y la prioridad. Podrás ajustar lo que quieras antes de enviar.</p>
+                        <div>
+                            <button type="button" id="btn-ia-ticket-clasificar" onclick="clasificarTicketConIA()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-violet-500/20 transition-all active:scale-95">
+                                <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Clasificar con IA
+                            </button>
+                        </div>
+                        <p id="ia-ticket-error" class="hidden text-rose-300 text-[11px] mt-1"></p>
+                    </div>
+                    <div id="ia-ticket-cargando" class="hidden items-center gap-2 text-violet-300 text-xs">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Analizando...
+                    </div>
+                    <div id="ia-ticket-resultado" class="hidden flex-col gap-2">
+                        <p class="text-violet-300 font-bold flex items-center gap-1.5"><i class="fa-solid fa-wand-magic-sparkles"></i> La IA sugiere</p>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div><span class="text-slate-500 block uppercase tracking-wider text-[9px]">Tipo</span><span id="ia-ticket-out-tipo" class="text-slate-200 font-bold text-[11px]"></span></div>
+                            <div><span class="text-slate-500 block uppercase tracking-wider text-[9px]">Categoría</span><span id="ia-ticket-out-categoria" class="text-slate-200 font-bold text-[11px]"></span></div>
+                            <div><span class="text-slate-500 block uppercase tracking-wider text-[9px]">Prioridad</span><span id="ia-ticket-out-prioridad" class="text-slate-200 font-bold text-[11px]"></span></div>
+                            <div><span class="text-slate-500 block uppercase tracking-wider text-[9px]">Confianza</span><span id="ia-ticket-out-confianza" class="text-violet-300 font-bold text-[11px]"></span></div>
+                        </div>
+                        <p id="ia-ticket-out-explicacion" class="text-slate-400 text-[11px] italic border-t border-violet-500/20 pt-2"></p>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="usarSugerenciaIATicket()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg font-bold text-[11px]"><i class="fa-solid fa-check mr-1"></i>Usar sugerencia</button>
+                            <button type="button" onclick="descartarSugerenciaIATicket()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-pen mr-1"></i>Prefiero ajustarlo yo</button>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
                 <div class="mt-3 flex justify-end gap-2">
                     <button type="button" onclick="cerrarModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
                     <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold shadow-lg shadow-orange-500/25">Enviar Solicitud</button>
@@ -413,6 +450,110 @@
             // Siempre arranca desde arriba, para que "Usar una plantilla" quede visible de
             // inmediato y no dependa del tamaño de la ventana ni de un scroll heredado.
             modal.scrollTop = 0;
+            _resetPanelIATicket();
+        }
+
+        // 🤖 Clasificación de tickets con IA (ver /tickets/clasificar_ia en app.py). Lee el
+        // título + la descripción que el usuario ya escribió, pide una sugerencia y la deja
+        // lista para aplicar con un clic — nunca se aplica sola, siempre requiere confirmar.
+        function _resetPanelIATicket() {
+            const panel = document.getElementById('panel-ia-ticket');
+            if (!panel) return; // ia_disponible=False: el panel ni siquiera se renderizó.
+            panel.classList.remove('hidden');
+            document.getElementById('ia-ticket-inicial').classList.remove('hidden');
+            document.getElementById('ia-ticket-error').classList.add('hidden');
+            const cargando = document.getElementById('ia-ticket-cargando');
+            cargando.classList.add('hidden');
+            cargando.classList.remove('flex');
+            const resultado = document.getElementById('ia-ticket-resultado');
+            resultado.classList.add('hidden');
+            resultado.classList.remove('flex');
+            window._iaTicketSugerencia = null;
+        }
+
+        function _iaTicketCsrfToken() {
+            const input = document.querySelector('#modal-ticket input[name="csrf_token"]');
+            return input ? input.value : '';
+        }
+
+        function clasificarTicketConIA() {
+            const form = document.querySelector('#modal-ticket form');
+            const titulo = form.querySelector('[name="titulo"]').value.trim();
+            const descripcionHtml = document.getElementById('input-descripcion-ticket').value;
+
+            const inicial = document.getElementById('ia-ticket-inicial');
+            const cargando = document.getElementById('ia-ticket-cargando');
+            const resultado = document.getElementById('ia-ticket-resultado');
+            const errorEl = document.getElementById('ia-ticket-error');
+            errorEl.classList.add('hidden');
+            resultado.classList.add('hidden');
+            resultado.classList.remove('flex');
+            inicial.classList.add('hidden');
+            cargando.classList.remove('hidden');
+            cargando.classList.add('flex');
+
+            const datos = new URLSearchParams();
+            datos.set('titulo', titulo);
+            datos.set('descripcion', descripcionHtml);
+
+            fetch('/tickets/clasificar_ia', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': _iaTicketCsrfToken()
+                },
+                body: datos.toString()
+            })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+                .then(function (res) {
+                    cargando.classList.add('hidden');
+                    cargando.classList.remove('flex');
+                    if (!res.ok || !res.datos.ok) {
+                        inicial.classList.remove('hidden');
+                        errorEl.textContent = (res.datos && res.datos.error) || 'La IA no está disponible en este momento.';
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                    window._iaTicketSugerencia = res.datos;
+                    document.getElementById('ia-ticket-out-tipo').textContent = res.datos.tipo;
+                    document.getElementById('ia-ticket-out-categoria').textContent = res.datos.categoria;
+                    document.getElementById('ia-ticket-out-prioridad').textContent = res.datos.prioridad;
+                    document.getElementById('ia-ticket-out-confianza').textContent = res.datos.confianza + '%';
+                    document.getElementById('ia-ticket-out-explicacion').textContent = res.datos.explicacion ? ('"' + res.datos.explicacion + '"') : '';
+                    resultado.classList.remove('hidden');
+                    resultado.classList.add('flex');
+                })
+                .catch(function () {
+                    cargando.classList.add('hidden');
+                    cargando.classList.remove('flex');
+                    inicial.classList.remove('hidden');
+                    errorEl.textContent = 'No se pudo conectar con la IA. Puedes clasificar el ticket manualmente.';
+                    errorEl.classList.remove('hidden');
+                });
+        }
+
+        function usarSugerenciaIATicket() {
+            const s = window._iaTicketSugerencia;
+            if (!s) return;
+            const form = document.querySelector('#modal-ticket form');
+
+            const radioTipo = form.querySelector('input[name="tipo"][value="' + s.tipo + '"]');
+            if (radioTipo) {
+                radioTipo.checked = true;
+                radioTipo.dispatchEvent(new Event('change'));
+            }
+            const setSelect = function (name, valor) {
+                const el = form.querySelector('[name="' + name + '"]');
+                if (el && valor) el.value = valor;
+            };
+            setSelect('categoria', s.categoria);
+            setSelect('prioridad', s.prioridad);
+
+            document.getElementById('panel-ia-ticket').classList.add('hidden');
+        }
+
+        function descartarSugerenciaIATicket() {
+            document.getElementById('panel-ia-ticket').classList.add('hidden');
         }
         function cerrarModal() {
             document.getElementById('modal-ticket').classList.add('hidden');
