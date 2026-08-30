@@ -360,7 +360,10 @@
                 </div>
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignar a</label>
-                    <select name="asignado_a" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    {# 🔒 Un ticket 'Cerrado' ya no se puede reasignar (ver actualizar_ticket en
+                       app.py, que lo hace cumplir aunque alguien arme el POST a mano) — este
+                       disabled es solo el reflejo visual de esa regla. #}
+                    <select name="asignado_a" {% if ticket.estado == 'Cerrado' %}disabled{% endif %} class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60">
                         <option value="">Sin asignar</option>
                         {% for a in agentes %}<option value="{{ a.usuario }}" {% if a.usuario == ticket.asignado_a %}selected{% endif %}>{{ a.nombre }}</option>{% endfor %}
                     </select>
@@ -386,15 +389,33 @@
             {% if session.get('username') == 'admin' %}
             <!-- 🗑️ Baja definitiva de la vista (para tickets de prueba/capacitación o creados
                  por error). No es lo mismo que poner el estado en "Cancelado": esto lo saca por
-                 completo de las listas e indicadores. Solo el super-admin la ve. -->
-            <div class="mt-4 pt-4 border-t border-slate-700/60 flex items-center justify-between">
-                <p class="text-[11px] text-slate-500">Solo para tickets de prueba, duplicados o creados por error. No se puede deshacer desde la interfaz.</p>
-                <form method="POST" action="/tickets/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar definitivamente esta solicitud {{ ticket.codigo }}? Dejará de aparecer en las listas e indicadores.');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                    <button type="submit" class="bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-600/40 font-bold py-2 px-4 rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap">
+                 completo de las listas e indicadores. Solo el super-admin la ve.
+                 🛡️ Ya asignado a alguien → no se puede eliminar (botón deshabilitado, ver
+                 eliminar_ticket en app.py que lo hace cumplir del lado del servidor). Sin
+                 asignar todavía → se puede eliminar, pero exige justificar el motivo. -->
+            <div class="mt-4 pt-4 border-t border-slate-700/60">
+                <p class="text-[11px] text-slate-500 mb-2">Solo para tickets de prueba, duplicados o creados por error. No se puede deshacer desde la interfaz.</p>
+                {% if ticket.asignado_a %}
+                <div class="flex items-center justify-between gap-3">
+                    <p class="text-[11px] text-amber-400/80"><i class="fa-solid fa-lock mr-1"></i>No se puede eliminar: esta solicitud ya tiene un responsable asignado ({{ ticket.asignado_a_nombre }}).</p>
+                    <button type="button" disabled title="No se puede eliminar una solicitud ya asignada" class="bg-rose-600/10 text-rose-300/40 border border-rose-600/20 font-bold py-2 px-4 rounded-xl text-xs whitespace-nowrap cursor-not-allowed">
                         <i class="fa-solid fa-trash mr-1"></i> Eliminar solicitud
                     </button>
+                </div>
+                {% else %}
+                <form method="POST" action="/tickets/{{ ticket.id }}/eliminar" onsubmit="return confirm('¿Eliminar definitivamente esta solicitud {{ ticket.codigo }}? Dejará de aparecer en las listas e indicadores.');" class="space-y-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Motivo de eliminación *</label>
+                        <textarea name="motivo_eliminacion" required minlength="10" rows="2" placeholder="Ej: ticket de prueba, duplicado del #123, creado por error." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-xs"></textarea>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="submit" class="bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-600/40 font-bold py-2 px-4 rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap">
+                            <i class="fa-solid fa-trash mr-1"></i> Eliminar solicitud
+                        </button>
+                    </div>
                 </form>
+                {% endif %}
             </div>
             {% endif %}
         </div>
