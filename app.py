@@ -483,6 +483,14 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
                 id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, comentario_id INTEGER REFERENCES tickets_comentarios(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
             )''')
+            # ✅ Tareas asociadas a un ticket: subtareas internas del equipo de soporte para
+            # repartir el trabajo de un mismo caso entre varias personas (inspirado en la
+            # pestaña "Tareas" de Aranda Service Desk, simplificado a lo que Arkiv realmente
+            # necesita). Solo las ve/gestiona el equipo operativo (agente/admin) — ver
+            # agente_o_admin_required en las rutas /tickets/<id>/tareas/*.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas (
+                id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, asunto VARCHAR(200) NOT NULL, descripcion TEXT, responsable VARCHAR(100), estado VARCHAR(20) DEFAULT 'pendiente', fecha_limite VARCHAR(20), creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, fecha_completada VARCHAR(100)
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo VARCHAR(255) NOT NULL, vistas INTEGER DEFAULT 0, creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
             )''')
@@ -753,6 +761,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, comentario_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE, FOREIGN KEY(comentario_id) REFERENCES tickets_comentarios(id) ON DELETE CASCADE
+            )''')
+            # ✅ Tareas asociadas a un ticket. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, asunto TEXT NOT NULL, descripcion TEXT, responsable TEXT, estado TEXT DEFAULT 'pendiente', fecha_limite TEXT, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, fecha_completada TEXT, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo TEXT NOT NULL, vistas INTEGER DEFAULT 0, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, estado TEXT DEFAULT 'activo'
@@ -3583,6 +3595,23 @@ def ver_ticket(ticket_id):
         cursor.execute(q_ag)
         agentes = [{'usuario': a[0], 'nombre': a[1] or a[0]} for a in cursor.fetchall()]
 
+    # ✅ Tareas del ticket (subtareas internas para repartir el trabajo del caso) — solo
+    # tienen sentido para el equipo operativo, igual que los comentarios internos.
+    tareas = []
+    if es_soporte:
+        q_tareas = "SELECT id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada FROM tickets_tareas WHERE ticket_id = %s ORDER BY (estado = 'completada') ASC, id ASC" if db_type == 'postgres' else "SELECT id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada FROM tickets_tareas WHERE ticket_id = ? ORDER BY (estado = 'completada') ASC, id ASC"
+        cursor.execute(q_tareas, (ticket_id,))
+        nombres_agentes = {a['usuario']: a['nombre'] for a in agentes}
+        for t in cursor.fetchall():
+            responsable_usuario = t[3]
+            tareas.append({
+                'id': t[0], 'asunto': t[1], 'descripcion': t[2], 'responsable': responsable_usuario,
+                'responsable_nombre': nombres_agentes.get(responsable_usuario, responsable_usuario),
+                'estado': t[4] or 'pendiente', 'fecha_limite': t[5], 'creado_por': t[6],
+                'fecha_creacion': t[7], 'fecha_completada': t[8],
+                'vencida': bool(t[5] and t[4] != 'completada' and t[5] < datetime.now().strftime('%Y-%m-%d')),
+            })
+
     conn.close()
 
     # 💬 Enlace "click to chat" de WhatsApp para contactar al solicitante desde el detalle del
@@ -3604,8 +3633,100 @@ def ver_ticket(ticket_id):
         whatsapp_tiene_numero=whatsapp_tiene_numero,
         max_modificaciones_sla=MAX_MODIFICACIONES_SLA, motivos_sla=MOTIVOS_MODIFICACION_SLA,
         calificacion_max=CALIFICACION_MAX, session_username=session.get('username'),
-        whatsapp_url=whatsapp_url
+        whatsapp_url=whatsapp_url, tareas=tareas
     )
+
+
+# ✅ TAREAS DE UN TICKET ---------------------------------------------------------------------
+# Subtareas internas para que el equipo de soporte reparta el trabajo de un mismo caso entre
+# varias personas (por ejemplo: "Revisar con el proveedor", "Actualizar el servidor",
+# "Confirmar con el usuario"), inspiradas en la pestaña "Tareas" de Aranda Service Desk pero
+# simplificadas a lo que Arkiv necesita realmente. Son de uso exclusivamente interno: un
+# usuario Estándar nunca las ve ni las gestiona, igual que pasa con los comentarios internos.
+
+@app.route('/tickets/<int:ticket_id>/tareas/crear', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def crear_tarea_ticket(ticket_id):
+    asunto = (request.form.get('asunto') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip() or None
+    responsable = (request.form.get('responsable') or '').strip() or None
+    fecha_limite = (request.form.get('fecha_limite') or '').strip() or None
+
+    if not asunto:
+        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    # El ticket debe existir (evita crear una tarea "huérfana" con un ID inventado en la URL).
+    q_existe = "SELECT id FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT id FROM tickets WHERE id = ?"
+    cursor.execute(q_existe, (ticket_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return redirect(url_for('ver_tickets'))
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        q_ins = ("INSERT INTO tickets_tareas (ticket_id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (%s, %s, %s, %s, 'pendiente', %s, %s, %s)") if db_type == 'postgres' else \
+                ("INSERT INTO tickets_tareas (ticket_id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?)")
+        cursor.execute(q_ins, (ticket_id, asunto, descripcion, responsable, fecha_limite, session['username'], fecha_actual))
+        conn.commit()
+        registrar_log(session['username'], "Tarea de Ticket Creada", f"Ticket #{ticket_id}: tarea '{asunto}'" + (f" asignada a {responsable}" if responsable else ""))
+        # 🔔 Si se le asignó a otra persona (no a quien la crea), se le avisa con una
+        # notificación interna — igual que cuando se le asigna un ticket completo.
+        if responsable and responsable != session['username']:
+            crear_notificacion(
+                responsable,
+                f"Te asignaron la tarea \"{asunto}\" en el ticket #{ticket_id}.",
+                url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
+            )
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error creando tarea en ticket {ticket_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/estado', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
+    """Alterna una tarea entre 'pendiente' y 'completada' (checkbox en el detalle del
+    ticket). También acepta 'en_progreso' desde el desplegable de estado de la tarea."""
+    nuevo_estado = (request.form.get('estado') or '').strip()
+    if nuevo_estado not in ('pendiente', 'en_progreso', 'completada'):
+        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    fecha_completada = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if nuevo_estado == 'completada' else None
+    try:
+        q_upd = ("UPDATE tickets_tareas SET estado = %s, fecha_completada = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
+                ("UPDATE tickets_tareas SET estado = ?, fecha_completada = ? WHERE id = ? AND ticket_id = ?")
+        cursor.execute(q_upd, (nuevo_estado, fecha_completada, tarea_id, ticket_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error actualizando estado de la tarea {tarea_id} (ticket {ticket_id}): {e}")
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_tarea_ticket(ticket_id, tarea_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_del = "DELETE FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "DELETE FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
+        cursor.execute(q_del, (tarea_id, ticket_id))
+        conn.commit()
+        registrar_log(session['username'], "Tarea de Ticket Eliminada", f"Ticket #{ticket_id}: se eliminó la tarea #{tarea_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error eliminando la tarea {tarea_id} (ticket {ticket_id}): {e}")
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
 
 @app.route('/tickets/<int:ticket_id>/duplicar_datos')
