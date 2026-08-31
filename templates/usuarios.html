@@ -64,6 +64,13 @@
         </div>
         {% endif %}
 
+        {% if error_pass_corta %}
+        <div class="mb-5 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>El resto de los cambios se guardó, pero la contraseña NO se actualizó: debe tener al menos {{ longitud_minima_password }} caracteres.</span>
+        </div>
+        {% endif %}
+
         <div class="mb-4 relative max-w-sm">
             <i class="fa-solid fa-id-card absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
             <input type="text" id="input-buscar-cedula" oninput="filtrarUsuariosPorCedula()" placeholder="Buscar por cédula..." autocomplete="off" class="w-full pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500">

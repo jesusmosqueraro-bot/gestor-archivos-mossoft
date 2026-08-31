@@ -35,6 +35,13 @@
         </div>
         {% endif %}
 
+        {% if obligatorio %}
+        <div class="p-3 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-semibold flex items-start gap-2">
+            <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+            <span>Tu rol requiere verificación en dos pasos activa para poder seguir usando Arkiv. Actívala para continuar.</span>
+        </div>
+        {% endif %}
+
         {% if mostrar_codigos %}
         <!-- ============ ESTADO: CÓDIGOS DE RESPALDO RECIÉN GENERADOS (se muestran UNA vez) ============ -->
         <div class="p-3.5 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-start gap-2">
@@ -66,6 +73,14 @@
             </button>
         </form>
 
+        {% if rol_exige_2fa %}
+        <div class="border-t border-slate-800 pt-5">
+            <p class="text-[11px] text-slate-500 text-center">
+                <i class="fa-solid fa-lock mr-1"></i>
+                Tu rol exige mantener la verificación en dos pasos activa, así que no puedes desactivarla tú mismo. Si perdiste tu dispositivo, pide a un administrador que la restablezca desde Gestión de Usuarios.
+            </p>
+        </div>
+        {% else %}
         <div class="border-t border-slate-800 pt-5">
             <form method="POST" action="{{ url_for('perfil_2fa_desactivar') }}" class="space-y-3" onsubmit="return confirm('¿Desactivar la verificación en dos pasos? Tu cuenta quedará protegida solo con tu contraseña.')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -76,6 +91,7 @@
                 </button>
             </form>
         </div>
+        {% endif %}
 
         {% else %}
         <!-- ============ ESTADO: CONFIGURAR 2FA POR PRIMERA VEZ ============ -->
