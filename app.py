@@ -25,6 +25,18 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# 📧 Validación de formato de correo electrónico del lado del SERVIDOR. Hasta ahora los
+# formularios de Gestión de Usuarios solo se apoyaban en el atributo HTML type="email" del
+# navegador (validación de cliente, fácil de saltarse enviando el formulario a mano); esto la
+# complementa con una revisión real en el backend, siguiendo la recomendación de pruebas de
+# seguridad de entrada revisada con el equipo (estructura básica usuario@dominio.tld). No
+# pretende cubrir el 100% de la RFC 5322 (eso es innecesariamente estricto para este caso de
+# uso) — solo rechazar valores que claramente no son un correo.
+REGEX_EMAIL = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+def _email_tiene_formato_valido(email):
+    return bool(email) and bool(REGEX_EMAIL.match(email.strip()))
+
 # flask_wtf seguro (protección CSRF real)
 try:
     from flask_wtf import CSRFProtect
@@ -7467,6 +7479,12 @@ def gestion_usuarios():
         if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
             error = "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario."
 
+        # 📧 Formato de correo válido (ver _email_tiene_formato_valido) — el navegador ya lo
+        # exige con type="email", pero eso se salta enviando el formulario a mano; esta es la
+        # validación real, del lado del servidor.
+        if not error and nuevo_email and not _email_tiene_formato_valido(nuevo_email):
+            error = "El correo electrónico no tiene un formato válido (ej: nombre@dominio.com)."
+
         # 🪪 La cédula sigue siendo opcional, pero si se indica no puede repetirse: dos cuentas
         # distintas no pueden compartir el mismo número de documento. (No se toca a ningún
         # usuario que ya exista con una cédula duplicada de antes de esta validación — solo se
@@ -7606,7 +7624,7 @@ def editar_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
@@ -7619,6 +7637,13 @@ def editar_usuario(usuario_id):
         cedula_original = row[4] if row else None
         cedula_final = nueva_cedula or cedula_original
         especialidad_final = nueva_especialidad or (row[5] if row else None)
+
+        # 📧 Igual que con los demás campos opcionales: si el correo que llegó no tiene un
+        # formato válido (ver _email_tiene_formato_valido), NO se guarda un dato corrupto —
+        # se conserva el correo que la cuenta ya tenía, en vez de tumbar toda la edición.
+        correo_original = row[6] if row and len(row) > 6 else None
+        if not _email_tiene_formato_valido(nuevo_email):
+            nuevo_email = correo_original or nuevo_email
 
         if user_target is None:
             conn.close()
