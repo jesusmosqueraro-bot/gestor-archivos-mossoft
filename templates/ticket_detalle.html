@@ -421,6 +421,80 @@
         </div>
         {% endif %}
 
+        {% if es_soporte %}
+        <!-- TAREAS DEL TICKET (SOLO SOPORTE TI): subtareas internas para repartir el trabajo
+             de un mismo caso entre varias personas del equipo — ver crear_tarea_ticket() y
+             compañía en app.py. Un usuario Estándar nunca ve este panel. -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-orange-400"></i> Tareas
+                    {% if tareas %}<span class="text-slate-500 normal-case font-normal">({{ tareas | selectattr('estado', 'equalto', 'completada') | list | length }}/{{ tareas | length }} completadas)</span>{% endif %}
+                </h3>
+                <button type="button" onclick="document.getElementById('form-nueva-tarea').classList.toggle('hidden')" class="text-[10px] text-sky-400 hover:text-sky-300 font-bold whitespace-nowrap">
+                    <i class="fa-solid fa-plus mr-1"></i>Nueva tarea
+                </button>
+            </div>
+
+            {% if tareas %}
+            <div class="space-y-2 mb-4">
+                {% for t in tareas %}
+                <div class="flex items-start gap-3 bg-slate-900/50 border border-slate-700/50 rounded-xl p-3">
+                    <form method="POST" action="/tickets/{{ ticket.id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="hidden" name="estado" value="{{ 'pendiente' if t.estado == 'completada' else 'completada' }}"/>
+                        <button type="submit" title="{{ 'Marcar como pendiente' if t.estado == 'completada' else 'Marcar como completada' }}" class="w-4 h-4 rounded border {{ 'bg-emerald-500 border-emerald-500' if t.estado == 'completada' else 'border-slate-500 hover:border-orange-400' }} flex items-center justify-center">
+                            {% if t.estado == 'completada' %}<i class="fa-solid fa-check text-[9px] text-white"></i>{% endif %}
+                        </button>
+                    </form>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs text-slate-200 {% if t.estado == 'completada' %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
+                        {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5">{{ t.descripcion }}</p>{% endif %}
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
+                            {% if t.responsable_nombre %}<span><i class="fa-solid fa-user mr-1"></i>{{ t.responsable_nombre }}</span>{% endif %}
+                            {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
+                        </div>
+                    </div>
+                    <form method="POST" action="/tickets/{{ ticket.id }}/tareas/{{ t.id }}/eliminar" onsubmit="return confirm('¿Eliminar esta tarea?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" title="Eliminar tarea" class="text-slate-600 hover:text-rose-400 text-xs px-1"><i class="fa-solid fa-trash"></i></button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-500 text-[11px] mb-4">Todavía no hay tareas creadas para repartir este caso.</p>
+            {% endif %}
+
+            <form id="form-nueva-tarea" method="POST" action="/tickets/{{ ticket.id }}/tareas/crear" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-900/40 border border-slate-700/50 rounded-xl p-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="sm:col-span-2">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asunto *</label>
+                    <input type="text" name="asunto" required maxlength="200" placeholder="Ej: Revisar con el proveedor" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Descripción (opcional)</label>
+                    <textarea name="descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Responsable</label>
+                    <select name="responsable" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Sin asignar</option>
+                        {% for a in agentes %}<option value="{{ a.usuario }}">{{ a.nombre }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha límite (opcional)</label>
+                    <input type="date" name="fecha_limite" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div class="sm:col-span-2 flex justify-end gap-2">
+                    <button type="button" onclick="document.getElementById('form-nueva-tarea').classList.add('hidden')" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs">Cancelar</button>
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl text-xs">Guardar tarea</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
         <!-- HILO DE COMENTARIOS -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
             <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
