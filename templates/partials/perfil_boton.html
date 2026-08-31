@@ -1,0 +1,11 @@
+<!-- 👤 MI PERFIL — botón compartido por todas las páginas autenticadas, junto al buscador, el
+     historial de sesiones y el botón de seguridad (2FA). Lleva a /perfil, donde cualquier cuenta
+     puede editar su nombre completo, teléfono y foto de perfil. Muestra la miniatura de la foto
+     si el usuario ya subió una (session['foto_perfil']), o un ícono de persona por defecto. -->
+<a href="{{ url_for('perfil_datos') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs flex items-center justify-center overflow-hidden" title="Mi Perfil" style="width: 32px; height: 32px;">
+    {% if session.get('foto_perfil') %}
+    <img src="{{ session.get('foto_perfil') }}" alt="Mi Perfil" class="w-full h-full object-cover rounded-lg">
+    {% else %}
+    <i class="fa-regular fa-circle-user"></i>
+    {% endif %}
+</a>
