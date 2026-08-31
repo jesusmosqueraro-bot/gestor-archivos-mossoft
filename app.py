@@ -45,6 +45,15 @@ except Exception:
     CSRFProtect = None
     CSRFError = Exception
 
+# 🔒 Hallazgo QA H-08 (30/08/2026): Flask-Limiter para poner un tope de peticiones por minuto
+# en los endpoints públicos más sensibles (login, recuperación de clave, verificación 2FA).
+# Antes no existía ningún límite a nivel de aplicación, así que un script podía probar
+# contraseñas o códigos de 6 dígitos tan rápido como el servidor aguantara.
+try:
+    from flask_limiter import Limiter
+except Exception:
+    Limiter = None
+
 # psycopg2 seguro para Render
 try:
     import psycopg2
@@ -179,6 +188,28 @@ else:
     @app.context_processor
     def _inyectar_csrf_token_placeholder():
         return dict(csrf_token=lambda: '')
+
+# 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
+# que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
+# vez de la IP cruda de Flask-Limiter, así el límite es por visitante real y no por el balanceador.
+# Guarda los contadores en memoria del proceso (sin Redis): con los 2 workers de gunicorn de este
+# servicio (ver Procfile) el tope real puede llegar a ser hasta el doble del configurado, pero
+# sigue siendo una barrera muy superior a no tener ningún límite.
+if Limiter:
+    limiter = Limiter(
+        key_func=lambda: _obtener_ip_cliente(),
+        app=app,
+        storage_uri="memory://",
+        default_limits=[],
+    )
+else:
+    print("⚠️ flask_limiter no está instalado: no habrá límite de peticiones por minuto. Agrega Flask-Limiter a requirements.txt.")
+    class _LimiterExemptDummy:
+        def limit(self, *args, **kwargs):
+            def decorador(f):
+                return f
+            return decorador
+    limiter = _LimiterExemptDummy()
 
 # 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
 try:
@@ -434,6 +465,15 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 # archivos estáticos (CSS/JS/imágenes) que esa página necesita para verse bien.
 ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', 'logout', 'static'}
 
+# 🔒 Hallazgo QA H-05 (30/08/2026): admin y agente manejan datos de toda la organización
+# (bóveda de accesos, gestor de archivos, base de datos), así que su 2FA ya no es opcional.
+# Mismo mecanismo que ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO: mientras
+# session['debe_activar_2fa'] esté encendido, cualquier ruta que no sea la propia activación
+# de 2FA (o cerrar sesión) redirige a /perfil/2fa. Se incluye cambiar_password_perfil por si
+# una cuenta recién creada por un admin tiene AMBAS pendientes a la vez (esa, al ir primero en
+# validar_instancia_y_sesion, se resuelve antes de llegar aquí).
+ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'cambiar_password_perfil', 'logout', 'static'}
+
 @app.before_request
 def validar_instancia_y_sesion():
     session.permanent = True
@@ -443,6 +483,8 @@ def validar_instancia_y_sesion():
             return redirect(url_for('login', expirado='1'))
         if session.get('debe_cambiar_password') and request.endpoint not in ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO:
             return redirect(url_for('cambiar_password_perfil'))
+        if session.get('debe_activar_2fa') and request.endpoint not in ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO:
+            return redirect(url_for('perfil_2fa', obligatorio='1'))
 
 def get_db():
     if DATABASE_URL and psycopg2:
@@ -718,6 +760,14 @@ def init_db():
                 # 🔐 Verificación en dos pasos (2FA/TOTP): secreto TOTP de la cuenta (NULL hasta
                 # que se active) y si ya quedó confirmado/activo. Ver rutas /perfil/2fa*.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64);",
+                # 🔒 Hallazgo QA H-07 (30/08/2026): el secreto TOTP se guardaba en texto plano.
+                # A partir de ahora se cifra con Fernet (igual que las contraseñas de la bóveda,
+                # ver encriptar_texto/desencriptar_texto) — un token Fernet no cabe en
+                # VARCHAR(64), así que se amplía la columna a TEXT para las instalaciones que
+                # ya la tenían creada con el tamaño viejo. _migrar_totp_secret_a_fernet() migra
+                # de forma transparente cada secreto existente en texto plano la próxima vez
+                # que se usa (login 2FA o vista de /perfil/2fa).
+                "ALTER TABLE usuarios ALTER COLUMN totp_secret TYPE TEXT;",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE;",
                 # 📅 Vencimiento de documentos institucionales (Instructivos y Archivos): fecha
                 # opcional en la que el instructivo/documento deja de estar vigente (ej. una
@@ -1253,6 +1303,42 @@ def _verificar_codigo_respaldo_2fa(usuario, codigo_ingresado):
         return False
 
 
+# 🔒 Hallazgo QA H-07 (30/08/2026): el secreto TOTP (totp_secret) se guardaba en texto plano en
+# la tabla usuarios — cualquiera con acceso a la base de datos (o al Gestor de BD, /admin/db)
+# podía leerlo y clonar la verificación en dos pasos de cualquier cuenta. Ahora se cifra con
+# Fernet, igual que las contraseñas guardadas en la bóveda (ver encriptar_texto/desencriptar_texto
+# más arriba). _migrar_totp_secret_a_fernet migra en el momento cualquier secreto que todavía
+# esté en texto plano de antes de este cambio, la primera vez que se usa para iniciar sesión.
+def _migrar_totp_secret_a_fernet(usuario, secreto_plano):
+    """Re-guarda cifrado con Fernet un totp_secret que todavía estaba en texto plano."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_upd = "UPDATE usuarios SET totp_secret = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET totp_secret = ? WHERE usuario = ?"
+        cursor.execute(q_upd, (encriptar_texto(secreto_plano), usuario))
+        conn.commit()
+        conn.close()
+        print(f"🔐 totp_secret de '{usuario}' migrado de texto plano a Fernet/AES.")
+    except Exception as e:
+        print(f"⚠️ Error migrando totp_secret de '{usuario}' a Fernet: {e}")
+
+
+def _descifrar_totp_secret(usuario, secreto_guardado):
+    """Descifra el totp_secret leído de la base de datos. Un secreto TOTP en base32 (el formato
+    en que se genera y se guardaba antes de este cambio) nunca es un token Fernet válido, así
+    que un fallo al descifrar se interpreta como 'todavía en texto plano' y se migra de una vez
+    (en vez de fallar el intento de login)."""
+    if not secreto_guardado:
+        return None
+    if not _fernet:
+        return secreto_guardado
+    try:
+        return _fernet.decrypt(secreto_guardado.encode('utf-8')).decode('utf-8')
+    except (InvalidToken, Exception):
+        _migrar_totp_secret_a_fernet(usuario, secreto_guardado)
+        return secreto_guardado
+
+
 def _desactivar_2fa_cuenta(usuario):
     """Apaga el 2FA de una cuenta: limpia el secreto TOTP y borra sus códigos de respaldo. Lo
     usan tanto /perfil/2fa/desactivar (el propio usuario, con su contraseña) como el admin desde
@@ -1303,6 +1389,22 @@ def _migrar_password_a_hash(usuario, password_plano):
         conn.close()
     except Exception as e:
         print(f"Error migrando password a hash para {usuario}: {e}")
+
+# 🔒 LONGITUD MÍNIMA DE CONTRASEÑA DE CUENTA (hallazgo QA H-02, 30/08/2026)
+# Antes solo se exigía en /perfil/cambiar_password (autoservicio); un admin creando o editando
+# una cuenta, o alguien recuperando su clave por correo, podía dejar contraseñas más cortas.
+# Esta única constante y su helper se reutilizan en los 4 puntos donde se asigna una contraseña
+# de cuenta, para que la política sea consistente sin importar quién la establezca.
+LONGITUD_MINIMA_PASSWORD_CUENTA = 8
+
+
+def _password_cuenta_valida(password_plano):
+    """True si 'password_plano' cumple la longitud mínima exigida para contraseñas de cuenta
+    (login, recuperación, alta/edición de usuario por un admin). No evalúa fortaleza ni la
+    compara contra contraseñas comunes — eso es un análisis aparte, propio de la bóveda
+    (ver _password_es_debil)."""
+    return bool(password_plano) and len(password_plano) >= LONGITUD_MINIMA_PASSWORD_CUENTA
+
 
 # 🔒 BLOQUEO AUTOMÁTICO POR INTENTOS FALLIDOS DE INICIO DE SESIÓN
 # Es un candado aparte del 'estado' (activo/inactivo), que sigue siendo del resorte exclusivo
@@ -5770,11 +5872,19 @@ def enviar_correo_ticket(email_destino, asunto, cuerpo):
 
 # 🔑 PASO 1: SOLICITAR CÓDIGO POR CORREO
 @app.route('/recuperar', methods=['GET', 'POST'])
+@limiter.limit("10 per minute", methods=["POST"])
 def recuperar_clave():
     if request.method == 'POST':
         email_ingresado = request.form.get('email', '').strip().lower()
         print(f"📩 Solicitud de recuperación recibida para: '{email_ingresado}'")
-        
+
+        # 🛡️ Hallazgo QA H-06 (30/08/2026): igual que /login, exige reCAPTCHA para evitar que
+        # un script automatizado pruebe correos en masa (enumeración) o sature de correos de
+        # recuperación a una cuenta real.
+        recaptcha_response = request.form.get('g-recaptcha-response')
+        if not verificar_recaptcha(recaptcha_response):
+            return render_template('recuperar.html', paso=1, error="Por favor, marca la casilla 'No soy un robot'.")
+
         conn, db_type = get_db()
         cursor = conn.cursor()
         query = "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = %s" if db_type == 'postgres' else "SELECT usuario FROM usuarios WHERE LOWER(TRIM(correo)) = ?"
@@ -5811,6 +5921,7 @@ def recuperar_clave():
 
 # 🔑 PASO 2: VALIDAR CÓDIGO Y CAMBIAR CONTRASEÑA
 @app.route('/validar_codigo', methods=['POST'])
+@limiter.limit("15 per minute")
 def validar_codigo():
     codigo_ingresado = request.form.get('codigo', '').strip()
     nueva_pass = request.form.get('nueva_password', '').strip()
@@ -5846,6 +5957,11 @@ def validar_codigo():
             return render_template('recuperar.html', paso=1, error="Demasiados intentos fallidos. Solicita un nuevo código.")
         return render_template('recuperar.html', paso=2, email=email_usuario, error="El código de verificación es incorrecto.")
 
+    # 🔒 Hallazgo QA H-02: esta era la única ruta que asignaba una contraseña de cuenta sin
+    # exigir la longitud mínima (sí se validaba en autoservicio, no aquí en recuperación).
+    if not _password_cuenta_valida(nueva_pass):
+        return render_template('recuperar.html', paso=2, email=email_usuario, error=f"La nueva contraseña debe tener al menos {LONGITUD_MINIMA_PASSWORD_CUENTA} caracteres.")
+
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -5880,6 +5996,7 @@ def validar_codigo():
 
 # 🔑 LOGIN
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("20 per minute", methods=["POST"])
 def login():
     if request.method == 'POST':
         try:
@@ -5948,6 +6065,9 @@ def login():
                     session['instance_id'] = SERVER_INSTANCE_ID
                     session['tema'] = user[4] or 'oscuro'
                     session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
+                    # 🔒 Hallazgo QA H-05: si llegamos aquí (no pasó por /login/2fa), esta cuenta
+                    # todavía no tiene 2FA activo. Para admin/agente, eso ya no es opcional.
+                    session['debe_activar_2fa'] = user[2] in ROLES_CON_ACCESO_OPERATIVO
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                     return redirect(url_for('bienvenida'))
                 elif user:
@@ -5976,6 +6096,7 @@ def login():
 
 
 @app.route('/login/2fa', methods=['GET', 'POST'])
+@limiter.limit("15 per minute", methods=["POST"])
 def login_2fa():
     """Segundo paso del inicio de sesión para las cuentas con 2FA activo. Solo es accesible tras
     validar usuario/contraseña en /login (que deja el marcador 'pre_2fa_usuario' en la sesión,
@@ -6016,7 +6137,11 @@ def login_2fa():
             es_valido = _verificar_codigo_respaldo_2fa(usuario_pendiente, codigo_respaldo)
             via_respaldo = es_valido
         elif codigo and user[5]:
-            es_valido = pyotp.TOTP(user[5]).verify(codigo, valid_window=1)
+            # 🔒 Hallazgo QA H-07: el secreto ya se guarda cifrado con Fernet (ver
+            # _descifrar_totp_secret); esto también migra en el momento cualquier secreto
+            # todavía en texto plano de antes de este cambio.
+            secreto_totp = _descifrar_totp_secret(usuario_pendiente, user[5])
+            es_valido = bool(secreto_totp) and pyotp.TOTP(secreto_totp).verify(codigo, valid_window=1)
 
         if es_valido:
             session.pop('pre_2fa_usuario', None)
@@ -6029,6 +6154,8 @@ def login_2fa():
             session['instance_id'] = SERVER_INSTANCE_ID
             session['tema'] = user[3] or 'oscuro'
             session['debe_cambiar_password'] = bool(user[4])
+            # 🔒 Hallazgo QA H-05: llegar aquí ya implica que la cuenta tiene 2FA activo.
+            session['debe_activar_2fa'] = False
             detalle = "Inicio de sesión exitoso (código de respaldo 2FA)" if via_respaldo else "Inicio de sesión exitoso (verificación en dos pasos)"
             registrar_log(user[0], "Inicio de Sesión", detalle, ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
             return redirect(url_for('bienvenida'))
@@ -7490,6 +7617,11 @@ def gestion_usuarios():
         if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
             error = "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario."
 
+        # 🔒 Misma política de longitud mínima que el autoservicio (hallazgo QA H-02): antes un
+        # admin podía crear una cuenta con una contraseña temporal de cualquier longitud.
+        if not error and nuevo_pass and not _password_cuenta_valida(nuevo_pass):
+            error = f"La contraseña debe tener al menos {LONGITUD_MINIMA_PASSWORD_CUENTA} caracteres."
+
         # 📧 Formato de correo válido (ver _email_tiene_formato_valido) — el navegador ya lo
         # exige con type="email", pero eso se salta enviando el formulario a mano; esta es la
         # validación real, del lado del servidor.
@@ -7555,10 +7687,14 @@ def gestion_usuarios():
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
     error_cedula = request.args.get('error_cedula', '').strip()
+    # 🔒 Hallazgo QA H-02: avisa cuando editar_usuario descartó una contraseña por no cumplir
+    # la longitud mínima (el resto de la edición sí se aplicó).
+    error_pass_corta = request.args.get('error_pass_corta', '').strip()
     return render_template(
         'usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data,
         usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas(),
-        error_cedula=error_cedula
+        error_cedula=error_cedula, error_pass_corta=error_pass_corta,
+        longitud_minima_password=LONGITUD_MINIMA_PASSWORD_CUENTA
     )
 
 
@@ -7593,11 +7729,14 @@ def admin_desactivar_2fa(usuario):
 
 @app.route('/usuarios/buscar_cedula')
 @login_required
+@agente_o_admin_required
 def buscar_usuario_por_cedula():
     """Busca una cuenta de Arkiv por número de cédula — usado desde el buscador rápido del
     Inventario de Activos para llenar 'Asignado a' sin tener que escribir el nombre completo de
-    memoria. Cualquier usuario logueado puede consultarlo (lo necesitan agentes al registrar
-    activos, no solo administradores)."""
+    memoria. Antes lo podía consultar cualquier usuario logueado (incluido el rol Estándar);
+    esto permitía enumerar nombres asociados a cédulas probando números al azar (hallazgo QA
+    H-03, 30/08/2026). Ahora queda restringido a los roles operativos que de verdad lo usan:
+    agentes y admins registrando/gestionando activos."""
     cedula = request.args.get('cedula', '').strip()
     if not cedula:
         return jsonify({'encontrado': False})
@@ -7689,6 +7828,15 @@ def editar_usuario(usuario_id):
         if nuevo_rol == 'admin' and not es_superadmin:
             nuevo_rol = rol_target or 'estandar'
 
+        # 🔒 Misma política de longitud mínima que el autoservicio (hallazgo QA H-02): si el
+        # admin decide asignar una contraseña nueva desde aquí, no puede ser más corta que la
+        # que se le exigiría a la propia persona en /perfil/cambiar_password. Se descarta solo
+        # la contraseña (se conserva la que ya tenía); el resto de la edición sigue su curso, y
+        # se avisa al admin con error_pass_corta para que no crea que sí quedó aplicada.
+        pass_rechazada = bool(nueva_pass) and not _password_cuenta_valida(nueva_pass)
+        if pass_rechazada:
+            nueva_pass = ''
+
         if nueva_pass:
             nuevo_hash = generate_password_hash(nueva_pass)
             # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
@@ -7705,8 +7853,11 @@ def editar_usuario(usuario_id):
         registrar_log(session['username'], "Edición de Usuario", detalle_log)
     except Exception as e:
         conn.rollback()
+        pass_rechazada = False
 
     conn.close()
+    if pass_rechazada:
+        return redirect(url_for('gestion_usuarios', error_pass_corta=1))
     return redirect(url_for('gestion_usuarios'))
 
 
@@ -8138,8 +8289,8 @@ def cambiar_password_perfil():
 
         if not password_actual or not password_nueva or not password_confirmar:
             error = "Todos los campos son obligatorios."
-        elif len(password_nueva) < 8:
-            error = "La nueva contraseña debe tener al menos 8 caracteres."
+        elif not _password_cuenta_valida(password_nueva):
+            error = f"La nueva contraseña debe tener al menos {LONGITUD_MINIMA_PASSWORD_CUENTA} caracteres."
         elif password_nueva != password_confirmar:
             error = "La nueva contraseña y su confirmación no coinciden."
 
@@ -8194,8 +8345,16 @@ def perfil_2fa():
     conn.close()
     habilitado = bool(row[0]) if row else False
 
+    # 🔒 Hallazgo QA H-05: si validar_instancia_y_sesion mandó para acá porque el rol exige 2FA,
+    # se avisa con un banner (en vez de dejar que la persona se pregunte por qué no puede
+    # navegar a ningún otro lado). rol_exige_2fa (independiente de si ya está activo en este
+    # momento) también oculta la opción de autodesactivarlo para admin/agente: solo un admin
+    # puede apagarlo, desde Gestión de Usuarios, para recuperación por pérdida de dispositivo.
+    obligatorio = bool(session.get('debe_activar_2fa'))
+    rol_exige_2fa = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
+
     if habilitado:
-        return render_template('perfil_2fa.html', habilitado=True, error=request.args.get('error'))
+        return render_template('perfil_2fa.html', habilitado=True, error=request.args.get('error'), obligatorio=obligatorio, rol_exige_2fa=rol_exige_2fa)
 
     secreto_pendiente = session.get('totp_pendiente_secret')
     if not secreto_pendiente:
@@ -8205,7 +8364,7 @@ def perfil_2fa():
     otpauth_uri = pyotp.TOTP(secreto_pendiente).provisioning_uri(name=session['username'], issuer_name=NOMBRE_EMISOR_2FA)
     return render_template(
         'perfil_2fa.html', habilitado=False, secreto=secreto_pendiente, otpauth_uri=otpauth_uri,
-        error=request.args.get('error')
+        error=request.args.get('error'), obligatorio=obligatorio, rol_exige_2fa=rol_exige_2fa
     )
 
 
@@ -8227,8 +8386,9 @@ def perfil_2fa_confirmar():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        # 🔒 Hallazgo QA H-07: se guarda cifrado con Fernet, nunca en texto plano.
         q_upd = "UPDATE usuarios SET totp_secret = %s, totp_habilitado = TRUE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET totp_secret = ?, totp_habilitado = 1 WHERE usuario = ?"
-        cursor.execute(q_upd, (secreto_pendiente, session['username']))
+        cursor.execute(q_upd, (encriptar_texto(secreto_pendiente), session['username']))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -8237,6 +8397,8 @@ def perfil_2fa_confirmar():
         return redirect(url_for('perfil_2fa', error="No se pudo activar la verificación en dos pasos. Intenta de nuevo."))
 
     session.pop('totp_pendiente_secret', None)
+    # 🔒 Hallazgo QA H-05: ya quedó activo, así que deja de exigirse en cada request.
+    session['debe_activar_2fa'] = False
     codigos_respaldo = _generar_codigos_respaldo_2fa(session['username'])
     registrar_log(session['username'], "Activación de 2FA", "El usuario activó la verificación en dos pasos en su cuenta.")
     return render_template('perfil_2fa.html', habilitado=True, codigos_respaldo=codigos_respaldo, mostrar_codigos=True)
@@ -8262,7 +8424,7 @@ def perfil_2fa_regenerar_respaldo():
     clave_db = str(row[0] or '')
     es_valida = check_password_hash(clave_db, password_actual) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else hmac.compare_digest(clave_db, password_actual)
     if not es_valida:
-        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.")
+        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.", rol_exige_2fa=session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
 
     codigos_respaldo = _generar_codigos_respaldo_2fa(session['username'])
     registrar_log(session['username'], "Regeneración de Códigos de Respaldo 2FA", "El usuario regeneró sus códigos de respaldo del 2FA.")
@@ -8287,10 +8449,14 @@ def perfil_2fa_desactivar():
     es_valida = check_password_hash(clave_db, password_actual) if (clave_db.startswith('pbkdf2:') or clave_db.startswith('scrypt:')) else hmac.compare_digest(clave_db, password_actual)
 
     if not es_valida:
-        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.")
+        return render_template('perfil_2fa.html', habilitado=True, error="La contraseña ingresada no es correcta.", rol_exige_2fa=session.get('rol') in ROLES_CON_ACCESO_OPERATIVO)
 
     _desactivar_2fa_cuenta(session['username'])
     session.pop('totp_pendiente_secret', None)
+    # 🔒 Hallazgo QA H-05: si el rol lo exige, apagar el 2FA no da un respiro — la próxima
+    # petición ya vuelve a mandar a /perfil/2fa a reactivarlo (ver validar_instancia_y_sesion).
+    if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+        session['debe_activar_2fa'] = True
     registrar_log(session['username'], "Desactivación de 2FA", "El usuario desactivó la verificación en dos pasos en su cuenta.")
     return redirect(url_for('perfil_2fa'))
 
