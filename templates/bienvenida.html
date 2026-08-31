@@ -57,11 +57,15 @@
 
             <!-- Perfil y Cierre de Sesión -->
             <div class="flex items-center gap-3">
-                <div class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-[11px] sm:text-xs max-w-[120px] sm:max-w-none">
+                <a href="{{ url_for('perfil_datos') }}" class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-[11px] sm:text-xs max-w-[120px] sm:max-w-none transition-all" title="Mi Perfil">
+                    {% if session.get('foto_perfil') %}
+                    <img src="{{ session.get('foto_perfil') }}" alt="" class="w-4 h-4 rounded-full object-cover shrink-0">
+                    {% else %}
                     <i class="fa-regular fa-circle-user text-cyan-400 shrink-0"></i>
+                    {% endif %}
                     <span class="font-semibold text-slate-200 truncate">{{ username }}</span>
                     <span class="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold uppercase shrink-0">{{ rol }}</span>
-                </div>
+                </a>
                 <div class="flex items-center gap-2">
                     {% include 'partials/buscador.html' %}
                     {% include 'partials/historial_sesiones_boton.html' %}
