@@ -769,6 +769,9 @@ def init_db():
                 # que se usa (login 2FA o vista de /perfil/2fa).
                 "ALTER TABLE usuarios ALTER COLUMN totp_secret TYPE TEXT;",
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS totp_habilitado BOOLEAN DEFAULT FALSE;",
+                # 🖼️ Foto de perfil (autoservicio, ver /perfil): URL de Cloudinary de la imagen que
+                # la propia persona subió, o NULL si nunca subió una (se muestra un ícono genérico).
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_perfil TEXT;",
                 # 📅 Vencimiento de documentos institucionales (Instructivos y Archivos): fecha
                 # opcional en la que el instructivo/documento deja de estar vigente (ej. una
                 # política o certificado con renovación periódica). 'alerta_vencimiento_nivel'
@@ -1034,7 +1037,8 @@ def init_db():
             # Postgres.
             for col_totp_sql in [
                 "ALTER TABLE usuarios ADD COLUMN totp_secret TEXT;",
-                "ALTER TABLE usuarios ADD COLUMN totp_habilitado INTEGER DEFAULT 0;"
+                "ALTER TABLE usuarios ADD COLUMN totp_habilitado INTEGER DEFAULT 0;",
+                "ALTER TABLE usuarios ADD COLUMN foto_perfil TEXT;"
             ]:
                 try:
                     cursor.execute(col_totp_sql)
@@ -2815,6 +2819,37 @@ def _subir_archivo_a_cloudinary(file):
     except Exception as e:
         print(f"⚠️ Error subiendo el archivo '{file.filename}' a Cloudinary: {e}")
         return None, None
+
+
+# 🖼️ FOTO DE PERFIL (autoservicio, ver /perfil) — deliberadamente más estricta que
+# _subir_archivo_a_cloudinary: solo formatos de imagen real (nada de video/zip/docx como
+# "foto de perfil") y un tamaño máximo bajo, porque esto lo sube cualquier usuario autenticado
+# sin revisión de un admin.
+EXTENSIONES_FOTO_PERFIL = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+TAMANO_MAXIMO_FOTO_PERFIL = 5 * 1024 * 1024  # 5 MB
+
+def _subir_foto_perfil(file):
+    """Sube una foto de perfil a Cloudinary, recortada a 400×400 centrada en el rostro si se
+    detecta uno. Devuelve (url, None) si todo sale bien, o (None, mensaje_error) si el archivo
+    no es una imagen válida, supera el tamaño máximo, o falla la subida."""
+    if not file or not file.filename:
+        return None, None
+    if '.' not in file.filename or file.filename.rsplit('.', 1)[1].lower() not in EXTENSIONES_FOTO_PERFIL:
+        return None, 'Formato de imagen no permitido. Usa JPG, PNG, GIF o WEBP.'
+    file.stream.seek(0, os.SEEK_END)
+    tamano = file.stream.tell()
+    file.stream.seek(0)
+    if tamano > TAMANO_MAXIMO_FOTO_PERFIL:
+        return None, 'La imagen no puede superar 5 MB.'
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file, resource_type="image", use_filename=True, unique_filename=True, timeout=60,
+            transformation=[{'width': 400, 'height': 400, 'crop': 'fill', 'gravity': 'face'}]
+        )
+        return upload_result['secure_url'], None
+    except Exception as e:
+        print(f"⚠️ Error subiendo foto de perfil: {e}")
+        return None, 'No se pudo subir la imagen. Intenta de nuevo.'
 
 
 def _marcar_comunicado_leido(comunicado_id, usuario):
@@ -6010,7 +6045,8 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                # foto_perfil se agrega AL FINAL (índice 9) para no correr los índices existentes.
+                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -6068,6 +6104,9 @@ def login():
                     # 🔒 Hallazgo QA H-05: si llegamos aquí (no pasó por /login/2fa), esta cuenta
                     # todavía no tiene 2FA activo. Para admin/agente, eso ya no es opcional.
                     session['debe_activar_2fa'] = user[2] in ROLES_CON_ACCESO_OPERATIVO
+                    # 🖼️ Foto de perfil: se cachea en la sesión para no consultar la BD en cada
+                    # página solo para pintar el ícono del encabezado (ver partials/perfil_boton.html).
+                    session['foto_perfil'] = user[9] if len(user) > 9 else None
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                     return redirect(url_for('bienvenida'))
                 elif user:
@@ -6118,7 +6157,8 @@ def login_2fa():
 
         conn, db_type = get_db()
         cursor = conn.cursor()
-        query = "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret FROM usuarios WHERE usuario = ?"
+        # foto_perfil se agrega AL FINAL (índice 6) para no correr los índices existentes.
+        query = "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil FROM usuarios WHERE usuario = ?"
         cursor.execute(query, (usuario_pendiente,))
         user = cursor.fetchone()
         conn.close()
@@ -6156,6 +6196,8 @@ def login_2fa():
             session['debe_cambiar_password'] = bool(user[4])
             # 🔒 Hallazgo QA H-05: llegar aquí ya implica que la cuenta tiene 2FA activo.
             session['debe_activar_2fa'] = False
+            # 🖼️ Foto de perfil: se cachea en la sesión (ver login() más arriba).
+            session['foto_perfil'] = user[6] if len(user) > 6 else None
             detalle = "Inicio de sesión exitoso (código de respaldo 2FA)" if via_respaldo else "Inicio de sesión exitoso (verificación en dos pasos)"
             registrar_log(user[0], "Inicio de Sesión", detalle, ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
             return redirect(url_for('bienvenida'))
@@ -8269,6 +8311,69 @@ def cambiar_tema():
     # por si el navegador no manda 'Referer').
     destino = request.referrer or url_for('bienvenida')
     return redirect(destino)
+
+
+@app.route('/perfil', methods=['GET', 'POST'])
+@login_required
+def perfil_datos():
+    """Página de autoservicio de datos personales: nombre completo, teléfono y foto de perfil.
+    Deliberadamente NO incluye correo ni cédula — ambos siguen siendo de resorte exclusivo de un
+    admin (Gestión de Usuarios), porque su edición ya tiene validaciones propias allí (formato de
+    correo, duplicados de cédula) y son datos más sensibles para identidad/notificaciones. El
+    usuario, el rol y el estado tampoco son editables aquí: solo se muestran de referencia."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    error = None
+    exito = False
+
+    if request.method == 'POST':
+        nombre_nuevo = (request.form.get('nombre') or '').strip()
+        telefono_nuevo = (request.form.get('telefono') or '').strip() or None
+
+        # 🪪 Mínimo primer nombre + primer apellido (2 palabras). No se piden 4 campos
+        # separados (primer/segundo nombre, primer/segundo apellido) como en el alta por admin
+        # para no tener que adivinar cómo partir un nombre ya existente en esos 4 casilleros al
+        # precargar el formulario — un nombre compuesto (p. ej. "María José Vélez De La Cruz")
+        # se presta a particiones ambiguas. Un solo campo de texto, validado por cantidad de
+        # palabras, evita ese problema sin perder la garantía mínima que pidió Tomás.
+        if not nombre_nuevo or len(nombre_nuevo.split()) < 2:
+            error = "Escribe tu nombre completo, con al menos nombre y apellido."
+
+        foto_url = None
+        if not error:
+            foto_file = request.files.get('foto_perfil')
+            if foto_file and foto_file.filename:
+                foto_url, error = _subir_foto_perfil(foto_file)
+
+        if not error:
+            try:
+                if foto_url:
+                    q_upd = "UPDATE usuarios SET nombre = %s, telefono = %s, foto_perfil = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET nombre = ?, telefono = ?, foto_perfil = ? WHERE usuario = ?"
+                    cursor.execute(q_upd, (nombre_nuevo, telefono_nuevo, foto_url, session['username']))
+                    session['foto_perfil'] = foto_url
+                else:
+                    # Sin foto nueva: no se toca la columna foto_perfil (se conserva la que ya había).
+                    q_upd = "UPDATE usuarios SET nombre = %s, telefono = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET nombre = ?, telefono = ? WHERE usuario = ?"
+                    cursor.execute(q_upd, (nombre_nuevo, telefono_nuevo, session['username']))
+                conn.commit()
+                registrar_log(session['username'], "Actualización de Perfil", "El usuario actualizó sus datos de perfil" + (" (incluida foto)" if foto_url else ""))
+                exito = True
+            except Exception as e:
+                conn.rollback()
+                error = "No se pudieron guardar los cambios. Intenta de nuevo."
+
+    q_sel = "SELECT nombre, telefono, correo, rol, foto_perfil, usuario FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT nombre, telefono, correo, rol, foto_perfil, usuario FROM usuarios WHERE usuario = ?"
+    cursor.execute(q_sel, (session['username'],))
+    row = cursor.fetchone()
+    conn.close()
+
+    return render_template(
+        'perfil_datos.html',
+        nombre=(row[0] if row else '') or '', telefono=(row[1] if row else '') or '',
+        correo=row[2] if row else '', rol=row[3] if row else session.get('rol'),
+        foto_perfil=row[4] if row else None, usuario=row[5] if row else session.get('username'),
+        error=error, exito=exito,
+    )
 
 
 @app.route('/perfil/cambiar_password', methods=['GET', 'POST'])
