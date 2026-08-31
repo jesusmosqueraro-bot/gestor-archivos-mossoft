@@ -141,6 +141,17 @@ def _agregar_cabeceras_seguridad(response):
         "form-action 'self'; "
         "frame-ancestors 'self';"
     )
+    # 🔙 Sin caché en páginas de la app (todo menos /static/): evita que el botón
+    # "atrás" del navegador muestre una página ya autenticada tomada de la caché
+    # local (o del historial bfcache) sin volver a pasar por el servidor. Sin esto,
+    # tras cerrar sesión o con la sesión expirada, "atrás" podía mostrar contenido
+    # protegido sin pedir clave de nuevo. Con estas cabeceras, el navegador siempre
+    # vuelve a pedir la página al servidor, que valida la sesión y redirige a
+    # /login si ya no es válida (hallazgo QA, corregido).
+    if not request.path.startswith('/static/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
     return response
 
 # 🛡️ Protección CSRF real vía Flask-WTF. Todas las plantillas con formularios POST ya
