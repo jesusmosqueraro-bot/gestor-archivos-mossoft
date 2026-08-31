@@ -43,7 +43,16 @@ function _cerrarDropdownNotificaciones() {
     }
 }
 
-function toggleVistaPapelera() {
+function toggleVistaPapelera(evento) {
+    // 🐛 Corrección de bug: este botón reemplaza su propio ícono (innerHTML) para cambiar
+    // de 🗑️ a ← según la vista. Si el clic ocurrió justo sobre el <i> del ícono, ese <i>
+    // queda "desconectado" del DOM en cuanto se reemplaza el innerHTML — y el listener
+    // global de "clic afuera" (en notificaciones.js, más abajo) usa wrapper.contains(evento.target)
+    // para decidir si cierra el desplegable. Un nodo ya desconectado del DOM nunca está
+    // "contenido" en nada, así que ese listener creía que el clic fue AFUERA de la campanita
+    // y cerraba el desplegable inmediatamente después de abrir la papelera (nunca se llegaba
+    // a ver). stopPropagation() evita que el clic siquiera llegue a ese listener del document.
+    if (evento) { evento.stopPropagation(); }
     _vistaNotificaciones = (_vistaNotificaciones === 'papelera') ? 'activas' : 'papelera';
     var titulo = document.getElementById('titulo-notificaciones');
     var btnMarcarLeidas = document.getElementById('btn-marcar-leidas');
