@@ -120,6 +120,36 @@
             </table>
         </div>
 
+        <!-- PAGINACIÓN -->
+        {% if logs %}
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 px-1">
+            <span>
+                Página {{ pagina_actual }} de {{ total_paginas }} · {{ total_registros }} registro{{ 's' if total_registros != 1 else '' }} en total
+            </span>
+            <div class="flex items-center gap-2">
+                {% set _qs = {'usuario': q_usuario, 'accion': q_accion, 'q': q_busqueda} %}
+                {% if pagina_actual > 1 %}
+                <a href="{{ url_for('ver_logs', pagina=pagina_actual - 1, **_qs) }}" class="bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-200 font-bold py-2 px-4 rounded-xl transition-all flex items-center gap-1.5">
+                    <i class="fa-solid fa-chevron-left"></i> Anterior
+                </a>
+                {% else %}
+                <span class="bg-slate-900/40 border border-slate-800 text-slate-600 font-bold py-2 px-4 rounded-xl flex items-center gap-1.5 cursor-not-allowed">
+                    <i class="fa-solid fa-chevron-left"></i> Anterior
+                </span>
+                {% endif %}
+                {% if pagina_actual < total_paginas %}
+                <a href="{{ url_for('ver_logs', pagina=pagina_actual + 1, **_qs) }}" class="bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-200 font-bold py-2 px-4 rounded-xl transition-all flex items-center gap-1.5">
+                    Siguiente <i class="fa-solid fa-chevron-right"></i>
+                </a>
+                {% else %}
+                <span class="bg-slate-900/40 border border-slate-800 text-slate-600 font-bold py-2 px-4 rounded-xl flex items-center gap-1.5 cursor-not-allowed">
+                    Siguiente <i class="fa-solid fa-chevron-right"></i>
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
     </main>
 
 
