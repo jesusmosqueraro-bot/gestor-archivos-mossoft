@@ -1,0 +1,5 @@
+# Dependencias SOLO para desarrollo/pruebas (pytest y lo que necesite) — Render nunca instala
+# este archivo, solo requirements.txt. Se mantienen separados para no meter nada de esto en la
+# imagen de producción por accidente.
+-r requirements.txt
+pytest==8.3.3

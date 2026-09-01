@@ -13,3 +13,4 @@ openpyxl
 pyotp==2.10.0
 anthropic
 Flask-Limiter==3.8.0
+redis==5.0.8

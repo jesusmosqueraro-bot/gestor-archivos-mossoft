@@ -1,4 +1,5 @@
 import os
+import math
 import uuid
 import random
 import sqlite3
@@ -144,7 +145,13 @@ def _agregar_cabeceras_seguridad(response):
         "img-src 'self' data: https://res.cloudinary.com; "
         "media-src 'self' https://res.cloudinary.com; "
         "connect-src 'self' https://www.google.com; "
-        "frame-src https://www.google.com; "
+        # 🩹 'self' y res.cloudinary.com: el visor de archivos (index.html) inserta un
+        # <iframe src="URL_DE_CLOUDINARY"> para previsualizar PDFs sin descargarlos.
+        # Sin res.cloudinary.com aquí, el navegador bloqueaba ese iframe por CSP y el
+        # botón de vista previa de un PDF se veía en blanco (no se había notado porque
+        # el resto de la app no depende de esto). 'self' queda por si el día de mañana
+        # se enruta algún iframe a través de una ruta propia (como /pdf_proxy).
+        "frame-src 'self' https://www.google.com https://res.cloudinary.com; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
@@ -192,16 +199,47 @@ else:
 # 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
 # que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
 # vez de la IP cruda de Flask-Limiter, así el límite es por visitante real y no por el balanceador.
-# Guarda los contadores en memoria del proceso (sin Redis): con los 2 workers de gunicorn de este
-# servicio (ver Procfile) el tope real puede llegar a ser hasta el doble del configurado, pero
-# sigue siendo una barrera muy superior a no tener ningún límite.
+#
+# 📦 Almacenamiento de los contadores: por defecto en memoria del proceso — con los 2 workers de
+# gunicorn de este servicio (ver Procfile) cada uno cuenta por su lado, así que el tope real puede
+# llegar a ser hasta el doble del configurado. Sigue siendo una barrera muy superior a no tener
+# ningún límite, pero deja de ser exacto en cuanto haya más de un worker/instancia.
+#
+# Si en Render se agrega un addon de Redis y se define la variable de entorno RATELIMIT_STORAGE_URI
+# (o REDIS_URL, la que Render suele exponer para su addon "Key Value") con algo como
+# "redis://usuario:clave@host:puerto", los contadores pasan a vivir ahí — compartidos entre todos
+# los workers/instancias, sin ese margen de doble conteo. No hace falta tocar código para activarlo,
+# solo agregar la variable de entorno; sin ella, sigue funcionando igual que hasta ahora (memoria).
+_RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI') or os.environ.get('REDIS_URL') or "memory://"
+
 if Limiter:
-    limiter = Limiter(
-        key_func=lambda: _obtener_ip_cliente(),
-        app=app,
-        storage_uri="memory://",
-        default_limits=[],
-    )
+    try:
+        limiter = Limiter(
+            key_func=lambda: _obtener_ip_cliente(),
+            app=app,
+            storage_uri=_RATELIMIT_STORAGE_URI,
+            default_limits=[],
+            # 🛟 in_memory_fallback_enabled: si Redis está configurado pero en algún momento no
+            # responde (se cae el addon, URL mal escrita, problema de red puntual), Flask-Limiter
+            # sigue limitando usando memoria local en vez de dejar pasar todo sin control
+            # (fail-open) o tumbar la petición con un error 500. Es puramente un respaldo — no
+            # reemplaza a Redis como fuente de verdad mientras esté disponible.
+            in_memory_fallback_enabled=True,
+        )
+        if _RATELIMIT_STORAGE_URI != "memory://":
+            print("🔒 Flask-Limiter usando almacenamiento compartido (Redis) para los límites de peticiones.")
+    except Exception as e:
+        # 🛟 Si la URL de Redis está mal escrita o hay cualquier otro problema al construir el
+        # limiter (no la conexión en sí, que se valida perezosamente en cada petición — de eso se
+        # encarga in_memory_fallback_enabled de arriba): no tiene sentido que la app entera falle
+        # por esto. Se cae a memoria (el comportamiento de siempre) y sigue arrancando normal.
+        print(f"⚠️ No se pudo inicializar Flask-Limiter con almacenamiento compartido ({e}); usando memoria como respaldo.")
+        limiter = Limiter(
+            key_func=lambda: _obtener_ip_cliente(),
+            app=app,
+            storage_uri="memory://",
+            default_limits=[],
+        )
 else:
     print("⚠️ flask_limiter no está instalado: no habrá límite de peticiones por minuto. Agrega Flask-Limiter a requirements.txt.")
     class _LimiterExemptDummy:
@@ -1077,6 +1115,50 @@ def init_db():
                 except Exception:
                     pass
 
+        # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
+        # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
+        # consulta. Con pocos cientos de filas eso no se nota, pero 'logs', 'tickets' y
+        # 'notificaciones' crecen sin parar con el uso diario, y ya hay consultas que filtran
+        # justo por estas columnas (ver ver_logs, ver_tickets, la campanita). La sintaxis
+        # CREATE INDEX IF NOT EXISTS es idéntica en Postgres y sqlite, así que esta única
+        # lista sirve para ambos motores — por eso vive fuera del if/else de arriba. Cada
+        # sentencia va en su propio try/except: si alguna tabla no existe todavía (instalación
+        # nueva a mitad de arranque) o el índice ya está creado, simplemente se ignora y se
+        # sigue con las demás.
+        for indice_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_logs_usuario ON logs (usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_logs_fecha ON logs (fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_logs_accion ON logs (accion);",
+            "CREATE INDEX IF NOT EXISTS idx_logs_credencial_id ON logs (credencial_id);",
+            "CREATE INDEX IF NOT EXISTS idx_correos_log_fecha ON correos_log (fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_credenciales_area ON credenciales (area);",
+            "CREATE INDEX IF NOT EXISTS idx_credenciales_estado ON credenciales (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_credenciales_propietario ON credenciales (propietario);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_estado ON tickets (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_creado_por ON tickets (creado_por);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_asignado_a ON tickets (asignado_a);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_categoria ON tickets (categoria);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_comentarios_ticket_id ON tickets_comentarios (ticket_id);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_adjuntos_ticket_id ON tickets_adjuntos (ticket_id);",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_tareas_ticket_id ON tickets_tareas (ticket_id);",
+            "CREATE INDEX IF NOT EXISTS idx_activos_inventario_estado ON activos_inventario (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_activos_inventario_asignado_a ON activos_inventario (asignado_a);",
+            "CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario_estado ON notificaciones (usuario, estado);",
+            "CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario_leida ON notificaciones (usuario, leida);",
+            "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_colaborador ON credenciales_colaboradores (colaborador);",
+            "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_estado ON credenciales_colaboradores (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_usuario ON documentos_empleado (usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_estado ON documentos_empleado (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_totp_codigos_respaldo_usuario ON totp_codigos_respaldo (usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_comunicados_estado ON comunicados (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_conocimiento_articulos_estado ON conocimiento_articulos (estado);",
+        ]:
+            try:
+                cursor.execute(indice_sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
         # Siembra las categorías de ticket por defecto la primera vez (instalación nueva o
         # actualización desde una versión sin `ticket_configuraciones`), para que la lista no
         # aparezca vacía. Áreas y Sedes NO se siembran: son específicas de la organización y
@@ -1567,19 +1649,33 @@ def visor_db():
 
     try:
         if q_sql:
-            cursor.execute(q_sql)
-            if q_sql.lower().startswith('select'):
-                registros = cursor.fetchall()
-                if cursor.description:
-                    columnas = [desc[0] for desc in cursor.description]
-            else:
-                conn.commit()
-                mensaje_exito = f"Sentencia SQL ejecutada con éxito. Filas afectadas: {cursor.rowcount}"
-                registrar_log(session['username'], "Ejecución SQL Manual", f"SQL: {q_sql[:120]}")
-                cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
-                registros = cursor.fetchall()
-                if cursor.description:
-                    columnas = [desc[0] for desc in cursor.description]
+            # 📝 Hallazgo QA H-04 (consola SQL libre, riesgo aceptado con control
+            # compensatorio): antes solo quedaba rastro en la bitácora de las sentencias
+            # que modificaban datos (INSERT/UPDATE/DELETE/etc.), y solo si terminaban
+            # bien. Un SELECT manual —la forma más simple de exfiltrar datos por esta
+            # consola sin dejar huella— no generaba ningún registro, y una sentencia que
+            # fallara (por ejemplo, un intento de inyección mal formado) tampoco. Ahora
+            # se registra CADA sentencia que se intenta ejecutar aquí, éxito o error.
+            es_lectura = q_sql.lower().startswith('select')
+            try:
+                cursor.execute(q_sql)
+                if es_lectura:
+                    registros = cursor.fetchall()
+                    if cursor.description:
+                        columnas = [desc[0] for desc in cursor.description]
+                    registrar_log(session['username'], "Consulta SQL Manual", f"SQL: {q_sql[:300]}")
+                else:
+                    conn.commit()
+                    mensaje_exito = f"Sentencia SQL ejecutada con éxito. Filas afectadas: {cursor.rowcount}"
+                    registrar_log(session['username'], "Ejecución SQL Manual", f"SQL: {q_sql[:300]}")
+                    cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
+                    registros = cursor.fetchall()
+                    if cursor.description:
+                        columnas = [desc[0] for desc in cursor.description]
+            except Exception as e_sql:
+                conn.rollback()
+                registrar_log(session['username'], "Error en SQL Manual", f"SQL: {q_sql[:300]} | Error: {str(e_sql)[:200]}")
+                raise
         else:
             cursor.execute(f"SELECT * FROM {tabla_seleccionada} LIMIT 100")
             registros = cursor.fetchall()
@@ -8091,20 +8187,46 @@ def ver_logs():
             query += " AND (detalles LIKE ? OR fecha LIKE ?)"
             params.extend([p_busq, p_busq])
 
-    query += " ORDER BY id DESC"
+    # 📄 Paginación: esta bitácora crece sin límite (una fila por cada acción que registra
+    # registrar_log en toda la app) y antes se traía la tabla completa en cada visita — con
+    # meses de uso eso se vuelve una consulta cada vez más lenta y una página cada vez más
+    # pesada de renderizar. El filtrado (usuario/acción/búsqueda) ya vive entero en el SQL de
+    # arriba, así que paginar con LIMIT/OFFSET sobre esa misma consulta no esconde ningún
+    # resultado: cambia página y sigue viendo exactamente los mismos filtros.
+    POR_PAGINA_LOGS = 50
+    try:
+        pagina_actual = max(1, int(request.args.get('pagina', '1')))
+    except ValueError:
+        pagina_actual = 1
 
-    cursor.execute(query, tuple(params))
+    query_conteo = query.replace(
+        "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1",
+        "SELECT COUNT(*) FROM logs WHERE 1=1",
+        1
+    )
+    cursor.execute(query_conteo, tuple(params))
+    total_registros = cursor.fetchone()[0]
+    total_paginas = max(1, math.ceil(total_registros / POR_PAGINA_LOGS))
+    pagina_actual = min(pagina_actual, total_paginas)
+    offset = (pagina_actual - 1) * POR_PAGINA_LOGS
+
+    query += " ORDER BY id DESC LIMIT %s OFFSET %s" if db_type == 'postgres' else " ORDER BY id DESC LIMIT ? OFFSET ?"
+    cursor.execute(query, tuple(params) + (POR_PAGINA_LOGS, offset))
     lista_logs = cursor.fetchall()
     conn.close()
 
     return render_template(
-        'logs.html', 
-        logs=lista_logs, 
-        usuarios_opt=lista_usuarios, 
+        'logs.html',
+        logs=lista_logs,
+        usuarios_opt=lista_usuarios,
         acciones_opt=lista_acciones,
         q_usuario=q_usuario,
         q_accion=q_accion,
-        q_busqueda=q_busqueda
+        q_busqueda=q_busqueda,
+        pagina_actual=pagina_actual,
+        total_paginas=total_paginas,
+        total_registros=total_registros,
+        por_pagina=POR_PAGINA_LOGS
     )
 
 # 📊 EXPORTAR AUDITORÍA A EXCEL / CSV

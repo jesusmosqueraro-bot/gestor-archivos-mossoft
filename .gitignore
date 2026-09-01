@@ -5,6 +5,7 @@ gestor.db
 # Cache de Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Variables de entorno locales, si alguna vez se usa un archivo .env
 .env
