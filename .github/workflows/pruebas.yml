@@ -1,0 +1,37 @@
+name: Pruebas automáticas
+
+# Corre en cada push y cada Pull Request a main — incluye los commits que llegan por la
+# interfaz web de GitHub (Upload files), no solo los que se suben con `git push`. No depende
+# de ningún acceso especial al repositorio: es infraestructura de GitHub, separada del entorno
+# donde se generan los commits.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias (producción + pruebas)
+        run: pip install -r requirements-dev.txt
+
+      - name: Verificar que app.py compila sin errores de sintaxis
+        run: python -m py_compile app.py
+
+      - name: Correr la suite de pruebas (pytest)
+        env:
+          # 🧪 Todas las pruebas usan sqlite local y descartable — nunca Postgres/producción.
+          # Sin DATABASE_URL, get_db() cae automáticamente a sqlite (ver app.py).
+          DESHABILITAR_RESPALDO_AUTOMATICO: '1'
+        run: python -m pytest tests/ -v
