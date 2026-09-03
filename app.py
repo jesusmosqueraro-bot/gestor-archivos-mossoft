@@ -1141,6 +1141,9 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_tickets_comentarios_ticket_id ON tickets_comentarios (ticket_id);",
             "CREATE INDEX IF NOT EXISTS idx_tickets_adjuntos_ticket_id ON tickets_adjuntos (ticket_id);",
             "CREATE INDEX IF NOT EXISTS idx_tickets_tareas_ticket_id ON tickets_tareas (ticket_id);",
+            # 🔎 Para la cola "Mis Tareas" (WHERE responsable = ? sobre TODA la tabla, sin
+            # filtrar primero por ticket_id como sí hace el detalle del ticket).
+            "CREATE INDEX IF NOT EXISTS idx_tickets_tareas_responsable ON tickets_tareas (responsable);",
             "CREATE INDEX IF NOT EXISTS idx_activos_inventario_estado ON activos_inventario (estado);",
             "CREATE INDEX IF NOT EXISTS idx_activos_inventario_asignado_a ON activos_inventario (asignado_a);",
             "CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario_estado ON notificaciones (usuario, estado);",
@@ -3865,7 +3868,7 @@ def ver_ticket(ticket_id):
                 'responsable_nombre': nombres_agentes.get(responsable_usuario, responsable_usuario),
                 'estado': t[4] or 'pendiente', 'fecha_limite': t[5], 'creado_por': t[6],
                 'fecha_creacion': t[7], 'fecha_completada': t[8],
-                'vencida': bool(t[5] and t[4] != 'completada' and t[5] < datetime.now().strftime('%Y-%m-%d')),
+                'vencida': bool(t[5] and t[4] not in ('completada', 'cancelada') and t[5] < datetime.now().strftime('%Y-%m-%d')),
             })
 
     conn.close()
@@ -3946,25 +3949,53 @@ def crear_tarea_ticket(ticket_id):
 @login_required
 @agente_o_admin_required
 def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
-    """Alterna una tarea entre 'pendiente' y 'completada' (checkbox en el detalle del
-    ticket). También acepta 'en_progreso' desde el desplegable de estado de la tarea."""
+    """Cambia el estado de una tarea del ticket: 'pendiente', 'en_progreso', 'completada' o
+    'cancelada' (desplegable de estado en el detalle del ticket). 'cancelada' es para una tarea
+    que ya no aplica —se distingue de 'completada' porque no se hizo el trabajo, solo dejó de
+    ser necesario— y, junto con 'completada', es lo que actualizar_ticket() exige para poder
+    marcar el ticket como Resuelto/Cerrado (ver ese bloqueo en app.py).
+
+    Cada cambio queda en Logs (bitácora): antes solo se registraba crear/eliminar una tarea, no
+    sus transiciones de estado, dejando un hueco en el rastro de auditoría de quién hizo qué y
+    cuándo dentro de un caso."""
     nuevo_estado = (request.form.get('estado') or '').strip()
-    if nuevo_estado not in ('pendiente', 'en_progreso', 'completada'):
-        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+    # 🔁 Cuando el cambio se dispara desde la cola personal "Mis Tareas" (ver mis_tareas() más
+    # abajo), conviene devolver al agente ahí mismo en vez de mandarlo al detalle del ticket —
+    # si no, cada clic lo saca de su lista y tiene que volver a entrar para seguir marcando
+    # tareas de otros casos.
+    origen = request.form.get('origen', '')
+    ver_todas = request.form.get('ver_todas', '')
+    destino = url_for('mis_tareas', todas='1') if origen == 'mis_tareas' and ver_todas == '1' else \
+              url_for('mis_tareas') if origen == 'mis_tareas' else url_for('ver_ticket', ticket_id=ticket_id)
+    if nuevo_estado not in ('pendiente', 'en_progreso', 'completada', 'cancelada'):
+        return redirect(destino)
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    fecha_completada = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if nuevo_estado == 'completada' else None
+    fecha_completada = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if nuevo_estado in ('completada', 'cancelada') else None
     try:
+        q_sel = "SELECT asunto, estado FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, estado FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
+        cursor.execute(q_sel, (tarea_id, ticket_id))
+        fila_tarea = cursor.fetchone()
+        if not fila_tarea:
+            conn.close()
+            return redirect(destino)
+        asunto_tarea, estado_tarea_old = fila_tarea
+
         q_upd = ("UPDATE tickets_tareas SET estado = %s, fecha_completada = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
                 ("UPDATE tickets_tareas SET estado = ?, fecha_completada = ? WHERE id = ? AND ticket_id = ?")
         cursor.execute(q_upd, (nuevo_estado, fecha_completada, tarea_id, ticket_id))
         conn.commit()
+        if nuevo_estado != estado_tarea_old:
+            registrar_log(
+                session['username'], "Estado de Tarea de Ticket Actualizado",
+                f"Ticket #{ticket_id}: tarea '{asunto_tarea}' pasó de '{estado_tarea_old or 'pendiente'}' a '{nuevo_estado}'"
+            )
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error actualizando estado de la tarea {tarea_id} (ticket {ticket_id}): {e}")
     conn.close()
-    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+    return redirect(destino)
 
 
 @app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/eliminar', methods=['POST'])
@@ -3983,6 +4014,49 @@ def eliminar_tarea_ticket(ticket_id, tarea_id):
         print(f"⚠️ Error eliminando la tarea {tarea_id} (ticket {ticket_id}): {e}")
     conn.close()
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/mis_tareas')
+@login_required
+@agente_o_admin_required
+def mis_tareas():
+    """Cola de trabajo personal del agente: todas las tareas asignadas a él en CUALQUIER
+    ticket, sin tener que recordar en cuáles casos le tocó algo (inspirado en la cola "Tareas"
+    del menú lateral de Aranda Service Desk). Por defecto solo se muestran las tareas activas
+    (pendiente/en_progreso); 'Ver completadas y canceladas' las agrega todas."""
+    usuario = session.get('username')
+    ver_todas = request.args.get('todas') == '1'
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    filtro_estado = "" if ver_todas else "AND tt.estado NOT IN ('completada', 'cancelada')"
+    q = (
+        f"SELECT tt.id, tt.ticket_id, tt.asunto, tt.descripcion, tt.estado, tt.fecha_limite, "
+        f"tt.fecha_completada, t.titulo, t.tipo, t.estado, t.fecha_creacion "
+        f"FROM tickets_tareas tt JOIN tickets t ON t.id = tt.ticket_id "
+        f"WHERE tt.responsable = {ph} AND COALESCE(t.eliminado, 0) = 0 {filtro_estado} "
+        f"ORDER BY (tt.estado IN ('completada', 'cancelada')) ASC, "
+        f"(tt.fecha_limite IS NULL OR tt.fecha_limite = '') ASC, tt.fecha_limite ASC, tt.id DESC"
+    )
+    cursor.execute(q, (usuario,))
+    filas = cursor.fetchall()
+    conn.close()
+
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    tareas = []
+    for f in filas:
+        (tarea_id, ticket_id, asunto, descripcion, estado, fecha_limite, fecha_completada,
+         ticket_titulo, ticket_tipo, ticket_estado, ticket_fecha_creacion) = f
+        tareas.append({
+            'id': tarea_id, 'ticket_id': ticket_id, 'asunto': asunto, 'descripcion': descripcion,
+            'estado': estado or 'pendiente', 'fecha_limite': fecha_limite, 'fecha_completada': fecha_completada,
+            'ticket_titulo': ticket_titulo, 'ticket_estado': ticket_estado,
+            'ticket_codigo': _codigo_ticket(ticket_tipo or 'Incidente', ticket_id, ticket_fecha_creacion),
+            'vencida': bool(fecha_limite and estado not in ('completada', 'cancelada') and fecha_limite < hoy),
+        })
+
+    return render_template('mis_tareas.html', es_soporte=True, tareas=tareas, ver_todas=ver_todas)
 
 
 @app.route('/tickets/<int:ticket_id>/duplicar_datos')
@@ -4130,6 +4204,26 @@ def actualizar_ticket(ticket_id):
         estado_final = nuevo_estado if nuevo_estado in _estados_disponibles_ticket(estado_old) else estado_old
         prioridad_final = nueva_prioridad if nueva_prioridad in PRIORIDADES_TICKET else prioridad_old
         asignado_final = nuevo_asignado or None
+
+        # 🚧 Inspirado en la pestaña "Tareas" de Aranda Service Desk: un caso no debería poder
+        # marcarse Resuelto/Cerrado mientras todavía tenga tareas internas sin terminar. Si el
+        # agente intenta ese salto con tareas en 'pendiente'/'en_progreso', se bloquea el cambio
+        # de estado (el resto de los campos del formulario —prioridad, asignado— sí se guardan)
+        # y se le explica por qué con un mensaje flash. Una tarea que ya no aplica se marca
+        # 'cancelada' (no 'completada') para no bloquear el cierre sin haberla hecho de verdad.
+        if estado_final in ('Resuelto', 'Cerrado') and estado_final != estado_old:
+            q_tareas_pend = ("SELECT COUNT(*) FROM tickets_tareas WHERE ticket_id = %s AND estado NOT IN ('completada', 'cancelada')") if db_type == 'postgres' else \
+                            ("SELECT COUNT(*) FROM tickets_tareas WHERE ticket_id = ? AND estado NOT IN ('completada', 'cancelada')")
+            cursor.execute(q_tareas_pend, (ticket_id,))
+            tareas_pendientes = cursor.fetchone()[0]
+            if tareas_pendientes:
+                estado_final = estado_old
+                flash(
+                    f"No se pudo cambiar el estado a '{nuevo_estado}': el ticket todavía tiene "
+                    f"{tareas_pendientes} tarea(s) sin completar o cancelar. Resuélvelas (o cancélalas) "
+                    "en la sección Tareas de este ticket antes de continuar.",
+                    "error"
+                )
 
         # 🔒 Un ticket 'Cerrado' ya no se puede reasignar a otra persona: el caso quedó resuelto
         # y cerrado, así que cambiar después quién quedó como responsable no aporta nada y podía
@@ -4863,6 +4957,15 @@ def _calcular_indicadores_tickets():
     except Exception as e:
         print(f"Error consultando indicadores de tickets: {e}")
         rows = []
+    # ✅ Tareas completadas por agente: aproximación simple a las "Horas-Hombre" de Aranda
+    # Service Desk sin necesitar registrar duración exacta (que Arkiv no pide al crear una
+    # tarea) — cuenta cuántas tareas cerró cada persona, no cuánto tiempo le tomaron.
+    try:
+        cursor.execute("SELECT responsable, COUNT(*) FROM tickets_tareas WHERE estado = 'completada' AND responsable IS NOT NULL GROUP BY responsable")
+        filas_tareas_agente = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando tareas completadas por agente: {e}")
+        filas_tareas_agente = []
     conn.close()
 
     tickets = []
@@ -4922,13 +5025,20 @@ def _calcular_indicadores_tickets():
         (_nombre_para_mostrar(u, nombres_usuarios_ind), cant)
         for u, cant in sorted(por_agente.items(), key=lambda x: x[1], reverse=True)[:5]
     ]
+    # ✅ Mismo criterio que 'top_agentes' pero contando tareas internas completadas (ver
+    # tickets_tareas) en vez de tickets resueltos/cerrados — aproximación a las "Horas-Hombre"
+    # de Aranda Service Desk (ver comentario donde se consultó filas_tareas_agente).
+    top_agentes_tareas = [
+        (_nombre_para_mostrar(u, nombres_usuarios_ind), cant)
+        for u, cant in sorted(filas_tareas_agente, key=lambda x: x[1], reverse=True)[:5]
+    ]
 
     return {
         'total': total, 'por_estado': por_estado, 'por_prioridad': por_prioridad, 'por_tipo': por_tipo,
         'por_cumplimiento': por_cumplimiento, 'por_categoria': por_categoria,
         'por_area': por_area, 'por_sede': por_sede, 'dias_tendencia': dias_tendencia,
         'promedio_calificacion': promedio_calificacion, 'total_calificaciones': len(calificaciones),
-        'top_agentes': top_agentes
+        'top_agentes': top_agentes, 'top_agentes_tareas': top_agentes_tareas
     }
 
 
