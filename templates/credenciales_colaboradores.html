@@ -180,30 +180,40 @@
             <form method="POST" action="{{ url_for('crear_credencial_colaborador') }}" class="flex flex-col gap-3 text-xs">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
-                <div>
+                <div class="relative">
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
-                    <input type="text" name="colaborador" required list="lista_colaboradores" autocomplete="off" placeholder="Nombre del colaborador (existente o nuevo)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    {# 🔎 Busca por nombre o cédula en Gestión de Usuarios mientras se escribe (ver
+                       /usuarios/buscar) y sugiere coincidencias para elegir con un clic — pero el
+                       campo sigue siendo texto libre: si la persona todavía no tiene cuenta en Arkiv
+                       (empleado nuevo), se puede escribir su nombre igual que antes. #}
+                    <input type="text" name="colaborador" id="input-colaborador-alta" required list="lista_colaboradores"
+                           autocomplete="off" placeholder="Nombre del colaborador (existente o nuevo)"
+                           oninput="buscarColaboradorSugerencias(this.value)" onblur="setTimeout(ocultarSugerenciasColaborador, 150)"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
                     <datalist id="lista_colaboradores">
                         {% for c in colaboradores_existentes %}
                         <option value="{{ c }}"></option>
                         {% endfor %}
                     </datalist>
+                    <div id="sugerencias-colaborador" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo *</label>
-                        <select name="aplicativo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
-                            <option value="" disabled selected>Selecciona...</option>
-                            {% for a in aplicativos %}
-                            <option value="{{ a.nombre }}">{{ a.nombre }}</option>
-                            {% endfor %}
-                        </select>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo(s) *</label>
+                    <p class="text-slate-500 text-[10px] mb-1.5">Selecciona uno o varios — se crea una credencial por cada uno, con la misma contraseña.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 bg-slate-900/60 border border-slate-700 rounded-xl p-2.5">
+                        {% for a in aplicativos %}
+                        <label class="flex items-center gap-1.5 text-slate-300 text-[11px] px-1.5 py-1 rounded-lg hover:bg-slate-800 cursor-pointer">
+                            <input type="checkbox" name="aplicativos" value="{{ a.nombre }}" class="accent-fuchsia-500">
+                            {{ a.nombre }}
+                        </label>
+                        {% endfor %}
                     </div>
-                    <div>
-                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña asignada *</label>
-                        <input type="text" name="password" required placeholder="Clave asignada" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 font-mono">
-                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña asignada *</label>
+                    <input type="text" name="password" required placeholder="Clave asignada" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 font-mono">
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
@@ -372,6 +382,56 @@
             document.getElementById('modal-aplicativos').classList.add('hidden');
             document.getElementById('modal-aplicativos').classList.remove('flex');
         }
+
+        // 🔎 Sugerencias del campo "Colaborador": busca en Gestión de Usuarios por nombre o
+        // cédula mientras se escribe (ver /usuarios/buscar) — el campo sigue siendo texto libre,
+        // esto solo ofrece coincidencias para no tener que escribir el nombre completo de memoria.
+        var _timeoutSugerenciasColaborador = null;
+        function buscarColaboradorSugerencias(valor) {
+            clearTimeout(_timeoutSugerenciasColaborador);
+            var contenedor = document.getElementById('sugerencias-colaborador');
+            if (!valor || valor.trim().length < 2) {
+                contenedor.classList.add('hidden');
+                return;
+            }
+            _timeoutSugerenciasColaborador = setTimeout(function () {
+                fetch('/usuarios/buscar?q=' + encodeURIComponent(valor.trim()))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (!data.resultados || !data.resultados.length) {
+                            contenedor.classList.add('hidden');
+                            return;
+                        }
+                        contenedor.innerHTML = data.resultados.map(function (u) {
+                            var nombreEsc = u.nombre.replace(/'/g, "\\'");
+                            return '<button type="button" onclick="elegirColaborador(\'' + nombreEsc + '\')" ' +
+                                'class="w-full text-left px-3 py-2 hover:bg-slate-700 text-slate-200 border-b border-slate-700/50 last:border-0 flex items-center justify-between gap-2">' +
+                                '<span>' + u.nombre + '</span>' +
+                                (u.cedula ? '<span class="text-slate-500 font-mono text-[10px]">' + u.cedula + '</span>' : '') +
+                                '</button>';
+                        }).join('');
+                        contenedor.classList.remove('hidden');
+                    })
+                    .catch(function () { contenedor.classList.add('hidden'); });
+            }, 250);
+        }
+        function elegirColaborador(nombre) {
+            document.getElementById('input-colaborador-alta').value = nombre;
+            ocultarSugerenciasColaborador();
+        }
+        function ocultarSugerenciasColaborador() {
+            document.getElementById('sugerencias-colaborador').classList.add('hidden');
+        }
+
+        // ✅ Al menos un aplicativo marcado — los checkboxes no admiten "required" nativo para
+        // "al menos uno de N", así que se valida al enviar (el backend también lo exige).
+        document.querySelector('#modal-alta form').addEventListener('submit', function (e) {
+            var marcados = this.querySelectorAll('input[name="aplicativos"]:checked');
+            if (!marcados.length) {
+                e.preventDefault();
+                mostrarToast('Selecciona al menos un aplicativo');
+            }
+        });
     </script>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la

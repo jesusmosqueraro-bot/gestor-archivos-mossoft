@@ -286,6 +286,9 @@
             <div id="lecturas-cuerpo" class="overflow-y-auto text-xs space-y-4">
                 <p class="text-slate-500 text-center py-6">Cargando...</p>
             </div>
+            <a id="lecturas-exportar" href="#" class="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 justify-center pt-3 mt-1 border-t border-slate-700/60">
+                <i class="fa-solid fa-file-arrow-down"></i> Exportar a CSV
+            </a>
         </div>
     </div>
 
@@ -341,6 +344,7 @@
         function abrirModalLecturas(comId, titulo) {
             document.getElementById('lecturas-titulo').innerHTML = '<i class="fa-solid fa-eye text-emerald-400"></i> Lecturas — ' + titulo;
             document.getElementById('lecturas-cuerpo').innerHTML = '<p class="text-slate-500 text-center py-6">Cargando...</p>';
+            document.getElementById('lecturas-exportar').href = '/comunicados/' + comId + '/lecturas/exportar_csv';
             document.getElementById('modal-lecturas').classList.remove('hidden');
             document.getElementById('modal-lecturas').classList.add('flex');
 
@@ -351,7 +355,7 @@
                     html += '<div><h4 class="font-bold text-emerald-400 uppercase tracking-wider text-[10px] mb-1.5">Ya lo leyeron (' + data.leyeron.length + ')</h4>';
                     if (data.leyeron.length) {
                         html += '<ul class="space-y-1">' + data.leyeron.map(function (u) {
-                            return '<li class="flex items-center justify-between bg-slate-900/50 rounded-lg px-2.5 py-1.5"><span class="text-slate-200">' + u.nombre + '</span><span class="text-slate-500 font-mono text-[10px]">' + u.fecha + '</span></li>';
+                            return '<li class="flex items-center justify-between bg-slate-900/50 rounded-lg px-2.5 py-1.5"><span class="text-slate-200">' + u.nombre + (u.cedula ? ' <span class="text-slate-500 font-mono text-[10px]">(' + u.cedula + ')</span>' : '') + '</span><span class="text-slate-500 font-mono text-[10px]">' + u.fecha + '</span></li>';
                         }).join('') + '</ul>';
                     } else {
                         html += '<p class="text-slate-500 text-center py-2">Todavía nadie lo ha leído.</p>';

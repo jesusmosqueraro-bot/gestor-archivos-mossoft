@@ -130,7 +130,13 @@
                                 </div>
 
                                 <div class="flex items-center gap-2 text-slate-400 text-[11px] font-mono">
+                                    {% if rol in ['admin', 'agente'] %}
+                                    <button type="button" onclick="abrirModalVistas('{{ item.id }}', '{{ item.titulo|replace("'", "\\'") }}')" title="Ver quién lo ha visto" class="hover:text-white transition-colors">
+                                        <i class="fa-regular fa-eye"></i> <span id="vistas-{{ item.id }}">{{ item.vistas }}</span>
+                                    </button>
+                                    {% else %}
                                     <span title="Vistas"><i class="fa-regular fa-eye"></i> <span id="vistas-{{ item.id }}">{{ item.vistas }}</span></span>
+                                    {% endif %}
                                     <span title="Descargas"><i class="fa-solid fa-download text-blue-400"></i> <span id="descargas-{{ item.id }}">{{ item.descargas }}</span></span>
                                 </div>
                             </div>
@@ -377,6 +383,22 @@
         </div>
     </div>
 
+    <!-- MODAL VISTAS (quién ha visto este instructivo — solo admin/agente) -->
+    <div id="modal-vistas" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-3">
+                <h3 id="vistas-titulo" class="text-sm font-bold text-white flex items-center gap-2"><i class="fa-regular fa-eye text-blue-400"></i> Vistas</h3>
+                <button onclick="cerrarModalVistas()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="vistas-cuerpo" class="overflow-y-auto text-xs space-y-1.5 mb-3">
+                <p class="text-slate-500 text-center py-6">Cargando...</p>
+            </div>
+            <a id="vistas-exportar" href="#" class="text-[11px] font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1.5 justify-center pt-2 border-t border-slate-700/60">
+                <i class="fa-solid fa-file-arrow-down"></i> Exportar a CSV
+            </a>
+        </div>
+    </div>
+
     <!-- SCRIPTS MÉTRICAS Y PREVISUALIZACIÓN -->
     <script>
         function sumarVista(id) {
@@ -384,6 +406,36 @@
                 const el = document.getElementById(`vistas-${id}`);
                 if (el) el.innerText = parseInt(el.innerText || 0) + 1;
             });
+        }
+
+        function abrirModalVistas(galeriaId, titulo) {
+            document.getElementById('vistas-titulo').innerHTML = '<i class="fa-regular fa-eye text-blue-400"></i> Vistas — ' + titulo;
+            document.getElementById('vistas-cuerpo').innerHTML = '<p class="text-slate-500 text-center py-6">Cargando...</p>';
+            document.getElementById('vistas-exportar').href = '/galerias/' + galeriaId + '/vistas/exportar_csv';
+            document.getElementById('modal-vistas').classList.remove('hidden');
+            document.getElementById('modal-vistas').classList.add('flex');
+
+            fetch('/galerias/' + galeriaId + '/vistas')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.vistas || !data.vistas.length) {
+                        document.getElementById('vistas-cuerpo').innerHTML = '<p class="text-slate-500 text-center py-6">Todavía nadie lo ha visto.</p>';
+                        return;
+                    }
+                    var html = '<ul class="space-y-1">' + data.vistas.map(function (v) {
+                        return '<li class="flex items-center justify-between bg-slate-900/50 rounded-lg px-2.5 py-1.5">' +
+                            '<span class="text-slate-200">' + v.nombre + (v.cedula ? ' <span class="text-slate-500 font-mono text-[10px]">(' + v.cedula + ')</span>' : '') + '</span>' +
+                            '<span class="text-slate-500 font-mono text-[10px]">' + v.fecha + '</span></li>';
+                    }).join('') + '</ul>';
+                    document.getElementById('vistas-cuerpo').innerHTML = html;
+                })
+                .catch(function () {
+                    document.getElementById('vistas-cuerpo').innerHTML = '<p class="text-rose-400 text-center py-6">No se pudo cargar la información.</p>';
+                });
+        }
+        function cerrarModalVistas() {
+            document.getElementById('modal-vistas').classList.add('hidden');
+            document.getElementById('modal-vistas').classList.remove('flex');
         }
 
         function sumarDescarga(id) {
