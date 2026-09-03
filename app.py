@@ -621,6 +621,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, colaborador VARCHAR(150) NOT NULL, confirmado_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, observaciones TEXT
             )''')
+            # 🖼️ Panel de marca del login (imagen o video corto que rota junto al formulario de
+            # acceso). Administrable desde Novedades y Comunicados → "Fondo de Login" — ver
+            # _fondo_login_activo(). 'orden' decide en qué secuencia rotan los activos; 'estado'
+            # deja pausar un archivo sin borrarlo (y perder su historial/URL de Cloudinary).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
+                id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, url TEXT NOT NULL, public_id VARCHAR(200), orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo', fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL
+            )''')
             # 🗂️ Catálogo administrable de Tipos de activo (Portátil, Impresora, Servidor...),
             # inspirado en el módulo de Solvyx: cada tipo tiene una key estable, una etiqueta
             # visible, un ícono (nombre de ícono de Font Awesome, sin el prefijo 'fa-') y un
@@ -914,6 +921,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, colaborador TEXT NOT NULL, confirmado_por TEXT NOT NULL, fecha TEXT NOT NULL, observaciones TEXT, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, url TEXT NOT NULL, public_id TEXT, orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo', fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, etiqueta TEXT NOT NULL, icono TEXT DEFAULT 'box', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
@@ -1174,6 +1184,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_estado ON credenciales_colaboradores (estado);",
             "CREATE INDEX IF NOT EXISTS idx_galerias_vistas_galeria_id ON galerias_vistas (galeria_id);",
             "CREATE INDEX IF NOT EXISTS idx_inventario_devoluciones_activo_id ON inventario_devoluciones (activo_id);",
+            "CREATE INDEX IF NOT EXISTS idx_login_fondo_media_estado ON login_fondo_media (estado);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_usuario ON documentos_empleado (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_estado ON documentos_empleado (estado);",
             "CREATE INDEX IF NOT EXISTS idx_totp_codigos_respaldo_usuario ON totp_codigos_respaldo (usuario);",
@@ -1670,7 +1681,7 @@ def visor_db():
         'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
         'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
         'ticket_configuraciones', 'activos_inventario', 'inventario_devoluciones', 'aplicativos_catalogo',
-        'credenciales_colaboradores'
+        'credenciales_colaboradores', 'login_fondo_media'
     ]
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
@@ -1757,7 +1768,7 @@ TABLAS_RESPALDO = [
     'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
     'activos_inventario', 'inventario_adjuntos', 'inventario_devoluciones', 'aplicativos_catalogo',
-    'credenciales_colaboradores'
+    'credenciales_colaboradores', 'login_fondo_media'
 ]
 
 
@@ -2259,6 +2270,136 @@ def eliminar_comunicado(com_id):
     # siempre. Ahora se redirige directo a la Papelera con la pestaña de Comunicados ya abierta,
     # para que quede claro que sigue ahí y se puede restaurar.
     return redirect(url_for('ver_papelera', tab='comunicados'))
+
+
+# 🖼️ FONDO DE LOGIN — panel de marca (imagen/video corto, uno o varios rotando) que se
+# muestra junto al formulario de /login. Vive bajo Novedades y Comunicados (mismo permiso,
+# agente_o_admin_required) porque es contenido institucional igual que los comunicados,
+# aunque su tabla (login_fondo_media) y su plantilla son propias — ver _fondo_login_activo().
+@app.route('/comunicados/fondo_login')
+@login_required
+@agente_o_admin_required
+def ver_fondo_login():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    items = []
+    try:
+        cursor.execute("SELECT id, tipo, url, orden, estado, fecha_creacion, creado_por FROM login_fondo_media ORDER BY orden ASC, id ASC")
+        items = [{'id': r[0], 'tipo': r[1], 'url': r[2], 'orden': r[3], 'estado': r[4],
+                  'fecha_creacion': r[5], 'creado_por': r[6]} for r in cursor.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error consultando el fondo de login: {e}")
+    conn.close()
+    return render_template('fondo_login.html', items=items)
+
+
+@app.route('/comunicados/fondo_login/subir', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def subir_fondo_login():
+    archivo = request.files.get('archivo')
+    tipo, url, public_id, error = _subir_fondo_login(archivo)
+    if error:
+        flash(error, "error")
+        return redirect(url_for('ver_fondo_login'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM login_fondo_media")
+        siguiente_orden = cursor.fetchone()[0] + 1
+        fecha_act = obtener_fecha_actual()
+        q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, 'activo', %s, %s)"
+             if db_type == 'postgres' else
+             "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, 'activo', ?, ?)")
+        cursor.execute(q, (tipo, url, public_id, siguiente_orden, fecha_act, session.get('username')))
+        conn.commit()
+        registrar_log(session.get('username'), "Fondo de Login", f"Se agregó un(a) {tipo} nuevo al panel de marca del login ('{archivo.filename}')")
+        flash("Archivo agregado al fondo de login.", "exito")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error guardando el fondo de login: {e}")
+        flash("El archivo se subió, pero no se pudo guardar el registro. Intenta de nuevo.", "error")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
+
+
+@app.route('/comunicados/fondo_login/<int:item_id>/toggle', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def toggle_fondo_login(item_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT estado FROM login_fondo_media WHERE id = {ph}", (item_id,))
+        row = cursor.fetchone()
+        if row:
+            nuevo_estado = 'inactivo' if row[0] == 'activo' else 'activo'
+            cursor.execute(f"UPDATE login_fondo_media SET estado = {ph} WHERE id = {ph}", (nuevo_estado, item_id))
+            conn.commit()
+            registrar_log(session.get('username'), "Fondo de Login", f"Se marcó el archivo #{item_id} como '{nuevo_estado}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error cambiando estado del fondo de login {item_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
+
+
+@app.route('/comunicados/fondo_login/<int:item_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_fondo_login(item_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT tipo, public_id FROM login_fondo_media WHERE id = {ph}", (item_id,))
+        row = cursor.fetchone()
+        if row:
+            tipo, public_id = row
+            cursor.execute(f"DELETE FROM login_fondo_media WHERE id = {ph}", (item_id,))
+            conn.commit()
+            registrar_log(session.get('username'), "Fondo de Login", f"Se eliminó del panel de marca del login el archivo #{item_id}")
+            if public_id:
+                try:
+                    cloudinary.uploader.destroy(public_id, resource_type=('video' if tipo == 'video' else 'image'))
+                except Exception as e:
+                    print(f"⚠️ No se pudo borrar de Cloudinary el archivo de fondo de login #{item_id} ({public_id}): {e}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error eliminando el fondo de login {item_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
+
+
+@app.route('/comunicados/fondo_login/<int:item_id>/mover/<direccion>', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def mover_fondo_login(item_id, direccion):
+    """Sube o baja un archivo en el orden de rotación, intercambiando su 'orden' con el del
+    vecino inmediato — mismo patrón que el reordenamiento de Tipos de Activo del Inventario."""
+    if direccion not in ('subir', 'bajar'):
+        return redirect(url_for('ver_fondo_login'))
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, orden FROM login_fondo_media ORDER BY orden ASC, id ASC")
+        filas = cursor.fetchall()
+        posicion = next((i for i, f in enumerate(filas) if f[0] == item_id), None)
+        vecino_pos = posicion - 1 if direccion == 'subir' else posicion + 1
+        if posicion is not None and 0 <= vecino_pos < len(filas):
+            id_actual, orden_actual = filas[posicion]
+            id_vecino, orden_vecino = filas[vecino_pos]
+            ph = '%s' if db_type == 'postgres' else '?'
+            cursor.execute(f"UPDATE login_fondo_media SET orden = {ph} WHERE id = {ph}", (orden_vecino, id_actual))
+            cursor.execute(f"UPDATE login_fondo_media SET orden = {ph} WHERE id = {ph}", (orden_actual, id_vecino))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error reordenando el fondo de login: {e}")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
 
 @app.route('/comunicados/<int:com_id>/lecturas')
 @login_required
@@ -3053,6 +3194,49 @@ def _subir_foto_perfil(file):
     except Exception as e:
         print(f"⚠️ Error subiendo foto de perfil: {e}")
         return None, 'No se pudo subir la imagen. Intenta de nuevo.'
+
+
+# 🖼️ FONDO DE LOGIN (panel de marca que rota junto al formulario de acceso, ver
+# _fondo_login_activo/login_fondo_media) — deliberadamente más estricto que
+# _subir_archivo_a_cloudinary: solo imagen o video corto (nada de PDF/zip/docx, esto se
+# muestra en la pantalla PÚBLICA de inicio de sesión) y con un tope de tamaño bajo, para no
+# volver lento el login — es lo primero que carga cualquier persona, cada vez.
+EXTENSIONES_FONDO_LOGIN_IMAGEN = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+EXTENSIONES_FONDO_LOGIN_VIDEO = {'mp4', 'mov', 'webm'}
+TAMANO_MAXIMO_FONDO_LOGIN = 60 * 1024 * 1024  # 60 MB: de sobra para un video corto de marca bien comprimido
+
+def _subir_fondo_login(file):
+    """Sube una imagen o video corto para el panel de marca del login. Devuelve
+    (tipo, url, public_id, error) — tipo es 'imagen' o 'video'; si algo no es válido, los
+    tres primeros vienen en None y 'error' trae el mensaje para mostrar."""
+    if not file or not file.filename:
+        return None, None, None, 'No se recibió ningún archivo.'
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext in EXTENSIONES_FONDO_LOGIN_VIDEO:
+        tipo = 'video'
+    elif ext in EXTENSIONES_FONDO_LOGIN_IMAGEN:
+        tipo = 'imagen'
+    else:
+        return None, None, None, 'Formato no permitido. Usa una imagen (JPG, PNG, GIF, WEBP) o un video corto (MP4, MOV, WEBM).'
+    file.stream.seek(0, os.SEEK_END)
+    tamano = file.stream.tell()
+    file.stream.seek(0)
+    if tamano > TAMANO_MAXIMO_FONDO_LOGIN:
+        return None, None, None, 'El archivo no puede superar 60 MB — entre más liviano, más rápido carga el login para todos.'
+    try:
+        if tipo == 'video':
+            upload_result = cloudinary.uploader.upload_large(
+                file.stream, resource_type="video", filename=file.filename,
+                use_filename=True, unique_filename=True, chunk_size=6000000, timeout=600
+            )
+        else:
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="image", use_filename=True, unique_filename=True, timeout=60
+            )
+        return tipo, upload_result['secure_url'], upload_result.get('public_id'), None
+    except Exception as e:
+        print(f"⚠️ Error subiendo archivo de fondo de login '{file.filename}': {e}")
+        return None, None, None, 'No se pudo subir el archivo a Cloudinary. Intenta de nuevo.'
 
 
 def _marcar_comunicado_leido(comunicado_id, usuario):
@@ -6446,6 +6630,34 @@ def validar_codigo():
         conn.close()
         return render_template('recuperar.html', paso=2, email=email_usuario, error="Ocurrió un error al actualizar la contraseña.")
 
+def _fondo_login_activo():
+    """Imágenes/videos activos para el panel de marca del login (ver login_fondo_media),
+    en el orden en que deben rotar. Se consulta en cada render de /login a propósito —el
+    login no usa caché de plantillas— pero es una sola query liviana (pocas filas, sin
+    joins) y así un cambio recién publicado por Comunicados se ve de inmediato, sin esperar
+    a un reinicio del servidor. Si la tabla no existe todavía (despliegue viejo) o la query
+    falla por lo que sea, se devuelve vacío y el login sencillamente no muestra el panel —
+    nunca debe tumbar la página de inicio de sesión."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT tipo, url FROM login_fondo_media WHERE estado = 'activo' ORDER BY orden ASC, id ASC")
+        filas = [{'tipo': t, 'url': u} for t, u in cursor.fetchall()]
+        conn.close()
+        return filas
+    except Exception as e:
+        print(f"⚠️ Error consultando el fondo del login (se omite el panel): {e}")
+        return []
+
+
+def _render_login(**kwargs):
+    """Único punto por el que /login renderiza login.html: así el panel de marca
+    (fondo_media) siempre viaja junto, sin tener que repetir la consulta en cada uno de los
+    ~10 lugares donde /login puede devolver la plantilla (éxito, error de clave, cuenta
+    bloqueada, etc.)."""
+    return render_template('login.html', fondo_media=_fondo_login_activo(), **kwargs)
+
+
 # 🔑 LOGIN
 @app.route('/login', methods=['GET', 'POST'])
 @limiter.limit("20 per minute", methods=["POST"])
@@ -6457,7 +6669,7 @@ def login():
             recaptcha_response = request.form.get('g-recaptcha-response')
 
             if not verificar_recaptcha(recaptcha_response):
-                return render_template('login.html', error="Por favor, marca la casilla 'No soy un robot'.")
+                return _render_login(error="Por favor, marca la casilla 'No soy un robot'.")
 
             try:
                 conn, db_type = get_db()
@@ -6487,7 +6699,7 @@ def login():
                 # confirma a un tercero que adivina contraseñas si una cuenta está bloqueada o no.
                 if es_valida and len(user) > 8 and user[8]:
                     registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso (con contraseña correcta) a una cuenta bloqueada por intentos fallidos.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
-                    return render_template('login.html', error="Tu cuenta quedó bloqueada por varios intentos fallidos de inicio de sesión. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
+                    return _render_login(error="Tu cuenta quedó bloqueada por varios intentos fallidos de inicio de sesión. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
 
                 if es_valida:
                     # Contraseña correcta y cuenta no bloqueada por intentos: se rompió la racha
@@ -6499,7 +6711,7 @@ def login():
                     # por un administrador no debe poder iniciar sesión aunque su clave sea correcta.
                     if (user[3] or 'activo') == 'inactivo':
                         registrar_log(user[0], "Inicio de Sesión Bloqueado", "Intento de acceso de una cuenta desactivada.", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
-                        return render_template('login.html', error="Tu cuenta ha sido desactivada. Contacta a un administrador.")
+                        return _render_login(error="Tu cuenta ha sido desactivada. Contacta a un administrador.")
 
                     # 🔐 Si la cuenta tiene activada la verificación en dos pasos, la sesión NO se
                     # abre todavía: se guarda solo un marcador "pre-2FA" (session['logged_in']
@@ -6534,21 +6746,21 @@ def login():
                     # que se bloquee la cuenta.
                     bloqueada, intentos_restantes = _registrar_intento_fallido_login(user[0])
                     if bloqueada:
-                        return render_template('login.html', error="Contraseña incorrecta. Por seguridad, la cuenta quedó bloqueada tras varios intentos fallidos. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
+                        return _render_login(error="Contraseña incorrecta. Por seguridad, la cuenta quedó bloqueada tras varios intentos fallidos. Cámbiala desde \"¿Olvidaste tu clave?\" o pide a un administrador que la desbloquee.")
                     if intentos_restantes == 1:
-                        return render_template('login.html', error="Usuario o contraseña incorrectos. Te queda 1 intento antes de que la cuenta se bloquee por seguridad.")
-                    return render_template('login.html', error=f"Usuario o contraseña incorrectos. Te quedan {intentos_restantes} intentos antes de que la cuenta se bloquee por seguridad.")
+                        return _render_login(error="Usuario o contraseña incorrectos. Te queda 1 intento antes de que la cuenta se bloquee por seguridad.")
+                    return _render_login(error=f"Usuario o contraseña incorrectos. Te quedan {intentos_restantes} intentos antes de que la cuenta se bloquee por seguridad.")
             except Exception as db_err:
                 print(f"Error consultando usuario en BD: {db_err}")
 
-            return render_template('login.html', error="Usuario o contraseña incorrectos.")
+            return _render_login(error="Usuario o contraseña incorrectos.")
 
         except Exception as e:
             print(f"Error general en login: {e}")
-            return render_template('login.html', error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
+            return _render_login(error="Ocurrió un error en el servidor. Por favor intenta de nuevo.")
 
     mensaje_expirado = "⚠️ Tu sesión ha expirado. Por favor ingresa nuevamente." if request.args.get('expirado') == '1' else None
-    return render_template('login.html', mensaje_expirado=mensaje_expirado)
+    return _render_login(mensaje_expirado=mensaje_expirado)
 
 
 @app.route('/login/2fa', methods=['GET', 'POST'])
@@ -6628,7 +6840,7 @@ def login_2fa():
             session.pop('pre_2fa_usuario', None)
             session.pop('pre_2fa_expira', None)
             session.pop('pre_2fa_intentos', None)
-            return render_template('login.html', error="Demasiados intentos fallidos. Vuelve a iniciar sesión.")
+            return _render_login(error="Demasiados intentos fallidos. Vuelve a iniciar sesión.")
 
         error = "El código ingresado no es válido. Verifica la hora de tu dispositivo o usa un código de respaldo."
 
