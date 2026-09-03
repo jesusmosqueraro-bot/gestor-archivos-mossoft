@@ -11,92 +11,135 @@
 </head>
 <body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
 
-    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
-        
-        <!-- ENCABEZADO CON LOGO NÓRDICO ATEMPORAL -->
-        <div class="text-center mb-6">
-            <!-- ISOTIPO VECTORIAL ARKIV -->
-            <div class="w-16 h-16 mx-auto mb-3 drop-shadow-md">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full">
-                    <defs>
-                        <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#020617;stop-opacity:1" />
-                        </linearGradient>
-                        <linearGradient id="platLight" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
-                        </linearGradient>
-                        <linearGradient id="steelG" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect width="100" height="100" rx="22" fill="url(#bgSlate)"/>
-                    <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
-                    <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLight)" />
-                    <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelG)" />
-                    <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
-                    <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLight)" />
-                    <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
-                    <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
-                </svg>
-            </div>
+    <div class="w-full max-w-4xl flex items-stretch justify-center gap-6">
 
-            <h1 class="text-2xl font-black text-slate-800 tracking-tight font-serif">Arkiv</h1>
-            <div class="h-0.5 w-8 bg-slate-200 mx-auto my-2 rounded-full"></div>
-            <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Documentos y Archivo</p>
+        {% if fondo_media %}
+        <!-- 🖼️ PANEL DE MARCA (imagen/video corto, administrable desde Novedades y Comunicados
+             → Fondo de Login). Oculto en celular a propósito: en pantalla angosta solo importa
+             que el login cargue rápido y sea fácil de usar; el panel es puramente decorativo. -->
+        <div class="hidden md:block md:w-80 lg:w-96 rounded-3xl overflow-hidden shadow-2xl relative flex-shrink-0">
+            {% for item in fondo_media %}
+            <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
+                {% if item.tipo == 'video' %}
+                <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-cover"></video>
+                {% else %}
+                <img src="{{ item.url }}" alt="" class="w-full h-full object-cover">
+                {% endif %}
+            </div>
+            {% endfor %}
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent pointer-events-none"></div>
         </div>
-
-        {% if error %}
-            <div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl font-medium text-center">
-                ⚠️ {{ error }}
-            </div>
         {% endif %}
 
-        {% if mensaje_expirado %}
-            <div class="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl font-medium text-center">
-                {{ mensaje_expirado }}
-            </div>
-        {% endif %}
+        <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100 flex-shrink-0">
 
-        <!-- Formulario Login -->
-        <form action="/login" method="POST" class="flex flex-col gap-4">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <div>
-                <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
-                <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
-            </div>
-
-            <div>
-                <div class="flex justify-between items-center mb-1">
-                    <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
-                    <a href="/recuperar" class="text-[11px] text-blue-600 hover:underline font-medium">¿Olvidaste tu clave?</a>
+            <!-- ENCABEZADO CON LOGO NÓRDICO ATEMPORAL -->
+            <div class="text-center mb-6">
+                <!-- ISOTIPO VECTORIAL ARKIV -->
+                <div class="w-16 h-16 mx-auto mb-3 drop-shadow-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full">
+                        <defs>
+                            <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#020617;stop-opacity:1" />
+                            </linearGradient>
+                            <linearGradient id="platLight" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
+                            </linearGradient>
+                            <linearGradient id="steelG" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
+                            </linearGradient>
+                        </defs>
+                        <rect width="100" height="100" rx="22" fill="url(#bgSlate)"/>
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLight)" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelG)" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLight)" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
                 </div>
-                <input type="password" name="contrasena" placeholder="••••" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+
+                <h1 class="text-2xl font-black text-slate-800 tracking-tight font-serif">Arkiv</h1>
+                <div class="h-0.5 w-8 bg-slate-200 mx-auto my-2 rounded-full"></div>
+                <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Documentos y Archivo</p>
             </div>
 
-            <!-- reCAPTCHA v2 con Clave de Sitio Oficial -->
-            <div class="flex justify-center my-1">
-                <div class="g-recaptcha scale-90 sm:scale-100 origin-center" data-sitekey="6LcU0mAtAAAAAOj_aciK31VM2nAuECZQe0-G36Ph"></div>
+            {% if error %}
+                <div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl font-medium text-center">
+                    ⚠️ {{ error }}
+                </div>
+            {% endif %}
+
+            {% if mensaje_expirado %}
+                <div class="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl font-medium text-center">
+                    {{ mensaje_expirado }}
+                </div>
+            {% endif %}
+
+            <!-- Formulario Login -->
+            <form action="/login" method="POST" class="flex flex-col gap-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
+                    <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
+                        <a href="/recuperar" class="text-[11px] text-blue-600 hover:underline font-medium">¿Olvidaste tu clave?</a>
+                    </div>
+                    <input type="password" name="contrasena" placeholder="••••" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+                </div>
+
+                <!-- reCAPTCHA v2 con Clave de Sitio Oficial -->
+                <div class="flex justify-center my-1">
+                    <div class="g-recaptcha scale-90 sm:scale-100 origin-center" data-sitekey="6LcU0mAtAAAAAOj_aciK31VM2nAuECZQe0-G36Ph"></div>
+                </div>
+
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
+                    Iniciar Sesión →
+                </button>
+            </form>
+
+            <!-- Pie de página informativo -->
+            <div class="mt-6 pt-4 border-t border-slate-100 text-center">
+                <p class="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
+                    🔒 Conexión segura y cifrada
+                </p>
+                <p class="text-[10px] text-slate-400 mt-1">
+                    <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-100">v1.3.0 Pro</span> • Powered by <strong class="text-slate-600">MosSoft</strong>
+                </p>
             </div>
 
-            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
-                Iniciar Sesión →
-            </button>
-        </form>
-
-        <!-- Pie de página informativo -->
-        <div class="mt-6 pt-4 border-t border-slate-100 text-center">
-            <p class="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
-                🔒 Conexión segura y cifrada
-            </p>
-            <p class="text-[10px] text-slate-400 mt-1">
-                <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-100">v1.3.0 Pro</span> • Powered by <strong class="text-slate-600">MosSoft</strong>
-            </p>
         </div>
 
     </div>
+
+    {% if fondo_media|length > 1 %}
+    <script>
+        // 🎞️ Rotación simple del panel de marca (ver Fondo de Login) — sin librerías externas,
+        // solo alterna la opacidad entre slides cada 6 segundos. Si solo hay un archivo activo,
+        // este bloque ni siquiera se imprime (ver la condición Jinja de arriba) y el archivo
+        // se queda fijo, sin parpadeos.
+        (function () {
+            var slides = document.querySelectorAll('.fondo-login-slide');
+            if (slides.length < 2) return;
+            var actual = 0;
+            setInterval(function () {
+                slides[actual].classList.remove('opacity-100');
+                slides[actual].classList.add('opacity-0');
+                actual = (actual + 1) % slides.length;
+                slides[actual].classList.remove('opacity-0');
+                slides[actual].classList.add('opacity-100');
+            }, 6000);
+        })();
+    </script>
+    {% endif %}
 
 </body>
 </html>
