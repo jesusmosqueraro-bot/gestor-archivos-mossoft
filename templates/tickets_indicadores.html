@@ -55,6 +55,7 @@
             <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
             <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/mis_tareas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-list-check mr-1.5"></i>Mis Tareas</a>
             <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
             <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
             <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
@@ -142,6 +143,28 @@
             </div>
             {% else %}
             <p class="text-xs text-slate-500 text-center py-4">Todavía no hay solicitudes resueltas por agente.</p>
+            {% endif %}
+        </div>
+
+        <!-- TOP AGENTES POR TAREAS: aproximación a las "Horas-Hombre" de Aranda Service Desk,
+             contando tareas internas completadas (ver módulo Tareas / Mis Tareas) en vez de
+             tickets resueltos, ya que Arkiv no pide registrar duración exacta. -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3">Top agentes por tareas completadas</h3>
+            {% if top_agentes_tareas %}
+            <div class="space-y-2">
+                {% for agente, cantidad in top_agentes_tareas %}
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold text-slate-300 w-32 truncate">{{ agente }}</span>
+                    <div class="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full bg-sky-500 rounded-full" style="width: {{ (cantidad / top_agentes_tareas[0][1] * 100) | round }}%"></div>
+                    </div>
+                    <span class="text-xs font-mono text-slate-400 w-8 text-right">{{ cantidad }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-xs text-slate-500 text-center py-4">Todavía no hay tareas completadas por agente.</p>
             {% endif %}
         </div>
 

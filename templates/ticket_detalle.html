@@ -47,6 +47,7 @@
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
             {% if es_soporte %}
             <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/mis_tareas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-list-check mr-1.5"></i>Mis Tareas</a>
             <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
             <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
             <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
@@ -56,6 +57,16 @@
 
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- MENSAJES (p.ej. bloqueo de cierre por tareas pendientes, ver actualizar_ticket) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+            {% endfor %}
+        {% endwith %}
 
         <!-- CABECERA DEL TICKET -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
@@ -430,7 +441,10 @@
             <div class="flex items-center justify-between mb-3">
                 <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                     <i class="fa-solid fa-list-check text-orange-400"></i> Tareas
-                    {% if tareas %}<span class="text-slate-500 normal-case font-normal">({{ tareas | selectattr('estado', 'equalto', 'completada') | list | length }}/{{ tareas | length }} completadas)</span>{% endif %}
+                    {% if tareas %}
+                    {% set canceladas_ct = tareas | selectattr('estado', 'equalto', 'cancelada') | list | length %}
+                    <span class="text-slate-500 normal-case font-normal">({{ tareas | selectattr('estado', 'equalto', 'completada') | list | length }}/{{ tareas | length }} completadas{% if canceladas_ct %} · {{ canceladas_ct }} cancelada{{ 's' if canceladas_ct != 1 }}{% endif %})</span>
+                    {% endif %}
                 </h3>
                 <button type="button" onclick="document.getElementById('form-nueva-tarea').classList.toggle('hidden')" class="text-[10px] text-sky-400 hover:text-sky-300 font-bold whitespace-nowrap">
                     <i class="fa-solid fa-plus mr-1"></i>Nueva tarea
@@ -441,21 +455,27 @@
             <div class="space-y-2 mb-4">
                 {% for t in tareas %}
                 <div class="flex items-start gap-3 bg-slate-900/50 border border-slate-700/50 rounded-xl p-3">
-                    <form method="POST" action="/tickets/{{ ticket.id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                        <input type="hidden" name="estado" value="{{ 'pendiente' if t.estado == 'completada' else 'completada' }}"/>
-                        <button type="submit" title="{{ 'Marcar como pendiente' if t.estado == 'completada' else 'Marcar como completada' }}" class="w-4 h-4 rounded border {{ 'bg-emerald-500 border-emerald-500' if t.estado == 'completada' else 'border-slate-500 hover:border-orange-400' }} flex items-center justify-center">
-                            {% if t.estado == 'completada' %}<i class="fa-solid fa-check text-[9px] text-white"></i>{% endif %}
-                        </button>
-                    </form>
                     <div class="flex-1 min-w-0">
-                        <p class="text-xs text-slate-200 {% if t.estado == 'completada' %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
+                        <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
                         {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5">{{ t.descripcion }}</p>{% endif %}
                         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
                             {% if t.responsable_nombre %}<span><i class="fa-solid fa-user mr-1"></i>{{ t.responsable_nombre }}</span>{% endif %}
                             {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
                         </div>
                     </div>
+                    {# 🚦 Las 4 posibles fases de una tarea (pendiente/en_progreso/completada/cancelada,
+                       ver cambiar_estado_tarea_ticket en app.py). 'cancelada' es para una tarea que ya
+                       no aplica: junto con 'completada', es lo que actualizar_ticket() exige para poder
+                       marcar el ticket como Resuelto/Cerrado. #}
+                    <form method="POST" action="/tickets/{{ ticket.id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <select name="estado" onchange="this.form.submit()" class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                            <option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>
+                            <option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>
+                            <option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>
+                        </select>
+                    </form>
                     <form method="POST" action="/tickets/{{ ticket.id }}/tareas/{{ t.id }}/eliminar" onsubmit="return confirm('¿Eliminar esta tarea?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" title="Eliminar tarea" class="text-slate-600 hover:text-rose-400 text-xs px-1"><i class="fa-solid fa-trash"></i></button>

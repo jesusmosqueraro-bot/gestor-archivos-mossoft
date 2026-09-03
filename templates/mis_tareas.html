@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Mis Tareas</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+</head>
+<body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-list-check text-orange-400"></i> Mis Tareas
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/buscador.html' %}
+            {% include 'partials/historial_sesiones_boton.html' %}
+            {% include 'partials/seguridad_boton.html' %}
+            {% include 'partials/perfil_boton.html' %}
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-4xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/mis_tareas" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-list-check mr-1.5"></i>Mis Tareas</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- MENSAJES -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="flex items-center justify-between gap-3">
+            <p class="text-xs text-slate-400">
+                {% if ver_todas %}Todas las tareas que te han asignado, en cualquier ticket.{% else %}Tareas activas (pendiente o en progreso) que te han asignado, en cualquier ticket.{% endif %}
+            </p>
+            <a href="{{ '/tickets/mis_tareas' if ver_todas else '/tickets/mis_tareas?todas=1' }}" class="text-[11px] font-bold text-orange-400 hover:text-orange-300 whitespace-nowrap">
+                {% if ver_todas %}<i class="fa-solid fa-filter mr-1"></i>Ver solo activas{% else %}<i class="fa-solid fa-list mr-1"></i>Ver completadas y canceladas{% endif %}
+            </a>
+        </div>
+
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 shadow-xl">
+            {% if tareas %}
+            <div class="space-y-2">
+                {% for t in tareas %}
+                <div class="flex items-start gap-3 bg-slate-900/50 border border-slate-700/50 rounded-xl p-3">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                            <a href="/tickets/{{ t.ticket_id }}" class="text-[10px] font-mono text-sky-400 hover:text-sky-300 font-bold">{{ t.ticket_codigo }}</a>
+                            <span class="text-[10px] text-slate-500">{{ t.ticket_titulo }}</span>
+                        </div>
+                        <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
+                        {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5">{{ t.descripcion }}</p>{% endif %}
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
+                            {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
+                            <span><i class="fa-solid fa-flag mr-1"></i>Ticket: {{ t.ticket_estado }}</span>
+                        </div>
+                    </div>
+                    <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="hidden" name="origen" value="mis_tareas"/>
+                        <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
+                        <select name="estado" onchange="this.form.submit()" class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                            <option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>
+                            <option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>
+                            <option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>
+                        </select>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-500 text-xs text-center py-8">
+                {% if ver_todas %}No tienes tareas asignadas todavía.{% else %}No tienes tareas pendientes por ahora — buen trabajo.{% endif %}
+            </p>
+            {% endif %}
+        </div>
+
+    </main>
+
+</body>
+</html>
