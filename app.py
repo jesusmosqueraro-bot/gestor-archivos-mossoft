@@ -546,6 +546,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id VARCHAR(50) PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, fecha_subida VARCHAR(100), categoria VARCHAR(100) DEFAULT 'General', area VARCHAR(100) DEFAULT 'General', tipo VARCHAR(100) DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado VARCHAR(50) DEFAULT 'activo'
             )''')
+            # 👁️ Quién ha visto cada instructivo (UNIQUE por usuario: guarda la fecha de la
+            # PRIMERA vista, igual que comunicados_leidos — no es un log de cada vista repetida).
+            # 'vistas' en 'galerias' sigue siendo el contador de TODAS las vistas (no cambia);
+            # esta tabla es aparte, solo para poder mostrar/exportar quién y cuándo.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias_vistas (
+                id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, usuario VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, UNIQUE(galeria_id, usuario)
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original VARCHAR(255) NOT NULL DEFAULT '', estado VARCHAR(50) DEFAULT 'activo'
             )''')
@@ -845,6 +852,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS galerias (
                 id TEXT PRIMARY KEY, titulo TEXT NOT NULL, descripcion TEXT, fecha_subida TEXT, categoria TEXT DEFAULT 'General', area TEXT DEFAULT 'General', tipo TEXT DEFAULT 'Instructivo', tags TEXT DEFAULT '', vistas INTEGER DEFAULT 0, descargas INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+            )''')
+            # 👁️ Quién ha visto cada instructivo. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS galerias_vistas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT NOT NULL, usuario TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE, UNIQUE(galeria_id, usuario)
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original TEXT NOT NULL DEFAULT '', estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
@@ -1150,6 +1161,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario_leida ON notificaciones (usuario, leida);",
             "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_colaborador ON credenciales_colaboradores (colaborador);",
             "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_estado ON credenciales_colaboradores (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_galerias_vistas_galeria_id ON galerias_vistas (galeria_id);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_usuario ON documentos_empleado (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_estado ON documentos_empleado (estado);",
             "CREATE INDEX IF NOT EXISTS idx_totp_codigos_respaldo_usuario ON totp_codigos_respaldo (usuario);",
@@ -2226,20 +2238,21 @@ def eliminar_comunicado(com_id):
 @agente_o_admin_required
 def lecturas_comunicado(com_id):
     """JSON con quién (de las cuentas activas) ya leyó este comunicado y quién falta —
-    usado por el modal de "Ver lecturas" en el muro de Comunicados."""
+    usado por el modal de "Ver lecturas" en el muro de Comunicados. Incluye la cédula de quien
+    leyó (cuando la tiene registrada) para poder identificarlo sin ambigüedad al exportar."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT usuario, COALESCE(nombre, usuario) FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC")
-        todos = {r[0]: r[1] for r in cursor.fetchall()}
+        cursor.execute("SELECT usuario, COALESCE(nombre, usuario), cedula FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC")
+        todos = {r[0]: {'nombre': r[1], 'cedula': r[2] or ''} for r in cursor.fetchall()}
 
         q = "SELECT usuario, fecha FROM comunicados_leidos WHERE comunicado_id = %s" if db_type == 'postgres' else "SELECT usuario, fecha FROM comunicados_leidos WHERE comunicado_id = ?"
         cursor.execute(q, (com_id,))
         leidos = {r[0]: r[1] for r in cursor.fetchall()}
         conn.close()
 
-        leyeron = [{'usuario': u, 'nombre': todos.get(u, u), 'fecha': f} for u, f in leidos.items() if u in todos]
-        faltan = [{'usuario': u, 'nombre': n} for u, n in todos.items() if u not in leidos]
+        leyeron = [{'usuario': u, 'nombre': todos[u]['nombre'], 'cedula': todos[u]['cedula'], 'fecha': f} for u, f in leidos.items() if u in todos]
+        faltan = [{'usuario': u, 'nombre': info['nombre']} for u, info in todos.items() if u not in leidos]
         leyeron.sort(key=lambda x: x['fecha'], reverse=True)
         faltan.sort(key=lambda x: x['nombre'].lower())
         return {'leyeron': leyeron, 'faltan': faltan, 'total': len(todos)}
@@ -2247,6 +2260,43 @@ def lecturas_comunicado(com_id):
         conn.close()
         print(f"⚠️ Error listando lecturas del comunicado {com_id}: {e}")
         return {'leyeron': [], 'faltan': [], 'total': 0}
+
+
+@app.route('/comunicados/<int:com_id>/lecturas/exportar_csv')
+@login_required
+@agente_o_admin_required
+def exportar_lecturas_comunicado(com_id):
+    """CSV de quién ha leído este comunicado (nombre, cédula, usuario, fecha) — quien falta por
+    leer no tiene fecha de lectura, así que no aplica a este export (ver panel de Cumplimiento
+    para el detalle de quién falta)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_tit = "SELECT titulo FROM comunicados WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM comunicados WHERE id = ?"
+        cursor.execute(q_tit, (com_id,))
+        fila_tit = cursor.fetchone()
+        titulo = fila_tit[0] if fila_tit else str(com_id)
+
+        q = (
+            "SELECT COALESCE(u.nombre, cl.usuario), u.cedula, cl.usuario, cl.fecha "
+            "FROM comunicados_leidos cl LEFT JOIN usuarios u ON u.usuario = cl.usuario "
+            "WHERE cl.comunicado_id = %s ORDER BY cl.fecha DESC"
+        ) if db_type == 'postgres' else (
+            "SELECT COALESCE(u.nombre, cl.usuario), u.cedula, cl.usuario, cl.fecha "
+            "FROM comunicados_leidos cl LEFT JOIN usuarios u ON u.usuario = cl.usuario "
+            "WHERE cl.comunicado_id = ? ORDER BY cl.fecha DESC"
+        )
+        cursor.execute(q, (com_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error exportando lecturas del comunicado {com_id}: {e}")
+        filas = []
+    conn.close()
+
+    registrar_log(session.get('username'), "Exportación de Lecturas de Comunicado", f"Exportó las lecturas de '{titulo}'")
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    nombre_limpio = re.sub(r'[^A-Za-z0-9_-]+', '_', titulo)[:60]
+    return _exportar_csv_personas(f"Arkiv_Lecturas_{nombre_limpio}_{fecha_filename}.csv", filas)
 
 
 @app.route('/comunicados/cumplimiento')
@@ -6433,6 +6483,19 @@ def incrementar_vista(galeria_id):
         cursor = conn.cursor()
         q = "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = %s" if db_type == 'postgres' else "UPDATE galerias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?"
         cursor.execute(q, (galeria_id,))
+        # 👁️ Además del contador total (arriba, que sigue sumando en cada vista), se guarda la
+        # fecha de la PRIMERA vista de este usuario para este instructivo — para poder mostrar y
+        # exportar quién lo ha visto (ver /galerias/<id>/vistas). ON CONFLICT DO NOTHING / INSERT
+        # OR IGNORE: una vista repetida del mismo usuario no pisa la fecha original.
+        usuario = session.get('username')
+        if usuario:
+            fecha_act = obtener_fecha_actual()
+            if db_type == 'postgres':
+                q_vista = ("INSERT INTO galerias_vistas (galeria_id, usuario, fecha) VALUES (%s, %s, %s) "
+                           "ON CONFLICT (galeria_id, usuario) DO NOTHING")
+            else:
+                q_vista = "INSERT OR IGNORE INTO galerias_vistas (galeria_id, usuario, fecha) VALUES (?, ?, ?)"
+            cursor.execute(q_vista, (galeria_id, usuario, fecha_act))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -6463,6 +6526,90 @@ def incrementar_descarga(galeria_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 200
+
+
+def _exportar_csv_personas(nombre_archivo, filas):
+    """CSV compartido para exportar "quién vio/leyó algo": Nombre, Documento, Usuario, Fecha.
+    Usado tanto por las vistas de instructivos (galerías) como por las lecturas de comunicados,
+    para no repetir el mismo boilerplate de csv.writer/BOM/cabeceras dos veces. 'filas' es una
+    lista de tuplas (nombre, cedula, usuario, fecha)."""
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['NOMBRE', 'DOCUMENTO', 'USUARIO', 'FECHA'])
+    for nombre, cedula, usuario, fecha in filas:
+        writer.writerow([nombre or usuario, cedula or '', usuario, fecha or ''])
+
+    csv_bytes = '﻿' + output.getvalue()
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="{nombre_archivo}"'
+    }
+    return Response(csv_bytes, headers=headers, status=200)
+
+
+@app.route('/galerias/<galeria_id>/vistas')
+@login_required
+@agente_o_admin_required
+def vistas_galeria(galeria_id):
+    """JSON con quién ha visto este instructivo (nombre, cédula y fecha de la primera vista) —
+    usado por el modal "Ver vistas" en el Gestor de Instructivos. Restringido a agente/admin,
+    igual que el resto de acciones de gestión de esta tarjeta."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = (
+            "SELECT gv.usuario, COALESCE(u.nombre, gv.usuario), u.cedula, gv.fecha "
+            "FROM galerias_vistas gv LEFT JOIN usuarios u ON u.usuario = gv.usuario "
+            "WHERE gv.galeria_id = %s ORDER BY gv.fecha DESC"
+        ) if db_type == 'postgres' else (
+            "SELECT gv.usuario, COALESCE(u.nombre, gv.usuario), u.cedula, gv.fecha "
+            "FROM galerias_vistas gv LEFT JOIN usuarios u ON u.usuario = gv.usuario "
+            "WHERE gv.galeria_id = ? ORDER BY gv.fecha DESC"
+        )
+        cursor.execute(q, (galeria_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando vistas del instructivo {galeria_id}: {e}")
+        filas = []
+    conn.close()
+
+    vistas = [{'usuario': f[0], 'nombre': f[1], 'cedula': f[2] or '', 'fecha': f[3]} for f in filas]
+    return jsonify({'vistas': vistas})
+
+
+@app.route('/galerias/<galeria_id>/vistas/exportar_csv')
+@login_required
+@agente_o_admin_required
+def exportar_vistas_galeria(galeria_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_tit = "SELECT titulo FROM galerias WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM galerias WHERE id = ?"
+        cursor.execute(q_tit, (galeria_id,))
+        fila_tit = cursor.fetchone()
+        titulo = fila_tit[0] if fila_tit else galeria_id
+
+        q = (
+            "SELECT COALESCE(u.nombre, gv.usuario), u.cedula, gv.usuario, gv.fecha "
+            "FROM galerias_vistas gv LEFT JOIN usuarios u ON u.usuario = gv.usuario "
+            "WHERE gv.galeria_id = %s ORDER BY gv.fecha DESC"
+        ) if db_type == 'postgres' else (
+            "SELECT COALESCE(u.nombre, gv.usuario), u.cedula, gv.usuario, gv.fecha "
+            "FROM galerias_vistas gv LEFT JOIN usuarios u ON u.usuario = gv.usuario "
+            "WHERE gv.galeria_id = ? ORDER BY gv.fecha DESC"
+        )
+        cursor.execute(q, (galeria_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error exportando vistas del instructivo {galeria_id}: {e}")
+        filas = []
+    conn.close()
+
+    registrar_log(session.get('username'), "Exportación de Vistas de Instructivo", f"Exportó las vistas de '{titulo}'")
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y%m%d_%H%M")
+    nombre_limpio = re.sub(r'[^A-Za-z0-9_-]+', '_', titulo)[:60]
+    return _exportar_csv_personas(f"Arkiv_Vistas_{nombre_limpio}_{fecha_filename}.csv", filas)
+
 
 # 🛡️ Dominios de Cloudinary a los que este proxy tiene permitido conectarse.
 # Cualquier otro destino se rechaza ANTES de hacer la petición saliente: sin esto,
@@ -7433,8 +7580,13 @@ def ver_credenciales_colaboradores():
 @login_required
 @agente_o_admin_required
 def crear_credencial_colaborador():
+    """Da de alta una credencial por cada aplicativo seleccionado, para el mismo colaborador y
+    con los mismos datos compartidos (contraseña, fechas, analista, capacitado por, medio de
+    envío) — antes había que repetir todo el formulario un aplicativo a la vez. Sigue guardando
+    UN registro por (colaborador, aplicativo) en credenciales_colaboradores (no se cambió ese
+    esquema): esta ruta simplemente inserta varias filas en una sola transacción."""
     colaborador = request.form.get('colaborador', '').strip()
-    aplicativo = request.form.get('aplicativo', '').strip()
+    aplicativos_sel = [a.strip() for a in request.form.getlist('aplicativos') if a.strip()]
     password = request.form.get('password', '').strip()
     fecha_creacion = request.form.get('fecha_creacion', '').strip() or None
     fecha_solicitud = request.form.get('fecha_solicitud', '').strip() or None
@@ -7445,7 +7597,7 @@ def crear_credencial_colaborador():
     if medio_envio not in MEDIOS_ENVIO_CREDENCIAL:
         medio_envio = None
 
-    if colaborador and aplicativo and password:
+    if colaborador and aplicativos_sel and password:
         try:
             pass_cifrada = encriptar_texto(password)
             fecha_act = obtener_fecha_actual()
@@ -7460,15 +7612,16 @@ def crear_credencial_colaborador():
                 "fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio, estado, "
                 "fecha_registro, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
             )
-            cursor.execute(q_ins, (colaborador, aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
-                                    analista_gestiona, solicitado_por, capacitado_por, medio_envio,
-                                    fecha_act, session.get('username')))
+            for aplicativo in aplicativos_sel:
+                cursor.execute(q_ins, (colaborador, aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
+                                        analista_gestiona, solicitado_por, capacitado_por, medio_envio,
+                                        fecha_act, session.get('username')))
             conn.commit()
             conn.close()
             registrar_log(session.get('username'), "Alta de Credencial de Colaborador",
-                          f"Se creó la credencial de '{aplicativo}' para {colaborador}")
+                          f"Se creó credencial de {', '.join(aplicativos_sel)} para {colaborador}")
         except Exception as e:
-            print(f"⚠️ Error creando credencial de colaborador '{colaborador}'/{aplicativo}: {e}")
+            print(f"⚠️ Error creando credencial de colaborador '{colaborador}'/{aplicativos_sel}: {e}")
 
     return redirect(url_for('ver_credenciales_colaboradores'))
 
@@ -8003,6 +8156,42 @@ def buscar_usuario_por_cedula():
     if not row:
         return jsonify({'encontrado': False})
     return jsonify({'encontrado': True, 'usuario': row[0], 'nombre': row[1] or row[0]})
+
+
+@app.route('/usuarios/buscar')
+@login_required
+@agente_o_admin_required
+def buscar_usuarios():
+    """Coincidencia PARCIAL por nombre, usuario o cédula (a diferencia de buscar_usuario_por_cedula,
+    que exige la cédula completa) — usado por el campo "Colaborador" de Altas de Credenciales para
+    sugerir cuentas ya registradas en Gestión de Usuarios mientras se escribe, sin obligar a que la
+    persona ya tenga cuenta (si no aparece en las sugerencias, el campo sigue aceptando texto libre).
+    Restringido a agente/admin, igual que buscar_usuario_por_cedula (hallazgo QA H-03: no debe poder
+    consultarlo cualquier cuenta Estándar)."""
+    q = (request.args.get('q') or '').strip().lower()
+    if len(q) < 2:
+        return jsonify({'resultados': []})
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT usuario, nombre, cedula FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC"
+        )
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error buscando usuarios: {e}")
+        filas = []
+    conn.close()
+
+    resultados = []
+    for u_usuario, u_nombre, u_cedula in filas:
+        if q in f"{u_nombre or ''} {u_usuario} {u_cedula or ''}".lower():
+            resultados.append({'usuario': u_usuario, 'nombre': u_nombre or u_usuario, 'cedula': u_cedula or ''})
+            if len(resultados) >= 10:
+                break
+    return jsonify({'resultados': resultados})
+
 
 # ✏️ EDITAR USUARIO
 @app.route('/editar_usuario/<int:usuario_id>', methods=['POST'])
