@@ -613,6 +613,14 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
             )''')
+            # 🪪 Certificación de devolución de activos: cuando Gestión Humana o TI confirma que
+            # un colaborador ya devolvió el PC/activo que tenía asignado, queda una fila aquí
+            # (quién lo confirmó, cuándo, con qué observaciones) — es el "certificado" que se
+            # puede exportar, y a la vez lo que destraba la baja de su cuenta en Gestión de
+            # Usuarios (ver toggle_estado_usuario / _activos_pendientes_devolucion).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
+                id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, colaborador VARCHAR(150) NOT NULL, confirmado_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, observaciones TEXT
+            )''')
             # 🗂️ Catálogo administrable de Tipos de activo (Portátil, Impresora, Servidor...),
             # inspirado en el módulo de Solvyx: cada tipo tiene una key estable, una etiqueta
             # visible, un ícono (nombre de ícono de Font Awesome, sin el prefijo 'fa-') y un
@@ -903,6 +911,9 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, colaborador TEXT NOT NULL, confirmado_por TEXT NOT NULL, fecha TEXT NOT NULL, observaciones TEXT, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, etiqueta TEXT NOT NULL, icono TEXT DEFAULT 'box', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
@@ -1162,6 +1173,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_colaborador ON credenciales_colaboradores (colaborador);",
             "CREATE INDEX IF NOT EXISTS idx_credenciales_colaboradores_estado ON credenciales_colaboradores (estado);",
             "CREATE INDEX IF NOT EXISTS idx_galerias_vistas_galeria_id ON galerias_vistas (galeria_id);",
+            "CREATE INDEX IF NOT EXISTS idx_inventario_devoluciones_activo_id ON inventario_devoluciones (activo_id);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_usuario ON documentos_empleado (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_estado ON documentos_empleado (estado);",
             "CREATE INDEX IF NOT EXISTS idx_totp_codigos_respaldo_usuario ON totp_codigos_respaldo (usuario);",
@@ -1630,6 +1642,21 @@ def agente_o_admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# 🪪 Rol "Gestión Humana": rol nuevo y acotado, distinto de ROLES_CON_ACCESO_OPERATIVO
+# (admin/agente) a propósito — NO hereda el resto de permisos de soporte TI (Tickets,
+# Bóveda de Accesos, Papelera, Auditoría, etc.), solo puede certificar la devolución de
+# activos del Inventario antes de que se pueda dar de baja la cuenta de un colaborador
+# (ver certificacion_devoluciones / confirmar_devolucion_activo). Admin y Agente conservan
+# también esta certificación, porque ya administran el Inventario por completo.
+ROLES_CERTIFICACION_DEVOLUCION = ('admin', 'agente', 'gestion_humana')
+
+def certificacion_devolucion_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('rol') not in ROLES_CERTIFICACION_DEVOLUCION: return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
 @app.route('/admin/db', methods=['GET', 'POST'])
 @login_required
@@ -1642,7 +1669,7 @@ def visor_db():
     tablas_permitidas = [
         'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
         'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
-        'ticket_configuraciones', 'activos_inventario', 'aplicativos_catalogo',
+        'ticket_configuraciones', 'activos_inventario', 'inventario_devoluciones', 'aplicativos_catalogo',
         'credenciales_colaboradores'
     ]
     if tabla_seleccionada not in tablas_permitidas:
@@ -1729,7 +1756,7 @@ TABLAS_RESPALDO = [
     'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
     'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
-    'activos_inventario', 'inventario_adjuntos', 'aplicativos_catalogo',
+    'activos_inventario', 'inventario_adjuntos', 'inventario_devoluciones', 'aplicativos_catalogo',
     'credenciales_colaboradores'
 ]
 
@@ -2415,6 +2442,33 @@ ESTADOS_RESULTANTES_REEMPLAZO = [
     {'valor': 'Baja', 'etiqueta': 'Dado de baja — definitivamente'},
     {'valor': 'Perdido', 'etiqueta': 'Perdido'},
 ]
+
+
+def _activos_pendientes_devolucion(nombre_colaborador, usuario_login=None):
+    """Activos del Inventario que siguen en estado 'Asignado' a nombre de este colaborador
+    (por nombre completo o por su usuario de login), pendientes de que Gestión Humana o TI
+    certifiquen su devolución (ver /inventario/certificacion_devoluciones). 'asignado_a' es
+    texto libre —igual que el resto del módulo de Inventario— así que la coincidencia es por
+    subcadena, no exacta, para no dejar pasar por alto una devolución real solo porque el
+    nombre se escribió con una variación menor."""
+    objetivos = [t for t in [(nombre_colaborador or '').strip().lower(), (usuario_login or '').strip().lower()] if t]
+    if not objetivos:
+        return []
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, nombre, tipo_activo, asignado_a FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error consultando activos pendientes de devolución: {e}")
+        filas = []
+    conn.close()
+    pendientes = []
+    for activo_id, nombre_activo, tipo_activo, asignado_a in filas:
+        asignado_norm = (asignado_a or '').strip().lower()
+        if asignado_norm and any(obj in asignado_norm or asignado_norm in obj for obj in objetivos):
+            pendientes.append({'id': activo_id, 'nombre': nombre_activo, 'tipo_activo': tipo_activo, 'asignado_a': asignado_a})
+    return pendientes
 
 # ⏱️ SLA (Acuerdos de Nivel de Servicio): horas máximas de "primera respuesta" (sacar el
 # ticket de 'Abierto') y de "resolución" (llegar a 'Resuelto'/'Cerrado') según la prioridad.
@@ -6063,6 +6117,113 @@ def eliminar_adjunto_inventario(adjunto_id):
     return redirect(url_for('ver_inventario'))
 
 
+# 🪪 CERTIFICACIÓN DE DEVOLUCIÓN DE ACTIVOS (retiro/liquidación de colaboradores) ---------
+# Antes de dar de baja la cuenta de un colaborador en Gestión de Usuarios, Gestión Humana o
+# TI deben certificar aquí que ya devolvió el PC u otro activo que tenía asignado en el
+# Inventario (ver _activos_pendientes_devolucion / toggle_estado_usuario). Cada confirmación
+# libera el activo (vuelve a 'Disponible') y queda registrada en 'inventario_devoluciones'
+# como el certificado de devolución, exportable a CSV para Gestión Humana.
+@app.route('/inventario/certificacion_devoluciones')
+@login_required
+@certificacion_devolucion_required
+def certificacion_devoluciones():
+    busqueda = (request.args.get('q') or '').strip().lower()
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    pendientes = []
+    try:
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
+        for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede in cursor.fetchall():
+            if busqueda and busqueda not in f"{asignado_a or ''} {nombre or ''}".lower():
+                continue
+            pendientes.append({
+                'id': aid, 'nombre': nombre, 'tipo_activo': tipo_activo, 'marca': marca,
+                'modelo': modelo, 'numero_serie': numero_serie, 'asignado_a': asignado_a, 'sede': sede
+            })
+    except Exception as e:
+        print(f"⚠️ Error consultando pendientes de devolución: {e}")
+
+    historial = []
+    try:
+        cursor.execute("""SELECT d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones
+                           FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id
+                           ORDER BY d.id DESC LIMIT 200""")
+        historial = [{'colaborador': r[0], 'nombre_activo': r[1], 'tipo_activo': r[2],
+                      'confirmado_por': r[3], 'fecha': r[4], 'observaciones': r[5]} for r in cursor.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error consultando historial de devoluciones: {e}")
+    conn.close()
+
+    return render_template('inventario_certificacion.html', pendientes=pendientes, historial=historial,
+                            busqueda=busqueda, es_soporte=(session.get('rol') in ROLES_CON_ACCESO_OPERATIVO))
+
+
+@app.route('/inventario/<int:activo_id>/confirmar_devolucion', methods=['POST'])
+@login_required
+@certificacion_devolucion_required
+def confirmar_devolucion_activo(activo_id):
+    usuario = session.get('username')
+    observaciones = (request.form.get('observaciones') or '').strip() or None
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT nombre, asignado_a, estado FROM activos_inventario WHERE id = {ph} AND COALESCE(eliminado, 0) = 0", (activo_id,))
+        row = cursor.fetchone()
+        if not row:
+            flash("El activo indicado no existe o fue eliminado.", "error")
+        elif row[2] != 'Asignado':
+            flash("Este activo ya no figura como asignado; no hay una devolución pendiente que certificar.", "error")
+        else:
+            nombre_activo, colaborador, _ = row
+            fecha_act = obtener_fecha_actual()
+            q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones) VALUES (%s, %s, %s, %s, %s)"
+                      if db_type == 'postgres' else
+                      "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones) VALUES (?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones))
+            q_upd = f"UPDATE activos_inventario SET estado = {ph}, asignado_a = NULL WHERE id = {ph}"
+            cursor.execute(q_upd, ('Disponible', activo_id))
+            conn.commit()
+            registrar_log(usuario, "Certificación de Devolución de Activo",
+                          f"Se certificó la devolución de '{nombre_activo}' por parte de {colaborador}"
+                          + (f" — nota: {observaciones}" if observaciones else ""))
+            flash(f"Devolución de '{nombre_activo}' certificada. El activo vuelve a estar disponible en el Inventario.", "exito")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error certificando devolución del activo {activo_id}: {e}")
+        flash("No se pudo registrar la certificación de devolución.", "error")
+    conn.close()
+    return redirect(url_for('certificacion_devoluciones'))
+
+
+@app.route('/inventario/certificacion_devoluciones/exportar_csv')
+@login_required
+@certificacion_devolucion_required
+def exportar_certificacion_devoluciones():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""SELECT d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones
+                           FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id
+                           ORDER BY d.id DESC""")
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error exportando certificación de devoluciones: {e}")
+        filas = []
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['COLABORADOR', 'ACTIVO', 'TIPO_ACTIVO', 'CERTIFICADO_POR', 'FECHA', 'OBSERVACIONES'])
+    for colaborador, nombre_activo, tipo_activo, confirmado_por, fecha, observaciones in filas:
+        writer.writerow([colaborador, nombre_activo, tipo_activo or '', confirmado_por, fecha or '', observaciones or ''])
+    csv_bytes = '﻿' + output.getvalue()
+    headers = {'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="certificacion_devolucion_activos.csv"'}
+    registrar_log(session.get('username'), "Exportación de Certificación de Devoluciones",
+                  f"Se exportó el listado de {len(filas)} devolución(es) certificada(s)")
+    return Response(csv_bytes, headers=headers, status=200)
+
+
 # 📧 ENVÍO VÍA GMAIL APPS SCRIPT (PUERTO 443 HTTPS - SIN BLOQUEOS)
 def enviar_correo_recuperacion(email_destino, usuario_nombre, codigo):
     try:
@@ -7997,9 +8158,11 @@ def gestion_usuarios():
         nueva_cedula = (request.form.get('cedula') or '').strip() or None
         nueva_especialidad = (request.form.get('especialidad') or '').strip() or None
         nuevo_rol = request.form.get('rol', 'estandar')
-        # 🛡️ Solo se aceptan los 3 roles válidos del sistema; cualquier otro valor (enviado a
-        # mano, no desde el formulario) cae a 'estandar' por seguridad.
-        if nuevo_rol not in ('admin', 'agente', 'estandar'):
+        # 🛡️ Solo se aceptan los roles válidos del sistema; cualquier otro valor (enviado a
+        # mano, no desde el formulario) cae a 'estandar' por seguridad. 'gestion_humana' es un
+        # rol acotado (ver certificacion_devolucion_required): no tiene el resto de accesos de
+        # soporte TI que sí tiene 'agente'.
+        if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
             nuevo_rol = 'estandar'
         # 🛡️ Solo la cuenta 'admin' (super-admin) puede otorgar el rol 'admin' a un usuario
         # nuevo. Cualquier otro admin sí puede crear cuentas 'agente' (analistas de soporte
@@ -8200,7 +8363,7 @@ def buscar_usuarios():
 def editar_usuario(usuario_id):
     nuevo_email = request.form.get('email', '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
-    if nuevo_rol not in ('admin', 'agente', 'estandar'):
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
         nuevo_rol = 'estandar'
     nueva_pass = request.form.get('password', '').strip()
     nuevo_nombre = request.form.get('nombre', '').strip()
@@ -8387,12 +8550,12 @@ def toggle_estado_usuario(usuario_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, estado, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, estado, rol FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, estado, rol, nombre FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, estado, rol, nombre FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
 
         if row:
-            user_target, estado_actual, rol_target = row[0], (row[1] or 'activo'), row[2]
+            user_target, estado_actual, rol_target, nombre_target = row[0], (row[1] or 'activo'), row[2], row[3]
             # 🛡️ Nunca permitir bloquear la cuenta 'admin' (dejaría a todos sin acceso) ni la
             # propia cuenta con la que se inició sesión (evita un auto-bloqueo accidental).
             if user_target == 'admin' or user_target == session.get('username'):
@@ -8406,6 +8569,20 @@ def toggle_estado_usuario(usuario_id):
                 return redirect(url_for('gestion_usuarios'))
 
             nuevo_estado = 'inactivo' if estado_actual == 'activo' else 'activo'
+
+            # 🪪 Antes de bloquear (dar de baja) a un colaborador: si todavía tiene un PC u
+            # otro activo del Inventario asignado a su nombre, no se deja bloquear la cuenta
+            # hasta que Gestión Humana o TI certifiquen la devolución en
+            # /inventario/certificacion_devoluciones. No aplica al desbloqueo.
+            if nuevo_estado == 'inactivo':
+                pendientes = _activos_pendientes_devolucion(nombre_target, user_target)
+                if pendientes:
+                    conn.close()
+                    nombres_pendientes = ', '.join(f"{p['nombre']} ({p['tipo_activo']})" for p in pendientes)
+                    flash(f"No se pudo bloquear a '{user_target}': todavía tiene activo(s) asignado(s) en el Inventario sin devolución confirmada: {nombres_pendientes}. "
+                          "Gestión Humana o TI deben certificar la devolución en Inventario → Certificación de Devoluciones antes de continuar.", "error")
+                    return redirect(url_for('gestion_usuarios'))
+
             q_upd = "UPDATE usuarios SET estado = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET estado = ? WHERE id = ?"
             cursor.execute(q_upd, (nuevo_estado, usuario_id))
             conn.commit()
