@@ -9,29 +9,33 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
-<body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
+<body class="bg-slate-900 min-h-screen flex items-stretch">
 
-    <div class="w-full max-w-4xl flex items-stretch justify-center gap-6">
-
-        {% if fondo_media %}
-        <!-- 🖼️ PANEL DE MARCA (imagen/video corto, administrable desde Novedades y Comunicados
-             → Fondo de Login). Oculto en celular a propósito: en pantalla angosta solo importa
-             que el login cargue rápido y sea fácil de usar; el panel es puramente decorativo. -->
-        <div class="hidden md:block md:w-80 lg:w-96 rounded-3xl overflow-hidden shadow-2xl relative flex-shrink-0">
-            {% for item in fondo_media %}
-            <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
-                {% if item.tipo == 'video' %}
-                <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-cover"></video>
-                {% else %}
-                <img src="{{ item.url }}" alt="" class="w-full h-full object-cover">
-                {% endif %}
-            </div>
-            {% endfor %}
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent pointer-events-none"></div>
+    {% if fondo_media %}
+    <!-- 🖼️ PANEL DE MARCA (imagen/video corto, administrable desde Novedades y Comunicados
+         → Fondo de Login). Pegado al borde izquierdo de la pantalla y ocupando la mitad del
+         ancho, como en Facebook/Solvyx. Oculto en celular a propósito: en pantalla angosta solo
+         importa que el login cargue rápido y sea fácil de usar; el panel es puramente decorativo. -->
+    <div class="hidden md:block md:w-1/2 relative overflow-hidden flex-shrink-0">
+        {% for item in fondo_media %}
+        <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
+            {% if item.tipo == 'video' %}
+            <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-cover"></video>
+            {% else %}
+            <img src="{{ item.url }}" alt="" class="w-full h-full object-cover">
+            {% endif %}
         </div>
-        {% endif %}
+        {% endfor %}
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent pointer-events-none"></div>
+    </div>
+    {% endif %}
 
-        <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100 flex-shrink-0">
+    <!-- Columna del login: ocupa el resto del ancho disponible; el módulo de login en sí
+         (tarjeta blanca, campos, reCAPTCHA, botón) queda exactamente igual que antes, solo
+         cambia el tamaño del espacio a su alrededor. -->
+    <div class="flex-1 min-h-screen flex items-center justify-center p-4">
+
+        <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
             <!-- ENCABEZADO CON LOGO NÓRDICO ATEMPORAL -->
             <div class="text-center mb-6">
