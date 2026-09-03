@@ -51,6 +51,19 @@
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="mb-5 space-y-2">
+                {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+
         {% if usuario_creado %}
         <div class="mb-5 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-2">
             <i class="fa-solid fa-circle-check"></i>
@@ -290,6 +303,7 @@
                             <select name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                                 <option value="estandar" {% if form_data and form_data.rol == 'estandar' %}selected{% endif %}>Estándar (Solo lectura y descargas)</option>
                                 <option value="agente" {% if form_data and form_data.rol == 'agente' %}selected{% endif %}>Agente (Soporte TI / PQRS)</option>
+                                <option value="gestion_humana" {% if form_data and form_data.rol == 'gestion_humana' %}selected{% endif %}>Gestión Humana (Certificación de devolución de activos)</option>
                                 {% if session.get('username') == 'admin' %}
                                 <option value="admin" {% if form_data and form_data.rol == 'admin' %}selected{% endif %}>Administrador (Control total)</option>
                                 {% endif %}
@@ -368,6 +382,7 @@
                     <select id="edit_rol" name="rol" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                         <option value="estandar">Estándar</option>
                         <option value="agente">Agente (Soporte TI / PQRS)</option>
+                        <option value="gestion_humana">Gestión Humana (Certificación de devolución de activos)</option>
                         <option value="admin">Administrador</option>
                     </select>
                 </div>

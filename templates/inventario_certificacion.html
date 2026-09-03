@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARKIV - Certificación de Devolución de Activos</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style> body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; } </style>
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+</head>
+<body class="pagina-acento-teal min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-teal-500 selection:text-white">
+
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-y-3">
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('bienvenida') }}" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span class="hidden sm:inline">Volver</span>
+                </a>
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-sm">
+                        <i class="fa-solid fa-id-card-clip"></i>
+                    </div>
+                    <h1 class="text-base font-bold text-white whitespace-nowrap">Certificación de Devolución de Activos</h1>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                {% if es_soporte %}
+                <a href="{{ url_for('ver_inventario') }}" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-boxes-stacked text-xs"></i>
+                    <span class="hidden sm:inline">Ir a Inventario</span>
+                </a>
+                {% endif %}
+                {% include 'partials/perfil_boton.html' %}
+                {% include 'partials/campanita.html' %}
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="space-y-2">
+                {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="p-4 rounded-2xl bg-teal-500/10 border border-teal-500/30 text-teal-200 text-xs flex items-start gap-3">
+            <i class="fa-solid fa-circle-info text-base mt-0.5"></i>
+            <span>Antes de dar de baja la cuenta de un colaborador en Gestión de Usuarios, aquí se certifica que ya devolvió el PC u otro activo que tenía asignado en el Inventario. Mientras un activo siga "Pendiente de devolución", su cuenta no se podrá bloquear/liquidar.</span>
+        </div>
+
+        <!-- BUSCADOR -->
+        <form method="GET" action="{{ url_for('certificacion_devoluciones') }}" class="flex gap-2">
+            <input type="text" name="q" value="{{ busqueda }}" placeholder="Buscar por colaborador o activo..." class="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-teal-500">
+            <button type="submit" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all">
+                <i class="fa-solid fa-magnifying-glass"></i>
+            </button>
+            {% if busqueda %}
+            <a href="{{ url_for('certificacion_devoluciones') }}" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-semibold rounded-xl transition-all">Limpiar</a>
+            {% endif %}
+        </form>
+
+        <!-- PENDIENTES DE DEVOLUCIÓN -->
+        <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6">
+            <h2 class="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
+                Pendientes de devolución
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30">{{ pendientes|length }}</span>
+            </h2>
+            {% if pendientes %}
+            <div class="space-y-3">
+                {% for p in pendientes %}
+                <div class="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                    <div class="min-w-0">
+                        <p class="text-sm font-bold text-white">{{ p.asignado_a or 'Sin asignar' }}</p>
+                        <p class="text-xs text-slate-400 mt-0.5">
+                            <i class="fa-solid fa-box mr-1"></i>{{ p.nombre }}
+                            {% if p.tipo_activo %}<span class="text-slate-600">·</span> {{ p.tipo_activo }}{% endif %}
+                            {% if p.marca or p.modelo %}<span class="text-slate-600">·</span> {{ p.marca or '' }} {{ p.modelo or '' }}{% endif %}
+                        </p>
+                        {% if p.numero_serie %}<p class="text-[10px] text-slate-500 mt-0.5">Serie: {{ p.numero_serie }}</p>{% endif %}
+                        {% if p.sede %}<p class="text-[10px] text-slate-500">Sede: {{ p.sede }}</p>{% endif %}
+                    </div>
+                    <form method="POST" action="{{ url_for('confirmar_devolucion_activo', activo_id=p.id) }}" onsubmit="return confirm('¿Confirmar que {{ p.asignado_a or "este colaborador" }} ya devolvió {{ p.nombre }}? El activo volverá a estar disponible en el Inventario.')" class="flex items-center gap-2 flex-shrink-0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="text" name="observaciones" placeholder="Observaciones (opcional)" class="w-40 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-teal-500">
+                        <button type="submit" class="px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold rounded-lg transition-all whitespace-nowrap">
+                            <i class="fa-solid fa-check mr-1"></i>Confirmar devolución
+                        </button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-500 text-xs text-center py-6">No hay activos pendientes de devolución{% if busqueda %} para "{{ busqueda }}"{% endif %}.</p>
+            {% endif %}
+        </div>
+
+        <!-- HISTORIAL / CERTIFICADO -->
+        <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-file-shield text-emerald-400"></i>
+                    Certificados de devolución
+                </h2>
+                <a href="{{ url_for('exportar_certificacion_devoluciones') }}" class="text-xs font-semibold text-teal-400 hover:text-teal-300 flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-csv"></i> Exportar a CSV
+                </a>
+            </div>
+            {% if historial %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b border-slate-800">
+                            <th class="py-2 pr-4 font-semibold">Colaborador</th>
+                            <th class="py-2 pr-4 font-semibold">Activo</th>
+                            <th class="py-2 pr-4 font-semibold">Certificado por</th>
+                            <th class="py-2 pr-4 font-semibold">Fecha</th>
+                            <th class="py-2 font-semibold">Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for h in historial %}
+                        <tr class="border-b border-slate-800/60">
+                            <td class="py-2 pr-4 text-white font-semibold">{{ h.colaborador }}</td>
+                            <td class="py-2 pr-4 text-slate-300">{{ h.nombre_activo }}{% if h.tipo_activo %} <span class="text-slate-600">({{ h.tipo_activo }})</span>{% endif %}</td>
+                            <td class="py-2 pr-4 text-slate-400">{{ h.confirmado_por }}</td>
+                            <td class="py-2 pr-4 text-slate-400">{{ h.fecha }}</td>
+                            <td class="py-2 text-slate-500">{{ h.observaciones or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-slate-500 text-xs text-center py-6">Todavía no se ha certificado ninguna devolución.</p>
+            {% endif %}
+        </div>
+
+    </main>
+
+    <script src="/static/js/notificaciones.js"></script>
+</body>
+</html>
