@@ -13,6 +13,13 @@ import sys
 # pruebas y, si algo llegara a reimportar el módulo más de una vez, dejaría hilos sueltos.
 os.environ.setdefault('DESHABILITAR_RESPALDO_AUTOMATICO', '1')
 
+# 🔑 app.py lee ENCRYPTION_KEY al importarse (para cifrar/descifrar credenciales guardadas,
+# ver encriptar_texto/desencriptar_texto) y sin ella cualquier prueba que dé de alta una
+# credencial falla con "ENCRYPTION_KEY no configurada". Esta clave es SOLO para pruebas —nunca
+# se usa en producción, donde la real vive en las variables de entorno de Render— y debe fijarse
+# ANTES de "import app", porque _fernet se construye una sola vez a nivel de módulo.
+os.environ.setdefault('ENCRYPTION_KEY', 'zH1Yv3E4v5b6c7d8e9f0AbCdEfGhIjKlMnOpQrStUvw=')
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, 'gestor.db')
@@ -106,16 +113,16 @@ def crear_usuario(app):
     el alta desde /usuarios (que ya tiene sus propias pruebas de validación aparte)."""
     contador = {'n': 0}
 
-    def _crear(usuario=None, password_hash='x', correo=None, rol='estandar', nombre='Persona de Prueba', telefono=None):
+    def _crear(usuario=None, password_hash='x', correo=None, rol='estandar', nombre='Persona de Prueba', telefono=None, cedula=None):
         contador['n'] += 1
         usuario = usuario or f"usuarioprueba{contador['n']}"
         correo = correo or f"{usuario}@preventivaips.com.co"
         conn, db_type = app.get_db()
         cur = conn.cursor()
-        q = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono) VALUES (%s, %s, %s, %s, %s, %s)"
+        q = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula) VALUES (%s, %s, %s, %s, %s, %s, %s)"
              if db_type == 'postgres' else
-             "INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono) VALUES (?, ?, ?, ?, ?, ?)")
-        cur.execute(q, (usuario, password_hash, correo, rol, nombre, telefono))
+             "INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        cur.execute(q, (usuario, password_hash, correo, rol, nombre, telefono, cedula))
         conn.commit()
         conn.close()
         return usuario
