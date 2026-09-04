@@ -209,3 +209,61 @@ def test_tablero_ejecutivo_muestra_los_totales_de_costos_de_inventario(admin_ses
     assert 'Costos de Inventario' in texto
     assert '3,000,000' in texto
     assert '200,000' in texto
+
+
+def test_tabla_inventario_muestra_el_costo_por_articulo(admin_session, app):
+    """Tomás pidió ver el costo POR ARTÍCULO (mensual y anual si es alquilado, o el valor de
+    compra si es propio) directamente en la tabla de Inventario — antes solo se veía el TOTAL
+    agregado de todo el inventario en las tarjetas de arriba, nunca el de cada activo."""
+    _crear_activo_directo(app, nombre='30014', tipo_costo='propio', costo_compra=2500000)
+    _crear_activo_directo(app, nombre='30015', tipo_costo='alquilado', costo_alquiler_mensual=150000)
+    _crear_activo_directo(app, nombre='30016')  # sin tipo_costo definido
+
+    texto = admin_session.get('/tickets/inventario').get_data(as_text=True)
+
+    assert 'Propio' in texto
+    assert '2,500,000' in texto
+    assert 'Alquiler' in texto
+    assert '150,000' in texto
+    assert '/mes' in texto
+    assert '1,800,000' in texto  # proyección anual del activo alquilado: 150,000 * 12
+    assert '/año' in texto
+
+
+def test_csv_exportar_incluye_costo_de_alquiler_anual_por_articulo(admin_session, app):
+    _crear_activo_directo(app, nombre='30017', tipo_costo='alquilado', costo_alquiler_mensual=100000)
+
+    r = admin_session.get('/tickets/inventario/exportar_csv')
+    texto = r.get_data(as_text=True)
+
+    assert 'COSTO ALQUILER ANUAL' in texto
+    assert '1200000' in texto  # 100,000 * 12, sin separador de miles en el CSV crudo
+
+
+def test_xlsx_exportar_incluye_costo_de_alquiler_anual_por_articulo(admin_session, app):
+    import io
+    import openpyxl
+
+    _crear_activo_directo(app, nombre='30018', tipo_costo='alquilado', costo_alquiler_mensual=100000)
+
+    r = admin_session.get('/tickets/inventario/exportar_xlsx')
+    wb = openpyxl.load_workbook(io.BytesIO(r.get_data()))
+    ws = wb.active
+
+    encabezados = [c.value for c in ws[1]]
+    assert 'Costo alquiler anual' in encabezados
+    col_anual = encabezados.index('Costo alquiler anual') + 1
+    valores_columna = [ws.cell(row=fila, column=col_anual).value for fila in range(2, ws.max_row + 1)]
+    assert 1200000 in valores_columna
+
+
+def test_pdf_exportar_no_falla_con_activo_alquilado(admin_session, app):
+    """Regresión: el cálculo de 'costo_alquiler_mensual * 12' dentro del PDF no debe romper la
+    exportación cuando el valor viene de Postgres como Decimal (aquí simulado con float normal,
+    ver test_totales_costos_inventario_no_revienta_con_decimal_de_postgres para el caso Decimal)."""
+    _crear_activo_directo(app, nombre='30019', tipo_costo='alquilado', costo_alquiler_mensual=180000)
+
+    r = admin_session.get('/tickets/inventario/exportar_pdf')
+
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] == 'application/pdf'
