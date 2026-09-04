@@ -139,21 +139,32 @@
                                 {% endif %}
                             </td>
                             <td class="py-3 px-3 text-right whitespace-nowrap">
-                                {% if r.estado == 'activo' %}
-                                <form action="{{ url_for('deshabilitar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Deshabilitar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
-                                        <i class="fa-solid fa-user-slash"></i> <span class="hidden lg:inline">Deshabilitar</span>
+                                <div class="inline-flex items-center gap-1.5">
+                                    <button type="button" onclick='abrirModalEditarCredColab({{ r | tojson }})' title="Editar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold rounded-xl transition-all">
+                                        <i class="fa-solid fa-pen"></i> <span class="hidden lg:inline">Editar</span>
                                     </button>
-                                </form>
-                                {% else %}
-                                <form action="{{ url_for('reactivar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Reactivar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-semibold rounded-xl transition-all">
-                                        <i class="fa-solid fa-user-check"></i> <span class="hidden lg:inline">Reactivar</span>
-                                    </button>
-                                </form>
-                                {% endif %}
+                                    {% if r.estado == 'activo' %}
+                                    <form action="{{ url_for('deshabilitar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Deshabilitar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
+                                            <i class="fa-solid fa-user-slash"></i> <span class="hidden lg:inline">Deshabilitar</span>
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    <form action="{{ url_for('reactivar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Reactivar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-semibold rounded-xl transition-all">
+                                            <i class="fa-solid fa-user-check"></i> <span class="hidden lg:inline">Reactivar</span>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                    <form action="{{ url_for('eliminar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Eliminar PERMANENTEMENTE el acceso a {{ r.aplicativo }} de {{ r.colaborador }}? Esta acción no se puede deshacer.')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" title="Eliminar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-rose-600/30 text-slate-300 hover:text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -271,6 +282,91 @@
         </div>
     </div>
 
+    <!-- MODAL EDITAR ALTA -->
+    <div id="modal-editar-alta" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Editar Alta de Credencial</h3>
+                <button type="button" onclick="cerrarModalEditarCredColab()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-editar-cred-colab" method="POST" action="" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
+                    <input type="text" name="colaborador" id="edit-colaborador" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo *</label>
+                    <select name="aplicativo" id="edit-aplicativo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        {% for a in aplicativos %}
+                        <option value="{{ a.nombre }}">{{ a.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Contraseña asignada</label>
+                    <input type="text" name="password" id="edit-password" placeholder="Dejar en blanco para no cambiarla" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 font-mono">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de solicitud</label>
+                        <input type="date" name="fecha_solicitud" id="edit-fecha-solicitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha de creación</label>
+                        <input type="date" name="fecha_creacion" id="edit-fecha-creacion" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Solicitado por (PQRS)</label>
+                    <input type="text" name="solicitado_por" id="edit-solicitado-por" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Analista que gestiona</label>
+                        <select name="analista_gestiona" id="edit-analista" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <option value="">Sin asignar</option>
+                            {% for m in equipo_soporte %}
+                            <option value="{{ m.nombre }}">{{ m.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Capacitado por</label>
+                        <select name="capacitado_por" id="edit-capacitado-por" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <option value="">Sin asignar</option>
+                            {% for m in equipo_soporte %}
+                            <option value="{{ m.nombre }}">{{ m.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Credenciales enviadas vía</label>
+                    <select name="medio_envio" id="edit-medio-envio" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        <option value="">Sin especificar</option>
+                        {% for m in medios %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="mt-3 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalEditarCredColab()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-xl font-bold shadow-lg shadow-fuchsia-500/25">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- MODAL CATÁLOGO DE APLICATIVOS -->
     <div id="modal-aplicativos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -374,6 +470,29 @@
             document.getElementById('modal-alta').classList.add('hidden');
             document.getElementById('modal-alta').classList.remove('flex');
         }
+        // ✏️ Edición de una fila existente: reutiliza un modal aparte (no el de "Nueva Alta",
+        // que permite marcar varios aplicativos a la vez) porque aquí solo se edita UN
+        // aplicativo puntual. La contraseña llega vacía a propósito — igual que en la Bóveda de
+        // Accesos, si el campo se deja en blanco el backend no toca la clave actual.
+        function abrirModalEditarCredColab(r) {
+            document.getElementById('form-editar-cred-colab').action = `/credenciales/colaboradores/${r.id}/editar`;
+            document.getElementById('edit-colaborador').value = r.colaborador || '';
+            document.getElementById('edit-aplicativo').value = r.aplicativo || '';
+            document.getElementById('edit-password').value = '';
+            document.getElementById('edit-fecha-solicitud').value = r.fecha_solicitud || '';
+            document.getElementById('edit-fecha-creacion').value = r.fecha_creacion || '';
+            document.getElementById('edit-solicitado-por').value = r.solicitado_por || '';
+            document.getElementById('edit-analista').value = r.analista_gestiona || '';
+            document.getElementById('edit-capacitado-por').value = r.capacitado_por || '';
+            document.getElementById('edit-medio-envio').value = r.medio_envio || '';
+            document.getElementById('modal-editar-alta').classList.remove('hidden');
+            document.getElementById('modal-editar-alta').classList.add('flex');
+        }
+        function cerrarModalEditarCredColab() {
+            document.getElementById('modal-editar-alta').classList.add('hidden');
+            document.getElementById('modal-editar-alta').classList.remove('flex');
+        }
+
         function abrirModalAplicativos() {
             document.getElementById('modal-aplicativos').classList.remove('hidden');
             document.getElementById('modal-aplicativos').classList.add('flex');

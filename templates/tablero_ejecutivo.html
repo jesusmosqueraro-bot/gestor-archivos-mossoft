@@ -36,22 +36,68 @@
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
+        {% set qs = request.query_string.decode() %}
         <div class="bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded-2xl p-4 text-xs flex items-start gap-2.5">
             <i class="fa-solid fa-circle-info mt-0.5"></i>
             <span>
                 Panorama general de Arkiv en una sola pantalla. Para el detalle completo de Solicitudes de Soporte
-                (gráficos, exportación a PDF/Excel) visita <a href="{{ url_for('indicadores_tickets') }}" class="underline font-bold hover:text-blue-200">Indicadores de Soporte TI</a>.
+                (gráficos, exportación a PDF/Excel) visita <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="underline font-bold hover:text-blue-200">Indicadores de Soporte TI</a>.
             </span>
+        </div>
+
+        <!-- FILTROS: mismos filtros que Indicadores de Soporte TI (mes, rango de fechas,
+             analista) — acotan las tarjetas y la tendencia de Solicitudes de este tablero al
+             mismo período/agente elegido. El resto de módulos (no relacionados a Tickets) no
+             se ve afectado por este filtro. -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl">
+            <form method="GET" action="/tablero-ejecutivo" class="flex flex-wrap items-end gap-3">
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Mes</label>
+                    <select name="mes" onchange="this.form.fecha_inicio.value=''; this.form.fecha_fin.value=''; this.form.submit()" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">Todo el histórico</option>
+                        {% for m in opciones_meses %}
+                        <option value="{{ m.valor }}" {% if filtro_mes == m.valor %}selected{% endif %}>{{ m.etiqueta }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Desde</label>
+                    <input type="date" name="fecha_inicio" value="{{ filtro_fecha_inicio }}" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Hasta</label>
+                    <input type="date" name="fecha_fin" value="{{ filtro_fecha_fin }}" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Analista</label>
+                    <select name="agente" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]">
+                        <option value="">Todos</option>
+                        {% for a in opciones_agentes %}
+                        <option value="{{ a.valor }}" {% if filtro_agente == a.valor %}selected{% endif %}>{{ a.etiqueta }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl text-xs transition-all active:scale-95">
+                        <i class="fa-solid fa-filter mr-1.5"></i>Filtrar
+                    </button>
+                    {% if filtro_mes or filtro_fecha_inicio or filtro_fecha_fin or filtro_agente %}
+                    <a href="/tablero-ejecutivo" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all active:scale-95">
+                        <i class="fa-solid fa-xmark mr-1.5"></i>Limpiar
+                    </a>
+                    {% endif %}
+                </div>
+            </form>
         </div>
 
         <!-- TARJETAS KPI -->
         <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-orange-500/50 rounded-2xl p-4 transition-all">
+            <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-orange-500/50 rounded-2xl p-4 transition-all">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-headset mr-1 text-orange-400"></i>Solicitudes abiertas</p>
                 <p class="text-2xl font-extrabold text-white">{{ tickets_abiertos }}</p>
                 <p class="text-[10px] text-slate-500 mt-0.5">de {{ total_tickets }} en total</p>
             </a>
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-rose-500/50 rounded-2xl p-4 transition-all">
+            <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-rose-500/50 rounded-2xl p-4 transition-all">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-triangle-exclamation mr-1 text-rose-400"></i>SLA vencidos</p>
                 <p class="text-2xl font-extrabold text-rose-400">{{ tickets_vencidos }}</p>
                 {% if pct_sla_cumplido is not none %}
@@ -60,7 +106,7 @@
                     <p class="text-[10px] text-slate-500 mt-0.5">Sin solicitudes registradas</p>
                 {% endif %}
             </a>
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-cyan-500/50 rounded-2xl p-4 transition-all">
+            <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-cyan-500/50 rounded-2xl p-4 transition-all">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-star mr-1 text-cyan-400"></i>Satisfacción promedio</p>
                 {% if promedio_calificacion %}
                     <p class="text-2xl font-extrabold text-cyan-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5</span></p>
@@ -75,7 +121,7 @@
                     {{ usuarios_por_rol.get('admin', 0) }} admin · {{ usuarios_por_rol.get('agente', 0) }} agente · {{ usuarios_por_rol.get('estandar', 0) }} estándar
                 </p>
             </a>
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
+            <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-regular fa-clock mr-1 text-blue-400"></i>Tiempo prom. de resolución</p>
                 {% if tiempo_promedio_resolucion_texto %}
                     <p class="text-2xl font-extrabold text-blue-400">{{ tiempo_promedio_resolucion_texto }}</p>
@@ -83,8 +129,8 @@
                     <p class="text-sm text-slate-500 font-bold mt-2">Sin datos aún</p>
                 {% endif %}
             </a>
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
-                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-arrow-trend-up mr-1 text-blue-400"></i>Solicitudes vs. quincena anterior</p>
+            <a href="{{ url_for('indicadores_tickets') }}{{ '?' + qs if qs else '' }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-arrow-trend-up mr-1 text-blue-400"></i>Solicitudes vs. {{ titulo_comparativo_periodo }}</p>
                 {% if variacion_pct_tendencia is not none %}
                     <p class="text-2xl font-extrabold {{ 'text-orange-400' if variacion_pct_tendencia > 0 else 'text-cyan-400' }}">
                         <i class="fa-solid {{ 'fa-arrow-up' if variacion_pct_tendencia > 0 else 'fa-arrow-down' if variacion_pct_tendencia < 0 else 'fa-minus' }}"></i>
@@ -98,7 +144,7 @@
 
         <!-- TENDENCIA DE SOLICITUDES -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
-            <h3 class="text-sm font-bold text-white mb-3">Solicitudes de Soporte creadas — últimos 14 días</h3>
+            <h3 class="text-sm font-bold text-white mb-3">Solicitudes de Soporte creadas {% if filtro_fecha_inicio or filtro_fecha_fin %}— {{ filtro_fecha_inicio or '…' }} a {{ filtro_fecha_fin or '…' }}{% else %}— últimos 14 días{% endif %}</h3>
             <div class="h-56"><canvas id="chart-tendencia"></canvas></div>
         </div>
 
