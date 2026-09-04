@@ -715,6 +715,18 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS documentos_empleado (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, tipo_documento VARCHAR(150) NOT NULL, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_archivo TEXT DEFAULT '', nombre_original VARCHAR(255) DEFAULT '', fecha_emision VARCHAR(20), fecha_vencimiento VARCHAR(20), alerta_nivel VARCHAR(20), estado VARCHAR(20) DEFAULT 'activo', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL
             )''')
+            # 💬 Chat interno (pedido por Tomás) entre admin/agente: un "Canal General" (mensajes
+            # de tipo 'canal', visibles para todo el equipo operativo) y mensajes directos 1 a 1
+            # (tipo 'directo', con 'destinatario' puntual). 'leido' solo aplica a los directos —
+            # el canal usa chat_canal_visto (más abajo) para saber qué ya vio cada quien.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_mensajes (
+                id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, remitente VARCHAR(100) NOT NULL, destinatario VARCHAR(100), mensaje TEXT NOT NULL, fecha VARCHAR(100) NOT NULL, leido INTEGER DEFAULT 0
+            )''')
+            # 👁️ Última vez que cada usuario "vio" el Canal General — los mensajes de otros con
+            # fecha posterior a esta cuentan como no leídos (ver _chat_canal_no_leidos).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_canal_visto (
+                usuario VARCHAR(100) PRIMARY KEY, fecha_visto VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -1045,6 +1057,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS documentos_empleado (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, tipo_documento TEXT NOT NULL, titulo TEXT NOT NULL, descripcion TEXT, url_archivo TEXT DEFAULT '', nombre_original TEXT DEFAULT '', fecha_emision TEXT, fecha_vencimiento TEXT, alerta_nivel TEXT, estado TEXT DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL
             )''')
+            # 💬 Chat interno. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_mensajes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, remitente TEXT NOT NULL, destinatario TEXT, mensaje TEXT NOT NULL, fecha TEXT NOT NULL, leido INTEGER DEFAULT 0
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_canal_visto (
+                usuario TEXT PRIMARY KEY, fecha_visto TEXT NOT NULL
+            )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
                 try:
@@ -1327,6 +1346,9 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_dispositivos_confiables_2fa_usuario ON dispositivos_confiables_2fa (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_comunicados_estado ON comunicados (estado);",
             "CREATE INDEX IF NOT EXISTS idx_conocimiento_articulos_estado ON conocimiento_articulos (estado);",
+            "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_tipo_fecha ON chat_mensajes (tipo, fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_remitente ON chat_mensajes (remitente);",
+            "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_destinatario ON chat_mensajes (destinatario);",
         ]:
             try:
                 cursor.execute(indice_sql)
@@ -1915,7 +1937,7 @@ def visor_db():
         'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
         'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
         'ticket_configuraciones', 'activos_inventario', 'inventario_devoluciones', 'aplicativos_catalogo',
-        'credenciales_colaboradores', 'login_fondo_media'
+        'credenciales_colaboradores', 'login_fondo_media', 'chat_mensajes', 'chat_canal_visto'
     ]
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
@@ -2002,7 +2024,8 @@ TABLAS_RESPALDO = [
     'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
     'activos_inventario', 'inventario_adjuntos', 'inventario_devoluciones', 'aplicativos_catalogo',
-    'credenciales_colaboradores', 'login_fondo_media', 'actas_recibido_biomedico'
+    'credenciales_colaboradores', 'login_fondo_media', 'actas_recibido_biomedico',
+    'chat_mensajes', 'chat_canal_visto'
 ]
 
 
@@ -3239,6 +3262,302 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
     de soporte), sin duplicar destinatarios."""
     for u in set(u for u in (usuarios or []) if u):
         crear_notificacion(u, mensaje, url=url, tipo=tipo)
+
+
+# 💬 CHAT INTERNO (pedido por Tomás): "Canal General" para todo el equipo operativo (admin +
+# agente) más mensajes directos 1 a 1 entre ellos. Sigue el mismo patrón de la campanita de
+# notificaciones — sin WebSockets, la página consulta por fetch() cada pocos segundos mientras
+# está abierta (ver /static/js/chat.js) — y reutiliza crear_notificacion() para avisar en la
+# campanita de un mensaje directo nuevo a quien no tenga el chat abierto en ese momento.
+def _usuarios_operativos_activos(excluir=None):
+    """Lista de {usuario, nombre} de cuentas activas con rol admin/agente (con quién se puede
+    chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por nombre."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        placeholders = ', '.join(['%s' if db_type == 'postgres' else '?'] * len(ROLES_CON_ACCESO_OPERATIVO))
+        q = f"SELECT usuario, nombre FROM usuarios WHERE estado = 'activo' AND rol IN ({placeholders})"
+        cursor.execute(q, ROLES_CON_ACCESO_OPERATIVO)
+        filas = [{'usuario': u, 'nombre': n or u} for u, n in cursor.fetchall() if u != excluir]
+        conn.close()
+        filas.sort(key=lambda f: f['nombre'].lower())
+        return filas
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error listando usuarios operativos activos para el chat: {e}")
+        return []
+
+
+def _es_usuario_operativo_activo(usuario):
+    """True si 'usuario' existe, está activo y tiene rol admin/agente — con quién SÍ se puede
+    abrir un chat directo (evita chatear con cuentas inactivas, estándar o inexistentes)."""
+    if not usuario:
+        return False
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT estado, rol FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT estado, rol FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (usuario,))
+        fila = cursor.fetchone()
+        conn.close()
+        if not fila:
+            return False
+        estado, rol = fila
+        return (estado or 'activo') == 'activo' and rol in ROLES_CON_ACCESO_OPERATIVO
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error validando usuario operativo '{usuario}' para el chat: {e}")
+        return False
+
+
+def _chat_canal_no_leidos(usuario):
+    """Cuenta mensajes del Canal General escritos por OTROS después de la última vez que
+    'usuario' lo vio (chat_canal_visto) — nunca haberlo visto cuenta como 'todo no leído'."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_visto = "SELECT fecha_visto FROM chat_canal_visto WHERE usuario = %s" if db_type == 'postgres' else "SELECT fecha_visto FROM chat_canal_visto WHERE usuario = ?"
+        cursor.execute(q_visto, (usuario,))
+        fila = cursor.fetchone()
+        fecha_visto = fila[0] if fila else '0000-00-00 00:00:00'
+        q_cuenta = ("SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'canal' AND remitente != %s AND fecha > %s" if db_type == 'postgres'
+                    else "SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'canal' AND remitente != ? AND fecha > ?")
+        cursor.execute(q_cuenta, (usuario, fecha_visto))
+        total = cursor.fetchone()[0]
+        conn.close()
+        return total
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error contando no leídos del Canal General para '{usuario}': {e}")
+        return 0
+
+
+def _chat_directos_no_leidos_total(usuario):
+    """Cuenta TODOS los mensajes directos no leídos de 'usuario', sin importar quién se los
+    envió — para el badge general (ver bienvenida())."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'directo' AND destinatario = %s AND leido = 0" if db_type == 'postgres' else "SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'directo' AND destinatario = ? AND leido = 0"
+        cursor.execute(q, (usuario,))
+        total = cursor.fetchone()[0]
+        conn.close()
+        return total
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error contando directos no leídos de '{usuario}': {e}")
+        return 0
+
+
+def _chat_marcar_canal_visto(usuario):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        fecha_actual = obtener_fecha_actual()
+        if db_type == 'postgres':
+            q = ("INSERT INTO chat_canal_visto (usuario, fecha_visto) VALUES (%s, %s) "
+                 "ON CONFLICT (usuario) DO UPDATE SET fecha_visto = EXCLUDED.fecha_visto")
+        else:
+            q = "INSERT OR REPLACE INTO chat_canal_visto (usuario, fecha_visto) VALUES (?, ?)"
+        cursor.execute(q, (usuario, fecha_actual))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error marcando visto el Canal General para '{usuario}': {e}")
+
+
+@app.route('/chat')
+@login_required
+@agente_o_admin_required
+def chat_pagina():
+    return render_template('chat.html', username=session.get('username'), rol=session.get('rol'),
+                            contactos=_usuarios_operativos_activos(excluir=session.get('username')),
+                            con=(request.args.get('con') or '').strip())
+
+
+@app.route('/chat/contactos')
+@login_required
+@agente_o_admin_required
+def chat_contactos():
+    """JSON para refrescar la barra lateral: contactos con su último mensaje y no leídos, más
+    el contador aparte del Canal General (que no es un 'contacto' sino el ítem fijo de arriba)."""
+    usuario_actual = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    contactos = []
+    try:
+        for c in _usuarios_operativos_activos(excluir=usuario_actual):
+            q_ultimo = ("SELECT mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+                        "((remitente = %s AND destinatario = %s) OR (remitente = %s AND destinatario = %s)) "
+                        "ORDER BY id DESC LIMIT 1") if db_type == 'postgres' else \
+                       ("SELECT mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+                        "((remitente = ? AND destinatario = ?) OR (remitente = ? AND destinatario = ?)) "
+                        "ORDER BY id DESC LIMIT 1")
+            cursor.execute(q_ultimo, (usuario_actual, c['usuario'], c['usuario'], usuario_actual))
+            fila = cursor.fetchone()
+            q_no_leidos = "SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'directo' AND remitente = %s AND destinatario = %s AND leido = 0" if db_type == 'postgres' else "SELECT COUNT(*) FROM chat_mensajes WHERE tipo = 'directo' AND remitente = ? AND destinatario = ? AND leido = 0"
+            cursor.execute(q_no_leidos, (c['usuario'], usuario_actual))
+            no_leidos = cursor.fetchone()[0]
+            contactos.append({
+                'usuario': c['usuario'], 'nombre': c['nombre'], 'no_leidos': no_leidos,
+                'ultimo_mensaje': fila[0] if fila else None, 'ultima_fecha': fila[1] if fila else None,
+            })
+        conn.close()
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error listando contactos del chat: {e}")
+
+    # 🔀 Doble sort estable: primero por nombre (para los que nunca han cruzado un mensaje),
+    # y ENCIMA por fecha del último mensaje descendente — así la conversación más reciente
+    # queda arriba de todo, y quienes no tienen ningún mensaje quedan al final, por nombre.
+    contactos.sort(key=lambda c: c['nombre'].lower())
+    contactos.sort(key=lambda c: c['ultima_fecha'] or '', reverse=True)
+    return jsonify({'contactos': contactos, 'canal_no_leidos': _chat_canal_no_leidos(usuario_actual)})
+
+
+@app.route('/chat/canal/mensajes')
+@login_required
+@agente_o_admin_required
+def chat_canal_mensajes():
+    usuario_actual = session.get('username')
+    desde_id = request.args.get('desde_id', 0, type=int) or 0
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    mensajes = []
+    try:
+        if desde_id > 0:
+            # Poll incremental: solo lo nuevo desde el último mensaje que ya tiene el navegador.
+            q = "SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' AND id > %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' AND id > ? ORDER BY id ASC"
+            cursor.execute(q, (desde_id,))
+        else:
+            # Primera carga: los últimos 200 nada más (no todo el historial del canal desde
+            # siempre), reordenados de más viejo a más nuevo para pintarlos de arriba a abajo.
+            q = ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' ORDER BY id DESC LIMIT 200) t ORDER BY id ASC")
+            cursor.execute(q)
+        nombres = _mapa_nombres_usuarios()
+        for mid, remitente, mensaje, fecha in cursor.fetchall():
+            mensajes.append({
+                'id': mid, 'remitente': remitente, 'remitente_nombre': _nombre_para_mostrar(remitente, nombres),
+                'mensaje': mensaje, 'fecha': fecha, 'es_mio': remitente == usuario_actual,
+            })
+        conn.close()
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error consultando el Canal General: {e}")
+
+    _chat_marcar_canal_visto(usuario_actual)
+    return jsonify({'mensajes': mensajes})
+
+
+@app.route('/chat/canal/enviar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def chat_canal_enviar():
+    usuario_actual = session.get('username')
+    mensaje = (request.form.get('mensaje') or '').strip()
+    if not mensaje:
+        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
+    if len(mensaje) > 2000:
+        return jsonify({'success': False, 'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        fecha_actual = obtener_fecha_actual()
+        q = "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', ?, ?, ?)"
+        cursor.execute(q, (usuario_actual, mensaje, fecha_actual))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error enviando mensaje al Canal General: {e}")
+        return jsonify({'success': False, 'error': 'No se pudo enviar el mensaje.'}), 500
+
+    _chat_marcar_canal_visto(usuario_actual)  # su propio mensaje no debe contarle como no leído
+    return jsonify({'success': True})
+
+
+@app.route('/chat/directo/<usuario>/mensajes')
+@login_required
+@agente_o_admin_required
+def chat_directo_mensajes(usuario):
+    if not _es_usuario_operativo_activo(usuario):
+        return jsonify({'error': 'No se puede chatear con ese usuario.'}), 404
+
+    usuario_actual = session.get('username')
+    desde_id = request.args.get('desde_id', 0, type=int) or 0
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    mensajes = []
+    try:
+        if desde_id > 0:
+            q = ("SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND id > %s AND "
+                 "((remitente = %s AND destinatario = %s) OR (remitente = %s AND destinatario = %s)) ORDER BY id ASC") if db_type == 'postgres' else \
+                ("SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND id > ? AND "
+                 "((remitente = ? AND destinatario = ?) OR (remitente = ? AND destinatario = ?)) ORDER BY id ASC")
+            cursor.execute(q, (desde_id, usuario_actual, usuario, usuario, usuario_actual))
+        else:
+            # Primera carga: los últimos 300 mensajes de esta conversación nada más.
+            q = ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+                 "((remitente = %s AND destinatario = %s) OR (remitente = %s AND destinatario = %s)) ORDER BY id DESC LIMIT 300) t ORDER BY id ASC") if db_type == 'postgres' else \
+                ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+                 "((remitente = ? AND destinatario = ?) OR (remitente = ? AND destinatario = ?)) ORDER BY id DESC LIMIT 300) t ORDER BY id ASC")
+            cursor.execute(q, (usuario_actual, usuario, usuario, usuario_actual))
+        for mid, remitente, mensaje, fecha in cursor.fetchall():
+            mensajes.append({'id': mid, 'remitente': remitente, 'mensaje': mensaje, 'fecha': fecha, 'es_mio': remitente == usuario_actual})
+
+        # 👁️ Entrar a esta conversación marca como leídos los mensajes que ESE contacto me envió.
+        q_upd = "UPDATE chat_mensajes SET leido = 1 WHERE tipo = 'directo' AND remitente = %s AND destinatario = %s AND leido = 0" if db_type == 'postgres' else "UPDATE chat_mensajes SET leido = 1 WHERE tipo = 'directo' AND remitente = ? AND destinatario = ? AND leido = 0"
+        cursor.execute(q_upd, (usuario, usuario_actual))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error consultando chat directo entre '{usuario_actual}' y '{usuario}': {e}")
+
+    return jsonify({'mensajes': mensajes})
+
+
+@app.route('/chat/directo/<usuario>/enviar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def chat_directo_enviar(usuario):
+    if not _es_usuario_operativo_activo(usuario):
+        return jsonify({'success': False, 'error': 'No se puede chatear con ese usuario.'}), 404
+
+    usuario_actual = session.get('username')
+    if usuario == usuario_actual:
+        return jsonify({'success': False, 'error': 'No puedes enviarte un mensaje a ti mismo.'}), 400
+
+    mensaje = (request.form.get('mensaje') or '').strip()
+    if not mensaje:
+        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
+    if len(mensaje) > 2000:
+        return jsonify({'success': False, 'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        fecha_actual = obtener_fecha_actual()
+        q = "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', ?, ?, ?, ?)"
+        cursor.execute(q, (usuario_actual, usuario, mensaje, fecha_actual))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error enviando mensaje directo de '{usuario_actual}' a '{usuario}': {e}")
+        return jsonify({'success': False, 'error': 'No se pudo enviar el mensaje.'}), 500
+
+    nombres_para_notif = _mapa_nombres_usuarios()
+    nombre_remitente = _nombre_para_mostrar(usuario_actual, nombres_para_notif)
+    vista_previa = mensaje if len(mensaje) <= 80 else (mensaje[:77] + '...')
+    crear_notificacion(usuario, f"💬 {nombre_remitente}: {vista_previa}", url=f"/chat?con={usuario_actual}", tipo='chat')
+    return jsonify({'success': True})
 
 
 # 📅 VENCIMIENTO DE DOCUMENTOS (institucionales en 'galerias' y por empleado en
@@ -11787,7 +12106,13 @@ def bienvenida():
     if comunicado_fijado:
         _marcar_comunicado_leido(comunicado_fijado['id'], session.get('username'))
 
-    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado)
+    # 💬 Punto rojo en la tarjeta de Chat Interno si hay directos o mensajes del Canal General
+    # sin leer — solo aplica a quien puede entrar al chat (admin/agente).
+    chat_no_leidos = 0
+    if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+        chat_no_leidos = _chat_directos_no_leidos_total(session.get('username')) + _chat_canal_no_leidos(session.get('username'))
+
+    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado, chat_no_leidos=chat_no_leidos)
 
 @app.route('/gestor')
 @login_required
