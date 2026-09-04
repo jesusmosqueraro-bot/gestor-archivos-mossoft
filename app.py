@@ -6252,7 +6252,7 @@ def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
     try:
         cursor.execute("SELECT tipo_costo, costo_compra, costo_alquiler_mensual FROM activos_inventario WHERE COALESCE(eliminado, 0) = 0")
         totales_costos_inventario = _totales_costos_inventario([
-            {'tipo_costo': tc, 'costo_compra': cc, 'costo_alquiler_mensual': cam}
+            {'tipo_costo': tc, 'costo_compra': _decimal_a_float(cc), 'costo_alquiler_mensual': _decimal_a_float(cam)}
             for tc, cc, cam in cursor.fetchall()
         ])
     except Exception as e:
@@ -6427,7 +6427,7 @@ def ver_inventario():
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
         'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
-        'tipo_costo': r[14], 'costo_compra': r[15], 'costo_alquiler_mensual': r[16],
+        'tipo_costo': r[14], 'costo_compra': _decimal_a_float(r[15]), 'costo_alquiler_mensual': _decimal_a_float(r[16]),
         'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]),
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
@@ -6548,7 +6548,7 @@ def _consultar_activos_inventario_filtrados(q_estado='', q_tipo='', q_sede='', q
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
         'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
-        'tipo_costo': r[14], 'costo_compra': r[15], 'costo_alquiler_mensual': r[16],
+        'tipo_costo': r[14], 'costo_compra': _decimal_a_float(r[15]), 'costo_alquiler_mensual': _decimal_a_float(r[16]),
     } for r in rows]
 
     if q_sede:
@@ -6858,6 +6858,21 @@ def inventario_exportar_pdf():
     })
 
 
+def _decimal_a_float(valor):
+    """Convierte a float lo que llega de una columna NUMERIC de Postgres (psycopg2 las devuelve
+    como decimal.Decimal, nunca como float) — sin esto, sumar 'costo_compra'/'costo_alquiler_mensual'
+    en _totales_costos_inventario contra un acumulador float revienta con
+    "TypeError: unsupported operand type(s) for +=: 'float' and 'decimal.Decimal'" (500 al abrir
+    Inventario en cuanto CUALQUIER activo tenga un costo guardado), y el modal de editar tampoco
+    podría serializar el activo a JSON ({{ a | tojson }}) porque Decimal no es serializable. En
+    SQLite esto no pasaba porque esa columna es REAL y ya vuelve como float — por eso las pruebas
+    (que corren sobre SQLite) no lo detectaron. Debe llamarse justo al leer la fila de la base,
+    antes de que el valor se use en cualquier cálculo o se guarde en el diccionario del activo."""
+    if valor is None:
+        return None
+    return float(valor)
+
+
 def _parsear_datos_costo_inventario(form):
     """Lee y valida tipo_costo/costo_compra/costo_alquiler_mensual del formulario de crear/editar
     activo. Un activo es propio O alquilado, nunca las dos cosas a la vez: el campo que no aplica
@@ -6894,11 +6909,14 @@ def _totales_costos_inventario(activos):
     total_alquiler_mensual = 0.0
     cantidad_alquilados = 0
     for a in activos:
+        # 🛡️ float(...) aquí es una segunda barrera además de _decimal_a_float() en el punto de
+        # lectura: aunque alguna vez un caller nuevo olvide convertir el Decimal que devuelve
+        # Postgres, esta suma no debe volver a reventar la página con un 500.
         if a.get('tipo_costo') == 'propio' and a.get('costo_compra') is not None:
-            total_compra += a['costo_compra']
+            total_compra += float(a['costo_compra'])
             cantidad_propios += 1
         elif a.get('tipo_costo') == 'alquilado' and a.get('costo_alquiler_mensual') is not None:
-            total_alquiler_mensual += a['costo_alquiler_mensual']
+            total_alquiler_mensual += float(a['costo_alquiler_mensual'])
             cantidad_alquilados += 1
     return {
         'total_compra': total_compra, 'cantidad_propios': cantidad_propios,
