@@ -690,6 +690,16 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, codigo_hash VARCHAR(255) NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion VARCHAR(100) NOT NULL, fecha_uso VARCHAR(100)
             )''')
+            # 📱 Dispositivos de confianza del 2FA (pedido por Tomás): en vez de pedir el código
+            # de la app autenticadora en CADA inicio de sesión, un dispositivo que ya lo verificó
+            # una vez queda "de confianza" por DURACION_DISPOSITIVO_CONFIABLE_2FA_DIAS (10 días).
+            # Solo se guarda el HASH del token (igual que los códigos de respaldo) — el token en
+            # claro solo vive en la cookie del navegador. La IP se valida además del token: si el
+            # mismo dispositivo/cookie se usa desde una IP distinta, igual se vuelve a pedir el
+            # 2FA (así una cookie robada/copiada a otra red no sirve de nada).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS dispositivos_confiables_2fa (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, token_hash VARCHAR(255) NOT NULL, ip VARCHAR(100), dispositivo VARCHAR(150), fecha_creacion VARCHAR(100) NOT NULL, fecha_expiracion VARCHAR(100) NOT NULL
+            )''')
             # 📋 Plantillas de solicitud: administradas por el equipo de soporte (/tickets/plantillas)
             # para acelerar la creación de tickets recurrentes — al elegir una en "Nueva Solicitud"
             # se prellenan tipo, título, categoría, prioridad, área, sede y descripción, todo
@@ -1022,6 +1032,10 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS totp_codigos_respaldo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, codigo_hash TEXT NOT NULL, usado INTEGER DEFAULT 0, fecha_creacion TEXT NOT NULL, fecha_uso TEXT
             )''')
+            # 📱 Dispositivos de confianza del 2FA. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS dispositivos_confiables_2fa (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, token_hash TEXT NOT NULL, ip TEXT, dispositivo TEXT, fecha_creacion TEXT NOT NULL, fecha_expiracion TEXT NOT NULL
+            )''')
             # 📋 Plantillas de solicitud. Ver comentario equivalente en la rama de Postgres.
             cursor.execute('''CREATE TABLE IF NOT EXISTS ticket_plantillas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo TEXT DEFAULT 'Incidente', categoria TEXT, prioridad TEXT DEFAULT 'Media', area TEXT, sede TEXT, titulo TEXT NOT NULL, descripcion TEXT NOT NULL, estado TEXT DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL
@@ -1310,6 +1324,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_usuario ON documentos_empleado (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_documentos_empleado_estado ON documentos_empleado (estado);",
             "CREATE INDEX IF NOT EXISTS idx_totp_codigos_respaldo_usuario ON totp_codigos_respaldo (usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_dispositivos_confiables_2fa_usuario ON dispositivos_confiables_2fa (usuario);",
             "CREATE INDEX IF NOT EXISTS idx_comunicados_estado ON comunicados (estado);",
             "CREATE INDEX IF NOT EXISTS idx_conocimiento_articulos_estado ON conocimiento_articulos (estado);",
         ]:
@@ -1479,6 +1494,16 @@ def _detectar_dispositivo(user_agent):
 # Authy, etc.) mientras aún conserva alguno de sus 10 códigos de respaldo.
 NOMBRE_EMISOR_2FA = "Arkiv - Preventiva"
 
+# 📱 DISPOSITIVOS DE CONFIANZA DEL 2FA (pedido por Tomás): "que con el 2FA se habilite... que se
+# solicite cada 10 días por dispositivo... si la IP es la misma durante los inicios de sesión
+# durante 10 días, no solicite constantemente el inicio de sesión". Un dispositivo que ya pasó el
+# segundo factor una vez queda "de confianza" por esta cantidad de días — mientras tanto, /login
+# no vuelve a redirigir a /login/2fa para ese mismo dispositivo, SIEMPRE que además la IP siga
+# siendo la misma (ver _dispositivo_2fa_es_confiable). Un PC distinto (sin la cookie, o con una
+# IP distinta) sí vuelve a pedir el código.
+DURACION_DISPOSITIVO_CONFIABLE_2FA_DIAS = 10
+NOMBRE_COOKIE_DISPOSITIVO_2FA = 'dispositivo_confiable_2fa'
+
 
 def _normalizar_codigo_respaldo(codigo):
     """Los códigos de respaldo se muestran como 'XXXX-XXXX' pero se aceptan con o sin guion,
@@ -1586,9 +1611,11 @@ def _descifrar_totp_secret(usuario, secreto_guardado):
 
 
 def _desactivar_2fa_cuenta(usuario):
-    """Apaga el 2FA de una cuenta: limpia el secreto TOTP y borra sus códigos de respaldo. Lo
-    usan tanto /perfil/2fa/desactivar (el propio usuario, con su contraseña) como el admin desde
-    Gestión de Usuarios (recuperación por pérdida de dispositivo)."""
+    """Apaga el 2FA de una cuenta: limpia el secreto TOTP, borra sus códigos de respaldo Y
+    revoca cualquier dispositivo que hubiera quedado 'de confianza' (ver dispositivos_confiables_
+    2fa más abajo) — si se vuelve a activar el 2FA más adelante, todo dispositivo debe volver a
+    verificarse desde cero. Lo usan tanto /perfil/2fa/desactivar (el propio usuario, con su
+    contraseña) como el admin desde Gestión de Usuarios (recuperación por pérdida de dispositivo)."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -1596,6 +1623,8 @@ def _desactivar_2fa_cuenta(usuario):
         cursor.execute(q_upd, (usuario,))
         q_del = "DELETE FROM totp_codigos_respaldo WHERE usuario = %s" if db_type == 'postgres' else "DELETE FROM totp_codigos_respaldo WHERE usuario = ?"
         cursor.execute(q_del, (usuario,))
+        q_del_disp = "DELETE FROM dispositivos_confiables_2fa WHERE usuario = %s" if db_type == 'postgres' else "DELETE FROM dispositivos_confiables_2fa WHERE usuario = ?"
+        cursor.execute(q_del_disp, (usuario,))
         conn.commit()
         conn.close()
         return True
@@ -1603,6 +1632,89 @@ def _desactivar_2fa_cuenta(usuario):
         conn.rollback()
         conn.close()
         print(f"⚠️ Error desactivando 2FA: {e}")
+        return False
+
+
+def _hash_token_dispositivo(token):
+    """Hashea (SHA-256) el token de 'dispositivo de confianza' del 2FA antes de guardarlo —
+    igual que con los códigos de respaldo, en la base de datos nunca se guarda el valor en
+    claro; el token sin hashear solo vive en la cookie del navegador de la persona."""
+    return hashlib.sha256((token or '').encode('utf-8')).hexdigest()
+
+
+def _purgar_dispositivos_confiables_vencidos(usuario=None):
+    """Borra las filas de dispositivos_confiables_2fa ya vencidas. Es oportunista (se llama
+    antes de crear un dispositivo nuevo) en vez de necesitar un job aparte; con 'usuario' limita
+    la purga a esa cuenta, sin él purga globalmente (se usa ahí donde ya se toca la tabla igual)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        fecha_actual = obtener_fecha_actual()
+        if usuario:
+            q = ("DELETE FROM dispositivos_confiables_2fa WHERE usuario = %s AND fecha_expiracion < %s" if db_type == 'postgres'
+                 else "DELETE FROM dispositivos_confiables_2fa WHERE usuario = ? AND fecha_expiracion < ?")
+            cursor.execute(q, (usuario, fecha_actual))
+        else:
+            q = ("DELETE FROM dispositivos_confiables_2fa WHERE fecha_expiracion < %s" if db_type == 'postgres'
+                 else "DELETE FROM dispositivos_confiables_2fa WHERE fecha_expiracion < ?")
+            cursor.execute(q, (fecha_actual,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error purgando dispositivos de confianza 2FA vencidos: {e}")
+
+
+def _generar_dispositivo_confiable_2fa(usuario, ip, dispositivo):
+    """Se llama justo después de que /login/2fa verifica el código correctamente: crea un
+    registro nuevo de 'dispositivo de confianza', válido por DURACION_DISPOSITIVO_CONFIABLE_2FA_
+    DIAS (10 días) para esa cuenta+IP, y devuelve el TOKEN EN CLARO para guardarlo en la cookie
+    del navegador — en la base de datos solo queda su hash (ver _hash_token_dispositivo)."""
+    _purgar_dispositivos_confiables_vencidos(usuario)
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        token = secrets.token_urlsafe(32)
+        fecha_creacion = obtener_fecha_actual()
+        fecha_expiracion = (datetime.now(timezone.utc) + timedelta(days=DURACION_DISPOSITIVO_CONFIABLE_2FA_DIAS)).strftime("%Y-%m-%d %H:%M:%S")
+        q = ("INSERT INTO dispositivos_confiables_2fa (usuario, token_hash, ip, dispositivo, fecha_creacion, fecha_expiracion) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres'
+             else "INSERT INTO dispositivos_confiables_2fa (usuario, token_hash, ip, dispositivo, fecha_creacion, fecha_expiracion) VALUES (?, ?, ?, ?, ?, ?)")
+        cursor.execute(q, (usuario, _hash_token_dispositivo(token), ip or '', dispositivo or '', fecha_creacion, fecha_expiracion))
+        conn.commit()
+        conn.close()
+        return token
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error generando dispositivo de confianza 2FA: {e}")
+        return None
+
+
+def _dispositivo_2fa_es_confiable(usuario, token, ip):
+    """True si 'token' (leído de la cookie del navegador) corresponde a un dispositivo de
+    confianza vigente para 'usuario' Y la IP actual coincide con la que se guardó al crearlo. La
+    IP es una señal ADICIONAL a la del propio token (pedida por Tomás: "si la IP es la misma...
+    no solicite constantemente"), nunca la reemplaza — así, si alguien copia la cookie a otra
+    red, ese dispositivo de todas formas vuelve a pedir el código."""
+    if not usuario or not token:
+        return False
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        fecha_actual = obtener_fecha_actual()
+        token_hash = _hash_token_dispositivo(token)
+        q = ("SELECT ip FROM dispositivos_confiables_2fa WHERE usuario = %s AND token_hash = %s AND fecha_expiracion >= %s" if db_type == 'postgres'
+             else "SELECT ip FROM dispositivos_confiables_2fa WHERE usuario = ? AND token_hash = ? AND fecha_expiracion >= ?")
+        cursor.execute(q, (usuario, token_hash, fecha_actual))
+        fila = cursor.fetchone()
+        conn.close()
+        if not fila:
+            return False
+        return (fila[0] or '') == (ip or '')
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error validando dispositivo de confianza 2FA: {e}")
         return False
 
 # 📧 Bitácora de correos enviados (ver /logs/correos). Se llama desde enviar_correo_ticket y
@@ -7353,7 +7465,7 @@ def editar_activo(activo_id):
 
 @app.route('/tickets/inventario/<int:activo_id>/eliminar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@admin_required
 def eliminar_activo(activo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -7992,6 +8104,25 @@ def login():
                     # sigue sin existir, así que validar_instancia_y_sesion la deja pasar de largo)
                     # y se manda a /login/2fa a pedir el código de la app autenticadora.
                     if len(user) > 6 and user[6]:
+                        # 📱 Dispositivo de confianza (pedido por Tomás): si este mismo
+                        # dispositivo/navegador ya pasó el 2FA hace menos de 10 días Y la IP
+                        # sigue siendo la misma, no se vuelve a pedir el código — se completa el
+                        # inicio de sesión de una vez, igual que si no tuviera 2FA activo.
+                        ip_actual = _obtener_ip_cliente()
+                        token_dispositivo = request.cookies.get(NOMBRE_COOKIE_DISPOSITIVO_2FA)
+                        if token_dispositivo and _dispositivo_2fa_es_confiable(user[0], token_dispositivo, ip_actual):
+                            session.permanent = True
+                            session['logged_in'] = True
+                            session['username'] = user[0]
+                            session['rol'] = user[2]
+                            session['instance_id'] = SERVER_INSTANCE_ID
+                            session['tema'] = user[4] or 'oscuro'
+                            session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
+                            session['debe_activar_2fa'] = False
+                            session['foto_perfil'] = user[9] if len(user) > 9 else None
+                            registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso (dispositivo de confianza 2FA, no se pidió el código)", ip=ip_actual, dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+                            return redirect(url_for('bienvenida'))
+
                         session['pre_2fa_usuario'] = user[0]
                         session['pre_2fa_expira'] = (datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp()
                         session.pop('pre_2fa_intentos', None)
@@ -8102,8 +8233,22 @@ def login_2fa():
             # 🖼️ Foto de perfil: se cachea en la sesión (ver login() más arriba).
             session['foto_perfil'] = user[6] if len(user) > 6 else None
             detalle = "Inicio de sesión exitoso (código de respaldo 2FA)" if via_respaldo else "Inicio de sesión exitoso (verificación en dos pasos)"
-            registrar_log(user[0], "Inicio de Sesión", detalle, ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
-            return redirect(url_for('bienvenida'))
+            ip_actual = _obtener_ip_cliente()
+            dispositivo_actual = _detectar_dispositivo(request.headers.get('User-Agent', ''))
+            registrar_log(user[0], "Inicio de Sesión", detalle, ip=ip_actual, dispositivo=dispositivo_actual)
+
+            respuesta = redirect(url_for('bienvenida'))
+            # 📱 Dispositivo de confianza (pedido por Tomás): al pasar el 2FA con éxito, este
+            # dispositivo queda "de confianza" por 10 días (ver DURACION_DISPOSITIVO_CONFIABLE_
+            # 2FA_DIAS) para que /login no vuelva a pedir el código mientras la IP no cambie.
+            token_dispositivo = _generar_dispositivo_confiable_2fa(user[0], ip_actual, dispositivo_actual)
+            if token_dispositivo:
+                respuesta.set_cookie(
+                    NOMBRE_COOKIE_DISPOSITIVO_2FA, token_dispositivo,
+                    max_age=DURACION_DISPOSITIVO_CONFIABLE_2FA_DIAS * 86400,
+                    httponly=True, secure=True, samesite='Lax',
+                )
+            return respuesta
 
         # 🛡️ Límite de intentos: 5 códigos incorrectos consecutivos obligan a volver a
         # ingresar usuario y contraseña, igual que en la recuperación de contraseña.
