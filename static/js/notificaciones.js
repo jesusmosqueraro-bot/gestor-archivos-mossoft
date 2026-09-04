@@ -93,6 +93,17 @@ function cargarNotificaciones() {
                     badge.classList.add('hidden');
                 }
             }
+            // 💬 Mismo sondeo, mismo dato de siempre: pinta el contador del botón de Chat
+            // Interno (partials/chat_boton.html) si esta página lo tiene.
+            var badgeChat = document.getElementById('badge-chat-header');
+            if (badgeChat) {
+                if (data.chat_no_leidos > 0) {
+                    badgeChat.textContent = data.chat_no_leidos > 99 ? '99+' : data.chat_no_leidos;
+                    badgeChat.classList.remove('hidden');
+                } else {
+                    badgeChat.classList.add('hidden');
+                }
+            }
             var lista = document.getElementById('lista-notificaciones');
             if (!lista) return;
             var enPapelera = _vistaNotificaciones === 'papelera';
