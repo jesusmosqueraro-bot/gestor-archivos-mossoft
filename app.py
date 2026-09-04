@@ -858,7 +858,16 @@ def init_db():
                 # se valida contra el catálogo de Áreas ya administrado en /tickets/configuracion
                 # (ver _config_ticket_lista('area')); ayuda a ubicar con más precisión un equipo
                 # de cómputo o biomédico dentro de la sede donde está.
-                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS area VARCHAR(100);"
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS area VARCHAR(100);",
+                # 🚚 Catálogo de Proveedores (mismo mecanismo que Área/Sede: filas de
+                # ticket_configuraciones con tipo = 'proveedor'). 'nit' y 'razon_social' solo
+                # tienen contenido real para tipo = 'proveedor'; para área/sede/categoría quedan
+                # en NULL sin usarse — ver _config_ticket_lista().
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS nit VARCHAR(50);",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS razon_social VARCHAR(200);",
+                # 🚚 Proveedor del activo (quién lo vendió/suministró) — se valida contra el
+                # catálogo de Proveedores de /tickets/configuracion, igual que 'area' y 'sede'.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS proveedor VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1157,6 +1166,18 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_area_activo_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🚚 Catálogo de Proveedores y proveedor del activo. Ver comentario equivalente en
+            # la rama de Postgres.
+            for col_proveedor_sql in [
+                "ALTER TABLE ticket_configuraciones ADD COLUMN nit TEXT;",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN razon_social TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN proveedor TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_proveedor_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -2876,18 +2897,20 @@ def _revisar_alertas_sla():
 
 
 def _config_ticket_lista(tipo_config):
-    """Devuelve [{'id', 'nombre', 'direccion', 'responsable'}] de las Áreas, Sedes o
-    Categorías activas configuradas por el equipo de soporte en /tickets/configuracion
-    (tipo_config: 'area' | 'sede' | 'categoria'). 'direccion' y 'responsable' solo tienen
-    contenido real para tipo_config == 'sede'; para área/categoría quedan en None.
+    """Devuelve [{'id', 'nombre', 'direccion', 'responsable', 'nit', 'razon_social'}] de las
+    Áreas, Sedes, Categorías o Proveedores activos configurados por el equipo de soporte en
+    /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria' | 'proveedor').
+    'direccion'/'responsable' solo tienen contenido real para tipo_config == 'sede' (y
+    'responsable' también para 'area'/'categoria'); 'nit'/'razon_social' solo para
+    tipo_config == 'proveedor'. Para el resto de combinaciones quedan en None.
     Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
     romper la página que la llama."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        q = "SELECT id, nombre, direccion, responsable, nit, razon_social FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable, nit, razon_social FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
         cursor.execute(q, (tipo_config,))
-        filas = [{'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3]} for r in cursor.fetchall()]
+        filas = [{'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3], 'nit': r[4], 'razon_social': r[5]} for r in cursor.fetchall()]
         conn.close()
         return filas
     except Exception as e:
@@ -4997,6 +5020,7 @@ def configuracion_tickets():
     areas = _config_ticket_lista('area')
     sedes = _config_ticket_lista('sede')
     categorias = _config_ticket_lista('categoria')
+    proveedores = _config_ticket_lista('proveedor')
 
     # 👤 Lista de usuarios activos para elegir el "responsable" de cada sede desde un
     # desplegable (en vez de escribir un nombre libre que podría no corresponder a
@@ -5007,7 +5031,7 @@ def configuracion_tickets():
     usuarios_disponibles = [{'usuario': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
     conn.close()
 
-    return render_template('tickets_configuracion.html', es_soporte=True, areas=areas, sedes=sedes, categorias=categorias, usuarios_disponibles=usuarios_disponibles)
+    return render_template('tickets_configuracion.html', es_soporte=True, areas=areas, sedes=sedes, categorias=categorias, proveedores=proveedores, usuarios_disponibles=usuarios_disponibles)
 
 
 @app.route('/tickets/configuracion/nuevo', methods=['POST'])
@@ -5017,23 +5041,31 @@ def crear_configuracion_ticket():
     tipo = request.form.get('tipo', '').strip()
     nombre = request.form.get('nombre', '').strip()
     # 📍 Dirección solo aplica a Sedes y Áreas. Responsable aplica a los tres tipos (se usa
-    # para la asignación automática de tickets por categoría/área).
+    # para la asignación automática de tickets por categoría/área). NIT/Razón social solo
+    # aplican a Proveedores.
     direccion = request.form.get('direccion', '').strip() or None
     responsable = request.form.get('responsable', '').strip() or None
+    nit = request.form.get('nit', '').strip() or None
+    razon_social = request.form.get('razon_social', '').strip() or None
     if tipo not in ('sede', 'area'):
         direccion = None
     if tipo not in ('sede', 'area', 'categoria'):
         responsable = None
-    if tipo in ('area', 'sede', 'categoria') and nombre:
+    if tipo != 'proveedor':
+        nit = None
+        razon_social = None
+    if tipo in ('area', 'sede', 'categoria', 'proveedor') and nombre:
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable) VALUES (?, ?, ?, ?)"
-            cursor.execute(q, (tipo, nombre, direccion, responsable))
+            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social) VALUES (?, ?, ?, ?, ?, ?)"
+            cursor.execute(q, (tipo, nombre, direccion, responsable, nit, razon_social))
             conn.commit()
             detalle = f"Se agregó {tipo} '{nombre}'"
             if tipo in ('sede', 'area') and (direccion or responsable):
                 detalle += f" (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
+            if tipo == 'proveedor' and (nit or razon_social):
+                detalle += f" (NIT: {nit or 'sin especificar'}, razón social: {razon_social or 'sin especificar'})"
             registrar_log(session.get('username'), "Configuración de Tickets", detalle)
         except Exception as e:
             conn.rollback()
@@ -5072,6 +5104,13 @@ def editar_configuracion_ticket(config_id):
                 q = "UPDATE ticket_configuraciones SET nombre = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, responsable = ? WHERE id = ?"
                 cursor.execute(q, (nombre, responsable, config_id))
                 detalle = f"Se editó la categoría '{nombre}' (responsable: {responsable or 'sin asignar'})"
+            elif tipo_actual == 'proveedor':
+                # 🚚 Proveedor tiene NIT y razón social en vez de dirección/responsable.
+                nit = request.form.get('nit', '').strip() or None
+                razon_social = request.form.get('razon_social', '').strip() or None
+                q = "UPDATE ticket_configuraciones SET nombre = %s, nit = %s, razon_social = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, nit = ?, razon_social = ? WHERE id = ?"
+                cursor.execute(q, (nombre, nit, razon_social, config_id))
+                detalle = f"Se editó el proveedor '{nombre}' (NIT: {nit or 'sin especificar'}, razón social: {razon_social or 'sin especificar'})"
             else:
                 q = "UPDATE ticket_configuraciones SET nombre = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ? WHERE id = ?"
                 cursor.execute(q, (nombre, config_id))
@@ -5876,6 +5915,7 @@ def ver_inventario():
     q_tipo = request.args.get('tipo', '').strip()
     q_sede = request.args.get('sede', '').strip()
     q_area = request.args.get('area', '').strip()
+    q_proveedor = request.args.get('proveedor', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
 
     tipos_activo_catalogo = _catalogo_tipos_activo_activos()
@@ -5884,7 +5924,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -5950,7 +5990,7 @@ def ver_inventario():
     activos_todos = [{
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
-        'observaciones': r[10], 'fecha_creacion': r[11], 'creado_por': r[12],
+        'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -5977,6 +6017,8 @@ def ver_inventario():
         activos_en_contexto = [a for a in activos_en_contexto if (a['sede'] or '') == q_sede]
     if q_area:
         activos_en_contexto = [a for a in activos_en_contexto if (a['area'] or '') == q_area]
+    if q_proveedor:
+        activos_en_contexto = [a for a in activos_en_contexto if (a['proveedor'] or '') == q_proveedor]
     if q_tipo in nombres_tipos_activo:
         activos_en_contexto = [a for a in activos_en_contexto if a['tipo_activo'] == q_tipo]
     if q_busqueda:
@@ -6007,6 +6049,7 @@ def ver_inventario():
 
     sedes = _config_ticket_lista('sede')
     areas = _config_ticket_lista('area')
+    proveedores = _config_ticket_lista('proveedor')
     error_placa = request.args.get('error_placa', '').strip()
     # 🔀 Candidatos para "Activo de reemplazo": todo el inventario activo (sin filtrar por la
     # vista actual), con los campos mínimos que necesita el buscador del modal.
@@ -6019,8 +6062,8 @@ def ver_inventario():
         ICONOS_TIPO_ACTIVO=ICONOS_TIPO_ACTIVO,
         motivos_reemplazo=MOTIVOS_REEMPLAZO_ACTIVO, estados_resultantes_reemplazo=ESTADOS_RESULTANTES_REEMPLAZO,
         activos_para_reemplazo=activos_para_reemplazo,
-        estados_activo=ESTADOS_ACTIVO, sedes=sedes, areas=areas,
-        q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_area=q_area, q_busqueda=q_busqueda,
+        estados_activo=ESTADOS_ACTIVO, sedes=sedes, areas=areas, proveedores=proveedores,
+        q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_area=q_area, q_proveedor=q_proveedor, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
         total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
         por_tipo_activo=por_tipo_activo, error_placa=error_placa
@@ -6040,6 +6083,7 @@ def crear_activo():
     asignado_a = request.form.get('asignado_a', '').strip()
     sede = request.form.get('sede', '').strip()
     area = request.form.get('area', '').strip()
+    proveedor = request.form.get('proveedor', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
     nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
@@ -6051,6 +6095,8 @@ def crear_activo():
     sede = sede if sede in sedes_validas else None
     areas_validas = [a['nombre'] for a in _config_ticket_lista('area')]
     area = area if area in areas_validas else None
+    proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
+    proveedor = proveedor if proveedor in proveedores_validos else None
 
     if nombre:
         fecha_act = obtener_fecha_actual()
@@ -6067,8 +6113,8 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, observaciones or None, fecha_act, usuario))
+            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario))
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
         except Exception as e:
@@ -6091,6 +6137,7 @@ def editar_activo(activo_id):
     asignado_a = request.form.get('asignado_a', '').strip()
     sede = request.form.get('sede', '').strip()
     area = request.form.get('area', '').strip()
+    proveedor = request.form.get('proveedor', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
     nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
@@ -6102,6 +6149,8 @@ def editar_activo(activo_id):
     sede = sede if sede in sedes_validas else None
     areas_validas = [a['nombre'] for a in _config_ticket_lista('area')]
     area = area if area in areas_validas else None
+    proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
+    proveedor = proveedor if proveedor in proveedores_validos else None
 
     if nombre:
         conn, db_type = get_db()
@@ -6115,8 +6164,8 @@ def editar_activo(activo_id):
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, observaciones = ? WHERE id = ?"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, observaciones or None, activo_id))
+            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, proveedor = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, proveedor = ?, observaciones = ? WHERE id = ?"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, activo_id))
             conn.commit()
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
@@ -9788,6 +9837,29 @@ def buscar_global_api():
                     })
         except Exception as e:
             print(f"⚠️ Error buscando en credenciales de colaboradores (buscador global): {e}")
+
+        # --- Inventario de Activos (solo admin/agente): placa, tipo, marca, modelo, serie,
+        # asignado a, sede, área y proveedor — todo lo que se puede filtrar/editar hoy en
+        # /tickets/inventario queda cubierto aquí para que el buscador global sirva para
+        # encontrar un equipo puntual sin tener que entrar al módulo primero.
+        try:
+            cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+            contador = 0
+            for (a_id, a_nombre, a_tipo, a_marca, a_modelo, a_serie, a_estado, a_asignado, a_sede, a_area, a_proveedor) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = f"{a_nombre} {a_tipo or ''} {a_marca or ''} {a_modelo or ''} {a_serie or ''} {a_estado or ''} {a_asignado or ''} {a_sede or ''} {a_area or ''} {a_proveedor or ''}".lower()
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    subtitulo = ' · '.join([p for p in [a_tipo, a_marca, a_estado] if p])
+                    resultados.append({
+                        'categoria': 'Inventario de Activos',
+                        'titulo': f"Placa {a_nombre}",
+                        'subtitulo': subtitulo,
+                        'url': url_for('ver_inventario', q=a_nombre)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en inventario de activos (buscador global): {e}")
 
     # --- Usuarios (solo rol admin — y la cuenta 'admin' literal se oculta al resto de admins) ---
     if es_admin:
