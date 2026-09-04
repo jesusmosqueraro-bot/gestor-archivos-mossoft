@@ -13,10 +13,11 @@
 
     {% if fondo_media %}
     <!-- 🖼️ PANEL DE MARCA (imagen/video corto, administrable desde Novedades y Comunicados
-         → Fondo de Login). Pegado al borde izquierdo de la pantalla y ocupando la mitad del
-         ancho, como en Facebook/Solvyx. Oculto en celular a propósito: en pantalla angosta solo
-         importa que el login cargue rápido y sea fácil de usar; el panel es puramente decorativo. -->
-    <div class="hidden md:block md:w-1/2 relative overflow-hidden flex-shrink-0">
+         → Fondo de Login). Pegado al borde izquierdo de la pantalla, más ancho que la columna
+         del login (60/40) para que no quede tanto espacio muerto alrededor de la tarjeta blanca.
+         Oculto en celular a propósito: en pantalla angosta solo importa que el login cargue
+         rápido y sea fácil de usar; el panel es puramente decorativo. -->
+    <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0">
         {% for item in fondo_media %}
         <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
             {% if item.tipo == 'video' %}
@@ -30,10 +31,10 @@
     </div>
     {% endif %}
 
-    <!-- Columna del login: ocupa el resto del ancho disponible; el módulo de login en sí
-         (tarjeta blanca, campos, reCAPTCHA, botón) queda exactamente igual que antes, solo
-         cambia el tamaño del espacio a su alrededor. -->
-    <div class="flex-1 min-h-screen flex items-center justify-center p-4">
+    <!-- Columna del login: más angosta que antes (40% en vez de 50%) para reducir el espacio
+         vacío alrededor de la tarjeta; el módulo de login en sí (tarjeta blanca, campos,
+         reCAPTCHA, botón) no cambia en nada, solo el tamaño de la columna que lo rodea. -->
+    <div class="w-full md:w-2/5 min-h-screen flex items-center justify-center p-4 flex-shrink-0">
 
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
