@@ -900,7 +900,15 @@ def init_db():
                 # equipos biomédicos que se entregan a domicilio (bombas de infusión, etc.) — ver
                 # actas_recibido_biomedico. Al asignar uno de estos activos, el modal pide además
                 # la dirección de entrega y la firma del paciente/cuidador que lo recibió.
-                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS es_biomedico BOOLEAN DEFAULT FALSE;"
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS es_biomedico BOOLEAN DEFAULT FALSE;",
+                # 🔒 Estado 'Devolución' (pedido por Tomás): un activo que entra a este estado
+                # (a mano desde Editar Activo, o automáticamente al certificar su devolución en
+                # /inventario/<id>/confirmar_devolucion) queda con 'asignado_a' vacío y con esta
+                # fecha registrada — y BLOQUEADO: mientras el estado siga siendo 'Devolución',
+                # editar_activo y reemplazar_activo rechazan cualquier cambio de quien no sea
+                # 'admin' (ver el chequeo al inicio de ambas rutas). Solo un administrador puede
+                # "desbloquearlo" editando el activo y eligiendo su siguiente estado real.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS fecha_devolucion VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1248,6 +1256,15 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_biomedico_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🔒 Estado 'Devolución'. Ver comentario equivalente en la rama de Postgres.
+            for col_fecha_devolucion_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN fecha_devolucion TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_fecha_devolucion_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -2668,7 +2685,13 @@ TIPOS_TICKET_INFO = {
 MAX_ADJUNTOS_TICKET = 5
 
 # 📦 INVENTARIO DE ACTIVOS DE TI
-ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja', 'Perdido']
+# 🔒 'Devolución': estado especial pedido por Tomás — se entra a él a mano (Editar Activo) o
+# automáticamente al certificar la devolución de un colaborador (confirmar_devolucion_activo).
+# Un activo en este estado queda sin 'asignado_a' y con 'fecha_devolucion' registrada, y BLOQUEADO
+# para el equipo operativo: editar_activo y reemplazar_activo lo rechazan si quien firma la
+# sesión no es 'admin' — solo un administrador puede "desbloquearlo" (editar el activo y elegir
+# su siguiente estado real: Disponible, Mantenimiento, Baja...).
+ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja', 'Perdido', 'Devolución']
 TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor', 'Teléfono/Celular', 'Servidor', 'Red (Switch/Router/AP)', 'Otro']
 ICONOS_TIPO_ACTIVO = ['desktop', 'laptop', 'print', 'display', 'mobile-screen', 'server', 'network-wired', 'box',
                       'tablet', 'keyboard', 'headphones', 'camera', 'video', 'wifi', 'hard-drive', 'database',
@@ -6360,7 +6383,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -6428,7 +6451,7 @@ def ver_inventario():
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
         'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
         'tipo_costo': r[14], 'costo_compra': _decimal_a_float(r[15]), 'costo_alquiler_mensual': _decimal_a_float(r[16]),
-        'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]),
+        'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]), 'fecha_devolucion': r[19],
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -6649,11 +6672,11 @@ def importar_inventario_xlsx():
              else "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(?) AND eliminado = 0")
     q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, "
              "asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, "
-             "costo_compra, costo_alquiler_mensual) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+             "costo_compra, costo_alquiler_mensual, fecha_devolucion) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
              if db_type == 'postgres' else
              "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, "
              "asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, "
-             "costo_compra, costo_alquiler_mensual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+             "costo_compra, costo_alquiler_mensual, fecha_devolucion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
     creados = 0
     omitidos = []
@@ -6687,6 +6710,12 @@ def importar_inventario_xlsx():
         if estado not in ESTADOS_ACTIVO:
             estado = 'Disponible'
         asignado_a = str(valores[6]).strip() if valores[6] else None
+        # 🔒 Estado 'Devolución': igual que en crear_activo/editar_activo, no puede quedar
+        # asociado a nadie — ver ESTADOS_ACTIVO.
+        fecha_devolucion = None
+        if estado == 'Devolución':
+            asignado_a = None
+            fecha_devolucion = fecha_act
         sede = str(valores[7]).strip() if valores[7] else None
         sede = sede if sede in sedes_validas else None
         area = str(valores[8]).strip() if valores[8] else None
@@ -6704,7 +6733,7 @@ def importar_inventario_xlsx():
         try:
             cursor.execute(q_ins, (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a,
                                     sede, area, proveedor, observaciones, fecha_act, usuario,
-                                    tipo_costo, costo_compra, costo_alquiler_mensual))
+                                    tipo_costo, costo_compra, costo_alquiler_mensual, fecha_devolucion))
             conn.commit()
             creados += 1
             placas_vistas_en_archivo.add(nombre.lower())
@@ -7199,6 +7228,14 @@ def crear_activo():
     if nombre:
         fecha_act = obtener_fecha_actual()
         firma_asignacion_fecha = fecha_act if firma_asignacion_url else None
+        # 🔒 Estado 'Devolución': aunque sea un activo recién creado, no tiene sentido dejarlo
+        # "asignado" a alguien si nace directamente en este estado — ver ESTADOS_ACTIVO.
+        fecha_devolucion = None
+        if estado == 'Devolución':
+            asignado_a = ''
+            firma_asignacion_url = None
+            firma_asignacion_fecha = None
+            fecha_devolucion = fecha_act
         usuario = session.get('username')
         conn, db_type = get_db()
         cursor = conn.cursor()
@@ -7213,10 +7250,10 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                      if db_type == 'postgres' else
-                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico))
+                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion))
             nuevo_activo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
@@ -7266,17 +7303,42 @@ def editar_activo(activo_id):
     if nombre:
         conn, db_type = get_db()
         cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgres' else '?'
         try:
+            # 🔒 Estado 'Devolución': mientras el activo YA esté en este estado, queda bloqueado
+            # para cualquiera que no sea 'admin' — ver ESTADOS_ACTIVO. Se revisa el estado que
+            # tiene HOY en la base (no el que llega en el formulario) para que un agente no pueda
+            # sortear el bloqueo reenviando el mismo estado con otros datos cambiados.
+            cursor.execute(f"SELECT estado, fecha_devolucion FROM activos_inventario WHERE id = {ph}", (activo_id,))
+            fila_actual = cursor.fetchone()
+            estado_actual, fecha_devolucion_actual = fila_actual if fila_actual else (None, None)
+            if estado_actual == 'Devolución' and session.get('rol') != 'admin':
+                conn.close()
+                flash("Este activo quedó bloqueado en estado 'Devolución'. Solo un administrador puede desbloquearlo.", "error")
+                return redirect(url_for('ver_inventario'))
+
             # 🏷️ Misma validación de placa única que en crear_activo, excluyendo la propia fila
             # que se está editando (si no cambió la placa, no debe chocar consigo misma).
-            q_dup = "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(%s) AND eliminado = 0 AND id != %s" if db_type == 'postgres' else "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(?) AND eliminado = 0 AND id != ?"
+            q_dup = f"SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER({ph}) AND eliminado = 0 AND id != {ph}"
             cursor.execute(q_dup, (nombre, activo_id))
             if cursor.fetchone():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, proveedor = %s, observaciones = %s, tipo_costo = %s, costo_compra = %s, costo_alquiler_mensual = %s, firma_asignacion_url = %s, firma_asignacion_fecha = %s, es_biomedico = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, proveedor = ?, observaciones = ?, tipo_costo = ?, costo_compra = ?, costo_alquiler_mensual = ?, firma_asignacion_url = ?, firma_asignacion_fecha = ?, es_biomedico = ? WHERE id = ?"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, activo_id))
+            # 🔒 Entrar a 'Devolución' es una acción, no solo un valor más de la lista: se
+            # registra la fecha y se garantiza que no quede asociado a nadie ("que no tenga forma
+            # de asociar a otro usuario", pedido de Tomás). Si el estado NO es 'Devolución', se
+            # conserva la última 'fecha_devolucion' que tuviera (queda como dato histórico de
+            # cuándo fue devuelto por última vez, sin borrar el rastro al desbloquearlo).
+            fecha_devolucion = fecha_devolucion_actual
+            if estado == 'Devolución':
+                asignado_a = ''
+                firma_asignacion_url = None
+                firma_asignacion_fecha = None
+                fecha_devolucion = obtener_fecha_actual()
+
+            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph} WHERE id = {ph}"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, activo_id))
             conn.commit()
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
@@ -7336,12 +7398,31 @@ def reemplazar_activo(activo_id):
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
     try:
-        cursor.execute(f"SELECT nombre, asignado_a, sede, area FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_id,))
+        cursor.execute(f"SELECT nombre, asignado_a, sede, area, estado FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_id,))
         fila_anterior = cursor.fetchone()
         if not fila_anterior:
             conn.close()
             return redirect(url_for('ver_inventario'))
-        nombre_anterior, asignado_a_anterior, sede_anterior, area_anterior = fila_anterior
+        nombre_anterior, asignado_a_anterior, sede_anterior, area_anterior, estado_anterior = fila_anterior
+
+        # 🔒 Mismo bloqueo de 'Devolución' que editar_activo — sin esto, un agente podría
+        # sortear el bloqueo del formulario de edición usando "Reemplazar" en su lugar.
+        if estado_anterior == 'Devolución' and session.get('rol') != 'admin':
+            conn.close()
+            flash("Este activo quedó bloqueado en estado 'Devolución'. Solo un administrador puede desbloquearlo.", "error")
+            return redirect(url_for('ver_inventario'))
+
+        # 🔒 Y también si el activo de reemplazo ELEGIDO (el que "entra") es el que está
+        # bloqueado: sin este chequeo, un agente podría desbloquear un activo en 'Devolución'
+        # por la puerta de atrás, escogiéndolo como reemplazo de otro activo cualquiera (eso lo
+        # reasigna y le cambia el estado más abajo, sin pasar por editar_activo).
+        if activo_nuevo_id and session.get('rol') != 'admin':
+            cursor.execute(f"SELECT estado FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_nuevo_id,))
+            fila_nuevo = cursor.fetchone()
+            if fila_nuevo and fila_nuevo[0] == 'Devolución':
+                conn.close()
+                flash("El activo de reemplazo elegido quedó bloqueado en estado 'Devolución'. Solo un administrador puede desbloquearlo.", "error")
+                return redirect(url_for('ver_inventario'))
 
         usuario = session.get('username')
         fecha_creacion = obtener_fecha_actual()
@@ -7492,8 +7573,10 @@ def eliminar_adjunto_inventario(adjunto_id):
 # Antes de dar de baja la cuenta de un colaborador en Gestión de Usuarios, Gestión Humana o
 # TI deben certificar aquí que ya devolvió el PC u otro activo que tenía asignado en el
 # Inventario (ver _activos_pendientes_devolucion / toggle_estado_usuario). Cada confirmación
-# libera el activo (vuelve a 'Disponible') y queda registrada en 'inventario_devoluciones'
-# como el certificado de devolución, exportable a CSV para Gestión Humana.
+# deja el activo en estado 'Devolución' (sin asignar a nadie, con la fecha registrada y
+# BLOQUEADO — ver ESTADOS_ACTIVO) y queda registrada en 'inventario_devoluciones' como el
+# certificado de devolución, exportable a CSV para Gestión Humana. Solo un administrador puede
+# luego revisar el activo y decidir su siguiente estado real (Disponible, Mantenimiento, Baja...).
 @app.route('/inventario/certificacion_devoluciones')
 @login_required
 @certificacion_devolucion_required
@@ -7552,13 +7635,17 @@ def confirmar_devolucion_activo(activo_id):
                       if db_type == 'postgres' else
                       "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones) VALUES (?, ?, ?, ?, ?)")
             cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones))
-            q_upd = f"UPDATE activos_inventario SET estado = {ph}, asignado_a = NULL WHERE id = {ph}"
-            cursor.execute(q_upd, ('Disponible', activo_id))
+            # 🔒 Certificar la devolución ya NO deja el activo 'Disponible' de inmediato (eso
+            # permitía que cualquier agente lo reasignara al instante) — pasa a 'Devolución',
+            # con la fecha registrada y BLOQUEADO hasta que un administrador lo revise y decida
+            # su siguiente estado (Disponible, Mantenimiento, Baja...). Ver ESTADOS_ACTIVO.
+            q_upd = f"UPDATE activos_inventario SET estado = {ph}, asignado_a = NULL, fecha_devolucion = {ph} WHERE id = {ph}"
+            cursor.execute(q_upd, ('Devolución', fecha_act, activo_id))
             conn.commit()
             registrar_log(usuario, "Certificación de Devolución de Activo",
                           f"Se certificó la devolución de '{nombre_activo}' por parte de {colaborador}"
                           + (f" — nota: {observaciones}" if observaciones else ""))
-            flash(f"Devolución de '{nombre_activo}' certificada. El activo vuelve a estar disponible en el Inventario.", "exito")
+            flash(f"Devolución de '{nombre_activo}' certificada. El activo queda bloqueado en estado 'Devolución' hasta que un administrador lo revise y le asigne su siguiente estado.", "exito")
     except Exception as e:
         conn.rollback()
         print(f"Error certificando devolución del activo {activo_id}: {e}")
