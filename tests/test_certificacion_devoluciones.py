@@ -52,6 +52,10 @@ def test_pendientes_de_devolucion_lista_activos_asignados(admin_session, app):
 
 
 def test_confirmar_devolucion_libera_el_activo_y_certifica(admin_session, app):
+    """Desde que se agregó el estado 'Devolución' (pedido por Tomás), certificar la devolución
+    ya NO deja el activo 'Disponible' de inmediato: queda en 'Devolución', sin asignar a nadie,
+    con la fecha registrada y bloqueado hasta que un admin lo revise (ver test_inventario_
+    devolucion.py para el bloqueo en sí)."""
     activo_id = _crear_activo(app, nombre='Laptop HP', asignado_a='María López')
 
     r = admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'observaciones': 'Entregada en buen estado'})
@@ -59,10 +63,11 @@ def test_confirmar_devolucion_libera_el_activo_y_certifica(admin_session, app):
     assert r.status_code == 302
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    cur.execute("SELECT estado, asignado_a FROM activos_inventario WHERE id = ?", (activo_id,))
-    estado, asignado_a = cur.fetchone()
-    assert estado == 'Disponible'
+    cur.execute("SELECT estado, asignado_a, fecha_devolucion FROM activos_inventario WHERE id = ?", (activo_id,))
+    estado, asignado_a, fecha_devolucion = cur.fetchone()
+    assert estado == 'Devolución'
     assert asignado_a is None
+    assert fecha_devolucion  # se registró la fecha de la devolución
     cur.execute("SELECT colaborador, confirmado_por, observaciones FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
     fila = cur.fetchone()
     conn.close()
@@ -82,7 +87,7 @@ def test_gestion_humana_puede_confirmar_devolucion(client, app, crear_usuario):
     conn, db_type = app.get_db()
     cur = conn.cursor()
     cur.execute("SELECT estado FROM activos_inventario WHERE id = ?", (activo_id,))
-    assert cur.fetchone()[0] == 'Disponible'
+    assert cur.fetchone()[0] == 'Devolución'
     conn.close()
 
 
