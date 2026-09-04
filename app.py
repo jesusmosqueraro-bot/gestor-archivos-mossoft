@@ -12076,6 +12076,54 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en usuarios (buscador global): {e}")
 
+    # --- Chat Interno (solo admin/agente, los únicos con acceso): el Canal General completo
+    # (es de todo el equipo) más solo los mensajes directos donde participa quien busca — nunca
+    # los directos ajenos, aunque quien busca sea admin. Cada resultado abre /chat ya en esa
+    # conversación (?con=<usuario>, el mismo parámetro que ya usa la campanita para un mensaje
+    # directo nuevo). LIMIT 500 en SQL para no escanear todo el historial en cada tecla. ---
+    if es_soporte:
+        nombres_chat = _mapa_nombres_usuarios()
+        try:
+            cursor.execute("SELECT remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' ORDER BY id DESC LIMIT 500")
+            contador = 0
+            for m_remitente, m_mensaje, m_fecha in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                nombre_remitente = _nombre_para_mostrar(m_remitente, nombres_chat)
+                if q_norm in normalizar(f"{m_mensaje} {nombre_remitente}"):
+                    contador += 1
+                    vista_previa = m_mensaje if len(m_mensaje) <= 80 else (m_mensaje[:77] + '...')
+                    resultados.append({
+                        'categoria': 'Chat Interno',
+                        'titulo': f"{nombre_remitente}: {vista_previa}",
+                        'subtitulo': f"Canal General · {m_fecha}",
+                        'url': url_for('chat_pagina')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en el Canal General del chat (buscador global): {e}")
+
+        try:
+            q_directos = ("SELECT remitente, destinatario, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND (remitente = %s OR destinatario = %s) ORDER BY id DESC LIMIT 500" if db_type == 'postgres'
+                          else "SELECT remitente, destinatario, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND (remitente = ? OR destinatario = ?) ORDER BY id DESC LIMIT 500")
+            cursor.execute(q_directos, (usuario, usuario))
+            contador = 0
+            for m_remitente, m_destinatario, m_mensaje, m_fecha in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                otro = m_destinatario if m_remitente == usuario else m_remitente
+                nombre_otro = _nombre_para_mostrar(otro, nombres_chat)
+                if q_norm in normalizar(f"{m_mensaje} {nombre_otro} {_nombre_para_mostrar(m_remitente, nombres_chat)}"):
+                    contador += 1
+                    vista_previa = m_mensaje if len(m_mensaje) <= 80 else (m_mensaje[:77] + '...')
+                    resultados.append({
+                        'categoria': 'Chat Interno',
+                        'titulo': f"{_nombre_para_mostrar(m_remitente, nombres_chat)}: {vista_previa}",
+                        'subtitulo': f"Privado con {nombre_otro} · {m_fecha}",
+                        'url': url_for('chat_pagina', con=otro)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en los mensajes directos del chat (buscador global): {e}")
+
     conn.close()
     return jsonify({'q': q, 'resultados': resultados})
 
