@@ -144,6 +144,16 @@ def test_mis_tareas_oculta_completadas_salvo_que_se_pida_ver_todas(admin_session
     assert 'Tarea ya resuelta' in r_todas.get_data(as_text=True)
 
 
+def test_mis_tareas_subnav_usa_el_mismo_ancho_que_los_demas_modulos(admin_session):
+    """El sub-nav de Mis Tareas usaba max-w-4xl mientras el resto de módulos de Tickets usa
+    max-w-7xl para el mismo contenedor — eso forzaba una barra de desplazamiento horizontal que
+    no aparece en ninguna otra pestaña. Ver Task de Round 2 (screenshot con el scrollbar
+    remarcado en rojo bajo el sub-nav)."""
+    texto = admin_session.get('/tickets/mis_tareas').get_data(as_text=True)
+    assert 'max-w-4xl mx-auto flex items-center gap-1 overflow-x-auto' not in texto
+    assert 'max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto' in texto
+
+
 def test_indicadores_muestra_top_agentes_por_tareas_completadas(admin_session, app):
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea completada por admin", responsable='admin')
