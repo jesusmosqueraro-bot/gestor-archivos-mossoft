@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style> body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; } </style>
     <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
 </head>
 <body class="pagina-acento-cyan min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white">
 
@@ -313,6 +314,26 @@
                             {% endif %}
                         </div>
                     </div>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Firma digital (opcional)</label>
+                        <div class="flex gap-1">
+                            <button type="button" id="firma-nuevo-tab-dibujar" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-cyan-600 text-white transition-all">Dibujar</button>
+                            <button type="button" id="firma-nuevo-tab-subir" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-300 transition-all">Subir imagen</button>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mb-1.5">Se guarda con la cuenta y se reutiliza como constancia de aceptación cuando se le asigne un activo del Inventario.</p>
+                    <div id="firma-nuevo-panel-dibujar">
+                        <canvas id="firma-nuevo-canvas" width="380" height="130" class="w-full bg-white rounded-xl border border-slate-800" style="height:130px; touch-action: none;"></canvas>
+                        <button type="button" id="firma-nuevo-borrar" class="mt-1.5 text-[10px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                    </div>
+                    <div id="firma-nuevo-panel-subir" class="hidden">
+                        <input type="file" id="firma-nuevo-archivo" accept="image/*" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300">
+                        <img id="firma-nuevo-preview" class="hidden mt-2 max-h-28 rounded-xl border border-slate-800 bg-white p-1" alt="Vista previa de la firma">
+                    </div>
+                    <input type="hidden" name="firma_dataurl" id="firma-nuevo-input">
                 </div>
 
                 <div class="pt-2 flex gap-3">
@@ -621,14 +642,22 @@
          cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
     <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
-        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
-            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
         </button>
     </form>
 
     <script src="/static/js/buscador.js"></script>
     <script src="/static/js/notificaciones.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/firma-digital.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            inicializarFirmaDigital('firma-nuevo');
+        });
+    </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
 </head>
 <body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -29,6 +30,10 @@
             <button onclick="abrirModalTiposActivo()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-layer-group"></i>
                 <span class="hidden sm:inline">Tipos de activo</span>
+            </button>
+            <button onclick="abrirModalImportarExportar()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-file-excel"></i>
+                <span class="hidden sm:inline">Importar / Exportar</span>
             </button>
             <button onclick="abrirModalNuevo()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-plus"></i>
@@ -60,6 +65,19 @@
 
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="space-y-2">
+                {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-start gap-3 whitespace-pre-line {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base mt-0.5"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
 
         {% if error_placa %}
         <div class="px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
@@ -105,6 +123,29 @@
             <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Perdidos</p>
                 <p class="text-2xl font-extrabold text-rose-400">{{ conteos_estado.Perdido }}</p>
+            </div>
+        </div>
+
+        <!-- COSTOS DE INVENTARIO: activos propios (compra) vs. alquilados (mensual/anual proyectado),
+             reflejan los mismos filtros de sede/tipo/búsqueda que las tarjetas de arriba -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-sack-dollar mr-1"></i>Invertido en compra ({{ totales_costos.cantidad_propios }} activo{{ 's' if totales_costos.cantidad_propios != 1 else '' }})
+                </p>
+                <p class="text-2xl font-extrabold text-emerald-400">${{ '{:,.0f}'.format(totales_costos.total_compra) }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-calendar-days mr-1"></i>Alquiler mensual ({{ totales_costos.cantidad_alquilados }} activo{{ 's' if totales_costos.cantidad_alquilados != 1 else '' }})
+                </p>
+                <p class="text-2xl font-extrabold text-cyan-400">${{ '{:,.0f}'.format(totales_costos.total_alquiler_mensual) }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-orange-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-calendar-check mr-1"></i>Alquiler proyectado (anual)
+                </p>
+                <p class="text-2xl font-extrabold text-orange-400">${{ '{:,.0f}'.format(totales_costos.total_alquiler_anual) }}</p>
             </div>
         </div>
 
@@ -237,7 +278,7 @@
                     {% if activos %}
                         {% for a in activos %}
                         <tr class="hover:bg-slate-800/40 transition-colors">
-                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}</td>
+                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}{% if a.es_biomedico %} <i class="fa-solid fa-kit-medical text-rose-400 ml-1" title="Activo biomédico"></i>{% endif %}</td>
                             <td class="py-3.5 px-3">{{ a.tipo_activo }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}</td>
                             <td class="py-3.5 px-3 font-mono text-slate-500">{{ a.numero_serie or '-' }}</td>
@@ -254,7 +295,12 @@
                                     <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Baja</span>
                                 {% endif %}
                             </td>
-                            <td class="py-3.5 px-3 text-slate-400 italic">{{ a.asignado_a or '-' }}</td>
+                            <td class="py-3.5 px-3 text-slate-400 italic">
+                                {{ a.asignado_a or '-' }}
+                                {% if a.firma_asignacion_url %}
+                                <a href="{{ a.firma_asignacion_url }}" target="_blank" rel="noopener" title="Ver firma de aceptación de la asignación" class="text-emerald-400 hover:text-emerald-300 ml-1 not-italic"><i class="fa-solid fa-signature"></i></a>
+                                {% endif %}
+                            </td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.area or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.proveedor or '-' }}</td>
@@ -360,6 +406,46 @@
                             </div>
                             <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
                             <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
+
+                            <!-- 🆕 Si la búsqueda por cédula no encuentra a nadie, se ofrece dar de
+                                 alta a la persona ahí mismo (sin salir de Inventario) — ver
+                                 crear_usuario_rapido_inventario(). Queda oculto por defecto. -->
+                            <div id="panel-crear-usuario-rapido" class="hidden mt-2 p-3 bg-slate-900/60 border border-slate-700/60 rounded-xl">
+                                <p class="text-[11px] font-bold text-slate-200 mb-2"><i class="fa-solid fa-user-plus mr-1 text-orange-400"></i>Crear usuario para esta persona</p>
+                                <div class="grid grid-cols-2 gap-2 mb-2">
+                                    <input type="text" id="rapido-primer-nombre" placeholder="Primer nombre *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-segundo-nombre" placeholder="Segundo nombre" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-primer-apellido" placeholder="Primer apellido *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-segundo-apellido" placeholder="Segundo apellido" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="email" id="rapido-email" placeholder="Correo *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 col-span-2">
+                                    <select id="rapido-especialidad" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 col-span-2">
+                                        <option value="">Cargo / especialidad *</option>
+                                        {% for esp in especialidades %}<option value="{{ esp.nombre }}">{{ esp.nombre }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-[10px] font-bold text-slate-300 uppercase">Firma (opcional)</p>
+                                        <div class="flex gap-1">
+                                            <button type="button" id="firma-rapido-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
+                                            <button type="button" id="firma-rapido-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
+                                        </div>
+                                    </div>
+                                    <div id="firma-rapido-panel-dibujar">
+                                        <canvas id="firma-rapido-canvas" width="340" height="90" class="w-full bg-white rounded-lg border border-slate-700" style="height:90px; touch-action: none;"></canvas>
+                                        <button type="button" id="firma-rapido-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                                    </div>
+                                    <div id="firma-rapido-panel-subir" class="hidden">
+                                        <input type="file" id="firma-rapido-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
+                                        <img id="firma-rapido-preview" class="hidden mt-1.5 max-h-20 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
+                                    </div>
+                                    <input type="hidden" id="firma-rapido-input">
+                                </div>
+                                <button type="button" onclick="crearUsuarioRapido()" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                    <i class="fa-solid fa-floppy-disk mr-1"></i>Crear usuario y asignar
+                                </button>
+                                <p id="mensaje-crear-usuario-rapido" class="text-[10px] mt-1.5"></p>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div>
@@ -386,6 +472,68 @@
                                 <p class="text-[10px] text-slate-500 mt-1">Quién vendió o suministró el equipo. Administra la lista en Configuración.</p>
                             </div>
                         </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo del activo</label>
+                                <select name="tipo_costo" id="input-activo-tipo-costo" onchange="actualizarCampoCostoInventario()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    <option value="propio">Propio (costo de compra)</option>
+                                    <option value="alquilado">Alquilado (costo mensual)</option>
+                                </select>
+                            </div>
+                            <div id="campo-costo-compra" class="hidden">
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo de compra</label>
+                                <input type="number" name="costo_compra" id="input-activo-costo-compra" min="0" step="0.01" placeholder="$ 0" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div id="campo-costo-alquiler" class="hidden">
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo de alquiler (mensual)</label>
+                                <input type="number" name="costo_alquiler_mensual" id="input-activo-costo-alquiler" min="0" step="0.01" placeholder="$ 0" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                        </div>
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                <input type="checkbox" name="es_biomedico" id="input-activo-biomedico" onchange="actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                <i class="fa-solid fa-kit-medical text-rose-400"></i> Es un activo biomédico (bomba de infusión y similares)
+                            </label>
+                            <div id="seccion-acta-recibido" class="hidden mt-3 space-y-2 border-t border-slate-700/60 pt-3">
+                                <p class="text-[10px] text-slate-500">Si este equipo se está entregando a domicilio (paciente o cuidador), registra aquí el acta de recibido — queda un historial aparte por cada entrega, con la dirección y la firma de quien lo recibió, útil si el equipo se pierde o se daña.</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <input type="text" name="acta_nombre_responsable" id="input-acta-nombre" placeholder="Nombre de quien recibe" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <select name="acta_relacion_responsable" id="input-acta-relacion" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="paciente">Paciente</option>
+                                        <option value="cuidador">Cuidador/a</option>
+                                        <option value="otro">Otro responsable</option>
+                                    </select>
+                                    <input type="text" name="acta_documento_responsable" id="input-acta-documento" placeholder="Documento de identidad (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" name="acta_telefono_contacto" id="input-acta-telefono" placeholder="Teléfono de contacto (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                </div>
+                                <textarea name="acta_direccion_entrega" id="input-acta-direccion" rows="2" placeholder="Dirección de entrega (domicilio del paciente)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+
+                                <div>
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-[10px] font-bold text-slate-300 uppercase">Firma de quien recibe</p>
+                                        <div class="flex gap-1">
+                                            <button type="button" id="firma-acta-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
+                                            <button type="button" id="firma-acta-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
+                                        </div>
+                                    </div>
+                                    <div id="firma-acta-panel-dibujar">
+                                        <canvas id="firma-acta-canvas" width="380" height="110" class="w-full bg-white rounded-lg border border-slate-700" style="height:110px; touch-action: none;"></canvas>
+                                        <button type="button" id="firma-acta-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                                    </div>
+                                    <div id="firma-acta-panel-subir" class="hidden">
+                                        <input type="file" id="firma-acta-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
+                                        <img id="firma-acta-preview" class="hidden mt-1.5 max-h-24 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
+                                    </div>
+                                    <input type="hidden" name="acta_firma_dataurl" id="firma-acta-input">
+                                </div>
+
+                                <button type="button" onclick="abrirModalActasRecibido()" id="btn-ver-actas-recibido" class="hidden w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                    <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de este activo
+                                </button>
+                            </div>
+                        </div>
+
                         <div class="flex-1 flex flex-col">
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
                             <textarea name="observaciones" id="input-activo-observaciones" rows="2" class="w-full flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
@@ -469,6 +617,61 @@
                 <p class="text-slate-500 text-xs text-center py-4">No hay tipos de activo activos en el catálogo.</p>
                 {% endfor %}
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL IMPORTAR / EXPORTAR INVENTARIO -->
+    <div id="modal-import-export" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-file-excel text-emerald-400"></i> Importar / Exportar Inventario</h3>
+                <button onclick="cerrarModalImportarExportar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-5">
+                <div>
+                    <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-2"><i class="fa-solid fa-upload text-emerald-400"></i>Carga masiva desde Excel</h4>
+                    <p class="text-[11px] text-slate-400 mb-2">
+                        Sube un archivo .xlsx con una fila por activo. Usa exactamente las mismas columnas de la
+                        <a href="{{ url_for('inventario_plantilla_xlsx') }}" class="text-emerald-400 hover:underline font-semibold">plantilla descargable</a>.
+                        Los activos con número de placa repetido, o campos inválidos, se omiten y quedan listados en el resultado.
+                    </p>
+                    <form id="form-importar-inventario" method="POST" action="{{ url_for('importar_inventario_xlsx') }}" enctype="multipart/form-data" class="flex flex-col gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="file" name="archivo" accept=".xlsx" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+                            <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Cargar activos
+                        </button>
+                    </form>
+                </div>
+
+                <div class="border-t border-slate-700/60 pt-4">
+                    <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-2"><i class="fa-solid fa-download text-cyan-400"></i>Exportar inventario</h4>
+                    <p class="text-[11px] text-slate-400 mb-3">Exporta los activos según los filtros que tengas aplicados ahora mismo en la vista ({{ total_activos }} activo{{ 's' if total_activos != 1 else '' }}).</p>
+                    <div class="grid grid-cols-3 gap-2">
+                        <a href="{{ url_for('inventario_exportar_csv', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-csv mr-1 text-emerald-400"></i> CSV
+                        </a>
+                        <a href="{{ url_for('inventario_exportar_xlsx', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-excel mr-1 text-emerald-400"></i> Excel
+                        </a>
+                        <a href="{{ url_for('inventario_exportar_pdf', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-pdf mr-1 text-rose-400"></i> PDF
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL HISTORIAL DE ACTAS DE RECIBIDO (activos biomédicos) -->
+    <div id="modal-actas-recibido" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-kit-medical text-rose-400"></i> Actas de recibido</h3>
+                <button onclick="cerrarModalActasRecibido()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="lista-actas-recibido" class="max-h-96 overflow-y-auto"></div>
         </div>
     </div>
 
@@ -588,6 +791,14 @@
             document.getElementById('input-activo-area').value = {{ q_area | tojson }};
             document.getElementById('input-activo-proveedor').value = {{ q_proveedor | tojson }};
             document.getElementById('input-activo-observaciones').value = '';
+            document.getElementById('input-activo-tipo-costo').value = '';
+            document.getElementById('input-activo-costo-compra').value = '';
+            document.getElementById('input-activo-costo-alquiler').value = '';
+            actualizarCampoCostoInventario();
+            document.getElementById('input-activo-biomedico').checked = false;
+            activoActualIdParaActas = null;
+            limpiarFormularioActaRecibido();
+            actualizarSeccionActaRecibido();
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
             document.getElementById('modal-activo').scrollTop = 0;
@@ -608,6 +819,14 @@
             document.getElementById('input-activo-area').value = activo.area || '';
             document.getElementById('input-activo-proveedor').value = activo.proveedor || '';
             document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
+            document.getElementById('input-activo-tipo-costo').value = activo.tipo_costo || '';
+            document.getElementById('input-activo-costo-compra').value = activo.costo_compra != null ? activo.costo_compra : '';
+            document.getElementById('input-activo-costo-alquiler').value = activo.costo_alquiler_mensual != null ? activo.costo_alquiler_mensual : '';
+            actualizarCampoCostoInventario();
+            document.getElementById('input-activo-biomedico').checked = !!activo.es_biomedico;
+            activoActualIdParaActas = activo.id;
+            limpiarFormularioActaRecibido();
+            actualizarSeccionActaRecibido();
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
             document.getElementById('modal-activo').scrollTop = 0;
@@ -615,6 +834,92 @@
         function cerrarModalActivo() {
             document.getElementById('modal-activo').classList.add('hidden');
             document.getElementById('modal-activo').classList.remove('flex');
+        }
+        function abrirModalImportarExportar() {
+            document.getElementById('modal-import-export').classList.remove('hidden');
+            document.getElementById('modal-import-export').classList.add('flex');
+        }
+        function cerrarModalImportarExportar() {
+            document.getElementById('modal-import-export').classList.add('hidden');
+            document.getElementById('modal-import-export').classList.remove('flex');
+        }
+        // 💰 Muestra solo el campo de costo que aplica según 'tipo_costo' — evita que quede un
+        // valor "fantasma" guardado en el campo que no corresponde (el backend igual lo
+        // descartaría, pero así el formulario refleja con claridad qué se está registrando).
+        function actualizarCampoCostoInventario() {
+            const tipo = document.getElementById('input-activo-tipo-costo').value;
+            document.getElementById('campo-costo-compra').classList.toggle('hidden', tipo !== 'propio');
+            document.getElementById('campo-costo-alquiler').classList.toggle('hidden', tipo !== 'alquilado');
+        }
+
+        // 🏥 Acta de recibido de activos biomédicos (bombas de infusión y similares entregadas a
+        // domicilio) — la sección solo aparece si se marca "Es un activo biomédico", y el botón
+        // de historial solo si el activo ya existe (no tiene sentido en "Nuevo Activo" porque
+        // todavía no hay ningún acta guardada).
+        var activoActualIdParaActas = null;
+        var firmaActaWidget = null;
+
+        function actualizarSeccionActaRecibido() {
+            const marcado = document.getElementById('input-activo-biomedico').checked;
+            document.getElementById('seccion-acta-recibido').classList.toggle('hidden', !marcado);
+            document.getElementById('btn-ver-actas-recibido').classList.toggle('hidden', !(marcado && activoActualIdParaActas));
+        }
+
+        function limpiarFormularioActaRecibido() {
+            document.getElementById('input-acta-nombre').value = '';
+            document.getElementById('input-acta-relacion').value = 'paciente';
+            document.getElementById('input-acta-documento').value = '';
+            document.getElementById('input-acta-telefono').value = '';
+            document.getElementById('input-acta-direccion').value = '';
+            if (firmaActaWidget) firmaActaWidget.reiniciar();
+        }
+
+        function abrirModalActasRecibido() {
+            if (!activoActualIdParaActas) return;
+            const lista = document.getElementById('lista-actas-recibido');
+            lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Cargando...</p>';
+            document.getElementById('modal-actas-recibido').classList.remove('hidden');
+            document.getElementById('modal-actas-recibido').classList.add('flex');
+            fetch('/tickets/inventario/' + activoActualIdParaActas + '/actas')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    lista.innerHTML = '';
+                    const actas = data.actas || [];
+                    if (actas.length === 0) {
+                        const vacio = document.createElement('p');
+                        vacio.className = 'text-slate-500 text-xs text-center py-4';
+                        vacio.textContent = 'Este activo todavía no tiene ningún acta de recibido registrada.';
+                        lista.appendChild(vacio);
+                        return;
+                    }
+                    const relaciones = {paciente: 'Paciente', cuidador: 'Cuidador/a', otro: 'Responsable'};
+                    actas.forEach(function(acta) {
+                        const fila = document.createElement('div');
+                        fila.className = 'bg-slate-950/60 border border-slate-800 rounded-xl p-3 mb-2 text-xs';
+                        const titulo = document.createElement('p');
+                        titulo.className = 'font-bold text-slate-200';
+                        titulo.textContent = acta.nombre_responsable + ' (' + (relaciones[acta.relacion_responsable] || acta.relacion_responsable) + ')';
+                        const detalle = document.createElement('p');
+                        detalle.className = 'text-slate-400 mt-0.5';
+                        detalle.textContent = acta.direccion_entrega + ' — ' + acta.fecha;
+                        const enlace = document.createElement('a');
+                        enlace.href = '/tickets/inventario/actas/' + acta.id + '/pdf';
+                        enlace.target = '_blank';
+                        enlace.className = 'inline-flex items-center gap-1.5 mt-2 text-orange-400 hover:text-orange-300 font-semibold';
+                        enlace.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Descargar acta en PDF';
+                        fila.appendChild(titulo);
+                        fila.appendChild(detalle);
+                        fila.appendChild(enlace);
+                        lista.appendChild(fila);
+                    });
+                })
+                .catch(function() {
+                    lista.innerHTML = '<p class="text-rose-400 text-xs text-center py-4">No se pudo cargar el historial. Intenta de nuevo.</p>';
+                });
+        }
+        function cerrarModalActasRecibido() {
+            document.getElementById('modal-actas-recibido').classList.add('hidden');
+            document.getElementById('modal-actas-recibido').classList.remove('flex');
         }
 
         // 🪪 Busca una cuenta de Arkiv por cédula y, si la encuentra, llena "Asignado a" con
@@ -624,6 +929,8 @@
         function buscarAsignadoPorCedula() {
             var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
             var mensaje = document.getElementById('mensaje-busqueda-cedula');
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            panelCrear.classList.add('hidden');
             if (!cedula) {
                 mensaje.textContent = 'Escribe una cédula para buscar.';
                 mensaje.className = 'text-[10px] mt-1 text-amber-400';
@@ -636,16 +943,74 @@
                 .then(function(data) {
                     if (data.encontrado) {
                         document.getElementById('input-activo-asignado').value = data.nombre + ' (' + data.usuario + ')';
-                        mensaje.textContent = 'Encontrado: ' + data.nombre + ' (' + data.usuario + ')';
+                        // ✍️ Si esta persona ya tiene una firma registrada (capturada al crear su
+                        // cuenta), se avisa que se reutilizará como constancia de la asignación —
+                        // no hace falta volver a firmar nada aquí.
+                        mensaje.textContent = 'Encontrado: ' + data.nombre + ' (' + data.usuario + ')' +
+                            (data.firma ? ' — se usará su firma registrada como aceptación.' : '');
                         mensaje.className = 'text-[10px] mt-1 text-emerald-400';
                     } else {
-                        mensaje.textContent = 'No se encontró ningún usuario de Arkiv con esa cédula. Puedes escribir el nombre manualmente arriba.';
+                        // 🆕 No existe todavía como usuario de Arkiv: se ofrece crearlo ahí mismo
+                        // (ver crear_usuario_rapido_inventario) en vez de solo sugerir escribir el
+                        // nombre a mano — la cédula ya escrita en el buscador se reutiliza.
+                        mensaje.textContent = 'No se encontró ningún usuario de Arkiv con esa cédula.';
                         mensaje.className = 'text-[10px] mt-1 text-amber-400';
+                        document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+                        panelCrear.dataset.cedula = cedula;
+                        panelCrear.classList.remove('hidden');
                     }
                 })
                 .catch(function() {
                     mensaje.textContent = 'No se pudo completar la búsqueda. Intenta de nuevo.';
                     mensaje.className = 'text-[10px] mt-1 text-rose-400';
+                });
+        }
+
+        // 🆕 Crea la cuenta con los datos mínimos del panel y, si sale bien, llena "Asignado a"
+        // exactamente igual que si se hubiera encontrado por cédula — así el resto del flujo de
+        // asignación del activo sigue siendo el mismo sin importar si la persona ya existía o no.
+        function crearUsuarioRapido() {
+            var mensaje = document.getElementById('mensaje-crear-usuario-rapido');
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            var datos = new URLSearchParams();
+            datos.set('csrf_token', document.querySelector('#form-activo input[name=csrf_token]').value);
+            datos.set('primer_nombre', document.getElementById('rapido-primer-nombre').value.trim());
+            datos.set('segundo_nombre', document.getElementById('rapido-segundo-nombre').value.trim());
+            datos.set('primer_apellido', document.getElementById('rapido-primer-apellido').value.trim());
+            datos.set('segundo_apellido', document.getElementById('rapido-segundo-apellido').value.trim());
+            datos.set('email', document.getElementById('rapido-email').value.trim());
+            datos.set('especialidad', document.getElementById('rapido-especialidad').value);
+            datos.set('cedula', panelCrear.dataset.cedula || '');
+            datos.set('firma_dataurl', document.getElementById('firma-rapido-input').value || '');
+
+            if (!datos.get('primer_nombre') || !datos.get('primer_apellido') || !datos.get('email') || !datos.get('especialidad')) {
+                mensaje.textContent = 'Nombre, apellido, correo y especialidad son obligatorios.';
+                mensaje.className = 'text-[10px] mt-1.5 text-amber-400';
+                return;
+            }
+
+            mensaje.textContent = 'Creando usuario...';
+            mensaje.className = 'text-[10px] mt-1.5 text-slate-400';
+            fetch('/tickets/inventario/usuarios/crear_rapido', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: datos.toString()
+            })
+                .then(function(r) { return r.json().then(function(data) { return {status: r.status, data: data}; }); })
+                .then(function(res) {
+                    if (res.data.ok) {
+                        document.getElementById('input-activo-asignado').value = res.data.nombre + ' (' + res.data.usuario + ')';
+                        mensaje.textContent = 'Usuario ' + res.data.usuario + ' creado y asignado.';
+                        mensaje.className = 'text-[10px] mt-1.5 text-emerald-400';
+                        setTimeout(function() { panelCrear.classList.add('hidden'); }, 1500);
+                    } else {
+                        mensaje.textContent = res.data.error || 'No se pudo crear el usuario.';
+                        mensaje.className = 'text-[10px] mt-1.5 text-rose-400';
+                    }
+                })
+                .catch(function() {
+                    mensaje.textContent = 'No se pudo completar la solicitud. Intenta de nuevo.';
+                    mensaje.className = 'text-[10px] mt-1.5 text-rose-400';
                 });
         }
 
@@ -923,14 +1288,23 @@
          cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
     <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
-        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
-            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
         </button>
     </form>
 
     <script src="/static/js/buscador.js"></script>
     <script src="/static/js/notificaciones.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/firma-digital.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            inicializarFirmaDigital('firma-rapido');
+            firmaActaWidget = inicializarFirmaDigital('firma-acta');
+        });
+    </script>
 </body>
 </html>

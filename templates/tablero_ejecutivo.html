@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="{{ 'claro' if session.get('tema') == 'claro' else 'oscuro' }}">
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
 </head>
 <body class="pagina-acento-blue bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -184,6 +185,14 @@
                         <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_inventario') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
                     </tr>
                     <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-sack-dollar text-emerald-400 mr-2"></i>Costos de Inventario</td>
+                        <td class="py-3.5 px-4">
+                            Compra: ${{ '{:,.0f}'.format(totales_costos_inventario.total_compra) }} ({{ totales_costos_inventario.cantidad_propios }})
+                            · Alquiler: ${{ '{:,.0f}'.format(totales_costos_inventario.total_alquiler_mensual) }}/mes ({{ totales_costos_inventario.cantidad_alquilados }})
+                        </td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_inventario') }}" class="text-emerald-400 hover:text-emerald-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
                         <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-users-gear text-blue-400 mr-2"></i>Usuarios</td>
                         <td class="py-3.5 px-4">{{ total_usuarios_activos }} activos</td>
                         <td class="py-3.5 px-4 text-right"><a href="{{ url_for('gestion_usuarios') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
@@ -231,9 +240,11 @@
          cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
     <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <input type="hidden" name="tema" value="{{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}">
-        <button type="submit" title="Cambiar a tema {{ 'oscuro' if session.get('tema') == 'claro' else 'claro' }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
-            <i class="fa-solid {{ 'fa-sun' if session.get('tema') == 'claro' else 'fa-moon' }}"></i>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
         </button>
     </form>
 
