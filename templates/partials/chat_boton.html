@@ -1,0 +1,15 @@
+<!-- 💬 CHAT INTERNO — botón de acceso directo, compartido por las páginas autenticadas de
+     admin/agente, junto a la campanita de notificaciones. Es el ícono "estilo Messenger" que
+     pidió Tomás: siempre visible en la barra de navegación (no solo en el recuadro de la
+     bienvenida), lleva a /chat y muestra sobre el mismo ícono un contador de mensajes sin leer
+     (directos + Canal General). Ese contador se pinta con cargarNotificaciones() en
+     notificaciones.js, reutilizando el mismo sondeo de /notificaciones/resumen cada 30s que ya
+     usa la campanita — no agrega ninguna ruta ni temporizador nuevo.
+     No se muestra para roles sin acceso operativo (estándar, gestión humana): para ellos /chat
+     redirige de vuelta, así que el ícono ni siquiera aparece. -->
+{% if session.get('rol') in ('admin', 'agente') %}
+<a href="{{ url_for('chat_pagina') }}" class="relative bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs" title="Chat Interno">
+    <i class="fa-solid fa-comment-dots text-sky-400"></i>
+    <span id="badge-chat-header" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">0</span>
+</a>
+{% endif %}
