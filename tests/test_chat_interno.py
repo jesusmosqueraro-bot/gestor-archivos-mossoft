@@ -220,3 +220,108 @@ def test_desactivar_2fa_no_afecta_el_chat_ni_al_reves(client, app, crear_usuario
 
     assert client.get('/chat').status_code == 200
     assert client.get('/notificaciones/resumen').status_code == 200
+
+
+def test_boton_de_chat_aparece_en_la_barra_solo_para_admin_agente(client, app, crear_usuario):
+    """El botón de Chat Interno (partials/chat_boton.html, el ícono estilo Messenger en la
+    barra de navegación) debe verse en páginas de admin/agente y nunca para un estándar, que
+    de todas formas no puede entrar a /chat."""
+    admin1 = crear_usuario(usuario='admin_chat13', rol='admin')
+    estandar1 = crear_usuario(usuario='estandar_chat13', rol='estandar')
+
+    _sesion_como(client, app, admin1, 'admin')
+    html_admin = client.get('/bienvenida').get_data(as_text=True)
+    assert 'badge-chat-header' in html_admin
+    assert 'Chat Interno' in html_admin  # título del ícono (atributo title)
+
+    _sesion_como(client, app, estandar1, 'estandar')
+    html_estandar = client.get('/bienvenida').get_data(as_text=True)
+    assert 'badge-chat-header' not in html_estandar
+
+
+def test_resumen_de_notificaciones_incluye_chat_no_leidos(client, app, crear_usuario):
+    """/notificaciones/resumen (la ruta que ya sondea la campanita cada 30s) debe traer también
+    'chat_no_leidos' para que ese mismo sondeo pinte el badge del botón de Chat Interno, sin
+    agregar una ruta ni un temporizador nuevos."""
+    admin1 = crear_usuario(usuario='admin_chat14', rol='admin')
+    agente1 = crear_usuario(usuario='agente_chat14', rol='agente')
+    estandar1 = crear_usuario(usuario='estandar_chat14', rol='estandar')
+
+    _sesion_como(client, app, admin1, 'admin')
+    client.post(f'/chat/directo/{agente1}/enviar', data={'mensaje': 'hola'})
+
+    _sesion_como(client, app, agente1, 'agente')
+    data_agente = client.get('/notificaciones/resumen').get_json()
+    assert data_agente['chat_no_leidos'] == 1
+
+    # Un rol sin acceso operativo nunca debe ver un conteo de chat (siempre 0), aunque de
+    # todas formas no podría entrar a /chat.
+    _sesion_como(client, app, estandar1, 'estandar')
+    data_estandar = client.get('/notificaciones/resumen').get_json()
+    assert data_estandar['chat_no_leidos'] == 0
+
+
+def test_burbuja_flotante_de_chat_aparece_solo_para_admin_agente(client, app, crear_usuario):
+    """La burbuja flotante estilo Messenger (partials/chat_flotante.html), apilada encima del
+    botón de cambiar tema, debe verse en páginas de admin/agente y nunca para un estándar."""
+    admin1 = crear_usuario(usuario='admin_chat15', rol='admin')
+    estandar1 = crear_usuario(usuario='estandar_chat15', rol='estandar')
+
+    _sesion_como(client, app, admin1, 'admin')
+    html_admin = client.get('/bienvenida').get_data(as_text=True)
+    assert 'badge-chat-flotante' in html_admin
+
+    _sesion_como(client, app, estandar1, 'estandar')
+    html_estandar = client.get('/bienvenida').get_data(as_text=True)
+    assert 'badge-chat-flotante' not in html_estandar
+
+
+def test_buscador_global_encuentra_mensajes_del_canal_general(client, app, crear_usuario):
+    """El botón Buscar en Arkiv (/buscar/api) debe encontrar mensajes del Canal General, ya
+    que ese canal es de todo el equipo con acceso operativo."""
+    admin1 = crear_usuario(usuario='admin_chat16', rol='admin', nombre='Admin Dieciséis')
+    agente1 = crear_usuario(usuario='agente_chat16', rol='agente')
+
+    _sesion_como(client, app, admin1, 'admin')
+    client.post('/chat/canal/enviar', data={'mensaje': 'Recuerden actualizar el inventario biomédico'})
+
+    _sesion_como(client, app, agente1, 'agente')
+    data = client.get('/buscar/api?q=inventario biomedico').get_json()
+    categorias = [r['categoria'] for r in data['resultados']]
+    assert 'Chat Interno' in categorias
+    resultado = next(r for r in data['resultados'] if r['categoria'] == 'Chat Interno')
+    assert 'Canal General' in resultado['subtitulo']
+    assert '/chat' in resultado['url']
+
+
+def test_buscador_global_encuentra_directos_propios_pero_no_ajenos(client, app, crear_usuario):
+    """Un mensaje directo solo debe aparecer en el buscador de quienes participan en esa
+    conversación — nunca para un tercero, ni siquiera si es admin."""
+    admin1 = crear_usuario(usuario='admin_chat17', rol='admin')
+    agente1 = crear_usuario(usuario='agente_chat17', rol='agente')
+    agente2 = crear_usuario(usuario='agente_chat17b', rol='agente')
+
+    _sesion_como(client, app, admin1, 'admin')
+    client.post(f'/chat/directo/{agente1}/enviar', data={'mensaje': 'Confidencial: revisar el contrato XYZ789'})
+
+    _sesion_como(client, app, agente1, 'agente')
+    data_destinatario = client.get('/buscar/api?q=contrato XYZ789').get_json()
+    assert any(r['categoria'] == 'Chat Interno' for r in data_destinatario['resultados'])
+
+    _sesion_como(client, app, agente2, 'agente')
+    data_tercero = client.get('/buscar/api?q=contrato XYZ789').get_json()
+    assert not any(r['categoria'] == 'Chat Interno' for r in data_tercero['resultados'])
+
+
+def test_buscador_global_no_muestra_chat_a_roles_sin_acceso_operativo(client, app, crear_usuario):
+    """Un estándar nunca debe ver resultados de Chat Interno en el buscador, aunque el texto
+    coincida con un mensaje real del Canal General."""
+    admin1 = crear_usuario(usuario='admin_chat18', rol='admin')
+    estandar1 = crear_usuario(usuario='estandar_chat18', rol='estandar')
+
+    _sesion_como(client, app, admin1, 'admin')
+    client.post('/chat/canal/enviar', data={'mensaje': 'Mensaje unico buscable qwerty123'})
+
+    _sesion_como(client, app, estandar1, 'estandar')
+    data = client.get('/buscar/api?q=qwerty123').get_json()
+    assert not any(r['categoria'] == 'Chat Interno' for r in data['resultados'])
