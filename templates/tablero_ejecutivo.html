@@ -10,7 +10,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/tema-claro.css">
 </head>
-<body class="pagina-acento-violet bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+<body class="pagina-acento-blue bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
     <!-- NAVBAR -->
     <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
@@ -21,7 +21,7 @@
             </a>
             <div class="h-6 w-px bg-slate-700"></div>
             <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
-                <i class="fa-solid fa-chart-pie text-violet-400"></i> Tablero Ejecutivo
+                <i class="fa-solid fa-chart-pie text-blue-400"></i> Tablero Ejecutivo
             </h1>
         </div>
         <div class="flex items-center gap-2">
@@ -36,16 +36,16 @@
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-        <div class="bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded-2xl p-4 text-xs flex items-start gap-2.5">
+        <div class="bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded-2xl p-4 text-xs flex items-start gap-2.5">
             <i class="fa-solid fa-circle-info mt-0.5"></i>
             <span>
                 Panorama general de Arkiv en una sola pantalla. Para el detalle completo de Solicitudes de Soporte
-                (gráficos, exportación a PDF/Excel) visita <a href="{{ url_for('indicadores_tickets') }}" class="underline font-bold hover:text-violet-200">Indicadores de Soporte TI</a>.
+                (gráficos, exportación a PDF/Excel) visita <a href="{{ url_for('indicadores_tickets') }}" class="underline font-bold hover:text-blue-200">Indicadores de Soporte TI</a>.
             </span>
         </div>
 
         <!-- TARJETAS KPI -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
             <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-orange-500/50 rounded-2xl p-4 transition-all">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-headset mr-1 text-orange-400"></i>Solicitudes abiertas</p>
                 <p class="text-2xl font-extrabold text-white">{{ tickets_abiertos }}</p>
@@ -60,20 +60,39 @@
                     <p class="text-[10px] text-slate-500 mt-0.5">Sin solicitudes registradas</p>
                 {% endif %}
             </a>
-            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-2xl p-4 transition-all">
-                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-star mr-1 text-emerald-400"></i>Satisfacción promedio</p>
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-cyan-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-star mr-1 text-cyan-400"></i>Satisfacción promedio</p>
                 {% if promedio_calificacion %}
-                    <p class="text-2xl font-extrabold text-emerald-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5</span></p>
+                    <p class="text-2xl font-extrabold text-cyan-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5</span></p>
                 {% else %}
                     <p class="text-sm text-slate-500 font-bold mt-2">Sin datos aún</p>
                 {% endif %}
             </a>
-            <a href="{{ url_for('gestion_usuarios') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-purple-500/50 rounded-2xl p-4 transition-all">
-                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-users mr-1 text-purple-400"></i>Usuarios activos</p>
+            <a href="{{ url_for('gestion_usuarios') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-users mr-1 text-blue-400"></i>Usuarios activos</p>
                 <p class="text-2xl font-extrabold text-white">{{ total_usuarios_activos }}</p>
                 <p class="text-[10px] text-slate-500 mt-0.5">
                     {{ usuarios_por_rol.get('admin', 0) }} admin · {{ usuarios_por_rol.get('agente', 0) }} agente · {{ usuarios_por_rol.get('estandar', 0) }} estándar
                 </p>
+            </a>
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-regular fa-clock mr-1 text-blue-400"></i>Tiempo prom. de resolución</p>
+                {% if tiempo_promedio_resolucion_texto %}
+                    <p class="text-2xl font-extrabold text-blue-400">{{ tiempo_promedio_resolucion_texto }}</p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin datos aún</p>
+                {% endif %}
+            </a>
+            <a href="{{ url_for('indicadores_tickets') }}" class="bg-slate-800/60 border border-slate-700/60 hover:border-blue-500/50 rounded-2xl p-4 transition-all">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-arrow-trend-up mr-1 text-blue-400"></i>Solicitudes vs. quincena anterior</p>
+                {% if variacion_pct_tendencia is not none %}
+                    <p class="text-2xl font-extrabold {{ 'text-orange-400' if variacion_pct_tendencia > 0 else 'text-cyan-400' }}">
+                        <i class="fa-solid {{ 'fa-arrow-up' if variacion_pct_tendencia > 0 else 'fa-arrow-down' if variacion_pct_tendencia < 0 else 'fa-minus' }}"></i>
+                        {{ variacion_pct_tendencia | abs }}%
+                    </p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin datos del período anterior</p>
+                {% endif %}
             </a>
         </div>
 
@@ -106,22 +125,32 @@
                         <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_comunicados') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
                     </tr>
                     <tr class="hover:bg-slate-800/40 transition-colors">
-                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-key text-emerald-400 mr-2"></i>Bóveda de Accesos</td>
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-key text-cyan-400 mr-2"></i>Bóveda de Accesos</td>
                         <td class="py-3.5 px-4">{{ total_credenciales }} credenciales · {{ total_accesos_colaboradores }} accesos de colaboradores</td>
-                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_credenciales') }}" class="text-emerald-400 hover:text-emerald-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_credenciales') }}" class="text-cyan-400 hover:text-cyan-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
                     </tr>
                     <tr class="hover:bg-slate-800/40 transition-colors">
-                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-boxes-stacked text-teal-400 mr-2"></i>Inventario de Activos</td>
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-boxes-stacked text-blue-400 mr-2"></i>Inventario de Activos</td>
                         <td class="py-3.5 px-4">
                             {{ total_activos_inventario }} activos
                             {% if inventario_por_estado %} ({% for estado, cant in inventario_por_estado.items() %}{{ estado }}: {{ cant }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}
                         </td>
-                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_inventario') }}" class="text-teal-400 hover:text-teal-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_inventario') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
                     </tr>
                     <tr class="hover:bg-slate-800/40 transition-colors">
-                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-users-gear text-purple-400 mr-2"></i>Usuarios</td>
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-users-gear text-blue-400 mr-2"></i>Usuarios</td>
                         <td class="py-3.5 px-4">{{ total_usuarios_activos }} activos</td>
-                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('gestion_usuarios') }}" class="text-purple-400 hover:text-purple-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('gestion_usuarios') }}" class="text-blue-400 hover:text-blue-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-calendar-xmark text-orange-400 mr-2"></i>Vencimiento de Documentos</td>
+                        <td class="py-3.5 px-4">{{ documentos_vencidos }} vencidos · {{ documentos_proximos_vencer }} próximos a vencer</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('ver_vencimientos') }}" class="text-orange-400 hover:text-orange-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
+                    </tr>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <td class="py-3.5 px-4 font-bold text-white"><i class="fa-solid fa-id-card-clip text-cyan-400 mr-2"></i>Certificación de Devoluciones</td>
+                        <td class="py-3.5 px-4">{{ devoluciones_certificadas_mes }} certificadas este mes</td>
+                        <td class="py-3.5 px-4 text-right"><a href="{{ url_for('certificacion_devoluciones') }}" class="text-cyan-400 hover:text-cyan-300 font-semibold">Ver <i class="fa-solid fa-arrow-right ml-1"></i></a></td>
                     </tr>
                 </tbody>
             </table>
@@ -140,7 +169,7 @@
                 datasets: [{
                     label: 'Solicitudes',
                     data: {{ dias_tendencia | map(attribute='cantidad') | list | tojson }},
-                    borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.15)',
+                    borderColor: '#1A4B9C', backgroundColor: 'rgba(26,75,156,0.18)',
                     fill: true, tension: 0.3, pointRadius: 3
                 }]
             },

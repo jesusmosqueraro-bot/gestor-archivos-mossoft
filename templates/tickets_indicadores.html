@@ -66,8 +66,8 @@
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
         <!-- TARJETAS KPI -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total Solicitudes</p>
                 <p class="text-2xl font-extrabold text-white">{{ total }}</p>
             </div>
@@ -75,20 +75,40 @@
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vigentes</p>
                 <p class="text-2xl font-extrabold text-cyan-400">{{ por_cumplimiento.vigente }}</p>
             </div>
-            <div class="bg-slate-800/60 border border-amber-500/30 rounded-2xl p-4">
+            <div class="bg-slate-800/60 border border-orange-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Próx. a vencer</p>
-                <p class="text-2xl font-extrabold text-amber-400">{{ por_cumplimiento.proximo_a_vencer }}</p>
+                <p class="text-2xl font-extrabold text-orange-400">{{ por_cumplimiento.proximo_a_vencer }}</p>
             </div>
             <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vencidos</p>
                 <p class="text-2xl font-extrabold text-rose-400">{{ por_cumplimiento.vencido }}</p>
             </div>
-            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+            <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Satisfacción promedio</p>
                 {% if promedio_calificacion %}
-                    <p class="text-2xl font-extrabold text-emerald-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5 ({{ total_calificaciones }})</span></p>
+                    <p class="text-2xl font-extrabold text-cyan-400">{{ promedio_calificacion }} <span class="text-xs text-slate-400 font-normal">/ 5 ({{ total_calificaciones }})</span></p>
                 {% else %}
                     <p class="text-sm text-slate-500 font-bold mt-2">Sin calificaciones aún</p>
+                {% endif %}
+            </div>
+            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-regular fa-clock mr-1"></i>Tiempo prom. de resolución</p>
+                {% if tiempo_promedio_resolucion_texto %}
+                    <p class="text-2xl font-extrabold text-blue-400">{{ tiempo_promedio_resolucion_texto }}</p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin datos aún</p>
+                {% endif %}
+            </div>
+            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1"><i class="fa-solid fa-arrow-trend-up mr-1"></i>Vs. quincena anterior</p>
+                {% if variacion_pct_tendencia is not none %}
+                    <p class="text-2xl font-extrabold {{ 'text-orange-400' if variacion_pct_tendencia > 0 else 'text-cyan-400' }}">
+                        <i class="fa-solid {{ 'fa-arrow-up' if variacion_pct_tendencia > 0 else 'fa-arrow-down' if variacion_pct_tendencia < 0 else 'fa-minus' }}"></i>
+                        {{ variacion_pct_tendencia | abs }}%
+                    </p>
+                    <p class="text-[10px] text-slate-500 mt-0.5">{{ conteo_periodo_actual }} vs {{ conteo_periodo_anterior }} solicitudes</p>
+                {% else %}
+                    <p class="text-sm text-slate-500 font-bold mt-2">Sin datos del período anterior</p>
                 {% endif %}
             </div>
         </div>
@@ -124,6 +144,10 @@
                 <h3 class="text-sm font-bold text-white mb-3">Por sede</h3>
                 <div class="h-52"><canvas id="chart-sede"></canvas></div>
             </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por tipo</h3>
+                <div class="h-52"><canvas id="chart-tipo"></canvas></div>
+            </div>
         </div>
 
         <!-- TOP AGENTES -->
@@ -135,7 +159,7 @@
                 <div class="flex items-center gap-3">
                     <span class="text-xs font-bold text-slate-300 w-32 truncate">{{ agente }}</span>
                     <div class="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div class="h-full bg-orange-500 rounded-full" style="width: {{ (cantidad / top_agentes[0][1] * 100) | round }}%"></div>
+                        <div class="h-full bg-[#E67E00] rounded-full" style="width: {{ (cantidad / top_agentes[0][1] * 100) | round }}%"></div>
                     </div>
                     <span class="text-xs font-mono text-slate-400 w-8 text-right">{{ cantidad }}</span>
                 </div>
@@ -157,7 +181,7 @@
                 <div class="flex items-center gap-3">
                     <span class="text-xs font-bold text-slate-300 w-32 truncate">{{ agente }}</span>
                     <div class="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                        <div class="h-full bg-sky-500 rounded-full" style="width: {{ (cantidad / top_agentes_tareas[0][1] * 100) | round }}%"></div>
+                        <div class="h-full bg-[#00A3DA] rounded-full" style="width: {{ (cantidad / top_agentes_tareas[0][1] * 100) | round }}%"></div>
                     </div>
                     <span class="text-xs font-mono text-slate-400 w-8 text-right">{{ cantidad }}</span>
                 </div>
@@ -193,16 +217,22 @@
             });
         }
 
+        // 🎨 Paleta de marca Preventiva Salud IPS: Azul Real #1A4B9C y variaciones para lo
+        // estructural, Cyan #00A3DA para lo operativo/positivo, Naranja Acento #E67E00
+        // reservado para lo que implica alerta o plazo (igual que en los KPI de arriba).
+        // '#f43f5e' (rose) se conserva solo para "Vencidos": es la única excepción semántica,
+        // fuera de la paleta de marca, porque es el estado más crítico del tablero.
         donut('chart-cumplimiento',
             ['Vigentes', 'Próx. a vencer', 'Vencidos', 'Cerrados'],
             [{{ por_cumplimiento.vigente }}, {{ por_cumplimiento.proximo_a_vencer }}, {{ por_cumplimiento.vencido }}, {{ por_cumplimiento.cerrado }}],
-            ['#22d3ee', '#f59e0b', '#f43f5e', '#64748b']
+            ['#00A3DA', '#E67E00', '#f43f5e', '#64748b']
         );
-        barra('chart-estado', {{ por_estado.keys() | list | tojson }}, {{ por_estado.values() | list | tojson }}, '#fb923c');
-        barra('chart-prioridad', {{ por_prioridad.keys() | list | tojson }}, {{ por_prioridad.values() | list | tojson }}, '#38bdf8');
-        barra('chart-categoria', {{ por_categoria.keys() | list | tojson }}, {{ por_categoria.values() | list | tojson }}, '#a78bfa');
-        barra('chart-area', {{ por_area.keys() | list | tojson }}, {{ por_area.values() | list | tojson }}, '#818cf8');
-        barra('chart-sede', {{ por_sede.keys() | list | tojson }}, {{ por_sede.values() | list | tojson }}, '#2dd4bf');
+        barra('chart-estado', {{ por_estado.keys() | list | tojson }}, {{ por_estado.values() | list | tojson }}, '#3D6BB5');
+        barra('chart-prioridad', {{ por_prioridad.keys() | list | tojson }}, {{ por_prioridad.values() | list | tojson }}, '#33B8E0');
+        barra('chart-categoria', {{ por_categoria.keys() | list | tojson }}, {{ por_categoria.values() | list | tojson }}, '#6690D6');
+        barra('chart-area', {{ por_area.keys() | list | tojson }}, {{ por_area.values() | list | tojson }}, '#007FAE');
+        barra('chart-sede', {{ por_sede.keys() | list | tojson }}, {{ por_sede.values() | list | tojson }}, '#1A4B9C');
+        donut('chart-tipo', {{ por_tipo.keys() | list | tojson }}, {{ por_tipo.values() | list | tojson }}, ['#1A4B9C', '#00A3DA', '#6690D6']);
 
         new Chart(document.getElementById('chart-tendencia'), {
             type: 'line',
@@ -211,7 +241,7 @@
                 datasets: [{
                     label: 'Solicitudes',
                     data: {{ dias_tendencia | map(attribute='cantidad') | list | tojson }},
-                    borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.15)',
+                    borderColor: '#E67E00', backgroundColor: 'rgba(230,126,0,0.15)',
                     fill: true, tension: 0.3, pointRadius: 3
                 }]
             },
