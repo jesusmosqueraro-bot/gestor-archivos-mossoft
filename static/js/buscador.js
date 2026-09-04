@@ -5,7 +5,8 @@
 // Categorías cubiertas hoy: Solicitudes TI, Comunicados, Base de Conocimiento, Gestor de
 // Archivos, Bóveda de Accesos, Accesos de Colaboradores, Inventario de Activos, Proveedores,
 // Áreas, Sedes, Categorías de Solicitudes, Mis Tareas, Actas de Recibido Biomédico, Plantillas
-// de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones y Usuarios.
+// de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones, Usuarios y Chat
+// Interno (Canal General + los mensajes directos propios).
 
 var _buscadorGlobalTimeout = null;
 var _buscadorGlobalUltimaConsulta = '';
@@ -52,7 +53,8 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Plantillas de Solicitud': 'fa-copy',
     'Vencimiento de Documentos': 'fa-calendar-days',
     'Certificación de Devoluciones': 'fa-rotate-left',
-    'Usuarios': 'fa-users'
+    'Usuarios': 'fa-users',
+    'Chat Interno': 'fa-comment-dots'
 };
 
 function _renderResultadosBuscadorGlobal(data) {
