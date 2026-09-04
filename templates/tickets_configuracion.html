@@ -294,16 +294,24 @@
             }
         }
 
-        // 🔎 Filtro de búsqueda por nombre dentro de cada columna (Áreas, Sedes, Categorías).
-        // Es 100% del lado del cliente: no recarga la página, solo oculta/muestra filas ya
-        // cargadas — útil en cuanto la lista crece y hay que encontrar una en particular.
+        // 🔎 Quita tildes/diacríticos y pasa a minúsculas — mismo criterio que normalizar() en
+        // el backend (ver /buscar/api) — así buscar "papeleria" encuentra "Papelería" tanto
+        // aquí como en el buscador global, sin obligar a escribir el acento exacto.
+        function _normalizarBusquedaConfig(texto) {
+            return (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+        }
+
+        // 🔎 Filtro de búsqueda por nombre (y NIT en Proveedores) dentro de cada columna
+        // (Áreas, Sedes, Categorías, Proveedores). Es 100% del lado del cliente: no recarga la
+        // página, solo oculta/muestra filas ya cargadas — útil en cuanto la lista crece y hay
+        // que encontrar una en particular.
         function filtrarConfigLista(input, listaId) {
-            const termino = (input.value || '').trim().toLowerCase();
+            const termino = _normalizarBusquedaConfig(input.value);
             const contenedor = document.getElementById(listaId);
             if (!contenedor) return;
             let algunoVisible = false;
             contenedor.querySelectorAll('[data-nombre-config]').forEach(function (item) {
-                const coincide = !termino || item.getAttribute('data-nombre-config').includes(termino);
+                const coincide = !termino || _normalizarBusquedaConfig(item.getAttribute('data-nombre-config')).includes(termino);
                 item.style.display = coincide ? '' : 'none';
                 if (coincide) algunoVisible = true;
             });
