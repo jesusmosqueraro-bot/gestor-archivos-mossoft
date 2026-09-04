@@ -5285,6 +5285,18 @@ def eliminar_plantilla_ticket(plantilla_id):
 # 📊 INDICADORES Y KPIS (solo equipo de soporte): panorama general del módulo de tickets —
 # cumplimiento de SLA, distribución por prioridad/categoría/área/sede, satisfacción de los
 # solicitantes y tendencia de solicitudes de los últimos 14 días — más exportación a Excel.
+def _formatear_duracion_horas(horas):
+    """Convierte una duración en horas (float) a un texto corto para mostrar en un KPI:
+    '3.5 h' si es menos de un día, '2d 4h' si es un día o más. Devuelve None si no hay dato."""
+    if horas is None:
+        return None
+    dias = int(horas // 24)
+    if dias >= 1:
+        horas_resto = round(horas - dias * 24)
+        return f"{dias}d {horas_resto}h"
+    return f"{horas:.1f} h"
+
+
 def _calcular_indicadores_tickets():
     """Calcula todos los indicadores/KPIs de Tickets (por estado, prioridad, tipo, cumplimiento
     de SLA, categoría/área/sede, calificación promedio, top agentes y tendencia de 14 días).
@@ -5329,6 +5341,11 @@ def _calcular_indicadores_tickets():
     por_categoria, por_area, por_sede, por_agente = {}, {}, {}, {}
     calificaciones = []
     conteo_por_fecha = {}
+    # ⏱️ Duración real de resolución (no aproximada): 'sla_resolucion_cumplida' se graba la
+    # primera vez que el ticket llega a Resuelto/Cerrado y se limpia si se reabre (ver
+    # modificar_ticket()), así que a diferencia de 'fecha_actualizacion' sí es el momento exacto
+    # en que se resolvió — resta contra 'fecha_creacion' para el tiempo promedio de resolución.
+    duraciones_resolucion_horas = []
 
     for t in tickets:
         if t['estado'] in por_estado:
@@ -5351,12 +5368,37 @@ def _calcular_indicadores_tickets():
         fecha_corta = (t['fecha_creacion'] or '')[:10]
         if fecha_corta:
             conteo_por_fecha[fecha_corta] = conteo_por_fecha.get(fecha_corta, 0) + 1
+        if t.get('sla_resolucion_cumplida'):
+            inicio_res = _parsear_fecha_ticket(t['fecha_creacion'])
+            fin_res = _parsear_fecha_ticket(t['sla_resolucion_cumplida'])
+            if inicio_res and fin_res and fin_res >= inicio_res:
+                duraciones_resolucion_horas.append((fin_res - inicio_res).total_seconds() / 3600)
 
     hoy = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
     dias_tendencia = []
     for i in range(13, -1, -1):
         dia = (hoy - timedelta(days=i)).strftime('%Y-%m-%d')
         dias_tendencia.append({'fecha': dia, 'cantidad': conteo_por_fecha.get(dia, 0)})
+
+    # 📈 Comparativo contra el período de 14 días inmediatamente anterior (días 14 a 27 atrás),
+    # para que el tablero no solo muestre "cuántas se crearon" sino si el volumen está subiendo o
+    # bajando frente a la quincena previa — reutiliza 'conteo_por_fecha' (ya cuenta TODOS los
+    # tickets por fecha de creación) en vez de otra consulta a la base de datos.
+    conteo_periodo_actual = sum(d['cantidad'] for d in dias_tendencia)
+    conteo_periodo_anterior = sum(
+        conteo_por_fecha.get((hoy - timedelta(days=i)).strftime('%Y-%m-%d'), 0)
+        for i in range(27, 13, -1)
+    )
+    if conteo_periodo_anterior > 0:
+        variacion_pct_tendencia = round((conteo_periodo_actual - conteo_periodo_anterior) / conteo_periodo_anterior * 100, 1)
+    else:
+        variacion_pct_tendencia = None
+
+    tiempo_promedio_resolucion_horas = (
+        round(sum(duraciones_resolucion_horas) / len(duraciones_resolucion_horas), 1)
+        if duraciones_resolucion_horas else None
+    )
+    tiempo_promedio_resolucion_texto = _formatear_duracion_horas(tiempo_promedio_resolucion_horas)
 
     promedio_calificacion = round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else None
     # 👤 Igual que en el resto de Tickets, se muestra el nombre/alias real del agente, no su
@@ -5379,7 +5421,11 @@ def _calcular_indicadores_tickets():
         'por_cumplimiento': por_cumplimiento, 'por_categoria': por_categoria,
         'por_area': por_area, 'por_sede': por_sede, 'dias_tendencia': dias_tendencia,
         'promedio_calificacion': promedio_calificacion, 'total_calificaciones': len(calificaciones),
-        'top_agentes': top_agentes, 'top_agentes_tareas': top_agentes_tareas
+        'top_agentes': top_agentes, 'top_agentes_tareas': top_agentes_tareas,
+        'conteo_periodo_actual': conteo_periodo_actual, 'conteo_periodo_anterior': conteo_periodo_anterior,
+        'variacion_pct_tendencia': variacion_pct_tendencia,
+        'tiempo_promedio_resolucion_horas': tiempo_promedio_resolucion_horas,
+        'tiempo_promedio_resolucion_texto': tiempo_promedio_resolucion_texto,
     }
 
 
@@ -5545,7 +5591,7 @@ def exportar_indicadores_tickets_pdf():
         lc.categoryAxis.labels.fontSize = 6.5
         lc.valueAxis.valueMin = 0
         lc.valueAxis.labels.fontSize = 7
-        lc.lines[0].strokeColor = colors.HexColor('#f97316')
+        lc.lines[0].strokeColor = colors.HexColor('#E67E00')
         lc.lines[0].strokeWidth = 2
         lc.lines[0].symbol = None
         d.add(lc)
@@ -5562,6 +5608,16 @@ def exportar_indicadores_tickets_pdf():
             f"({ind['total_calificaciones']} calificaciones recibidas)", estilos['Normal']
         ))
         contenido.append(Spacer(1, 0.5 * cm))
+    if ind['tiempo_promedio_resolucion_texto']:
+        contenido.append(Paragraph(f"Tiempo promedio de resolución: {ind['tiempo_promedio_resolucion_texto']}", estilos['Normal']))
+        contenido.append(Spacer(1, 0.3 * cm))
+    if ind['variacion_pct_tendencia'] is not None:
+        signo = '+' if ind['variacion_pct_tendencia'] >= 0 else ''
+        contenido.append(Paragraph(
+            f"Solicitudes creadas vs. quincena anterior: {signo}{ind['variacion_pct_tendencia']}% "
+            f"({ind['conteo_periodo_actual']} vs {ind['conteo_periodo_anterior']})", estilos['Normal']
+        ))
+        contenido.append(Spacer(1, 0.5 * cm))
 
     dias_tendencia = ind['dias_tendencia']
     contenido.append(Paragraph("Solicitudes creadas — últimos 14 días", estilos['Heading3']))
@@ -5569,17 +5625,23 @@ def exportar_indicadores_tickets_pdf():
     if g:
         contenido += [g, Spacer(1, 0.3 * cm)]
 
+    # 🎨 Mismos colores de marca que en el tablero en pantalla (ver tickets_indicadores.html):
+    # Azul Real/variaciones y Cyan para lo estructural/operativo, Naranja para lo que implica
+    # alerta o plazo, y '#f43f5e' (rose) reservado solo para "Vencidos" como única excepción.
     contenido += tabla_conteos("Por estado", ind['por_estado'].items(), ('Estado', 'Cantidad'))
-    g = grafico_barras(list(ind['por_estado'].keys()), list(ind['por_estado'].values()), '#fb923c')
+    g = grafico_barras(list(ind['por_estado'].keys()), list(ind['por_estado'].values()), '#3D6BB5')
     if g:
         contenido += [g, Spacer(1, 0.5 * cm)]
 
     contenido += tabla_conteos("Por prioridad", ind['por_prioridad'].items(), ('Prioridad', 'Cantidad'))
-    g = grafico_barras(list(ind['por_prioridad'].keys()), list(ind['por_prioridad'].values()), '#38bdf8')
+    g = grafico_barras(list(ind['por_prioridad'].keys()), list(ind['por_prioridad'].values()), '#33B8E0')
     if g:
         contenido += [g, Spacer(1, 0.5 * cm)]
 
     contenido += tabla_conteos("Por tipo", ind['por_tipo'].items(), ('Tipo', 'Cantidad'))
+    g = grafico_pie(list(ind['por_tipo'].keys()), list(ind['por_tipo'].values()), ['#1A4B9C', '#00A3DA'])
+    if g:
+        contenido += [g, Spacer(1, 0.5 * cm)]
 
     cumplimiento_items = list(ind['por_cumplimiento'].items())
     contenido += tabla_conteos(
@@ -5590,7 +5652,7 @@ def exportar_indicadores_tickets_pdf():
     g = grafico_pie(
         [ETIQUETAS_CUMPLIMIENTO_SLA.get(k, k) for k, v in cumplimiento_items],
         [v for k, v in cumplimiento_items],
-        ['#22d3ee', '#f59e0b', '#f43f5e', '#64748b']
+        ['#00A3DA', '#E67E00', '#f43f5e', '#64748b']
     )
     if g:
         contenido += [g, Spacer(1, 0.5 * cm)]
@@ -5598,19 +5660,19 @@ def exportar_indicadores_tickets_pdf():
     if ind['por_categoria']:
         cat_ordenada = sorted(ind['por_categoria'].items(), key=lambda x: x[1], reverse=True)
         contenido += tabla_conteos("Por categoría", cat_ordenada, ('Categoría', 'Cantidad'))
-        g = grafico_barras([k for k, v in cat_ordenada], [v for k, v in cat_ordenada], '#a78bfa')
+        g = grafico_barras([k for k, v in cat_ordenada], [v for k, v in cat_ordenada], '#6690D6')
         if g:
             contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['por_area']:
         area_ordenada = sorted(ind['por_area'].items(), key=lambda x: x[1], reverse=True)
         contenido += tabla_conteos("Por área", area_ordenada, ('Área', 'Cantidad'))
-        g = grafico_barras([k for k, v in area_ordenada], [v for k, v in area_ordenada], '#818cf8')
+        g = grafico_barras([k for k, v in area_ordenada], [v for k, v in area_ordenada], '#007FAE')
         if g:
             contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['por_sede']:
         sede_ordenada = sorted(ind['por_sede'].items(), key=lambda x: x[1], reverse=True)
         contenido += tabla_conteos("Por sede", sede_ordenada, ('Sede', 'Cantidad'))
-        g = grafico_barras([k for k, v in sede_ordenada], [v for k, v in sede_ordenada], '#2dd4bf')
+        g = grafico_barras([k for k, v in sede_ordenada], [v for k, v in sede_ordenada], '#1A4B9C')
         if g:
             contenido += [g, Spacer(1, 0.5 * cm)]
     if ind['top_agentes']:
@@ -5662,6 +5724,16 @@ def exportar_indicadores_tickets_xlsx():
         resumen.cell(row=fila, column=1, value=(
             f"Calificación promedio de satisfacción: {ind['promedio_calificacion']}/5 "
             f"({ind['total_calificaciones']} calificaciones)"
+        ))
+        fila += 2
+    if ind['tiempo_promedio_resolucion_texto']:
+        resumen.cell(row=fila, column=1, value=f"Tiempo promedio de resolución: {ind['tiempo_promedio_resolucion_texto']}")
+        fila += 2
+    if ind['variacion_pct_tendencia'] is not None:
+        signo = '+' if ind['variacion_pct_tendencia'] >= 0 else ''
+        resumen.cell(row=fila, column=1, value=(
+            f"Solicitudes creadas vs. quincena anterior: {signo}{ind['variacion_pct_tendencia']}% "
+            f"({ind['conteo_periodo_actual']} vs {ind['conteo_periodo_anterior']})"
         ))
         fila += 2
 
@@ -5741,7 +5813,7 @@ def exportar_indicadores_tickets_xlsx():
         chart.set_categories(cats_ref)
         chart.y_axis.majorGridlines = None
         chart.series[0].graphicalProperties = GraphicalProperties(solidFill=None)
-        chart.series[0].graphicalProperties.line.solidFill = 'F97316'
+        chart.series[0].graphicalProperties.line.solidFill = 'E67E00'
         chart.series[0].graphicalProperties.line.width = 22000
         chart.series[0].smooth = False
         agregar_grafico(chart, 'Solicitudes creadas — últimos 14 días')
@@ -5756,16 +5828,32 @@ def exportar_indicadores_tickets_xlsx():
         chart.dataLabels = DataLabelList()
         chart.dataLabels.showVal = True
         # 🎨 Mismos colores que el donut de Chart.js en pantalla, en el mismo orden
-        # (vigente/próx. a vencer/vencido/cerrado).
-        colores_sla = ['22D3EE', 'F59E0B', 'F43F5E', '64748B']
+        # (vigente/próx. a vencer/vencido/cerrado) — paleta de marca Preventiva, con 'F43F5E'
+        # (rose) como única excepción para el estado crítico "Vencido".
+        colores_sla = ['00A3DA', 'E67E00', 'F43F5E', '64748B']
         chart.series[0].data_points = [
             DataPoint(idx=i, spPr=GraphicalProperties(solidFill=c)) for i, c in enumerate(colores_sla[:r['filas']])
         ]
         agregar_grafico(chart, 'Cumplimiento de SLA')
 
+    r = rangos_secciones.get('Por tipo')
+    if r and r['filas']:
+        chart = DoughnutChart()
+        datos_ref = Reference(resumen, min_col=2, min_row=r['encabezado'], max_row=r['fin'])
+        cats_ref = Reference(resumen, min_col=1, min_row=r['inicio'], max_row=r['fin'])
+        chart.add_data(datos_ref, titles_from_data=True)
+        chart.set_categories(cats_ref)
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        colores_tipo = ['1A4B9C', '00A3DA', '6690D6']
+        chart.series[0].data_points = [
+            DataPoint(idx=i, spPr=GraphicalProperties(solidFill=c)) for i, c in enumerate(colores_tipo[:r['filas']])
+        ]
+        agregar_grafico(chart, 'Por tipo')
+
     colores_barras = {
-        'Por estado': 'FB923C', 'Por prioridad': '38BDF8',
-        'Por categoría': 'A78BFA', 'Por área': '818CF8', 'Por sede': '2DD4BF'
+        'Por estado': '3D6BB5', 'Por prioridad': '33B8E0',
+        'Por categoría': '6690D6', 'Por área': '007FAE', 'Por sede': '1A4B9C'
     }
     for titulo_seccion, color_hex in colores_barras.items():
         r = rangos_secciones.get(titulo_seccion)
@@ -5875,6 +5963,41 @@ def _calcular_tablero_ejecutivo():
         inventario_por_estado = {}
     total_activos_inventario = sum(inventario_por_estado.values())
 
+    # 📅 Vencimiento de Documentos: mismo criterio que /vencimientos (_bucket_vencimiento),
+    # contando institucionales (galerias) y por empleado (documentos_empleado) juntos, para que
+    # el tablero avise de un vistazo si hay algo por vencer sin tener que entrar al módulo.
+    documentos_vencidos = 0
+    documentos_proximos_vencer = 0
+    try:
+        cursor.execute(
+            "SELECT fecha_vencimiento FROM galerias "
+            "WHERE COALESCE(estado, 'activo') != 'eliminado' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento != ''"
+        )
+        fechas_vencimiento = [r[0] for r in cursor.fetchall()]
+        cursor.execute(
+            "SELECT fecha_vencimiento FROM documentos_empleado "
+            "WHERE COALESCE(estado, 'activo') = 'activo' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento != ''"
+        )
+        fechas_vencimiento += [r[0] for r in cursor.fetchall()]
+        for fecha_venc in fechas_vencimiento:
+            bucket = _bucket_vencimiento(fecha_venc)
+            if bucket == 'vencido':
+                documentos_vencidos += 1
+            elif bucket == 'proximo_a_vencer':
+                documentos_proximos_vencer += 1
+    except Exception as e:
+        print(f"⚠️ Error calculando Vencimiento de Documentos (tablero ejecutivo): {e}")
+
+    # 🔄 Certificaciones de devolución de activos registradas este mes calendario — módulo
+    # reciente, para que gerencia vea de un vistazo cuánta rotación de equipos hubo.
+    devoluciones_certificadas_mes = 0
+    try:
+        mes_actual = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m')
+        cursor.execute("SELECT fecha FROM inventario_devoluciones")
+        devoluciones_certificadas_mes = sum(1 for (f,) in cursor.fetchall() if (f or '').startswith(mes_actual))
+    except Exception as e:
+        print(f"⚠️ Error calculando Certificación de Devoluciones (tablero ejecutivo): {e}")
+
     conn.close()
 
     return {
@@ -5894,6 +6017,12 @@ def _calcular_tablero_ejecutivo():
         'total_accesos_colaboradores': total_accesos_colaboradores,
         'inventario_por_estado': inventario_por_estado,
         'total_activos_inventario': total_activos_inventario,
+        'documentos_vencidos': documentos_vencidos,
+        'documentos_proximos_vencer': documentos_proximos_vencer,
+        'devoluciones_certificadas_mes': devoluciones_certificadas_mes,
+        'variacion_pct_tendencia': ind_tickets['variacion_pct_tendencia'],
+        'conteo_periodo_anterior': ind_tickets['conteo_periodo_anterior'],
+        'tiempo_promedio_resolucion_texto': ind_tickets['tiempo_promedio_resolucion_texto'],
     }
 
 
