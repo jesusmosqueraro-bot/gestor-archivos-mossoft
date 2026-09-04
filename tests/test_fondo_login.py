@@ -39,6 +39,20 @@ def test_login_con_fondo_activo_muestra_el_panel(client, app):
     assert 'fake.jpg' in texto
 
 
+def test_panel_de_fondo_ocupa_la_mitad_de_la_pantalla_y_no_toca_el_login(client, app):
+    """El panel debe ir pegado al borde (mitad de la pantalla, layout de borde a borde tipo
+    Facebook/Solvyx) y el módulo de login en sí (acción, csrf, recaptcha) debe seguir intacto."""
+    _crear_item_fondo(app)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'md:w-1/2' in texto
+    assert 'md:w-80' not in texto and 'lg:w-96' not in texto
+    assert 'action="/login"' in texto
+    assert 'csrf_token' in texto
+    assert 'g-recaptcha' in texto
+
+
 def test_login_ignora_items_pausados(client, app):
     _crear_item_fondo(app, estado='inactivo', url='https://res.cloudinary.com/demo/image/upload/pausado.jpg')
 
