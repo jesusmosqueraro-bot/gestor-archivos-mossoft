@@ -292,6 +292,12 @@
                                     <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Mantenimiento</span>
                                 {% elif a.estado == 'Perdido' %}
                                     <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Perdido</span>
+                                {% elif a.estado == 'Devolución' %}
+                                    <!-- 🔒 Bloqueado: solo un admin puede desbloquearlo (ver editar_activo/
+                                         reemplazar_activo). La fecha queda debajo del badge para que se
+                                         vea de un vistazo cuándo entró a este estado. -->
+                                    <span class="px-2.5 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-lock mr-1"></i>Devolución</span>
+                                    {% if a.fecha_devolucion %}<div class="text-[10px] text-slate-500 mt-1 whitespace-nowrap">{{ a.fecha_devolucion }}</div>{% endif %}
                                 {% else %}
                                     <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Baja</span>
                                 {% endif %}
@@ -338,8 +344,16 @@
                                     <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs" title="Adjuntos ({{ a.adjuntos|length }})">
                                         <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
                                     </button>
+                                    {% if a.estado == 'Devolución' and session.get('rol') != 'admin' %}
+                                    <!-- 🔒 Bloqueado en 'Devolución': ni reemplazar ni editar quedan
+                                         disponibles para quien no sea admin (ver el mismo bloqueo del
+                                         lado del servidor en editar_activo/reemplazar_activo) — mismo
+                                         patrón de ícono de candado que ya usa Gestión de Usuarios. -->
+                                    <span class="text-slate-600 text-xs cursor-not-allowed" title="Activo bloqueado en 'Devolución' — solo un administrador puede desbloquearlo"><i class="fa-solid fa-lock"></i></span>
+                                    {% else %}
                                     <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
                                     <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs"><i class="fa-solid fa-pen"></i></button>
+                                    {% endif %}
                                     <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
