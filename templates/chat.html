@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARKIV - Chat Interno</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
+        #lista-mensajes-chat::-webkit-scrollbar, #lista-contactos-chat::-webkit-scrollbar { width: 6px; }
+        #lista-mensajes-chat::-webkit-scrollbar-thumb, #lista-contactos-chat::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3); border-radius: 999px; }
+    </style>
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+</head>
+<body class="pagina-acento-sky min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-sky-500 selection:text-white">
+
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-y-3">
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('bienvenida') }}" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span class="hidden sm:inline">Volver</span>
+                </a>
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-sm">
+                        <i class="fa-solid fa-comments"></i>
+                    </div>
+                    <h1 class="text-base font-bold text-white whitespace-nowrap">Chat Interno</h1>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                {% include 'partials/perfil_boton.html' %}
+                {% include 'partials/campanita.html' %}
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- 💬 Wrapper con los datos que necesita chat.js: usuario en sesión, token CSRF y con
+             quién abrir de entrada (?con=usuario en la URL, p. ej. al hacer clic en la campanita
+             de un mensaje directo nuevo). -->
+        <div id="wrapper-chat" data-csrf-token="{{ csrf_token() }}" data-usuario-actual="{{ username }}" data-con-inicial="{{ con }}"
+             class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden flex" style="height: calc(100vh - 140px); min-height: 480px;">
+
+            <!-- Barra lateral: Canal General (fijo) + contactos 1 a 1 -->
+            <div class="w-full sm:w-72 flex-shrink-0 border-r border-slate-800 flex flex-col" id="panel-lista-chat">
+                <div class="px-4 py-3 border-b border-slate-800/80">
+                    <h2 class="text-xs font-bold text-white uppercase tracking-wider">Conversaciones</h2>
+                </div>
+                <button type="button" id="item-canal-general" onclick="abrirCanalGeneral()"
+                        class="text-left px-4 py-3 flex items-center gap-3 border-b border-slate-800/60 hover:bg-slate-800/60 transition-colors bg-sky-500/10">
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm flex-shrink-0">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-semibold text-white truncate">Canal General</div>
+                        <div class="text-[11px] text-slate-500">Todo el equipo (admin/agente)</div>
+                    </div>
+                    <span id="badge-canal-general" class="hidden bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">0</span>
+                </button>
+                <div id="lista-contactos-chat" class="flex-1 overflow-y-auto divide-y divide-slate-800/50">
+                    {% for c in contactos %}
+                    <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})' data-usuario="{{ c.usuario }}"
+                            class="item-contacto-chat text-left w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-800/60 transition-colors">
+                        <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                            {{ c.nombre[:1] | upper }}
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-semibold text-white truncate">{{ c.nombre }}</div>
+                            <div class="previsualizacion-contacto-chat text-[11px] text-slate-500 truncate">Sin mensajes todavía</div>
+                        </div>
+                        <span class="badge-contacto-chat hidden bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">0</span>
+                    </button>
+                    {% else %}
+                    <p class="text-slate-500 text-center text-[11px] py-6 px-4">No hay más admin/agente activos para chatear.</p>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Panel de mensajes -->
+            <div class="flex-1 flex-col min-w-0 hidden sm:flex" id="panel-mensajes-chat">
+                <div class="px-5 py-3 border-b border-slate-800/80 flex items-center gap-3">
+                    <button type="button" onclick="_volverListaChatMovil()" class="sm:hidden text-slate-400 hover:text-white -ml-1 mr-1">
+                        <i class="fa-solid fa-arrow-left"></i>
+                    </button>
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm" id="icono-titulo-chat">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-white truncate" id="titulo-conversacion-chat">Canal General</div>
+                        <div class="text-[11px] text-slate-500" id="subtitulo-conversacion-chat">Todo el equipo con acceso operativo</div>
+                    </div>
+                </div>
+                <div id="lista-mensajes-chat" class="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                    <p class="text-slate-500 text-center text-[11px] py-6">Cargando...</p>
+                </div>
+                <div id="error-chat" class="hidden px-5 py-2 text-[11px] text-rose-400 bg-rose-500/10 border-t border-rose-500/20"></div>
+                <form id="form-enviar-chat" onsubmit="return enviarMensajeChat(event)" class="border-t border-slate-800/80 p-3 flex items-end gap-2">
+                    <textarea id="input-mensaje-chat" rows="1" maxlength="2000" placeholder="Escribe un mensaje... (Enter para enviar, Shift+Enter para salto de línea)"
+                              class="flex-1 resize-none px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                              onkeydown="return _teclaMensajeChat(event)"></textarea>
+                    <button type="submit" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all flex-shrink-0">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
