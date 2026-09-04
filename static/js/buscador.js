@@ -4,7 +4,8 @@
 // backend ya filtra qué módulos puede ver cada rol — este archivo solo pinta lo que reciba.
 // Categorías cubiertas hoy: Solicitudes TI, Comunicados, Base de Conocimiento, Gestor de
 // Archivos, Bóveda de Accesos, Accesos de Colaboradores, Inventario de Activos, Proveedores,
-// Plantillas de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones y Usuarios.
+// Áreas, Sedes, Categorías de Solicitudes, Mis Tareas, Actas de Recibido Biomédico, Plantillas
+// de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones y Usuarios.
 
 var _buscadorGlobalTimeout = null;
 var _buscadorGlobalUltimaConsulta = '';
@@ -43,6 +44,11 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Accesos de Colaboradores': 'fa-user-shield',
     'Inventario de Activos': 'fa-boxes-stacked',
     'Proveedores': 'fa-truck-field',
+    'Áreas': 'fa-sitemap',
+    'Sedes': 'fa-building',
+    'Categorías de Solicitudes': 'fa-tags',
+    'Mis Tareas': 'fa-list-check',
+    'Actas de Recibido Biomédico': 'fa-file-signature',
     'Plantillas de Solicitud': 'fa-copy',
     'Vencimiento de Documentos': 'fa-calendar-days',
     'Certificación de Devoluciones': 'fa-rotate-left',
