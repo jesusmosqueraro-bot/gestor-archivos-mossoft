@@ -106,6 +106,17 @@ def test_modal_inventario_incluye_el_panel_de_crear_usuario_rapido(admin_session
     assert 'crearUsuarioRapido' in texto
 
 
+def test_modal_inventario_incluye_boton_directo_para_crear_usuario_sin_buscar_cedula(admin_session):
+    """Tomás reportó que 'Editar Activo' debía 'permitir crear el usuario o cargar el módulo de
+    creación de usuarios' — el panel de alta rápida ya existía, pero solo aparecía DESPUÉS de
+    buscar una cédula y que esa búsqueda fallara ('no encontrado'). Ahora hay un botón que abre
+    el panel directamente, sin exigir ese paso previo — mismo comportamiento en Nuevo y en
+    Editar, porque ambos comparten el mismo modal/formulario."""
+    texto = admin_session.get('/tickets/inventario').get_data(as_text=True)
+    assert 'mostrarPanelCrearUsuarioRapido' in texto
+    assert 'onclick="mostrarPanelCrearUsuarioRapido()"' in texto
+
+
 def test_gestion_usuarios_sigue_creando_cuentas_tras_la_refactorización(admin_session, app):
     """Regresión: _crear_usuario_interno se factorizó a partir de gestion_usuarios() — esta
     prueba confirma que el alta completa (con contraseña elegida por el admin) sigue funcionando
