@@ -11102,6 +11102,87 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en proveedores (buscador global): {e}")
 
+        # --- Áreas, Sedes y Categorías de Solicitudes (mismo catálogo de /tickets/configuracion
+        # que Proveedores, solo admin/agente): antes el buscador global solo cubría 'proveedor'
+        # de esta tabla — un área o una sede configuradas ahí no aparecían por su propio nombre,
+        # aunque sí se pudiera encontrar un activo de Inventario que tuviera esa sede/área como
+        # ATRIBUTO. Este bloque cubre el catálogo en sí (nombre, dirección y responsable).
+        CATALOGOS_CONFIG_TICKETS_BUSCADOR = [('area', 'Áreas'), ('sede', 'Sedes'), ('categoria', 'Categorías de Solicitudes')]
+        for tipo_cat, etiqueta_cat in CATALOGOS_CONFIG_TICKETS_BUSCADOR:
+            try:
+                q_cat_sql = ("SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC"
+                             if db_type == 'postgres' else
+                             "SELECT id, nombre, direccion, responsable FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC")
+                cursor.execute(q_cat_sql, (tipo_cat,))
+                contador = 0
+                for (cf_id, cf_nombre, cf_direccion, cf_responsable) in cursor.fetchall():
+                    if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                        break
+                    texto_busqueda = normalizar(f"{cf_nombre} {cf_direccion or ''} {cf_responsable or ''}")
+                    if q_norm in texto_busqueda:
+                        contador += 1
+                        subtitulo = ' · '.join([p for p in [cf_direccion, f"Resp. {cf_responsable}" if cf_responsable else None] if p])
+                        resultados.append({
+                            'categoria': etiqueta_cat,
+                            'titulo': cf_nombre,
+                            'subtitulo': subtitulo,
+                            'url': url_for('configuracion_tickets')
+                        })
+            except Exception as e:
+                print(f"⚠️ Error buscando en catálogo '{tipo_cat}' de configuración de tickets (buscador global): {e}")
+
+        # --- Mis Tareas (subtareas asignadas dentro de un ticket, ver /tickets/mis_tareas): cada
+        # agente solo ve las SUYAS aquí, igual que en su cola personal — nunca las de otro agente,
+        # ni siquiera si quien busca es admin.
+        try:
+            q_tareas_sql = ("SELECT tt.id, tt.ticket_id, tt.asunto, tt.descripcion, tt.estado, t.titulo, t.tipo, t.fecha_creacion "
+                             "FROM tickets_tareas tt JOIN tickets t ON t.id = tt.ticket_id "
+                             "WHERE tt.responsable = %s AND COALESCE(t.eliminado, 0) = 0 ORDER BY tt.id DESC"
+                             if db_type == 'postgres' else
+                             "SELECT tt.id, tt.ticket_id, tt.asunto, tt.descripcion, tt.estado, t.titulo, t.tipo, t.fecha_creacion "
+                             "FROM tickets_tareas tt JOIN tickets t ON t.id = tt.ticket_id "
+                             "WHERE tt.responsable = ? AND COALESCE(t.eliminado, 0) = 0 ORDER BY tt.id DESC")
+            cursor.execute(q_tareas_sql, (usuario,))
+            contador = 0
+            for (tt_id, tt_ticket_id, tt_asunto, tt_descripcion, tt_estado, t_titulo, t_tipo, t_fecha_creacion) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if q_norm in normalizar(f"{tt_asunto} {tt_descripcion or ''} {t_titulo or ''}"):
+                    contador += 1
+                    codigo = _codigo_ticket(t_tipo or 'Incidente', tt_ticket_id, t_fecha_creacion)
+                    resultados.append({
+                        'categoria': 'Mis Tareas',
+                        'titulo': tt_asunto,
+                        'subtitulo': f"{codigo} · {(tt_estado or 'pendiente').replace('_', ' ').capitalize()}",
+                        'url': url_for('ver_ticket', ticket_id=tt_ticket_id)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en tareas asignadas (buscador global): {e}")
+
+        # --- Actas de Recibido Biomédico (entregas a domicilio de equipos como bombas de
+        # infusión, ver /tickets/inventario/<id>/actas): busca por el responsable que recibió el
+        # equipo, su documento, la dirección de entrega o la placa del activo asociado.
+        try:
+            cursor.execute("""SELECT ab.id, ab.activo_id, ab.nombre_responsable, ab.documento_responsable,
+                                      ab.direccion_entrega, a.nombre
+                               FROM actas_recibido_biomedico ab JOIN activos_inventario a ON a.id = ab.activo_id
+                               ORDER BY ab.id DESC""")
+            contador = 0
+            for (ab_id, ab_activo_id, ab_nombre_resp, ab_doc_resp, ab_direccion, a_nombre) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = normalizar(f"{ab_nombre_resp} {ab_doc_resp or ''} {ab_direccion or ''} {a_nombre or ''}")
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Actas de Recibido Biomédico',
+                        'titulo': f"Acta de {ab_nombre_resp}",
+                        'subtitulo': f"Placa {a_nombre} · {ab_direccion}" if a_nombre else (ab_direccion or ''),
+                        'url': url_for('ver_inventario', q=a_nombre)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en actas de recibido biomédico (buscador global): {e}")
+
         # --- Plantillas de Solicitud (solo admin/agente): agilizan crear tickets recurrentes;
         # se busca por nombre de la plantilla, tipo, categoría, título o descripción prellenada.
         try:
