@@ -9703,12 +9703,19 @@ def buscar_global_api():
     q = request.args.get('q', '').strip()
     if len(q) < 2:
         return jsonify({'q': q, 'resultados': []})
-    q_norm = q.lower()
+    # 🔎 normalizar() quita tildes además de pasar a minúsculas (reutiliza el mismo helper que
+    # ya se usa para generar nombres de usuario): así buscar "cedula" encuentra "Cédula" y
+    # "razon social" encuentra "razón social", sin obligar a escribir el acento exacto.
+    q_norm = normalizar(q)
 
     usuario = session.get('username')
     rol = session.get('rol')
     es_soporte = rol in ROLES_CON_ACCESO_OPERATIVO
     es_admin = rol == 'admin'
+    # 🔁 Certificación de Devoluciones la puede ver también el rol "Gestión Humana", no solo
+    # admin/agente — usa su propio set de roles (ROLES_CERTIFICACION_DEVOLUCION) en vez de
+    # es_soporte para no ocultársela a Gestión Humana ni mostrársela a quien no debería verla.
+    puede_ver_devoluciones = rol in ROLES_CERTIFICACION_DEVOLUCION
 
     resultados = []
     conn, db_type = get_db()
@@ -9732,7 +9739,7 @@ def buscar_global_api():
             # código completo ('IN-2026-000042'), por similitud (p. ej. '42' encuentra el
             # '000042' dentro del código, o encuentra el id 1042 por contener '42'), o el id
             # exacto — así el botón Buscar también sirve para ubicar un ticket puntual.
-            texto_busqueda = f"{titulo} {descripcion or ''} {codigo} {tid}".lower()
+            texto_busqueda = normalizar(f"{titulo} {descripcion or ''} {codigo} {tid}")
             if q_norm in texto_busqueda:
                 contador += 1
                 resultados.append({
@@ -9751,7 +9758,7 @@ def buscar_global_api():
         for c_id, titulo, contenido, nivel in cursor.fetchall():
             if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                 break
-            if q_norm in f"{titulo} {contenido or ''}".lower():
+            if q_norm in normalizar(f"{titulo} {contenido or ''}"):
                 contador += 1
                 resultados.append({
                     'categoria': 'Comunicados',
@@ -9769,7 +9776,7 @@ def buscar_global_api():
         for a_id, titulo, descripcion, url_documento in cursor.fetchall():
             if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                 break
-            if q_norm in f"{titulo} {descripcion or ''}".lower():
+            if q_norm in normalizar(f"{titulo} {descripcion or ''}"):
                 contador += 1
                 resultados.append({
                     'categoria': 'Base de Conocimiento',
@@ -9790,7 +9797,7 @@ def buscar_global_api():
                 break
             if (visibilidad or 'todos') == 'admin' and not es_soporte:
                 continue
-            if q_norm in f"{titulo} {descripcion or ''} {tags or ''}".lower():
+            if q_norm in normalizar(f"{titulo} {descripcion or ''} {tags or ''}"):
                 contador += 1
                 resultados.append({
                     'categoria': 'Gestor de Archivos',
@@ -9809,7 +9816,7 @@ def buscar_global_api():
             for c_id, titulo, usuario_acceso, area, notas in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                if q_norm in f"{titulo} {usuario_acceso or ''} {area or ''} {notas or ''}".lower():
+                if q_norm in normalizar(f"{titulo} {usuario_acceso or ''} {area or ''} {notas or ''}"):
                     contador += 1
                     resultados.append({
                         'categoria': 'Bóveda de Accesos',
@@ -9827,7 +9834,7 @@ def buscar_global_api():
             for r_id, colaborador, aplicativo, solicitado_por in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                if q_norm in f"{colaborador} {aplicativo} {solicitado_por or ''}".lower():
+                if q_norm in normalizar(f"{colaborador} {aplicativo} {solicitado_por or ''}"):
                     contador += 1
                     resultados.append({
                         'categoria': 'Accesos de Colaboradores',
@@ -9848,7 +9855,7 @@ def buscar_global_api():
             for (a_id, a_nombre, a_tipo, a_marca, a_modelo, a_serie, a_estado, a_asignado, a_sede, a_area, a_proveedor) in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                texto_busqueda = f"{a_nombre} {a_tipo or ''} {a_marca or ''} {a_modelo or ''} {a_serie or ''} {a_estado or ''} {a_asignado or ''} {a_sede or ''} {a_area or ''} {a_proveedor or ''}".lower()
+                texto_busqueda = normalizar(f"{a_nombre} {a_tipo or ''} {a_marca or ''} {a_modelo or ''} {a_serie or ''} {a_estado or ''} {a_asignado or ''} {a_sede or ''} {a_area or ''} {a_proveedor or ''}")
                 if q_norm in texto_busqueda:
                     contador += 1
                     subtitulo = ' · '.join([p for p in [a_tipo, a_marca, a_estado] if p])
@@ -9861,6 +9868,105 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en inventario de activos (buscador global): {e}")
 
+        # --- Proveedores (catálogo de /tickets/configuracion, solo admin/agente): busca por
+        # nombre comercial, NIT o razón social. Antes de este bloque el buscador global no
+        # cubría este catálogo en absoluto, así que escribir el NIT de un proveedor (que no
+        # aparece en ningún otro texto del sistema) no encontraba nada aunque el proveedor sí
+        # estuviera registrado — este bloque es lo que lo soluciona.
+        try:
+            q_proveedores_sql = ("SELECT id, nombre, nit, razon_social FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC"
+                                  if db_type == 'postgres' else
+                                  "SELECT id, nombre, nit, razon_social FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC")
+            cursor.execute(q_proveedores_sql, ('proveedor',))
+            contador = 0
+            for (p_id, p_nombre, p_nit, p_razon_social) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = normalizar(f"{p_nombre} {p_nit or ''} {p_razon_social or ''}")
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    subtitulo = ' · '.join([p for p in [f"NIT {p_nit}" if p_nit else None, p_razon_social] if p])
+                    resultados.append({
+                        'categoria': 'Proveedores',
+                        'titulo': p_nombre,
+                        'subtitulo': subtitulo,
+                        'url': url_for('configuracion_tickets')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en proveedores (buscador global): {e}")
+
+        # --- Plantillas de Solicitud (solo admin/agente): agilizan crear tickets recurrentes;
+        # se busca por nombre de la plantilla, tipo, categoría, título o descripción prellenada.
+        try:
+            cursor.execute("SELECT id, nombre, tipo, categoria, titulo, descripcion FROM ticket_plantillas WHERE estado = 'activo' ORDER BY nombre ASC")
+            contador = 0
+            for (pl_id, pl_nombre, pl_tipo, pl_categoria, pl_titulo, pl_descripcion) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = normalizar(f"{pl_nombre} {pl_tipo or ''} {pl_categoria or ''} {pl_titulo or ''} {pl_descripcion or ''}")
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Plantillas de Solicitud',
+                        'titulo': pl_nombre,
+                        'subtitulo': ' · '.join([p for p in [pl_tipo, pl_categoria] if p]),
+                        'url': url_for('ver_plantillas_ticket')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en plantillas de solicitud (buscador global): {e}")
+
+        # --- Documentos de empleado con vencimiento (panel de Vencimiento de Documentos, solo
+        # admin/agente): busca por título del documento, tipo de documento o el empleado dueño.
+        # Los instructivos institucionales con vencimiento no se repiten aquí porque ya son
+        # 'galerias' y quedan cubiertos por la categoría "Gestor de Archivos" de arriba.
+        try:
+            cursor.execute(
+                "SELECT d.titulo, d.tipo_documento, d.usuario, d.fecha_vencimiento, COALESCE(u.nombre, d.usuario) "
+                "FROM documentos_empleado d LEFT JOIN usuarios u ON u.usuario = d.usuario "
+                "WHERE COALESCE(d.estado, 'activo') = 'activo'"
+            )
+            contador = 0
+            for (dc_titulo, dc_tipo, dc_usuario, dc_fecha_venc, dc_nombre) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = normalizar(f"{dc_titulo} {dc_tipo or ''} {dc_usuario or ''} {dc_nombre or ''}")
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    subtitulo = ' · '.join([p for p in [dc_tipo, dc_nombre or dc_usuario, f"Vence {dc_fecha_venc}" if dc_fecha_venc else None] if p])
+                    resultados.append({
+                        'categoria': 'Vencimiento de Documentos',
+                        'titulo': dc_titulo,
+                        'subtitulo': subtitulo,
+                        'url': url_for('ver_vencimientos')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en documentos de empleado (buscador global): {e}")
+
+    # --- Certificación de Devoluciones (admin/agente/gestión humana): busca en el historial de
+    # devoluciones ya confirmadas por colaborador, activo devuelto, quién la confirmó o las
+    # observaciones dejadas — usa su propio permiso porque Gestión Humana entra aquí aunque no
+    # sea 'soporte' (no ve tickets, inventario, etc.).
+    if puede_ver_devoluciones:
+        try:
+            cursor.execute("""SELECT d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.observaciones
+                               FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id
+                               ORDER BY d.id DESC""")
+            contador = 0
+            for (dv_colaborador, dv_activo_nombre, dv_tipo, dv_confirmado_por, dv_observaciones) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                texto_busqueda = normalizar(f"{dv_colaborador} {dv_activo_nombre or ''} {dv_tipo or ''} {dv_confirmado_por or ''} {dv_observaciones or ''}")
+                if q_norm in texto_busqueda:
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Certificación de Devoluciones',
+                        'titulo': f"Devolución de {dv_colaborador}",
+                        'subtitulo': f"Placa {dv_activo_nombre}" if dv_activo_nombre else dv_tipo,
+                        'url': url_for('certificacion_devoluciones', q=dv_colaborador)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en certificación de devoluciones (buscador global): {e}")
+
     # --- Usuarios (solo rol admin — y la cuenta 'admin' literal se oculta al resto de admins) ---
     if es_admin:
         try:
@@ -9871,7 +9977,7 @@ def buscar_global_api():
                     break
                 if u_usuario == 'admin' and usuario != 'admin':
                     continue
-                if q_norm in f"{u_usuario} {u_nombre or ''} {u_correo or ''} {u_cedula or ''}".lower():
+                if q_norm in normalizar(f"{u_usuario} {u_nombre or ''} {u_correo or ''} {u_cedula or ''}"):
                     contador += 1
                     resultados.append({
                         'categoria': 'Usuarios',
