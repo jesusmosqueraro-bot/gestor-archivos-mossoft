@@ -3,7 +3,8 @@
 // no disparar una petición por cada tecla) y pinta los resultados agrupados por módulo. El
 // backend ya filtra qué módulos puede ver cada rol — este archivo solo pinta lo que reciba.
 // Categorías cubiertas hoy: Solicitudes TI, Comunicados, Base de Conocimiento, Gestor de
-// Archivos, Bóveda de Accesos, Accesos de Colaboradores, Inventario de Activos y Usuarios.
+// Archivos, Bóveda de Accesos, Accesos de Colaboradores, Inventario de Activos, Proveedores,
+// Plantillas de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones y Usuarios.
 
 var _buscadorGlobalTimeout = null;
 var _buscadorGlobalUltimaConsulta = '';
@@ -41,6 +42,10 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Bóveda de Accesos': 'fa-key',
     'Accesos de Colaboradores': 'fa-user-shield',
     'Inventario de Activos': 'fa-boxes-stacked',
+    'Proveedores': 'fa-truck-field',
+    'Plantillas de Solicitud': 'fa-copy',
+    'Vencimiento de Documentos': 'fa-calendar-days',
+    'Certificación de Devoluciones': 'fa-rotate-left',
     'Usuarios': 'fa-users'
 };
 
