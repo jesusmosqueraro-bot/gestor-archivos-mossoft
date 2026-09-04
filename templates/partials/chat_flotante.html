@@ -1,0 +1,15 @@
+<!-- 💬 BURBUJA FLOTANTE DE CHAT INTERNO — estilo Messenger, pedida por Tomás para que el chat
+     tenga un acceso siempre visible además del ícono de la barra (partials/chat_boton.html).
+     Se ubica apilada justo ENCIMA del botón flotante de cambiar tema (mismo bottom-5 right-5,
+     este va a bottom-[76px] = 44px del botón de tema + 20px de separación + 12px de aire), así
+     que debe incluirse siempre junto a ese botón, nunca sola, para que la pila se vea alineada.
+     Muestra el mismo contador de no leídos que ya pinta el ícono de la barra, reutilizando el
+     mismo sondeo de /notificaciones/resumen (ver notificaciones.js) — sin ruta ni temporizador nuevos.
+     Solo se muestra para admin/agente (los únicos con acceso al chat). -->
+{% if session.get('rol') in ('admin', 'agente') %}
+<a href="{{ url_for('chat_pagina') }}" title="Chat Interno"
+   class="fixed bottom-[76px] right-5 z-50 w-11 h-11 rounded-full bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+    <i class="fa-solid fa-comment-dots"></i>
+    <span id="badge-chat-flotante" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 border-2 border-slate-900">0</span>
+</a>
+{% endif %}
