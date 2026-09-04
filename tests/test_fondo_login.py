@@ -39,15 +39,17 @@ def test_login_con_fondo_activo_muestra_el_panel(client, app):
     assert 'fake.jpg' in texto
 
 
-def test_panel_de_fondo_ocupa_la_mitad_de_la_pantalla_y_no_toca_el_login(client, app):
-    """El panel debe ir pegado al borde (mitad de la pantalla, layout de borde a borde tipo
-    Facebook/Solvyx) y el módulo de login en sí (acción, csrf, recaptcha) debe seguir intacto."""
+def test_panel_de_fondo_ocupa_mas_espacio_que_el_login_y_no_toca_el_modulo(client, app):
+    """El panel va pegado al borde y es más ancho que la columna del login (60/40, layout de
+    borde a borde tipo Facebook/Solvyx) y el módulo de login en sí (acción, csrf, recaptcha)
+    debe seguir intacto."""
     _crear_item_fondo(app)
 
     texto = client.get('/login').get_data(as_text=True)
 
-    assert 'md:w-1/2' in texto
-    assert 'md:w-80' not in texto and 'lg:w-96' not in texto
+    assert 'md:w-3/5' in texto
+    assert 'md:w-2/5' in texto
+    assert 'md:w-80' not in texto and 'lg:w-96' not in texto and 'md:w-1/2' not in texto
     assert 'action="/login"' in texto
     assert 'csrf_token' in texto
     assert 'g-recaptcha' in texto
@@ -143,3 +145,12 @@ def test_mover_fondo_login_intercambia_el_orden(admin_session, app):
     orden_ids = [f[0] for f in cur.fetchall()]
     conn.close()
     assert orden_ids == [id2, id1]
+
+
+def test_fondo_login_tiene_boton_de_tema_claro_oscuro(admin_session):
+    """Esta pantalla se había quedado sin el botón flotante de tema claro/oscuro que sí tienen
+    las demás páginas del sistema — se agrega para que sea consistente."""
+    texto = admin_session.get('/comunicados/fondo_login').get_data(as_text=True)
+
+    assert 'action="/perfil/tema"' in texto
+    assert 'fa-sun' in texto or 'fa-moon' in texto

@@ -137,3 +137,12 @@ def test_exportar_certificacion_devoluciones_csv(admin_session, app):
     assert 'text/csv' in r.headers.get('Content-Type', '')
     texto = r.get_data(as_text=True)
     assert 'COLABORADOR' in texto and 'Ana Torres' in texto
+
+
+def test_certificacion_devoluciones_tiene_boton_de_tema_claro_oscuro(admin_session):
+    """Esta pantalla se había quedado sin el botón flotante de tema claro/oscuro que sí tienen
+    las demás páginas del sistema — se agrega para que sea consistente."""
+    texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
+
+    assert 'action="/perfil/tema"' in texto
+    assert 'fa-sun' in texto or 'fa-moon' in texto
