@@ -9689,12 +9689,23 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
 
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def gestion_usuarios():
+    """La VISTA (listado, carga masiva de usuarios) ya es de agentes y admins por igual — ver
+    ROLES_CON_ACCESO_OPERATIVO. La creación manual de una cuenta desde el formulario completo
+    (con rol elegible libremente) sigue siendo EXCLUSIVA de administradores: un agente que
+    necesite dar de alta gente lo hace por Carga Masiva (ver usuarios_importar_xlsx), que fuerza
+    el rol a 'estandar' sin excepción — así un agente nunca puede, ni por este formulario ni por
+    la carga masiva, crear una cuenta con rol 'agente' o 'admin'."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     error = None
     form_data = None
+
+    if request.method == 'POST' and session.get('rol') != 'admin':
+        conn.close()
+        flash("Solo un administrador puede crear una cuenta desde este formulario. Usa \"Carga masiva\" para dar de alta varias personas con rol Estándar.", "error")
+        return redirect(url_for('gestion_usuarios'))
 
     if request.method == 'POST':
         # 🛡️ Misma normalización de rol que aplicaba antes de factorizar la creación en
@@ -9744,6 +9755,145 @@ def gestion_usuarios():
         error_cedula=error_cedula, error_pass_corta=error_pass_corta,
         longitud_minima_password=LONGITUD_MINIMA_PASSWORD_CUENTA
     )
+
+
+# 📊 Columnas de la carga masiva de usuarios — igual que COLUMNAS_INVENTARIO_XLSX, usadas tanto
+# por la plantilla descargable como por el parser de usuarios_importar_xlsx (por posición, no
+# por nombre de encabezado). A propósito NO incluye 'rol' ni 'contraseña': la carga masiva
+# siempre crea la cuenta con rol 'estandar' y una contraseña temporal generada sola — el pedido
+# de Tomás fue justamente que la carga masiva sea "solo con el rol estándar" y que después, ya
+# dentro de Arkiv, un agente o administrador solo tenga que ajustar el rol y el estado de cada
+# cuenta si hace falta (ver cambiar_rol_usuario).
+COLUMNAS_USUARIOS_XLSX = [
+    'Primer nombre', 'Segundo nombre', 'Primer apellido', 'Segundo apellido',
+    'Correo electrónico', 'Teléfono', 'Cédula', 'Especialidad / Cargo'
+]
+
+
+@app.route('/usuarios/plantilla_xlsx')
+@login_required
+@agente_o_admin_required
+def usuarios_plantilla_xlsx():
+    """Plantilla descargable para la carga masiva de usuarios: mismas columnas que espera
+    usuarios_importar_xlsx, con una fila de ejemplo. 'Especialidad / Cargo' debe existir ya en
+    el catálogo de especialidades (Gestión de Usuarios → Especialidades) para que la cuenta
+    quede completa, aunque _crear_usuario_interno no lo exige de forma estricta."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Usuarios'
+    ws.append(COLUMNAS_USUARIOS_XLSX)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='0891B2', end_color='0891B2', fill_type='solid')
+    ws.append([
+        'Laura', '', 'Gómez', 'Ramírez', 'laura.gomez@preventivaips.com.co', '3001234567',
+        '1094567890', 'Auxiliar Administrativo'
+    ])
+    anchos = [16, 16, 16, 16, 32, 16, 16, 24]
+    for i, ancho in enumerate(anchos, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="Arkiv_Plantilla_Usuarios.xlsx"'
+    })
+
+
+@app.route('/usuarios/importar_xlsx', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def usuarios_importar_xlsx():
+    """Carga masiva de usuarios desde un archivo .xlsx (COLUMNAS_USUARIOS_XLSX). Cada fila crea
+    una cuenta con las MISMAS reglas que el alta individual (_crear_usuario_interno: usuario y
+    contraseña generados, correo de bienvenida, cédula única) — la única diferencia es que aquí
+    el rol SIEMPRE queda en 'estandar', sin excepción, sin importar qué traiga el archivo (esta
+    ruta no lee ninguna columna de rol). Las filas que fallan (sin nombre/apellido/correo/
+    especialidad, cédula ya usada, correo inválido) se omiten individualmente y se listan en el
+    mensaje final, igual que importar_inventario_xlsx — un solo renglón con error no descarta el
+    resto del archivo. Después de la carga, un agente o administrador entra a Gestión de
+    Usuarios solo a ajustar el rol y el estado de las cuentas que lo necesiten."""
+    archivo = request.files.get('archivo')
+    if not archivo or not archivo.filename:
+        flash("Selecciona un archivo .xlsx para cargar.", "error")
+        return redirect(url_for('gestion_usuarios'))
+    if not archivo.filename.lower().endswith('.xlsx'):
+        flash("El archivo debe tener extensión .xlsx (Excel).", "error")
+        return redirect(url_for('gestion_usuarios'))
+
+    import openpyxl
+    try:
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        flash(f"No se pudo leer el archivo: {e}", "error")
+        return redirect(url_for('gestion_usuarios'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    creador = session['username']
+
+    creados = []
+    omitidos = []
+    cedulas_vistas_en_archivo = set()
+
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not fila or all(c is None or str(c).strip() == '' for c in fila):
+            continue  # fila en blanco: se ignora sin contar como error
+
+        valores = list(fila) + [None] * (8 - len(fila))
+        primer_nombre = str(valores[0]).strip() if valores[0] is not None else ''
+        segundo_nombre = str(valores[1]).strip() if valores[1] is not None else ''
+        primer_apellido = str(valores[2]).strip() if valores[2] is not None else ''
+        segundo_apellido = str(valores[3]).strip() if valores[3] is not None else ''
+        email = str(valores[4]).strip() if valores[4] is not None else ''
+        telefono = str(valores[5]).strip() if valores[5] is not None else ''
+        cedula = str(valores[6]).strip() if valores[6] is not None else ''
+        especialidad = str(valores[7]).strip() if valores[7] is not None else ''
+
+        # 🪪 Igual que la carga de Inventario con la placa: una cédula repetida DENTRO del mismo
+        # archivo se detecta aquí antes de tocar la base (el duplicado contra la base ya lo
+        # cubre _crear_usuario_interno más abajo, fila por fila).
+        if cedula and cedula.lower() in cedulas_vistas_en_archivo:
+            omitidos.append((num_fila, f"cédula '{cedula}' repetida más de una vez en este archivo"))
+            continue
+
+        datos = {
+            'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
+            'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
+            'email': email, 'telefono': telefono, 'cedula': cedula, 'especialidad': especialidad,
+            'rol': 'estandar', 'password': secrets.token_urlsafe(12),
+        }
+        error, nuevo_user, nombre_completo, _firma_url = _crear_usuario_interno(datos, creador, conn, cursor, db_type)
+        if error:
+            omitidos.append((num_fila, error))
+            continue
+
+        creados.append(nuevo_user)
+        if cedula:
+            cedulas_vistas_en_archivo.add(cedula.lower())
+
+    conn.close()
+
+    if creados:
+        registrar_log(creador, "Gestión de Usuarios", f"Carga masiva desde Excel: {len(creados)} usuario(s) creado(s) con rol estándar")
+
+    if creados and not omitidos:
+        flash(f"Se crearon {len(creados)} usuario(s) con rol Estándar. Cada uno recibió su usuario y contraseña temporal por correo.", "exito")
+    elif creados and omitidos:
+        detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20])
+        extra = f"\n(...y {len(omitidos) - 20} fila(s) más)" if len(omitidos) > 20 else ""
+        flash(f"Se crearon {len(creados)} usuario(s). Se omitieron {len(omitidos)} fila(s):\n{detalle}{extra}", "exito")
+    else:
+        detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20]) or "El archivo no tiene filas con datos."
+        flash(f"No se creó ningún usuario. {detalle}", "error")
+
+    return redirect(url_for('gestion_usuarios'))
 
 
 @app.route('/tickets/inventario/usuarios/crear_rapido', methods=['POST'])
@@ -9980,6 +10130,64 @@ def editar_usuario(usuario_id):
     return redirect(url_for('gestion_usuarios'))
 
 
+# 🪪 CAMBIAR ROL (agentes y admins) — versión acotada de editar_usuario pensada para el paso que
+# queda después de la Carga Masiva de usuarios: solo toca la columna 'rol' (nada de correo,
+# nombre, teléfono, cédula, especialidad ni contraseña, que siguen siendo exclusivos del
+# formulario completo de editar_usuario, admin-only). Un agente puede usar esta ruta; un
+# administrador también (aunque para un admin es más simple seguir usando "Editar" en la fila).
+@app.route('/usuarios/<int:usuario_id>/cambiar_rol', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def cambiar_rol_usuario(usuario_id):
+    nuevo_rol = request.form.get('rol', '').strip()
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+        flash("Rol no válido.", "error")
+        return redirect(url_for('gestion_usuarios'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT usuario, rol FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol FROM usuarios WHERE id = ?"
+        cursor.execute(q_sel, (usuario_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+        user_target, rol_target = row[0], row[1]
+
+        # 🛡️ Mismas protecciones que editar_usuario/toggle_estado_usuario/eliminar_usuario:
+        # nunca la cuenta 'admin' ni la propia cuenta con la que se inició sesión, y solo el
+        # super-admin toca una cuenta que YA es 'admin' o 'agente'.
+        if user_target == 'admin' or user_target == session.get('username'):
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+        es_superadmin = (session.get('username') == 'admin')
+        if rol_target in ('admin', 'agente') and not es_superadmin:
+            conn.close()
+            return redirect(url_for('gestion_usuarios'))
+
+        # 🛡️ Solo el super-admin asciende a 'admin'. Y, a diferencia de un administrador
+        # cualquiera (que sí puede ascender a alguien a 'agente'), un AGENTE que use esta misma
+        # ruta no puede — así un agente comprometido no puede mintar nuevas cuentas de agente
+        # para sí mismo ni para terceros; esa promoción puntual la sigue haciendo un admin.
+        if nuevo_rol == 'admin' and not es_superadmin:
+            nuevo_rol = rol_target
+        if nuevo_rol == 'agente' and session.get('rol') != 'admin':
+            nuevo_rol = rol_target
+
+        q_upd = "UPDATE usuarios SET rol = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET rol = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_rol, usuario_id))
+        conn.commit()
+        registrar_log(session['username'], "Edición de Usuario", f"Se cambió el rol de '{user_target}' a '{nuevo_rol}'")
+        flash(f"Rol de '{user_target}' actualizado a {nuevo_rol}.", "exito")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error cambiando el rol del usuario {usuario_id}: {e}")
+        flash("No se pudo actualizar el rol.", "error")
+    conn.close()
+    return redirect(url_for('gestion_usuarios'))
+
+
 # 🩺 CATÁLOGO DE ESPECIALIDADES (administrable desde /usuarios, igual que el de aplicativos)
 @app.route('/usuarios/especialidades/crear', methods=['POST'])
 @login_required
@@ -10064,8 +10272,13 @@ def eliminar_usuario(usuario_id):
 # 🔒 BLOQUEAR / DESBLOQUEAR USUARIO
 @app.route('/usuarios/toggle_estado/<int:usuario_id>', methods=['POST'])
 @login_required
-@admin_required
+@agente_o_admin_required
 def toggle_estado_usuario(usuario_id):
+    # 🛡️ Se abrió a agentes (antes exclusivo de admin) para que puedan bloquear/desbloquear las
+    # cuentas 'estandar' que ellos mismos dan de alta por Carga Masiva — las protecciones de
+    # abajo (nunca 'admin', nunca la propia cuenta, y solo el super-admin toca cuentas
+    # admin/agente) siguen aplicando exactamente igual, así que un agente sigue sin poder tocar
+    # el estado de otra cuenta admin/agente.
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
