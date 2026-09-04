@@ -608,7 +608,7 @@ def init_db():
                 id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, nombre VARCHAR(150) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
-                id SERIAL PRIMARY KEY, nombre VARCHAR(200) NOT NULL, tipo_activo VARCHAR(100) DEFAULT 'Otro', marca VARCHAR(100), modelo VARCHAR(100), numero_serie VARCHAR(150), estado VARCHAR(30) DEFAULT 'Disponible', asignado_a VARCHAR(100), sede VARCHAR(100), observaciones TEXT, fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL, eliminado INTEGER DEFAULT 0
+                id SERIAL PRIMARY KEY, nombre VARCHAR(200) NOT NULL, tipo_activo VARCHAR(100) DEFAULT 'Otro', marca VARCHAR(100), modelo VARCHAR(100), numero_serie VARCHAR(150), estado VARCHAR(30) DEFAULT 'Disponible', asignado_a VARCHAR(100), sede VARCHAR(100), area VARCHAR(100), observaciones TEXT, fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL, eliminado INTEGER DEFAULT 0
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, url TEXT NOT NULL, nombre_original VARCHAR(255) NOT NULL, subido_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL
@@ -853,7 +853,12 @@ def init_db():
                 # leídas y de aparecer en la lista principal) hasta que la persona la restaure o
                 # la elimine definitivamente desde ahí. Ver /notificaciones/<id>/archivar,
                 # /restaurar, /eliminar y /notificaciones/papelera/vaciar.
-                "ALTER TABLE notificaciones ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activa';"
+                "ALTER TABLE notificaciones ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activa';",
+                # 🏢 Área del activo (Sistemas, Urgencias, Facturación, etc.) — igual que 'sede',
+                # se valida contra el catálogo de Áreas ya administrado en /tickets/configuracion
+                # (ver _config_ticket_lista('area')); ayuda a ubicar con más precisión un equipo
+                # de cómputo o biomédico dentro de la sede donde está.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS area VARCHAR(100);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -913,7 +918,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL, estado TEXT DEFAULT 'activo'
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo_activo TEXT DEFAULT 'Otro', marca TEXT, modelo TEXT, numero_serie TEXT, estado TEXT DEFAULT 'Disponible', asignado_a TEXT, sede TEXT, observaciones TEXT, fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL, eliminado INTEGER DEFAULT 0
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, tipo_activo TEXT DEFAULT 'Otro', marca TEXT, modelo TEXT, numero_serie TEXT, estado TEXT DEFAULT 'Disponible', asignado_a TEXT, sede TEXT, area TEXT, observaciones TEXT, fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL, eliminado INTEGER DEFAULT 0
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_adjuntos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
@@ -1143,6 +1148,15 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_notif_estado_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🏢 Área del activo. Ver comentario equivalente en la rama de Postgres.
+            for col_area_activo_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN area TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_area_activo_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -5861,6 +5875,7 @@ def ver_inventario():
     q_estado = request.args.get('estado', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
     q_sede = request.args.get('sede', '').strip()
+    q_area = request.args.get('area', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
 
     tipos_activo_catalogo = _catalogo_tipos_activo_activos()
@@ -5869,7 +5884,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -5934,8 +5949,8 @@ def ver_inventario():
 
     activos_todos = [{
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
-        'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8],
-        'observaciones': r[9], 'fecha_creacion': r[10], 'creado_por': r[11],
+        'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
+        'observaciones': r[10], 'fecha_creacion': r[11], 'creado_por': r[12],
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -5960,6 +5975,8 @@ def ver_inventario():
     activos_en_contexto = activos_todos
     if q_sede:
         activos_en_contexto = [a for a in activos_en_contexto if (a['sede'] or '') == q_sede]
+    if q_area:
+        activos_en_contexto = [a for a in activos_en_contexto if (a['area'] or '') == q_area]
     if q_tipo in nombres_tipos_activo:
         activos_en_contexto = [a for a in activos_en_contexto if a['tipo_activo'] == q_tipo]
     if q_busqueda:
@@ -5989,6 +6006,7 @@ def ver_inventario():
         activos = [a for a in activos if a['estado'] == q_estado]
 
     sedes = _config_ticket_lista('sede')
+    areas = _config_ticket_lista('area')
     error_placa = request.args.get('error_placa', '').strip()
     # 🔀 Candidatos para "Activo de reemplazo": todo el inventario activo (sin filtrar por la
     # vista actual), con los campos mínimos que necesita el buscador del modal.
@@ -6001,8 +6019,8 @@ def ver_inventario():
         ICONOS_TIPO_ACTIVO=ICONOS_TIPO_ACTIVO,
         motivos_reemplazo=MOTIVOS_REEMPLAZO_ACTIVO, estados_resultantes_reemplazo=ESTADOS_RESULTANTES_REEMPLAZO,
         activos_para_reemplazo=activos_para_reemplazo,
-        estados_activo=ESTADOS_ACTIVO, sedes=sedes,
-        q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_busqueda=q_busqueda,
+        estados_activo=ESTADOS_ACTIVO, sedes=sedes, areas=areas,
+        q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_area=q_area, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
         total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
         por_tipo_activo=por_tipo_activo, error_placa=error_placa
@@ -6021,6 +6039,7 @@ def crear_activo():
     estado = request.form.get('estado', 'Disponible').strip()
     asignado_a = request.form.get('asignado_a', '').strip()
     sede = request.form.get('sede', '').strip()
+    area = request.form.get('area', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
     nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
@@ -6030,6 +6049,8 @@ def crear_activo():
         estado = 'Disponible'
     sedes_validas = [s['nombre'] for s in _config_ticket_lista('sede')]
     sede = sede if sede in sedes_validas else None
+    areas_validas = [a['nombre'] for a in _config_ticket_lista('area')]
+    area = area if area in areas_validas else None
 
     if nombre:
         fecha_act = obtener_fecha_actual()
@@ -6046,8 +6067,8 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, fecha_act, usuario))
+            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, observaciones or None, fecha_act, usuario))
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
         except Exception as e:
@@ -6069,6 +6090,7 @@ def editar_activo(activo_id):
     estado = request.form.get('estado', 'Disponible').strip()
     asignado_a = request.form.get('asignado_a', '').strip()
     sede = request.form.get('sede', '').strip()
+    area = request.form.get('area', '').strip()
     observaciones = request.form.get('observaciones', '').strip()
 
     nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
@@ -6078,6 +6100,8 @@ def editar_activo(activo_id):
         estado = 'Disponible'
     sedes_validas = [s['nombre'] for s in _config_ticket_lista('sede')]
     sede = sede if sede in sedes_validas else None
+    areas_validas = [a['nombre'] for a in _config_ticket_lista('area')]
+    area = area if area in areas_validas else None
 
     if nombre:
         conn, db_type = get_db()
@@ -6091,8 +6115,8 @@ def editar_activo(activo_id):
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, observaciones = ? WHERE id = ?"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, observaciones or None, activo_id))
+            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, observaciones = ? WHERE id = ?"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, observaciones or None, activo_id))
             conn.commit()
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
@@ -6149,12 +6173,12 @@ def reemplazar_activo(activo_id):
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
     try:
-        cursor.execute(f"SELECT nombre, asignado_a, sede FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_id,))
+        cursor.execute(f"SELECT nombre, asignado_a, sede, area FROM activos_inventario WHERE id = {ph} AND eliminado = 0", (activo_id,))
         fila_anterior = cursor.fetchone()
         if not fila_anterior:
             conn.close()
             return redirect(url_for('ver_inventario'))
-        nombre_anterior, asignado_a_anterior, sede_anterior = fila_anterior
+        nombre_anterior, asignado_a_anterior, sede_anterior, area_anterior = fila_anterior
 
         usuario = session.get('username')
         fecha_creacion = obtener_fecha_actual()
@@ -6165,12 +6189,12 @@ def reemplazar_activo(activo_id):
 
         detalle = f"Se reemplazó el activo #{activo_id} ('{nombre_anterior}') — motivo: {motivo}. Queda en estado '{estado_resultante}'."
         if activo_nuevo_id:
-            # 🔁 El activo de reemplazo hereda responsable y sede del que sale de servicio, para
-            # que el inventario refleje de una vez a quién/dónde quedó el equipo nuevo.
+            # 🔁 El activo de reemplazo hereda responsable, sede y área del que sale de servicio,
+            # para que el inventario refleje de una vez a quién/dónde quedó el equipo nuevo.
             estado_nuevo = 'Asignado' if asignado_a_anterior else 'Disponible'
             cursor.execute(
-                f"UPDATE activos_inventario SET asignado_a = {ph}, sede = {ph}, estado = {ph} WHERE id = {ph} AND eliminado = 0",
-                (asignado_a_anterior, sede_anterior, estado_nuevo, activo_nuevo_id)
+                f"UPDATE activos_inventario SET asignado_a = {ph}, sede = {ph}, area = {ph}, estado = {ph} WHERE id = {ph} AND eliminado = 0",
+                (asignado_a_anterior, sede_anterior, area_anterior, estado_nuevo, activo_nuevo_id)
             )
             detalle += f" Reemplazado por el activo #{activo_nuevo_id}."
 
