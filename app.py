@@ -11529,10 +11529,18 @@ def notificaciones_resumen():
     🗑️ Acepta ?vista=activas (por defecto) o ?vista=papelera: la campanita reutiliza esta
     misma ruta para pintar tanto la lista principal como la papelera, cambiando solo el
     'estado' que filtra. El contador de no leídas ('no_leidas') SIEMPRE se calcula sobre las
-    activas — así el badge no cambia mientras alguien está mirando la papelera."""
+    activas — así el badge no cambia mientras alguien está mirando la papelera.
+
+    💬 'chat_no_leidos' viaja en esta misma respuesta (directos sin leer + no vistos del Canal
+    General) para que el botón de Chat Interno de la barra de navegación (partials/chat_boton.html)
+    pinte su propio contador con el mismo sondeo de 30s que ya usa la campanita, sin agregar una
+    ruta ni un temporizador nuevos. Solo aplica a admin/agente (los únicos con acceso al chat)."""
     usuario = session.get('username')
     vista = 'papelera' if request.args.get('vista') == 'papelera' else 'activas'
     estado_filtro = 'archivada' if vista == 'papelera' else 'activa'
+    chat_no_leidos = 0
+    if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+        chat_no_leidos = _chat_directos_no_leidos_total(usuario) + _chat_canal_no_leidos(usuario)
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -11545,11 +11553,11 @@ def notificaciones_resumen():
         cursor.execute(q_lista, (usuario, estado_filtro))
         recientes = [{'id': r[0], 'tipo': r[1], 'mensaje': r[2], 'url': r[3], 'leida': bool(r[4]), 'fecha': r[5]} for r in cursor.fetchall()]
         conn.close()
-        return {'no_leidas': no_leidas, 'recientes': recientes, 'vista': vista}
+        return {'no_leidas': no_leidas, 'recientes': recientes, 'vista': vista, 'chat_no_leidos': chat_no_leidos}
     except Exception as e:
         conn.close()
         print(f"⚠️ Error obteniendo resumen de notificaciones de '{usuario}': {e}")
-        return {'no_leidas': 0, 'recientes': [], 'vista': vista}
+        return {'no_leidas': 0, 'recientes': [], 'vista': vista, 'chat_no_leidos': chat_no_leidos}
 
 
 @app.route('/notificaciones/<int:notif_id>/ir')
