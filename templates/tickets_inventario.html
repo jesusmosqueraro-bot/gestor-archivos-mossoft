@@ -271,6 +271,7 @@
                         <th class="pb-3 px-3 font-bold">Sede</th>
                         <th class="pb-3 px-3 font-bold">Área</th>
                         <th class="pb-3 px-3 font-bold">Proveedor</th>
+                        <th class="pb-3 px-3 font-bold">Costo</th>
                         <th class="pb-3 px-3 font-bold text-right">Acciones</th>
                     </tr>
                 </thead>
@@ -304,6 +305,23 @@
                             <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.area or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.proveedor or '-' }}</td>
+                            <!-- 💰 Costo por artículo: pedido por Tomás — antes solo se veía el total
+                                 agregado de todo el inventario (tarjetas de arriba), no el costo de
+                                 CADA activo. Propio = pago único (compra); Alquilado = mensual y su
+                                 proyección anual (mensual × 12), para poder comparar de un vistazo
+                                 cuánto cuesta cada equipo alquilado al año. -->
+                            <td class="py-3.5 px-3 whitespace-nowrap">
+                                {% if a.tipo_costo == 'propio' and a.costo_compra is not none %}
+                                    <span class="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold rounded-full uppercase tracking-wider">Propio</span>
+                                    <div class="text-slate-300 mt-1">${{ '{:,.0f}'.format(a.costo_compra) }} <span class="text-slate-500">compra</span></div>
+                                {% elif a.tipo_costo == 'alquilado' and a.costo_alquiler_mensual is not none %}
+                                    <span class="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[9px] font-bold rounded-full uppercase tracking-wider">Alquiler</span>
+                                    <div class="text-slate-300 mt-1">${{ '{:,.0f}'.format(a.costo_alquiler_mensual) }} <span class="text-slate-500">/mes</span></div>
+                                    <div class="text-slate-400">${{ '{:,.0f}'.format(a.costo_alquiler_mensual * 12) }} <span class="text-slate-500">/año</span></div>
+                                {% else %}
+                                    <span class="text-slate-600">-</span>
+                                {% endif %}
+                            </td>
                             <td class="py-3.5 px-3 text-right">
                                 <!-- 🔧 flex + gap (en vez de mr-2 suelto) para que los 6 íconos siempre
                                      queden en una sola fila: flex no hace wrap por defecto, así que si
@@ -332,7 +350,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="10" class="text-center py-10 text-slate-500 font-bold">
+                            <td colspan="11" class="text-center py-10 text-slate-500 font-bold">
                                 {% if q_busqueda or q_estado or q_tipo or q_sede or q_area or q_proveedor %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
                             </td>
                         </tr>
