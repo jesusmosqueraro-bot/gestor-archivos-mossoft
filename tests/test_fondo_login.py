@@ -55,6 +55,18 @@ def test_panel_de_fondo_ocupa_mas_espacio_que_el_login_y_no_toca_el_modulo(clien
     assert 'g-recaptcha' in texto
 
 
+def test_login_muestra_la_imagen_completa_sin_recortar(client, app):
+    """El panel usaba object-cover, que recorta cualquier imagen cuya proporción no calce
+    exactamente con la del panel (caso real: una imagen ancha tipo banner quedaba cortada por
+    los bordes). Debe usar object-contain para que el archivo se vea completo siempre."""
+    _crear_item_fondo(app)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'object-contain' in texto
+    assert 'object-cover' not in texto
+
+
 def test_login_ignora_items_pausados(client, app):
     _crear_item_fondo(app, estado='inactivo', url='https://res.cloudinary.com/demo/image/upload/pausado.jpg')
 
