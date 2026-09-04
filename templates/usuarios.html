@@ -36,10 +36,19 @@
                     <i class="fa-solid fa-briefcase-medical text-xs"></i>
                     <span class="hidden sm:inline">Especialidades</span>
                 </button>
+                <button onclick="abrirModalCargaMasivaUsuarios()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-file-arrow-up text-xs text-emerald-400"></i>
+                    <span class="hidden sm:inline">Carga masiva</span>
+                </button>
+                {% if session.get('rol') == 'admin' %}
+                <!-- 🛡️ El alta manual con rol elegible libremente sigue siendo exclusiva de
+                     administradores — un agente que necesite dar de alta gente usa "Carga
+                     masiva" (siempre crea la cuenta en rol Estándar). -->
                 <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2">
                     <i class="fa-solid fa-user-plus text-xs"></i>
                     <span>Nuevo Usuario</span>
                 </button>
+                {% endif %}
                 <div class="flex items-center gap-2">
                     {% include 'partials/buscador.html' %}
                     {% include 'partials/historial_sesiones_boton.html' %}
@@ -139,9 +148,21 @@
                                 </div>
                             </td>
                             <td class="px-4 py-3 text-right">
-                                {% set es_otro_admin = (u[3] == 'admin' and u[1] != session.get('username') and session.get('username') != 'admin') %}
+                                {# 🛡️ Se amplió de "u[3] == 'admin'" a "in ('admin', 'agente')": ahora que los
+                                   agentes también entran a esta vista, la fila de OTRA cuenta admin/agente
+                                   debe quedar protegida igual para cualquiera que no sea el super-admin —
+                                   antes un admin normal (no super-admin) veía el lápiz de "Editar" sobre una
+                                   fila de agente aunque el servidor (editar_usuario) ya lo rechazara en
+                                   silencio; con esto la interfaz deja de mostrar un botón que en realidad
+                                   no hacía nada. #}
+                                {% set es_cuenta_protegida = (u[3] in ('admin', 'agente') and u[1] != session.get('username') and session.get('username') != 'admin') %}
+                                {% set es_admin_sesion = (session.get('rol') == 'admin') %}
                                 <div class="flex items-center justify-end gap-2">
-                                    {% if not es_otro_admin %}
+                                    {% if es_cuenta_protegida %}
+                                    <span class="p-1.5 text-slate-700" title="Solo el super-admin puede modificar a otro administrador o agente">
+                                        <i class="fa-solid fa-lock"></i>
+                                    </span>
+                                    {% elif es_admin_sesion %}
                                     {# ⚠️ IMPORTANTE: este atributo usa comillas SIMPLES (onclick='...') a propósito.
                                        El filtro |tojson SIEMPRE envuelve su salida en comillas DOBLES; si el
                                        atributo también usara comillas dobles, el primer '"' que produce tojson
@@ -154,17 +175,40 @@
                                     <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
-                                    {% else %}
-                                    <span class="p-1.5 text-slate-700" title="Solo el super-admin puede modificar a otro administrador">
+                                    {% elif u[1] == session.get('username') %}
+                                    {# Un agente no puede cambiar su propio rol desde aquí (cambiar_rol_usuario
+                                       lo bloquea igual que toggle_estado_usuario/eliminar_usuario bloquean
+                                       tocar la propia cuenta) — se muestra vacío en vez de un control que el
+                                       servidor rechazaría en silencio. #}
+                                    <span class="p-1.5 text-slate-700" title="No puedes cambiar tu propio rol">
                                         <i class="fa-solid fa-lock"></i>
                                     </span>
+                                    {% else %}
+                                    {# 🪪 Un agente no ve el formulario completo de edición (correo, teléfono,
+                                       contraseña, etc. quedan exclusivos de un administrador) — solo puede
+                                       ajustar el rol de esta cuenta 'estandar'/'gestión humana', que es
+                                       justamente lo que queda pendiente después de una Carga Masiva. El
+                                       propio servidor (cambiar_rol_usuario) impide además que un agente
+                                       ascienda a nadie a 'agente' o 'admin', aunque edite el <select> a mano. #}
+                                    <form method="POST" action="{{ url_for('cambiar_rol_usuario', usuario_id=u[0]) }}" class="flex items-center gap-1" onsubmit="return confirm('¿Cambiar el rol de {{ u[1] }}?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <select name="rol" class="bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-cyan-500">
+                                            <option value="estandar" {% if u[3] == 'estandar' %}selected{% endif %}>Estándar</option>
+                                            <option value="gestion_humana" {% if u[3] == 'gestion_humana' %}selected{% endif %}>Gestión Humana</option>
+                                        </select>
+                                        <button type="submit" class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Cambiar rol">
+                                            <i class="fa-solid fa-check"></i>
+                                        </button>
+                                    </form>
                                     {% endif %}
 
+                                    {% if es_admin_sesion %}
                                     <button onclick='abrirModalDocumentos({{ u[1] | tojson }}, {{ (u[5] or u[1]) | tojson }})' class="p-1.5 text-slate-400 hover:text-teal-400 transition-colors" title="Documentos y vencimientos">
                                         <i class="fa-solid fa-file-medical"></i>
                                     </button>
+                                    {% endif %}
 
-                                    {% if u[1] != 'admin' and u[1] != session.get('username') and not es_otro_admin %}
+                                    {% if u[1] != 'admin' and u[1] != session.get('username') and not es_cuenta_protegida %}
                                     <form method="POST" action="{{ url_for('toggle_estado_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('{% if u[4] == 'inactivo' %}¿Desbloquear al usuario {{ u[1] }}?{% else %}¿Bloquear al usuario {{ u[1] }}? No podrá iniciar sesión mientras esté bloqueado.{% endif %}')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-slate-400 {% if u[4] == 'inactivo' %}hover:text-emerald-400{% else %}hover:text-amber-400{% endif %} transition-colors" title="{% if u[4] == 'inactivo' %}Desbloquear{% else %}Bloquear{% endif %}">
@@ -173,12 +217,13 @@
                                     </form>
                                     {% endif %}
 
-                                    {% if u[10] and not es_otro_admin %}
+                                    {% if u[10] and not es_cuenta_protegida and es_admin_sesion %}
                                     {# 🔓 Este candado es aparte del anterior: ese es el bloqueo MANUAL (estado
                                        activo/inactivo, lo decide un admin); este es el bloqueo AUTOMÁTICO que
                                        disparó el propio sistema tras 3 intentos fallidos de contraseña seguidos
                                        (columna bloqueado_por_intentos). El usuario también puede recuperar el
-                                       acceso solo, cambiando su clave desde "¿Olvidaste tu clave?". #}
+                                       acceso solo, cambiando su clave desde "¿Olvidaste tu clave?". Sigue siendo
+                                       exclusivo de administradores, no forma parte de "rol y estado". #}
                                     <form method="POST" action="{{ url_for('desbloquear_intentos_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('¿Desbloquear a {{ u[1] }}? Se bloqueó sola tras varios intentos fallidos de inicio de sesión.')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-rose-400 hover:text-emerald-400 transition-colors" title="Desbloquear (se bloqueó por intentos fallidos de inicio de sesión)">
@@ -187,7 +232,7 @@
                                     </form>
                                     {% endif %}
 
-                                    {% if u[9] and not es_otro_admin %}
+                                    {% if u[9] and not es_cuenta_protegida and es_admin_sesion %}
                                     <form method="POST" action="{{ url_for('admin_desactivar_2fa', usuario=u[1]) }}" onsubmit="return confirm('¿Desactivar la verificación en dos pasos de {{ u[1] }}? Úsalo solo si perdió acceso a su app autenticadora y a sus códigos de respaldo.')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors" title="Desactivar 2FA (recuperación por pérdida de dispositivo)">
@@ -196,7 +241,10 @@
                                     </form>
                                     {% endif %}
 
-                                    {% if u[1] != 'admin' and u[1] != session.get('username') and not es_otro_admin %}
+                                    {% if u[1] != 'admin' and u[1] != session.get('username') and not es_cuenta_protegida and es_admin_sesion %}
+                                    {# Eliminar cuentas sigue siendo exclusivo de administradores, igual que
+                                       desbloquear por intentos y desactivar 2FA — no forma parte de "rol y
+                                       estado", que es lo único que se abrió a los agentes. #}
                                     <form method="POST" action="{{ url_for('eliminar_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('¿Eliminar al usuario {{ u[1] }}?')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Eliminar">
@@ -213,6 +261,43 @@
             </div>
         </div>
     </main>
+
+    <!-- Modal Carga Masiva de Usuarios: disponible para agentes y admins por igual — siempre
+         crea las cuentas con rol Estándar (ver usuarios_importar_xlsx); después, quien lo
+         necesite ajusta el rol/estado de cada cuenta desde la fila correspondiente. -->
+    <div id="modalCargaMasivaUsuarios" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-start justify-center p-4 overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative my-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-file-arrow-up text-emerald-400"></i> Carga masiva de usuarios
+                </h3>
+                <button onclick="cerrarModalCargaMasivaUsuarios()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <p class="text-[11px] text-slate-400 mb-4">
+                Sube un archivo .xlsx con una fila por persona. Usa exactamente las mismas columnas de la
+                <a href="{{ url_for('usuarios_plantilla_xlsx') }}" class="text-emerald-400 hover:underline font-semibold">plantilla descargable</a>.
+                Cada fila crea una cuenta con rol <strong class="text-slate-200">Estándar</strong> y le otorga
+                su propio usuario y contraseña temporal para ingresar a Arkiv (llega por correo de bienvenida).
+                Las filas sin nombre/apellido/correo/especialidad, con cédula repetida o correo inválido se
+                omiten y quedan listadas en el resultado — el resto de la carga sigue su curso.
+            </p>
+            <p class="text-[11px] text-slate-400 mb-4">
+                Después de la carga, entra a la fila de cada persona para ajustar su rol (si necesita ser
+                Agente o Administrador, eso lo hace un administrador) o su estado.
+            </p>
+
+            <form method="POST" action="{{ url_for('usuarios_importar_xlsx') }}" enctype="multipart/form-data" class="flex flex-col gap-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="file" name="archivo" accept=".xlsx" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-300 text-xs">
+                <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+                    <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Cargar usuarios
+                </button>
+            </form>
+        </div>
+    </div>
 
     <!-- Modal Crear Usuario -->
     <div id="modalNuevoUsuario" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-start justify-center p-4 overflow-y-auto">
@@ -526,6 +611,13 @@
             modal.scrollTop = 0;
         }
         function cerrarModalNuevoUsuario() { document.getElementById('modalNuevoUsuario').classList.add('hidden'); }
+
+        function abrirModalCargaMasivaUsuarios() {
+            var modal = document.getElementById('modalCargaMasivaUsuarios');
+            modal.classList.remove('hidden');
+            modal.scrollTop = 0;
+        }
+        function cerrarModalCargaMasivaUsuarios() { document.getElementById('modalCargaMasivaUsuarios').classList.add('hidden'); }
 
         function abrirModalEspecialidades() { document.getElementById('modalEspecialidades').classList.remove('hidden'); }
         function cerrarModalEspecialidades() { document.getElementById('modalEspecialidades').classList.add('hidden'); }
