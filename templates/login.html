@@ -31,10 +31,12 @@
     </div>
     {% endif %}
 
-    <!-- Columna del login: más angosta que antes (40% en vez de 50%) para reducir el espacio
-         vacío alrededor de la tarjeta; el módulo de login en sí (tarjeta blanca, campos,
-         reCAPTCHA, botón) no cambia en nada, solo el tamaño de la columna que lo rodea. -->
-    <div class="w-full md:w-2/5 min-h-screen flex items-center justify-center p-4 flex-shrink-0">
+    <!-- Columna del login: 40% del ancho SOLO cuando el panel de marca está visible (así queda
+         el layout 60/40). Si no hay ningún archivo activo en el panel (por ejemplo, si el único
+         archivo quedó pausado desde Fondo de Login), el bloque de arriba no se imprime — y aquí
+         el login debe ocupar TODO el ancho para quedar centrado en medio de la pantalla, en vez
+         de quedar encajonado en una columna angosta pegada a la izquierda con todo lo demás vacío. -->
+    <div class="w-full {% if fondo_media %}md:w-2/5{% endif %} min-h-screen flex items-center justify-center p-4 flex-shrink-0">
 
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
