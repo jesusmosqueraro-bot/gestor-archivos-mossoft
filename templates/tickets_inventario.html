@@ -354,10 +354,14 @@
                                     <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
                                     <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs"><i class="fa-solid fa-pen"></i></button>
                                     {% endif %}
+                                    {% if session.get('rol') == 'admin' %}
+                                    <!-- 🔒 Eliminar un activo queda restringido solo a rol admin (pedido
+                                         por Tomás): un agente ya no ve ni puede enviar este formulario. -->
                                     <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
                                     </form>
+                                    {% endif %}
                                 </div>
                             </td>
                         </tr>
