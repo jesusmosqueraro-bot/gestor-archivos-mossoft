@@ -17,13 +17,13 @@
          del login (60/40) para que no quede tanto espacio muerto alrededor de la tarjeta blanca.
          Oculto en celular a propósito: en pantalla angosta solo importa que el login cargue
          rápido y sea fácil de usar; el panel es puramente decorativo. -->
-    <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0">
+    <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0 bg-slate-950">
         {% for item in fondo_media %}
         <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
             {% if item.tipo == 'video' %}
-            <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-cover"></video>
+            <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-contain"></video>
             {% else %}
-            <img src="{{ item.url }}" alt="" class="w-full h-full object-cover">
+            <img src="{{ item.url }}" alt="" class="w-full h-full object-contain">
             {% endif %}
         </div>
         {% endfor %}
