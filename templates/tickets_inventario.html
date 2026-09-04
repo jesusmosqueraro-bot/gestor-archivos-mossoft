@@ -406,10 +406,19 @@
                             </div>
                             <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
                             <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
+                            <!-- 🆕 Acceso directo al alta rápida: antes solo aparecía si una búsqueda
+                                 por cédula fallaba primero ("no encontrado"), lo cual Tomás reportó
+                                 como que el módulo "no permite crear el usuario" — con este botón no
+                                 hace falta buscar (ni tener) una cédula para empezar a crear la cuenta. -->
+                            <button type="button" onclick="mostrarPanelCrearUsuarioRapido()" class="text-[10px] text-orange-400 hover:text-orange-300 font-semibold mt-1.5 inline-flex items-center gap-1">
+                                <i class="fa-solid fa-user-plus"></i> ¿Esta persona no tiene cuenta en Arkiv? Créala aquí
+                            </button>
 
                             <!-- 🆕 Si la búsqueda por cédula no encuentra a nadie, se ofrece dar de
                                  alta a la persona ahí mismo (sin salir de Inventario) — ver
-                                 crear_usuario_rapido_inventario(). Queda oculto por defecto. -->
+                                 crear_usuario_rapido_inventario(). También se puede abrir de una vez
+                                 con el botón de arriba, sin pasar primero por una búsqueda fallida.
+                                 Queda oculto por defecto. -->
                             <div id="panel-crear-usuario-rapido" class="hidden mt-2 p-3 bg-slate-900/60 border border-slate-700/60 rounded-xl">
                                 <p class="text-[11px] font-bold text-slate-200 mb-2"><i class="fa-solid fa-user-plus mr-1 text-orange-400"></i>Crear usuario para esta persona</p>
                                 <div class="grid grid-cols-2 gap-2 mb-2">
@@ -772,6 +781,33 @@
     </div>
 
     <script>
+        // 🆕 Oculta el panel de alta rápida de usuario y limpia lo que se hubiera escrito en él —
+        // se llama al abrir el modal (tanto "Nuevo Activo" como "Editar Activo") para que datos de
+        // un alta a medias en el activo anterior nunca aparezcan ya cargados en el siguiente.
+        function _reiniciarPanelCrearUsuarioRapido() {
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            panelCrear.classList.add('hidden');
+            panelCrear.dataset.cedula = '';
+            document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+            ['rapido-primer-nombre', 'rapido-segundo-nombre', 'rapido-primer-apellido', 'rapido-segundo-apellido', 'rapido-email'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) { el.value = ''; }
+            });
+            var especialidad = document.getElementById('rapido-especialidad');
+            if (especialidad) { especialidad.value = ''; }
+            // 🖊️ La firma (dibujada o subida) vive fuera de este panel en el DOM (widget
+            // compartido firma-digital.js) — se limpia aparte para que no quede la firma del
+            // activo anterior ya cargada en el input oculto que sí se envía al crear el usuario.
+            var firmaInput = document.getElementById('firma-rapido-input');
+            if (firmaInput) { firmaInput.value = ''; }
+            var borrarFirma = document.getElementById('firma-rapido-borrar');
+            if (borrarFirma) { borrarFirma.click(); }
+            var firmaPreview = document.getElementById('firma-rapido-preview');
+            if (firmaPreview) { firmaPreview.classList.add('hidden'); firmaPreview.src = ''; }
+            var firmaArchivo = document.getElementById('firma-rapido-archivo');
+            if (firmaArchivo) { firmaArchivo.value = ''; }
+        }
+
         function abrirModalNuevo() {
             document.getElementById('modal-activo-titulo').textContent = 'Nuevo Activo';
             document.getElementById('form-activo').action = '/tickets/inventario/nuevo';
@@ -784,6 +820,7 @@
             document.getElementById('input-activo-asignado').value = '';
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
+            _reiniciarPanelCrearUsuarioRapido();
             // 🏢 Si el agente ya está viendo una sede o área filtrada, se la sugerimos de una vez
             // en el formulario de "Nuevo Activo" — lo más probable es que esté registrando un
             // equipo de esa misma sede/área.
@@ -815,6 +852,7 @@
             document.getElementById('input-activo-asignado').value = activo.asignado_a || '';
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
+            _reiniciarPanelCrearUsuarioRapido();
             document.getElementById('input-activo-sede').value = activo.sede || '';
             document.getElementById('input-activo-area').value = activo.area || '';
             document.getElementById('input-activo-proveedor').value = activo.proveedor || '';
@@ -926,6 +964,20 @@
         // "Nombre (usuario)" — así queda claro tanto el nombre real como el alias/usuario con el
         // que esa persona inicia sesión. Si no la encuentra, no bloquea nada: el campo sigue
         // siendo de texto libre para escribir a cualquier colaborador manualmente.
+        // 🆕 Abre el panel de alta rápida directamente, sin exigir que antes se busque (y falle)
+        // una cédula — cubre el caso de alguien sin cédula a la mano o que de entrada sabe que la
+        // persona no tiene cuenta en Arkiv. Si ya hay algo escrito en el buscador de cédula, se
+        // reutiliza (queda precargada); si no, la cédula del alta rápida queda opcional.
+        function mostrarPanelCrearUsuarioRapido() {
+            var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+            panelCrear.dataset.cedula = cedula;
+            panelCrear.classList.remove('hidden');
+            var primerNombre = document.getElementById('rapido-primer-nombre');
+            if (primerNombre) { primerNombre.focus(); }
+        }
+
         function buscarAsignadoPorCedula() {
             var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
             var mensaje = document.getElementById('mensaje-busqueda-cedula');
