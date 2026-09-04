@@ -1,7 +1,17 @@
 """Pruebas de Costos de Inventario: un activo puede marcarse 'propio' (con costo_compra, pago
 único) o 'alquilado' (con costo_alquiler_mensual, pago recurrente) — nunca las dos cosas a la
 vez, el campo que no aplica se descarta al guardar. Cubre creación/edición, la agregación de
-totales que se muestra en /tickets/inventario y su reflejo en el Tablero Ejecutivo."""
+totales que se muestra en /tickets/inventario y su reflejo en el Tablero Ejecutivo.
+
+También cubre un bug real reportado por Tomás: en producción (Postgres), 'costo_compra' y
+'costo_alquiler_mensual' son columnas NUMERIC(14,2) y psycopg2 las devuelve como
+decimal.Decimal, NUNCA como float. En cuanto CUALQUIER activo quedaba con un costo guardado,
+/tickets/inventario reventaba con 500 ("TypeError: unsupported operand type(s) for +=: 'float'
+and 'decimal.Decimal'") al sumar los totales, y el modal de editar tampoco podía serializar ese
+activo a JSON (Decimal no es serializable). Las pruebas de este archivo corren sobre SQLite (esa
+columna es REAL, vuelve como float) y por eso nunca detectaron esto — las pruebas de abajo
+simulan explícitamente el Decimal que sí llega desde Postgres."""
+import decimal
 
 
 def _crear_activo_directo(app, nombre='30001', tipo_costo=None, costo_compra=None, costo_alquiler_mensual=None):
@@ -155,6 +165,32 @@ def test_totales_costos_inventario_ignora_activos_sin_tipo_costo(app):
     assert totales['total_alquiler_mensual'] == 100000
     assert totales['cantidad_alquilados'] == 1
     assert totales['total_alquiler_anual'] == 1200000
+
+
+def test_decimal_a_float_convierte_decimal_de_postgres(app):
+    """_decimal_a_float() es lo que se llama justo al leer costo_compra/costo_alquiler_mensual de
+    la base — con esto, un Decimal de Postgres se vuelve float antes de tocar cualquier cálculo o
+    plantilla; None se mantiene como None (activo sin costo guardado)."""
+    assert app._decimal_a_float(decimal.Decimal('1500000.00')) == 1500000.0
+    assert isinstance(app._decimal_a_float(decimal.Decimal('1500000.00')), float)
+    assert app._decimal_a_float(None) is None
+
+
+def test_totales_costos_inventario_no_revienta_con_decimal_de_postgres(app):
+    """Reproduce exactamente el 500 que reportó Tomás: en Postgres estos valores llegan como
+    decimal.Decimal, no como float. Sumar un Decimal contra el acumulador float (0.0) con '+='
+    lanzaba TypeError sin que nada lo atajara — bastaba con que UN activo tuviera un costo
+    guardado para tumbar /tickets/inventario en cada carga."""
+    activos = [
+        {'tipo_costo': 'propio', 'costo_compra': decimal.Decimal('2500000.00'), 'costo_alquiler_mensual': None},
+        {'tipo_costo': 'alquilado', 'costo_compra': None, 'costo_alquiler_mensual': decimal.Decimal('180000.00')},
+    ]
+
+    totales = app._totales_costos_inventario(activos)
+
+    assert totales['total_compra'] == 2500000.0
+    assert totales['total_alquiler_mensual'] == 180000.0
+    assert totales['total_alquiler_anual'] == 2160000.0
 
 
 def test_modal_inventario_incluye_los_campos_de_costo(admin_session):
