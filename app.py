@@ -1,4 +1,5 @@
 import os
+import calendar
 import math
 import uuid
 import random
@@ -5297,24 +5298,149 @@ def _formatear_duracion_horas(horas):
     return f"{horas:.1f} h"
 
 
-def _calcular_indicadores_tickets():
-    """Calcula todos los indicadores/KPIs de Tickets (por estado, prioridad, tipo, cumplimiento
-    de SLA, categoría/área/sede, calificación promedio, top agentes y tendencia de 14 días).
-    Lo usan tanto la página de Indicadores como sus exportaciones a PDF/Excel, para no duplicar
-    la lógica de agregación en dos lugares."""
+def _filtro_sql_tickets(fecha_inicio=None, fecha_fin=None, agente=None, db_type='sqlite'):
+    """Arma el WHERE + parámetros para filtrar tickets por rango de fecha de creación (inclusive,
+    en formato 'YYYY-MM-DD') y/o por agente asignado. Se usa tanto para el listado principal de
+    _calcular_indicadores_tickets como para el conteo del período anterior y el CSV de detalle,
+    para no repetir esta lógica en cuatro lugares distintos."""
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = ["COALESCE(eliminado, 0) = 0"]
+    parametros = []
+    if fecha_inicio:
+        condiciones.append(f"fecha_creacion >= {ph}")
+        parametros.append(f"{fecha_inicio} 00:00:00")
+    if fecha_fin:
+        condiciones.append(f"fecha_creacion <= {ph}")
+        parametros.append(f"{fecha_fin} 23:59:59")
+    if agente:
+        condiciones.append(f"asignado_a = {ph}")
+        parametros.append(agente)
+    return " AND ".join(condiciones), parametros
+
+
+def _contar_tickets_por_rango(fecha_inicio, fecha_fin, agente=None):
+    """Cuenta tickets creados en un rango de fechas puntual (usado para comparar el período
+    filtrado contra el inmediatamente anterior) — consulta aparte porque ese rango queda FUERA
+    del conjunto que ya cargó _calcular_indicadores_tickets cuando hay un filtro de fecha activo."""
     conn, db_type = get_db()
     cursor = conn.cursor()
+    where_sql, parametros = _filtro_sql_tickets(fecha_inicio, fecha_fin, agente, db_type)
     try:
-        cursor.execute("SELECT id, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, sla_resolucion_limite, sla_resolucion_cumplida, calificacion, area, sede FROM tickets WHERE COALESCE(eliminado, 0) = 0")
+        cursor.execute(f"SELECT COUNT(*) FROM tickets WHERE {where_sql}", parametros)
+        total = cursor.fetchone()[0]
+    except Exception as e:
+        print(f"Error contando tickets del período anterior ({fecha_inicio} a {fecha_fin}): {e}")
+        total = 0
+    conn.close()
+    return total
+
+
+MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+            'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+
+def _resolver_filtros_indicadores():
+    """Lee 'mes' (YYYY-MM), 'fecha_inicio'/'fecha_fin' (YYYY-MM-DD) y 'agente' desde
+    request.args y los normaliza a un rango de fechas concreto. 'mes' tiene prioridad sobre
+    fecha_inicio/fecha_fin si vienen ambos (evita que un rango manual "viejo" en la URL pise la
+    selección del combo de mes). La usan la página de Indicadores, el Tablero Ejecutivo y las
+    tres exportaciones, para que todas apliquen exactamente el mismo filtro."""
+    mes = (request.args.get('mes') or '').strip()
+    fecha_inicio = (request.args.get('fecha_inicio') or '').strip() or None
+    fecha_fin = (request.args.get('fecha_fin') or '').strip() or None
+    agente = (request.args.get('agente') or '').strip() or None
+    if mes:
+        try:
+            anio_str, mes_str = mes.split('-')
+            anio, mes_num = int(anio_str), int(mes_str)
+            fecha_inicio = f"{anio:04d}-{mes_num:02d}-01"
+            ultimo_dia = calendar.monthrange(anio, mes_num)[1]
+            fecha_fin = f"{anio:04d}-{mes_num:02d}-{ultimo_dia:02d}"
+        except Exception:
+            mes = ''
+    return fecha_inicio, fecha_fin, agente, mes
+
+
+def _opciones_meses_filtro():
+    """Últimos 12 meses (incluido el actual) para el selector 'Mes' del filtro de Indicadores:
+    [{'valor': 'YYYY-MM', 'etiqueta': 'Enero 2026'}, ...] del más reciente al más antiguo."""
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA)
+    opciones = []
+    anio, mes_num = hoy.year, hoy.month
+    for _ in range(12):
+        opciones.append({'valor': f"{anio:04d}-{mes_num:02d}", 'etiqueta': f"{MESES_ES[mes_num - 1].capitalize()} {anio}"})
+        mes_num -= 1
+        if mes_num == 0:
+            mes_num = 12
+            anio -= 1
+    return opciones
+
+
+def _opciones_agentes_filtro():
+    """Agentes/administradores con al menos un ticket asignado (activo, no eliminado), para el
+    selector 'Analista' del filtro de Indicadores — [{'valor': usuario, 'etiqueta': nombre}]
+    ordenados por nombre para mostrar."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT asignado_a FROM tickets WHERE asignado_a IS NOT NULL AND asignado_a != '' "
+            "AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a"
+        )
+        usuarios = [r[0] for r in cursor.fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"Error cargando agentes para el filtro de indicadores: {e}")
+        usuarios = []
+    nombres = _mapa_nombres_usuarios()
+    return sorted(
+        ({'valor': u, 'etiqueta': _nombre_para_mostrar(u, nombres)} for u in usuarios),
+        key=lambda x: (x['etiqueta'] or '').lower()
+    )
+
+
+def _calcular_indicadores_tickets(fecha_inicio=None, fecha_fin=None, agente=None):
+    """Calcula todos los indicadores/KPIs de Tickets (por estado, prioridad, tipo, cumplimiento
+    de SLA, categoría/área/sede, calificación promedio, top agentes y tendencia) — opcionalmente
+    acotado a un rango de fechas de creación ('YYYY-MM-DD') y/o a un agente puntual (por
+    'asignado_a'). Sin filtros se comporta exactamente como antes (últimos 14 días + comparativo
+    contra la quincena anterior). Lo usan tanto la página de Indicadores como sus exportaciones a
+    PDF/Excel/CSV, para no duplicar la lógica de agregación en varios lugares."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    where_sql, parametros = _filtro_sql_tickets(fecha_inicio, fecha_fin, agente, db_type)
+    try:
+        cursor.execute(
+            f"SELECT id, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, "
+            f"sla_resolucion_limite, sla_resolucion_cumplida, calificacion, area, sede FROM tickets WHERE {where_sql}",
+            parametros
+        )
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando indicadores de tickets: {e}")
         rows = []
     # ✅ Tareas completadas por agente: aproximación simple a las "Horas-Hombre" de Aranda
     # Service Desk sin necesitar registrar duración exacta (que Arkiv no pide al crear una
-    # tarea) — cuenta cuántas tareas cerró cada persona, no cuánto tiempo le tomaron.
+    # tarea) — cuenta cuántas tareas cerró cada persona, no cuánto tiempo le tomaron. Respeta el
+    # mismo filtro de fecha (por fecha_completada) y de agente (por responsable) que el resto del
+    # tablero, para que "Top agentes por tareas completadas" también se acote al período elegido.
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones_tareas = ["estado = 'completada'", "responsable IS NOT NULL"]
+    parametros_tareas = []
+    if fecha_inicio:
+        condiciones_tareas.append(f"fecha_completada >= {ph}")
+        parametros_tareas.append(f"{fecha_inicio} 00:00:00")
+    if fecha_fin:
+        condiciones_tareas.append(f"fecha_completada <= {ph}")
+        parametros_tareas.append(f"{fecha_fin} 23:59:59")
+    if agente:
+        condiciones_tareas.append(f"responsable = {ph}")
+        parametros_tareas.append(agente)
     try:
-        cursor.execute("SELECT responsable, COUNT(*) FROM tickets_tareas WHERE estado = 'completada' AND responsable IS NOT NULL GROUP BY responsable")
+        cursor.execute(
+            f"SELECT responsable, COUNT(*) FROM tickets_tareas WHERE {' AND '.join(condiciones_tareas)} GROUP BY responsable",
+            parametros_tareas
+        )
         filas_tareas_agente = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando tareas completadas por agente: {e}")
@@ -5375,20 +5501,56 @@ def _calcular_indicadores_tickets():
                 duraciones_resolucion_horas.append((fin_res - inicio_res).total_seconds() / 3600)
 
     hoy = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
-    dias_tendencia = []
-    for i in range(13, -1, -1):
-        dia = (hoy - timedelta(days=i)).strftime('%Y-%m-%d')
-        dias_tendencia.append({'fecha': dia, 'cantidad': conteo_por_fecha.get(dia, 0)})
+    filtro_fecha_activo = bool(fecha_inicio or fecha_fin)
 
-    # 📈 Comparativo contra el período de 14 días inmediatamente anterior (días 14 a 27 atrás),
-    # para que el tablero no solo muestre "cuántas se crearon" sino si el volumen está subiendo o
-    # bajando frente a la quincena previa — reutiliza 'conteo_por_fecha' (ya cuenta TODOS los
-    # tickets por fecha de creación) en vez de otra consulta a la base de datos.
-    conteo_periodo_actual = sum(d['cantidad'] for d in dias_tendencia)
-    conteo_periodo_anterior = sum(
-        conteo_por_fecha.get((hoy - timedelta(days=i)).strftime('%Y-%m-%d'), 0)
-        for i in range(27, 13, -1)
-    )
+    if filtro_fecha_activo:
+        # 📅 Con un filtro de fecha activo, la tendencia deja de ser "últimos 14 días desde hoy"
+        # y pasa a recorrer día por día el rango elegido — así el gráfico realmente muestra el
+        # período que se está consultando. Si falta un extremo, se usa la fecha más antigua/nueva
+        # que realmente aparece entre los tickets ya filtrados.
+        fechas_en_rango = sorted(conteo_por_fecha.keys())
+        ini_rango_str = fecha_inicio or (fechas_en_rango[0] if fechas_en_rango else hoy.strftime('%Y-%m-%d'))
+        fin_rango_str = fecha_fin or (fechas_en_rango[-1] if fechas_en_rango else hoy.strftime('%Y-%m-%d'))
+        try:
+            ini_rango = datetime.strptime(ini_rango_str[:10], '%Y-%m-%d')
+            fin_rango = datetime.strptime(fin_rango_str[:10], '%Y-%m-%d')
+        except Exception:
+            ini_rango = fin_rango = hoy
+
+        dias_tendencia = []
+        cursor_dia = ini_rango
+        # 🛡️ Tope de seguridad: si alguien filtra un rango de años, el gráfico deja de sumar
+        # puntos después de 366 días en vez de intentar dibujar miles de barras.
+        while cursor_dia <= fin_rango and len(dias_tendencia) < 366:
+            dia_str = cursor_dia.strftime('%Y-%m-%d')
+            dias_tendencia.append({'fecha': dia_str, 'cantidad': conteo_por_fecha.get(dia_str, 0)})
+            cursor_dia += timedelta(days=1)
+
+        conteo_periodo_actual = sum(d['cantidad'] for d in dias_tendencia)
+        duracion_periodo = (fin_rango - ini_rango).days + 1
+        fin_anterior = ini_rango - timedelta(days=1)
+        ini_anterior = fin_anterior - timedelta(days=duracion_periodo - 1)
+        conteo_periodo_anterior = _contar_tickets_por_rango(
+            ini_anterior.strftime('%Y-%m-%d'), fin_anterior.strftime('%Y-%m-%d'), agente
+        )
+        titulo_comparativo_periodo = 'período anterior'
+    else:
+        dias_tendencia = []
+        for i in range(13, -1, -1):
+            dia = (hoy - timedelta(days=i)).strftime('%Y-%m-%d')
+            dias_tendencia.append({'fecha': dia, 'cantidad': conteo_por_fecha.get(dia, 0)})
+
+        # 📈 Comparativo contra el período de 14 días inmediatamente anterior (días 14 a 27
+        # atrás), para que el tablero no solo muestre "cuántas se crearon" sino si el volumen
+        # está subiendo o bajando frente a la quincena previa — reutiliza 'conteo_por_fecha' (ya
+        # cuenta TODOS los tickets por fecha de creación) en vez de otra consulta a la BD.
+        conteo_periodo_actual = sum(d['cantidad'] for d in dias_tendencia)
+        conteo_periodo_anterior = sum(
+            conteo_por_fecha.get((hoy - timedelta(days=i)).strftime('%Y-%m-%d'), 0)
+            for i in range(27, 13, -1)
+        )
+        titulo_comparativo_periodo = 'quincena anterior'
+
     if conteo_periodo_anterior > 0:
         variacion_pct_tendencia = round((conteo_periodo_actual - conteo_periodo_anterior) / conteo_periodo_anterior * 100, 1)
     else:
@@ -5426,6 +5588,7 @@ def _calcular_indicadores_tickets():
         'variacion_pct_tendencia': variacion_pct_tendencia,
         'tiempo_promedio_resolucion_horas': tiempo_promedio_resolucion_horas,
         'tiempo_promedio_resolucion_texto': tiempo_promedio_resolucion_texto,
+        'titulo_comparativo_periodo': titulo_comparativo_periodo,
     }
 
 
@@ -5437,17 +5600,29 @@ def indicadores_tickets():
     # está gateada a admin/agente, así que se corre sin condición adicional.
     _revisar_alertas_sla()
 
-    ind = _calcular_indicadores_tickets()
-    return render_template('tickets_indicadores.html', es_soporte=True, **ind)
+    fecha_inicio, fecha_fin, agente, mes = _resolver_filtros_indicadores()
+    ind = _calcular_indicadores_tickets(fecha_inicio, fecha_fin, agente)
+    return render_template(
+        'tickets_indicadores.html', es_soporte=True,
+        filtro_mes=mes, filtro_fecha_inicio=fecha_inicio or '', filtro_fecha_fin=fecha_fin or '',
+        filtro_agente=agente or '', opciones_meses=_opciones_meses_filtro(), opciones_agentes=_opciones_agentes_filtro(),
+        **ind
+    )
 
 
 @app.route('/tickets/indicadores/exportar_csv')
 @login_required
 @agente_o_admin_required
 def exportar_indicadores_tickets():
+    fecha_inicio, fecha_fin, agente, _mes = _resolver_filtros_indicadores()
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+    where_sql, parametros = _filtro_sql_tickets(fecha_inicio, fecha_fin, agente, db_type)
+    cursor.execute(
+        f"SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, "
+        f"fecha_actualizacion, calificacion FROM tickets WHERE {where_sql} ORDER BY id DESC",
+        parametros
+    )
     rows = cursor.fetchall()
     conn.close()
 
@@ -5498,7 +5673,8 @@ def exportar_indicadores_tickets_pdf():
     from reportlab.graphics.charts.piecharts import Pie
     from reportlab.graphics.charts.legends import Legend
 
-    ind = _calcular_indicadores_tickets()
+    fecha_inicio, fecha_fin, agente, _mes = _resolver_filtros_indicadores()
+    ind = _calcular_indicadores_tickets(fecha_inicio, fecha_fin, agente)
     estilos = getSampleStyleSheet()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm)
@@ -5705,7 +5881,8 @@ def exportar_indicadores_tickets_xlsx():
     from openpyxl.chart.marker import DataPoint
     from openpyxl.chart.shapes import GraphicalProperties
 
-    ind = _calcular_indicadores_tickets()
+    fecha_inicio, fecha_fin, agente, _mes = _resolver_filtros_indicadores()
+    ind = _calcular_indicadores_tickets(fecha_inicio, fecha_fin, agente)
     wb = openpyxl.Workbook()
 
     relleno_encabezado = PatternFill(start_color='0F172A', end_color='0F172A', fill_type='solid')
@@ -5879,7 +6056,12 @@ def exportar_indicadores_tickets_xlsx():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, calificacion FROM tickets WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+    where_sql, parametros = _filtro_sql_tickets(fecha_inicio, fecha_fin, agente, db_type)
+    cursor.execute(
+        f"SELECT id, tipo, titulo, categoria, area, sede, prioridad, estado, creado_por, asignado_a, fecha_creacion, "
+        f"fecha_actualizacion, calificacion FROM tickets WHERE {where_sql} ORDER BY id DESC",
+        parametros
+    )
     rows = cursor.fetchall()
     conn.close()
 
@@ -5910,11 +6092,11 @@ def exportar_indicadores_tickets_xlsx():
 # Tickets, con gráficos y exportaciones a PDF/Excel/CSV, accesible también a agentes), este
 # tablero da un resumen liviano de cada módulo con un enlace directo al detalle de cada uno.
 # Reutiliza _calcular_indicadores_tickets() para no duplicar esa agregación.
-def _calcular_tablero_ejecutivo():
+def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    ind_tickets = _calcular_indicadores_tickets()
+    ind_tickets = _calcular_indicadores_tickets(fecha_inicio, fecha_fin, agente)
     total_tickets = ind_tickets['total']
     tickets_vencidos = ind_tickets['por_cumplimiento'].get('vencido', 0)
     pct_sla_cumplido = round((total_tickets - tickets_vencidos) / total_tickets * 100, 1) if total_tickets else None
@@ -6023,6 +6205,7 @@ def _calcular_tablero_ejecutivo():
         'variacion_pct_tendencia': ind_tickets['variacion_pct_tendencia'],
         'conteo_periodo_anterior': ind_tickets['conteo_periodo_anterior'],
         'tiempo_promedio_resolucion_texto': ind_tickets['tiempo_promedio_resolucion_texto'],
+        'titulo_comparativo_periodo': ind_tickets['titulo_comparativo_periodo'],
     }
 
 
@@ -6030,8 +6213,17 @@ def _calcular_tablero_ejecutivo():
 @login_required
 @admin_required
 def tablero_ejecutivo():
-    datos = _calcular_tablero_ejecutivo()
-    return render_template('tablero_ejecutivo.html', **datos)
+    # 🔎 Mismo filtro de fecha/mes/agente que /tickets/indicadores (ver _resolver_filtros_indicadores)
+    # — así lo que Tomás/gerencia filtra en Indicadores se puede reflejar también aquí, acotando
+    # los indicadores de Tickets del tablero al mismo período/agente elegido.
+    fecha_inicio, fecha_fin, agente, mes = _resolver_filtros_indicadores()
+    datos = _calcular_tablero_ejecutivo(fecha_inicio, fecha_fin, agente)
+    return render_template(
+        'tablero_ejecutivo.html',
+        filtro_mes=mes, filtro_fecha_inicio=fecha_inicio or '', filtro_fecha_fin=fecha_fin or '',
+        filtro_agente=agente or '', opciones_meses=_opciones_meses_filtro(), opciones_agentes=_opciones_agentes_filtro(),
+        **datos
+    )
 
 
 # 📦 INVENTARIO DE ACTIVOS DE TI (solo equipo de soporte): registro de equipos/activos y a
@@ -8197,6 +8389,80 @@ def crear_credencial_colaborador():
                           f"Se creó credencial de {', '.join(aplicativos_sel)} para {colaborador}")
         except Exception as e:
             print(f"⚠️ Error creando credencial de colaborador '{colaborador}'/{aplicativos_sel}: {e}")
+
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/<int:reg_id>/editar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def editar_credencial_colaborador(reg_id):
+    """Edita los datos de una fila existente de Altas de Credenciales (colaborador, aplicativo,
+    fechas, analista, solicitante, capacitador, medio de envío). La contraseña es opcional: si el
+    campo llega vacío se deja la clave actual sin tocar — mismo criterio que 'Editar Credencial'
+    en la Bóveda de Accesos, para no obligar a reescribir una clave que no cambió."""
+    colaborador = request.form.get('colaborador', '').strip()
+    aplicativo = request.form.get('aplicativo', '').strip()
+    password = request.form.get('password', '').strip()
+    fecha_creacion = request.form.get('fecha_creacion', '').strip() or None
+    fecha_solicitud = request.form.get('fecha_solicitud', '').strip() or None
+    analista_gestiona = request.form.get('analista_gestiona', '').strip() or None
+    solicitado_por = request.form.get('solicitado_por', '').strip() or None
+    capacitado_por = request.form.get('capacitado_por', '').strip() or None
+    medio_envio = request.form.get('medio_envio', '').strip() or None
+    if medio_envio not in MEDIOS_ENVIO_CREDENCIAL:
+        medio_envio = None
+
+    if colaborador and aplicativo:
+        try:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            campos_comunes = "colaborador = %s, aplicativo = %s, fecha_creacion = %s, fecha_solicitud = %s, analista_gestiona = %s, solicitado_por = %s, capacitado_por = %s, medio_envio = %s"
+            valores_comunes = [colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio]
+            if password:
+                q = f"UPDATE credenciales_colaboradores SET {campos_comunes}, password_cifrada = %s WHERE id = %s"
+                valores = valores_comunes + [encriptar_texto(password), reg_id]
+            else:
+                q = f"UPDATE credenciales_colaboradores SET {campos_comunes} WHERE id = %s"
+                valores = valores_comunes + [reg_id]
+            if db_type != 'postgres':
+                q = q.replace('%s', '?')
+            cursor.execute(q, valores)
+            conn.commit()
+            conn.close()
+            registrar_log(session.get('username'), "Edición de Credencial de Colaborador",
+                          f"Se editó la credencial de '{aplicativo}' de {colaborador} (ID {reg_id})")
+        except Exception as e:
+            print(f"⚠️ Error editando credencial de colaborador {reg_id}: {e}")
+
+    return redirect(url_for('ver_credenciales_colaboradores'))
+
+
+@app.route('/credenciales/colaboradores/<int:reg_id>/eliminar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def eliminar_credencial_colaborador(reg_id):
+    """Elimina PERMANENTEMENTE una fila de Altas de Credenciales — a diferencia de
+    'Deshabilitar' (que solo marca el acceso como inactivo y lo mantiene en el historial), esto
+    borra el registro de la base de datos sin posibilidad de deshacerlo. El front pide
+    confirmación antes de enviar el formulario."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_sel = "SELECT colaborador, aplicativo FROM credenciales_colaboradores WHERE id = %s" if db_type == 'postgres' else "SELECT colaborador, aplicativo FROM credenciales_colaboradores WHERE id = ?"
+        cursor.execute(q_sel, (reg_id,))
+        row = cursor.fetchone()
+        colaborador = row[0] if row else f"ID {reg_id}"
+        aplicativo = row[1] if row else ""
+
+        q_del = "DELETE FROM credenciales_colaboradores WHERE id = %s" if db_type == 'postgres' else "DELETE FROM credenciales_colaboradores WHERE id = ?"
+        cursor.execute(q_del, (reg_id,))
+        conn.commit()
+        conn.close()
+        registrar_log(session.get('username'), "Eliminación de Credencial de Colaborador",
+                      f"Se eliminó permanentemente el acceso a '{aplicativo}' de {colaborador} (ID {reg_id})")
+    except Exception as e:
+        print(f"⚠️ Error eliminando credencial de colaborador {reg_id}: {e}")
 
     return redirect(url_for('ver_credenciales_colaboradores'))
 
