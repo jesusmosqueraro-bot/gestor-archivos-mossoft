@@ -622,6 +622,16 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
                 id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, colaborador VARCHAR(150) NOT NULL, confirmado_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, observaciones TEXT
             )''')
+            # 🏥 Acta de recibido para activos BIOMÉDICOS entregados a domicilio (bombas de
+            # infusión y equipos similares que se le llevan a un paciente a su casa): a diferencia
+            # de 'firma_asignacion_url' en activos_inventario (que solo guarda la ÚLTIMA firma y
+            # se sobreescribe en cada reasignación), aquí queda UN REGISTRO HISTÓRICO por cada
+            # entrega — quién recibió (paciente o cuidador), su documento, la dirección donde
+            # quedó el equipo y su firma — para tener con qué responder si el equipo se pierde o
+            # se daña, aunque el activo ya se haya vuelto a asignar a alguien más después.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS actas_recibido_biomedico (
+                id SERIAL PRIMARY KEY, activo_id INTEGER NOT NULL REFERENCES activos_inventario(id) ON DELETE CASCADE, nombre_responsable VARCHAR(200) NOT NULL, relacion_responsable VARCHAR(30) NOT NULL, documento_responsable VARCHAR(50), telefono_contacto VARCHAR(30), direccion_entrega TEXT NOT NULL, firma_url TEXT NOT NULL, fecha VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL
+            )''')
             # 🖼️ Panel de marca del login (imagen o video corto que rota junto al formulario de
             # acceso). Administrable desde Novedades y Comunicados → "Fondo de Login" — ver
             # _fondo_login_activo(). 'orden' decide en qué secuencia rotan los activos; 'estado'
@@ -868,7 +878,29 @@ def init_db():
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS razon_social VARCHAR(200);",
                 # 🚚 Proveedor del activo (quién lo vendió/suministró) — se valida contra el
                 # catálogo de Proveedores de /tickets/configuracion, igual que 'area' y 'sede'.
-                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS proveedor VARCHAR(100);"
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS proveedor VARCHAR(100);",
+                # 💰 Costos de Inventario: 'tipo_costo' distingue si el activo es propio (se pagó
+                # una vez, 'costo_compra') o alquilado (se paga mes a mes, 'costo_alquiler_mensual')
+                # — ambos campos conviven en la misma fila porque un activo solo es una cosa u
+                # otra a la vez, nunca las dos; el que no aplica queda en NULL y no se contabiliza
+                # (ver _totales_costos_inventario). Sin 'tipo_costo' definido (activos ya
+                # existentes antes de este cambio) el activo simplemente no entra en los totales.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_costo VARCHAR(20);",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS costo_compra NUMERIC(14,2);",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS costo_alquiler_mensual NUMERIC(14,2);",
+                # ✍️ Firma digital: se captura una sola vez al crear la cuenta (dibujada a mano o
+                # una imagen subida, ver _subir_firma_desde_dataurl) y queda en 'usuarios.firma'
+                # como URL de Cloudinary. Al asignar un activo a esa persona, esa MISMA firma se
+                # copia a 'activos_inventario.firma_asignacion_url' (ver crear_activo/editar_activo)
+                # como constancia de aceptación — sin tener que volver a firmar en cada asignación.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS firma TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS firma_asignacion_url TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS firma_asignacion_fecha VARCHAR(20);",
+                # 🏥 Marca manual (no depende del catálogo de Tipos de activo) para identificar
+                # equipos biomédicos que se entregan a domicilio (bombas de infusión, etc.) — ver
+                # actas_recibido_biomedico. Al asignar uno de estos activos, el modal pide además
+                # la dirección de entrega y la firma del paciente/cuidador que lo recibió.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS es_biomedico BOOLEAN DEFAULT FALSE;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -935,6 +967,11 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, colaborador TEXT NOT NULL, confirmado_por TEXT NOT NULL, fecha TEXT NOT NULL, observaciones TEXT, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
+            # 🏥 Acta de recibido para activos biomédicos entregados a domicilio. Ver comentario
+            # equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS actas_recibido_biomedico (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, nombre_responsable TEXT NOT NULL, relacion_responsable TEXT NOT NULL, documento_responsable TEXT, telefono_contacto TEXT, direccion_entrega TEXT NOT NULL, firma_url TEXT NOT NULL, fecha TEXT NOT NULL, creado_por TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, url TEXT NOT NULL, public_id TEXT, orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo', fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL
@@ -1179,6 +1216,38 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_proveedor_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 💰 Costos de Inventario. Ver comentario equivalente en la rama de Postgres.
+            for col_costo_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN tipo_costo TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN costo_compra REAL;",
+                "ALTER TABLE activos_inventario ADD COLUMN costo_alquiler_mensual REAL;"
+            ]:
+                try:
+                    cursor.execute(col_costo_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # ✍️ Firma digital. Ver comentario equivalente en la rama de Postgres.
+            for col_firma_sql in [
+                "ALTER TABLE usuarios ADD COLUMN firma TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN firma_asignacion_url TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN firma_asignacion_fecha TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_firma_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🏥 Activos biomédicos entregados a domicilio. Ver comentario equivalente en la
+            # rama de Postgres.
+            for col_biomedico_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN es_biomedico INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_biomedico_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -1804,7 +1873,7 @@ TABLAS_RESPALDO = [
     'comunicados_leidos', 'notificaciones', 'tickets', 'tickets_comentarios',
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
     'activos_inventario', 'inventario_adjuntos', 'inventario_devoluciones', 'aplicativos_catalogo',
-    'credenciales_colaboradores', 'login_fondo_media'
+    'credenciales_colaboradores', 'login_fondo_media', 'actas_recibido_biomedico'
 ]
 
 
@@ -3232,6 +3301,38 @@ def _subir_foto_perfil(file):
     except Exception as e:
         print(f"⚠️ Error subiendo foto de perfil: {e}")
         return None, 'No se pudo subir la imagen. Intenta de nuevo.'
+
+
+# ✍️ FIRMA DIGITAL (dibujada a mano o subida como imagen, ver static/js/firma-digital.js) — se
+# captura al crear la cuenta (Gestión de Usuarios y el alta rápida desde Inventario) y se
+# reutiliza al asignar un activo a esa persona (ver crear_activo/editar_activo), sin tener que
+# volver a firmar cada vez. Llega desde el navegador como un data URL completo
+# ('data:image/png;base64,...'), tanto si se dibujó en el <canvas> como si se subió un archivo
+# (firma-digital.js convierte ambos casos al mismo formato antes de mandarlos).
+TAMANO_MAXIMO_FIRMA = 3 * 1024 * 1024  # 3 MB — generoso para una firma o una foto de una hoja firmada.
+
+def _subir_firma_desde_dataurl(data_url):
+    """Sube una firma capturada en el navegador a Cloudinary. Devuelve (url, error): error es
+    None si todo salió bien, o si 'data_url' viene vacío (la firma es opcional — no pasar nada
+    no es un error)."""
+    if not data_url:
+        return None, None
+    if not isinstance(data_url, str) or not data_url.startswith('data:image/'):
+        return None, 'Formato de firma no reconocido.'
+    try:
+        _cabecera, contenido_b64 = data_url.split(',', 1)
+    except ValueError:
+        return None, 'Formato de firma no reconocido.'
+    if (len(contenido_b64) * 3 / 4) > TAMANO_MAXIMO_FIRMA:
+        return None, 'La firma no puede superar 3 MB.'
+    try:
+        upload_result = cloudinary.uploader.upload(
+            data_url, resource_type="image", use_filename=False, unique_filename=True, timeout=60
+        )
+        return upload_result['secure_url'], None
+    except Exception as e:
+        print(f"⚠️ Error subiendo firma digital: {e}")
+        return None, 'No se pudo guardar la firma. Intenta de nuevo.'
 
 
 # 🖼️ FONDO DE LOGIN (panel de marca que rota junto al formulario de acceso, ver
@@ -6145,6 +6246,19 @@ def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
         inventario_por_estado = {}
     total_activos_inventario = sum(inventario_por_estado.values())
 
+    # 💰 Costos de Inventario: mismo cálculo que /tickets/inventario (_totales_costos_inventario),
+    # pero sobre TODO el inventario activo, sin los filtros de sede/tipo que tiene esa vista — el
+    # tablero ejecutivo es la foto general de la organización.
+    try:
+        cursor.execute("SELECT tipo_costo, costo_compra, costo_alquiler_mensual FROM activos_inventario WHERE COALESCE(eliminado, 0) = 0")
+        totales_costos_inventario = _totales_costos_inventario([
+            {'tipo_costo': tc, 'costo_compra': cc, 'costo_alquiler_mensual': cam}
+            for tc, cc, cam in cursor.fetchall()
+        ])
+    except Exception as e:
+        print(f"⚠️ Error calculando Costos de Inventario (tablero ejecutivo): {e}")
+        totales_costos_inventario = _totales_costos_inventario([])
+
     # 📅 Vencimiento de Documentos: mismo criterio que /vencimientos (_bucket_vencimiento),
     # contando institucionales (galerias) y por empleado (documentos_empleado) juntos, para que
     # el tablero avise de un vistazo si hay algo por vencer sin tener que entrar al módulo.
@@ -6199,6 +6313,7 @@ def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
         'total_accesos_colaboradores': total_accesos_colaboradores,
         'inventario_por_estado': inventario_por_estado,
         'total_activos_inventario': total_activos_inventario,
+        'totales_costos_inventario': totales_costos_inventario,
         'documentos_vencidos': documentos_vencidos,
         'documentos_proximos_vencer': documentos_proximos_vencer,
         'devoluciones_certificadas_mes': devoluciones_certificadas_mes,
@@ -6245,7 +6360,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -6312,6 +6427,8 @@ def ver_inventario():
         'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
         'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
         'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
+        'tipo_costo': r[14], 'costo_compra': r[15], 'costo_alquiler_mensual': r[16],
+        'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]),
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -6350,6 +6467,11 @@ def ver_inventario():
         conteos_estado[a['estado']] = conteos_estado.get(a['estado'], 0) + 1
     total_activos = len(activos_en_contexto)
 
+    # 💰 Costos de Inventario: responde a los mismos filtros de sede/área/proveedor/tipo/búsqueda
+    # que los indicadores de arriba (conteos_estado), para que el total mostrado corresponda a lo
+    # que el usuario está viendo en la tabla.
+    totales_costos = _totales_costos_inventario(activos_en_contexto)
+
     # 📊 "Por tipo de activo": mismo criterio de contexto que arriba — responde a la sede y la
     # búsqueda ya elegidas, pero no al tipo en sí, para poder comparar los tipos entre ellos en
     # vez de que el propio filtro de tipo colapse el gráfico a una sola barra.
@@ -6387,8 +6509,632 @@ def ver_inventario():
         q_estado=q_estado, q_tipo=q_tipo, q_sede=q_sede, q_area=q_area, q_proveedor=q_proveedor, q_busqueda=q_busqueda,
         conteos_estado=conteos_estado, total_activos=total_activos,
         total_activos_general=total_activos_general, distribucion_por_sede=distribucion_por_sede,
-        por_tipo_activo=por_tipo_activo, error_placa=error_placa
+        por_tipo_activo=por_tipo_activo, error_placa=error_placa,
+        especialidades=_catalogo_especialidades_activas(),
+        totales_costos=totales_costos
     )
+
+
+# 📊 Columnas usadas tanto por la plantilla descargable de carga masiva como por el parser de
+# importar_inventario_xlsx (posición por índice, no por nombre de encabezado — así una edición
+# menor al texto de la cabecera no rompe la carga).
+COLUMNAS_INVENTARIO_XLSX = [
+    'Placa', 'Tipo de activo', 'Marca', 'Modelo', 'Número de serie', 'Estado', 'Asignado a',
+    'Sede', 'Área', 'Proveedor', 'Tipo de costo (propio/alquilado)', 'Costo de compra',
+    'Costo de alquiler mensual', 'Observaciones'
+]
+
+
+def _consultar_activos_inventario_filtrados(q_estado='', q_tipo='', q_sede='', q_area='', q_proveedor='', q_busqueda=''):
+    """Misma lógica de filtrado que la tabla principal de ver_inventario, pero devolviendo solo
+    las columnas base (sin adjuntos/trazabilidad/historial de tickets, que no hacen falta para
+    exportar) — así "lo que ves en la vista filtrada es lo que exportas" en CSV/Excel/PDF."""
+    nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, "
+            "proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual "
+            "FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC"
+        )
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"Error consultando inventario (exportación): {e}")
+        rows = []
+    conn.close()
+
+    activos = [{
+        'id': r[0], 'nombre': r[1], 'tipo_activo': r[2], 'marca': r[3], 'modelo': r[4],
+        'numero_serie': r[5], 'estado': r[6], 'asignado_a': r[7], 'sede': r[8], 'area': r[9],
+        'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
+        'tipo_costo': r[14], 'costo_compra': r[15], 'costo_alquiler_mensual': r[16],
+    } for r in rows]
+
+    if q_sede:
+        activos = [a for a in activos if (a['sede'] or '') == q_sede]
+    if q_area:
+        activos = [a for a in activos if (a['area'] or '') == q_area]
+    if q_proveedor:
+        activos = [a for a in activos if (a['proveedor'] or '') == q_proveedor]
+    if q_tipo in nombres_tipos_activo_validos:
+        activos = [a for a in activos if a['tipo_activo'] == q_tipo]
+    if q_estado in ESTADOS_ACTIVO:
+        activos = [a for a in activos if a['estado'] == q_estado]
+    q_busqueda_norm = (q_busqueda or '').strip().lower()
+    if q_busqueda_norm:
+        activos = [a for a in activos if q_busqueda_norm in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+    return activos
+
+
+def _filtros_inventario_desde_query():
+    return (
+        request.args.get('estado', '').strip(), request.args.get('tipo', '').strip(),
+        request.args.get('sede', '').strip(), request.args.get('area', '').strip(),
+        request.args.get('proveedor', '').strip(), request.args.get('q', '').strip()
+    )
+
+
+@app.route('/tickets/inventario/plantilla_xlsx')
+@login_required
+@agente_o_admin_required
+def inventario_plantilla_xlsx():
+    """Plantilla descargable para la carga masiva: mismas columnas que espera
+    importar_inventario_xlsx, con una fila de ejemplo para que quede claro el formato esperado
+    (tipo_costo, por ejemplo, solo acepta 'propio' o 'alquilado')."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Inventario'
+    ws.append(COLUMNAS_INVENTARIO_XLSX)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='EA580C', end_color='EA580C', fill_type='solid')
+    ws.append([
+        '15099', 'Portátil', 'Dell', 'Latitude 5420', 'ABC12345', 'Disponible', '',
+        'Sede Principal', 'Sistemas', '', 'propio', 2500000, '',
+        'Fila de ejemplo — bórrala antes de subir tu archivo.'
+    ])
+    anchos = [12, 16, 14, 18, 16, 14, 22, 16, 14, 16, 26, 16, 20, 40]
+    for i, ancho in enumerate(anchos, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="Arkiv_Plantilla_Inventario.xlsx"'
+    })
+
+
+@app.route('/tickets/inventario/importar_xlsx', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def importar_inventario_xlsx():
+    """Carga masiva de activos desde un archivo .xlsx con el formato de COLUMNAS_INVENTARIO_XLSX.
+    Cada fila se valida con las MISMAS reglas que crear_activo (placa única y obligatoria, tipo/
+    estado/sede/área/proveedor validados contra los catálogos, costos según _parsear_datos_costo_
+    inventario) — las filas que fallan se omiten individualmente y se listan en el mensaje final,
+    en vez de descartar todo el archivo por un solo error."""
+    archivo = request.files.get('archivo')
+    if not archivo or not archivo.filename:
+        flash("Selecciona un archivo .xlsx para cargar.", "error")
+        return redirect(url_for('ver_inventario'))
+    if not archivo.filename.lower().endswith('.xlsx'):
+        flash("El archivo debe tener extensión .xlsx (Excel).", "error")
+        return redirect(url_for('ver_inventario'))
+
+    import openpyxl
+    try:
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        flash(f"No se pudo leer el archivo: {e}", "error")
+        return redirect(url_for('ver_inventario'))
+
+    nombres_tipos_activo_validos = [t['etiqueta'] for t in _catalogo_tipos_activo_activos()] or TIPOS_ACTIVO
+    sedes_validas = [s['nombre'] for s in _config_ticket_lista('sede')]
+    areas_validas = [a['nombre'] for a in _config_ticket_lista('area')]
+    proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
+
+    fecha_act = obtener_fecha_actual()
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+
+    q_dup = ("SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(%s) AND eliminado = 0" if db_type == 'postgres'
+             else "SELECT id FROM activos_inventario WHERE LOWER(nombre) = LOWER(?) AND eliminado = 0")
+    q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, "
+             "asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, "
+             "costo_compra, costo_alquiler_mensual) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+             if db_type == 'postgres' else
+             "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, "
+             "asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, "
+             "costo_compra, costo_alquiler_mensual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+    creados = 0
+    omitidos = []
+    placas_vistas_en_archivo = set()
+
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not fila or all(c is None or str(c).strip() == '' for c in fila):
+            continue  # fila en blanco: se ignora sin contar como error
+
+        valores = list(fila) + [None] * (14 - len(fila))
+        nombre = str(valores[0]).strip() if valores[0] is not None else ''
+        if not nombre:
+            omitidos.append((num_fila, "sin número de placa"))
+            continue
+        if nombre.lower() in placas_vistas_en_archivo:
+            omitidos.append((num_fila, f"placa '{nombre}' repetida más de una vez en este archivo"))
+            continue
+
+        cursor.execute(q_dup, (nombre,))
+        if cursor.fetchone():
+            omitidos.append((num_fila, f"la placa '{nombre}' ya existe en el inventario"))
+            continue
+
+        tipo_activo = str(valores[1]).strip() if valores[1] else 'Otro'
+        if tipo_activo not in nombres_tipos_activo_validos:
+            tipo_activo = 'Otro'
+        marca = str(valores[2]).strip() if valores[2] else None
+        modelo = str(valores[3]).strip() if valores[3] else None
+        numero_serie = str(valores[4]).strip() if valores[4] else None
+        estado = str(valores[5]).strip() if valores[5] else 'Disponible'
+        if estado not in ESTADOS_ACTIVO:
+            estado = 'Disponible'
+        asignado_a = str(valores[6]).strip() if valores[6] else None
+        sede = str(valores[7]).strip() if valores[7] else None
+        sede = sede if sede in sedes_validas else None
+        area = str(valores[8]).strip() if valores[8] else None
+        area = area if area in areas_validas else None
+        proveedor = str(valores[9]).strip() if valores[9] else None
+        proveedor = proveedor if proveedor in proveedores_validos else None
+        observaciones = str(valores[13]).strip() if valores[13] else None
+
+        tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario({
+            'tipo_costo': str(valores[10]).strip() if valores[10] else '',
+            'costo_compra': str(valores[11]).strip() if valores[11] not in (None, '') else '',
+            'costo_alquiler_mensual': str(valores[12]).strip() if valores[12] not in (None, '') else '',
+        })
+
+        try:
+            cursor.execute(q_ins, (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a,
+                                    sede, area, proveedor, observaciones, fecha_act, usuario,
+                                    tipo_costo, costo_compra, costo_alquiler_mensual))
+            conn.commit()
+            creados += 1
+            placas_vistas_en_archivo.add(nombre.lower())
+        except Exception as e:
+            conn.rollback()
+            omitidos.append((num_fila, f"error al guardar: {e}"))
+
+    conn.close()
+
+    if creados:
+        registrar_log(usuario, "Inventario de Activos", f"Carga masiva desde Excel: {creados} activo(s) registrado(s)")
+
+    if creados and not omitidos:
+        flash(f"Se cargaron {creados} activo(s) correctamente.", "exito")
+    elif creados and omitidos:
+        detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20])
+        extra = f"\n(...y {len(omitidos) - 20} fila(s) más)" if len(omitidos) > 20 else ""
+        flash(f"Se cargaron {creados} activo(s). Se omitieron {len(omitidos)} fila(s):\n{detalle}{extra}", "exito")
+    else:
+        detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20]) or "El archivo no tiene filas con datos."
+        flash(f"No se cargó ningún activo. {detalle}", "error")
+
+    return redirect(url_for('ver_inventario'))
+
+
+@app.route('/tickets/inventario/exportar_csv')
+@login_required
+@agente_o_admin_required
+def inventario_exportar_csv():
+    activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['PLACA', 'TIPO', 'MARCA', 'MODELO', 'N° SERIE', 'ESTADO', 'ASIGNADO A', 'SEDE', 'ÁREA',
+                      'PROVEEDOR', 'TIPO DE COSTO', 'COSTO DE COMPRA', 'COSTO ALQUILER MENSUAL',
+                      'OBSERVACIONES', 'FECHA DE CREACIÓN', 'CREADO POR'])
+    for a in activos:
+        writer.writerow([
+            a['nombre'], a['tipo_activo'] or '', a['marca'] or '', a['modelo'] or '', a['numero_serie'] or '',
+            a['estado'], a['asignado_a'] or '', a['sede'] or '', a['area'] or '', a['proveedor'] or '',
+            a['tipo_costo'] or '', a['costo_compra'] if a['costo_compra'] is not None else '',
+            a['costo_alquiler_mensual'] if a['costo_alquiler_mensual'] is not None else '',
+            a['observaciones'] or '', a['fecha_creacion'] or '', a['creado_por'] or ''
+        ])
+
+    csv_bytes = '﻿' + output.getvalue()
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="Arkiv_Inventario_{fecha_filename}.csv"'
+    }
+    return Response(csv_bytes, headers=headers, status=200)
+
+
+@app.route('/tickets/inventario/exportar_xlsx')
+@login_required
+@agente_o_admin_required
+def inventario_exportar_xlsx():
+    activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Inventario'
+    encabezados = ['Placa', 'Tipo', 'Marca', 'Modelo', 'N° Serie', 'Estado', 'Asignado a', 'Sede', 'Área',
+                   'Proveedor', 'Tipo de costo', 'Costo de compra', 'Costo alquiler mensual',
+                   'Observaciones', 'Fecha de creación', 'Creado por']
+    ws.append(encabezados)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='EA580C', end_color='EA580C', fill_type='solid')
+    for a in activos:
+        ws.append([
+            a['nombre'], a['tipo_activo'] or '', a['marca'] or '', a['modelo'] or '', a['numero_serie'] or '',
+            a['estado'], a['asignado_a'] or '', a['sede'] or '', a['area'] or '', a['proveedor'] or '',
+            a['tipo_costo'] or '', a['costo_compra'], a['costo_alquiler_mensual'],
+            a['observaciones'] or '', a['fecha_creacion'] or '', a['creado_por'] or ''
+        ])
+    ws.freeze_panes = 'A2'
+    anchos = [12, 16, 14, 18, 16, 14, 22, 16, 14, 16, 14, 16, 18, 32, 18, 14]
+    for i, ancho in enumerate(anchos, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="Arkiv_Inventario_{fecha_filename}.xlsx"'
+    })
+
+
+@app.route('/tickets/inventario/exportar_pdf')
+@login_required
+@agente_o_admin_required
+def inventario_exportar_pdf():
+    activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
+    totales = _totales_costos_inventario(activos)
+
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=landscape(letter), topMargin=1.2 * cm, bottomMargin=1.2 * cm,
+                             leftMargin=1 * cm, rightMargin=1 * cm)
+    estilos = getSampleStyleSheet()
+    elementos = [Paragraph("Arkiv &mdash; Inventario de Activos", estilos['Title']), Spacer(1, 0.25 * cm)]
+
+    resumen = (
+        f"{len(activos)} activo(s) &middot; Invertido en compra: ${totales['total_compra']:,.0f} "
+        f"({totales['cantidad_propios']}) &middot; Alquiler mensual: ${totales['total_alquiler_mensual']:,.0f} "
+        f"({totales['cantidad_alquilados']})"
+    )
+    elementos.append(Paragraph(resumen, estilos['Normal']))
+    elementos.append(Spacer(1, 0.4 * cm))
+
+    datos = [['Placa', 'Tipo', 'Marca/Modelo', 'Estado', 'Asignado a', 'Sede', 'Costo']]
+    for a in activos:
+        marca_modelo = ' '.join(filter(None, [a['marca'], a['modelo']])) or '-'
+        if a['tipo_costo'] == 'propio' and a['costo_compra'] is not None:
+            costo_texto = f"Compra: ${a['costo_compra']:,.0f}"
+        elif a['tipo_costo'] == 'alquilado' and a['costo_alquiler_mensual'] is not None:
+            costo_texto = f"Alquiler: ${a['costo_alquiler_mensual']:,.0f}/mes"
+        else:
+            costo_texto = '-'
+        datos.append([a['nombre'], a['tipo_activo'] or '-', marca_modelo, a['estado'], a['asignado_a'] or '-',
+                      a['sede'] or '-', costo_texto])
+
+    tabla = Table(datos, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#ea580c')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    elementos.append(tabla)
+    doc.build(elementos)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_Inventario_{fecha_filename}.pdf"'
+    })
+
+
+def _parsear_datos_costo_inventario(form):
+    """Lee y valida tipo_costo/costo_compra/costo_alquiler_mensual del formulario de crear/editar
+    activo. Un activo es propio O alquilado, nunca las dos cosas a la vez: el campo que no aplica
+    según 'tipo_costo' se descarta (queda en None) y por lo tanto no entra en
+    _totales_costos_inventario, aunque el usuario haya escrito algo en ese otro campo antes de
+    cambiar de opción en el formulario."""
+    tipo_costo = (form.get('tipo_costo') or '').strip().lower()
+    if tipo_costo not in ('propio', 'alquilado'):
+        tipo_costo = None
+
+    def _valor_numerico(valor_raw):
+        valor_raw = (valor_raw or '').strip()
+        if not valor_raw:
+            return None
+        try:
+            numero = float(valor_raw)
+        except ValueError:
+            return None
+        return numero if numero >= 0 else None
+
+    costo_compra = _valor_numerico(form.get('costo_compra')) if tipo_costo == 'propio' else None
+    costo_alquiler_mensual = _valor_numerico(form.get('costo_alquiler_mensual')) if tipo_costo == 'alquilado' else None
+    return tipo_costo, costo_compra, costo_alquiler_mensual
+
+
+def _totales_costos_inventario(activos):
+    """Suma costo_compra de los activos 'propio' y costo_alquiler_mensual de los 'alquilado' —
+    los que no tienen tipo_costo definido (activos creados antes de este cambio, o donde el campo
+    simplemente se dejó vacío) no entran en ningún total. Recibe la lista de activos ya en el
+    formato de diccionario que arma ver_inventario (con las claves 'tipo_costo', 'costo_compra' y
+    'costo_alquiler_mensual')."""
+    total_compra = 0.0
+    cantidad_propios = 0
+    total_alquiler_mensual = 0.0
+    cantidad_alquilados = 0
+    for a in activos:
+        if a.get('tipo_costo') == 'propio' and a.get('costo_compra') is not None:
+            total_compra += a['costo_compra']
+            cantidad_propios += 1
+        elif a.get('tipo_costo') == 'alquilado' and a.get('costo_alquiler_mensual') is not None:
+            total_alquiler_mensual += a['costo_alquiler_mensual']
+            cantidad_alquilados += 1
+    return {
+        'total_compra': total_compra, 'cantidad_propios': cantidad_propios,
+        'total_alquiler_mensual': total_alquiler_mensual, 'cantidad_alquilados': cantidad_alquilados,
+        'total_alquiler_anual': total_alquiler_mensual * 12,
+    }
+
+
+def _resolver_firma_para_asignacion(asignado_a):
+    """Si 'asignado_a' viene en el formato 'Nombre (usuario)' que arma buscarAsignadoPorCedula/
+    crearUsuarioRapido (ver tickets_inventario.html) y ese usuario tiene una firma registrada
+    (capturada al crear su cuenta — ver 'usuarios.firma'), la devuelve para copiarla a
+    'activos_inventario.firma_asignacion_url' como constancia de aceptación, sin pedirle que
+    vuelva a firmar en cada asignación. Si el texto es libre (se escribió el nombre a mano, sin
+    pasar por el buscador) o esa persona nunca registró firma, no hay nada que reutilizar — se
+    resuelve del lado del servidor (no de lo que mande el formulario) para que no se pueda
+    'inyectar' una firma ajena editando el campo oculto a mano."""
+    if not asignado_a:
+        return None
+    coincidencia = re.search(r'\(([^()]+)\)\s*$', asignado_a)
+    if not coincidencia:
+        return None
+    usuario = coincidencia.group(1).strip()
+    if not usuario:
+        return None
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT firma FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT firma FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (usuario,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error resolviendo firma para asignación ('{usuario}'): {e}")
+        fila = None
+    conn.close()
+    return fila[0] if fila and fila[0] else None
+
+
+RELACIONES_RESPONSABLE_ACTA = ('paciente', 'cuidador', 'otro')
+
+
+def _registrar_acta_recibido_biomedico(activo_id, form, creador, conn, cursor, db_type):
+    """Si el activo se marcó como biomédico ('es_biomedico') y el formulario trae los datos de
+    la entrega a domicilio (quién recibió, dirección, firma), guarda un registro HISTÓRICO en
+    'actas_recibido_biomedico' — a diferencia de 'firma_asignacion_url' en activos_inventario
+    (que solo guarda la última firma y se sobreescribe en cada reasignación), aquí queda una fila
+    nueva por cada entrega, con qué responder si el equipo se pierde o se daña más adelante.
+    Devuelve (categoria, mensaje) listo para flash(), o (None, None) si esta vez no se intentó
+    registrar ninguna acta (el checkbox no estaba marcado, o los campos del acta quedaron
+    vacíos)."""
+    if form.get('es_biomedico') not in ('on', '1', 'true'):
+        return None, None
+
+    nombre_responsable = (form.get('acta_nombre_responsable') or '').strip()
+    relacion_responsable = (form.get('acta_relacion_responsable') or '').strip()
+    documento_responsable = (form.get('acta_documento_responsable') or '').strip() or None
+    telefono_contacto = (form.get('acta_telefono_contacto') or '').strip() or None
+    direccion_entrega = (form.get('acta_direccion_entrega') or '').strip()
+    firma_dataurl = form.get('acta_firma_dataurl') or ''
+
+    if not any([nombre_responsable, direccion_entrega, firma_dataurl]):
+        return None, None  # activo marcado como biomédico, pero no se diligenció ningún acta esta vez
+
+    if not (nombre_responsable and direccion_entrega and firma_dataurl):
+        return 'error', ("El activo se guardó, pero el ACTA DE RECIBIDO no: para registrarla hacen falta "
+                          "el nombre de quien recibe, la dirección de entrega y su firma.")
+
+    if relacion_responsable not in RELACIONES_RESPONSABLE_ACTA:
+        relacion_responsable = 'otro'
+
+    firma_url, error_firma = _subir_firma_desde_dataurl(firma_dataurl)
+    if error_firma or not firma_url:
+        return 'error', f"El activo se guardó, pero el ACTA DE RECIBIDO no: {error_firma or 'no se pudo guardar la firma.'}"
+
+    try:
+        q_ins = ("INSERT INTO actas_recibido_biomedico (activo_id, nombre_responsable, relacion_responsable, "
+                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por) "
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO actas_recibido_biomedico (activo_id, nombre_responsable, relacion_responsable, "
+                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        cursor.execute(q_ins, (activo_id, nombre_responsable, relacion_responsable, documento_responsable,
+                                telefono_contacto, direccion_entrega, firma_url, obtener_fecha_actual(), creador))
+        conn.commit()
+        registrar_log(creador, "Inventario de Activos",
+                      f"Acta de recibido registrada para el activo #{activo_id} (biomédico) — recibió: "
+                      f"{nombre_responsable} ({relacion_responsable}), en {direccion_entrega}.")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error guardando acta de recibido biomédico (activo #{activo_id}): {e}")
+        return 'error', "El activo se guardó, pero no se pudo registrar el acta de recibido. Intenta de nuevo."
+
+    return 'exito', f"Acta de recibido registrada: {nombre_responsable} ({relacion_responsable}) en {direccion_entrega}."
+
+
+@app.route('/tickets/inventario/<int:activo_id>/actas')
+@login_required
+@agente_o_admin_required
+def listar_actas_recibido(activo_id):
+    """JSON con el historial de actas de recibido de un activo biomédico — usado por el modal
+    'Actas de recibido' en Inventario. A propósito devuelve TODAS las actas del activo (no solo
+    la más reciente): cada una es evidencia de una entrega distinta a lo largo de la vida del
+    equipo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT id, nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, "
+             "direccion_entrega, firma_url, fecha, creado_por FROM actas_recibido_biomedico "
+             "WHERE activo_id = %s ORDER BY id DESC" if db_type == 'postgres' else
+             "SELECT id, nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, "
+             "direccion_entrega, firma_url, fecha, creado_por FROM actas_recibido_biomedico "
+             "WHERE activo_id = ? ORDER BY id DESC")
+        cursor.execute(q, (activo_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando actas de recibido del activo {activo_id}: {e}")
+        filas = []
+    conn.close()
+
+    actas = [{
+        'id': f[0], 'nombre_responsable': f[1], 'relacion_responsable': f[2], 'documento_responsable': f[3] or '',
+        'telefono_contacto': f[4] or '', 'direccion_entrega': f[5], 'firma_url': f[6], 'fecha': f[7], 'creado_por': f[8]
+    } for f in filas]
+    return jsonify({'actas': actas})
+
+
+@app.route('/tickets/inventario/actas/<int:acta_id>/pdf')
+@login_required
+@agente_o_admin_required
+def acta_recibido_pdf(acta_id):
+    """Genera el PDF formal del acta de recibido — el documento que queda como constancia física
+    de que tal persona (paciente o cuidador) recibió tal equipo biomédico en tal dirección, con
+    su firma, por si el equipo se pierde o se daña más adelante."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT a.nombre_responsable, a.relacion_responsable, a.documento_responsable, a.telefono_contacto, "
+             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie "
+             "FROM actas_recibido_biomedico a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = %s"
+             if db_type == 'postgres' else
+             "SELECT a.nombre_responsable, a.relacion_responsable, a.documento_responsable, a.telefono_contacto, "
+             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie "
+             "FROM actas_recibido_biomedico a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = ?")
+        cursor.execute(q, (acta_id,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error consultando acta de recibido {acta_id}: {e}")
+        fila = None
+    conn.close()
+
+    if not fila:
+        return redirect(url_for('ver_inventario'))
+
+    (nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, direccion_entrega,
+     firma_url, fecha, creado_por, placa, tipo_activo, marca, modelo, numero_serie) = fila
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+                             leftMargin=2 * cm, rightMargin=2 * cm)
+    estilos = getSampleStyleSheet()
+    relaciones_texto = {'paciente': 'Paciente', 'cuidador': 'Cuidador/a', 'otro': 'Responsable'}
+
+    elementos = [
+        Paragraph("Arkiv &mdash; Acta de Recibido de Equipo Biomédico", estilos['Title']),
+        Spacer(1, 0.3 * cm),
+        Paragraph(
+            "Constancia de entrega a domicilio de un equipo biomédico, con la firma de quien lo recibió, "
+            "para efectos de trazabilidad en caso de pérdida o daño del equipo.", estilos['Normal']
+        ),
+        Spacer(1, 0.6 * cm),
+    ]
+
+    datos_equipo = [
+        ['Placa / identificación', placa],
+        ['Tipo de activo', tipo_activo or '-'],
+        ['Marca / Modelo', ' '.join(filter(None, [marca, modelo])) or '-'],
+        ['Número de serie', numero_serie or '-'],
+    ]
+    tabla_equipo = Table(datos_equipo, colWidths=[5.5 * cm, 10 * cm])
+    tabla_equipo.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Equipo entregado", estilos['Heading3']), tabla_equipo, Spacer(1, 0.5 * cm)]
+
+    datos_responsable = [
+        ['Recibió (nombre)', nombre_responsable],
+        ['Relación con el paciente', relaciones_texto.get(relacion_responsable, relacion_responsable)],
+        ['Documento de identidad', documento_responsable or '-'],
+        ['Teléfono de contacto', telefono_contacto or '-'],
+        ['Dirección de entrega', direccion_entrega],
+        ['Fecha de entrega', fecha],
+        ['Registrado por', creado_por],
+    ]
+    tabla_responsable = Table(datos_responsable, colWidths=[5.5 * cm, 10 * cm])
+    tabla_responsable.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Quién recibió el equipo", estilos['Heading3']), tabla_responsable, Spacer(1, 0.6 * cm)]
+
+    elementos.append(Paragraph("Firma de quien recibe", estilos['Heading3']))
+    firma_insertada = False
+    if firma_url:
+        try:
+            with urllib.request.urlopen(firma_url, timeout=15) as resp:
+                datos_imagen = resp.read()
+            imagen_firma = Image(io.BytesIO(datos_imagen), width=7 * cm, height=3.5 * cm)
+            imagen_firma.hAlign = 'LEFT'
+            elementos.append(imagen_firma)
+            firma_insertada = True
+        except Exception as e:
+            print(f"⚠️ No se pudo incrustar la firma del acta {acta_id} en el PDF: {e}")
+    if not firma_insertada:
+        elementos.append(Paragraph(f"(Firma registrada — ver imagen original: {firma_url})", estilos['Normal']))
+
+    doc.build(elementos)
+    salida.seek(0)
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_Acta_Recibido_{acta_id}.pdf"'
+    })
 
 
 @app.route('/tickets/inventario/nuevo', methods=['POST'])
@@ -6418,12 +7164,17 @@ def crear_activo():
     area = area if area in areas_validas else None
     proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
     proveedor = proveedor if proveedor in proveedores_validos else None
+    tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario(request.form)
+    firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
+    es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
 
     if nombre:
         fecha_act = obtener_fecha_actual()
+        firma_asignacion_fecha = fecha_act if firma_asignacion_url else None
         usuario = session.get('username')
         conn, db_type = get_db()
         cursor = conn.cursor()
+        nuevo_activo_id = None
         try:
             # 🏷️ El número de placa (columna "nombre" en la base) identifica un activo físico
             # puntual: no puede haber dos filas activas con la misma placa, o el inventario deja
@@ -6434,13 +7185,20 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario))
+            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+                     if db_type == 'postgres' else
+                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico))
+            nuevo_activo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
         except Exception as e:
             conn.rollback()
             print(f"Error creando activo: {e}")
+        if nuevo_activo_id:
+            categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(nuevo_activo_id, request.form, usuario, conn, cursor, db_type)
+            if mensaje_acta:
+                flash(mensaje_acta, categoria_acta)
         conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -6472,6 +7230,10 @@ def editar_activo(activo_id):
     area = area if area in areas_validas else None
     proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
     proveedor = proveedor if proveedor in proveedores_validos else None
+    tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario(request.form)
+    firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
+    firma_asignacion_fecha = obtener_fecha_actual() if firma_asignacion_url else None
+    es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
 
     if nombre:
         conn, db_type = get_db()
@@ -6485,13 +7247,16 @@ def editar_activo(activo_id):
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, proveedor = %s, observaciones = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, proveedor = ?, observaciones = ? WHERE id = ?"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, activo_id))
+            q_upd = "UPDATE activos_inventario SET nombre = %s, tipo_activo = %s, marca = %s, modelo = %s, numero_serie = %s, estado = %s, asignado_a = %s, sede = %s, area = %s, proveedor = %s, observaciones = %s, tipo_costo = %s, costo_compra = %s, costo_alquiler_mensual = %s, firma_asignacion_url = %s, firma_asignacion_fecha = %s, es_biomedico = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE activos_inventario SET nombre = ?, tipo_activo = ?, marca = ?, modelo = ?, numero_serie = ?, estado = ?, asignado_a = ?, sede = ?, area = ?, proveedor = ?, observaciones = ?, tipo_costo = ?, costo_compra = ?, costo_alquiler_mensual = ?, firma_asignacion_url = ?, firma_asignacion_fecha = ?, es_biomedico = ? WHERE id = ?"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, activo_id))
             conn.commit()
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
             conn.rollback()
             print(f"Error editando activo {activo_id}: {e}")
+        categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(activo_id, request.form, session.get('username'), conn, cursor, db_type)
+        if mensaje_acta:
+            flash(mensaje_acta, categoria_acta)
         conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -8818,6 +9583,82 @@ def destruir_archivo(archivo_id):
     conn.close()
     return redirect(url_for('ver_papelera'))
 
+def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
+    """Valida y crea una cuenta de usuario — lógica compartida entre el alta completa de
+    Gestión de Usuarios y el alta rápida desde el modal de asignación de Inventario (ver
+    crear_usuario_rapido_inventario), para no mantener dos copias de las mismas reglas de
+    negocio (usuario único generado, contraseña mínima, correo válido, cédula sin duplicar).
+    'datos' trae las claves primer_nombre/segundo_nombre/primer_apellido/segundo_apellido/
+    password/email/telefono/cedula/especialidad/rol/firma_dataurl. Devuelve (error, nuevo_user,
+    nombre_completo, firma_url) — error es None si todo salió bien; NO hace conn.close() (lo
+    decide quien llama, según si sigue usando la conexión después)."""
+    primer_nombre = (datos.get('primer_nombre') or '').strip()
+    segundo_nombre = (datos.get('segundo_nombre') or '').strip()
+    primer_apellido = (datos.get('primer_apellido') or '').strip()
+    segundo_apellido = (datos.get('segundo_apellido') or '').strip()
+    nuevo_pass = datos.get('password') or ''
+    nuevo_email = (datos.get('email') or '').strip()
+    nuevo_telefono = (datos.get('telefono') or '').strip() or None
+    nueva_cedula = (datos.get('cedula') or '').strip() or None
+    nueva_especialidad = (datos.get('especialidad') or '').strip() or None
+    nuevo_rol = datos.get('rol') or 'estandar'
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+        nuevo_rol = 'estandar'
+    if nuevo_rol == 'admin' and creador != 'admin':
+        nuevo_rol = 'estandar'
+
+    if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
+        return "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario.", None, None, None
+
+    if not _password_cuenta_valida(nuevo_pass):
+        return f"La contraseña debe tener al menos {LONGITUD_MINIMA_PASSWORD_CUENTA} caracteres.", None, None, None
+
+    if not _email_tiene_formato_valido(nuevo_email):
+        return "El correo electrónico no tiene un formato válido (ej: nombre@dominio.com).", None, None, None
+
+    if nueva_cedula:
+        q_dup_cedula = "SELECT id FROM usuarios WHERE cedula = %s" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE cedula = ?"
+        cursor.execute(q_dup_cedula, (nueva_cedula,))
+        if cursor.fetchone():
+            return f"Ya existe un usuario registrado con la cédula {nueva_cedula}.", None, None, None
+
+    # ✍️ Firma digital (opcional): si viene un data URL inválido o demasiado grande, sí se
+    # bloquea el alta (igual que _subir_foto_perfil en /perfil) — pero no mandar firma alguna
+    # nunca es un error, la firma se puede completar después.
+    firma_url, error_firma = _subir_firma_desde_dataurl(datos.get('firma_dataurl'))
+    if error_firma:
+        return error_firma, None, None, None
+
+    try:
+        nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
+        nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
+        nuevo_hash = generate_password_hash(nuevo_pass)
+        q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, 1, ?)"
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, firma_url))
+        conn.commit()
+        registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
+
+        # 👋 Correo de bienvenida (usuario + contraseña temporal), y notificación de campanita
+        # dentro de Arkiv para su propia cuenta. El correo se manda en un hilo aparte para no
+        # hacer esperar a quien está creando la cuenta.
+        threading.Thread(
+            target=enviar_correo_bienvenida,
+            args=(nuevo_email, nuevo_user, nombre_completo, nuevo_pass)
+        ).start()
+        crear_notificacion(
+            nuevo_user,
+            f"¡Bienvenido a Arkiv, {primer_nombre}! Tu cuenta ya está activa. Revisa tu correo "
+            f"({nuevo_email}) para conocer tu contraseña temporal y recuerda cambiarla en tu "
+            f"primer inicio de sesión.",
+            tipo='bienvenida'
+        )
+        return None, nuevo_user, nombre_completo, firma_url
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error creando usuario '{primer_nombre} {primer_apellido}': {e}")
+        return "No se pudo crear el usuario. Verifica los datos e intenta de nuevo.", None, None, None
+
+
 @app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -8828,98 +9669,33 @@ def gestion_usuarios():
     form_data = None
 
     if request.method == 'POST':
-        primer_nombre = (request.form.get('primer_nombre') or '').strip()
-        segundo_nombre = (request.form.get('segundo_nombre') or '').strip()
-        primer_apellido = (request.form.get('primer_apellido') or '').strip()
-        segundo_apellido = (request.form.get('segundo_apellido') or '').strip()
-        nuevo_pass = request.form.get('password') or ''
-        nuevo_email = (request.form.get('email') or '').strip()
-        nuevo_telefono = (request.form.get('telefono') or '').strip() or None
-        nueva_cedula = (request.form.get('cedula') or '').strip() or None
-        nueva_especialidad = (request.form.get('especialidad') or '').strip() or None
+        # 🛡️ Misma normalización de rol que aplicaba antes de factorizar la creación en
+        # _crear_usuario_interno: se calcula aquí también (y no solo dentro del helper) para
+        # que, si hay un error de validación, el formulario se vuelva a mostrar con el rol ya
+        # normalizado (no con un valor crudo que un POST manual pudo haber mandado).
         nuevo_rol = request.form.get('rol', 'estandar')
-        # 🛡️ Solo se aceptan los roles válidos del sistema; cualquier otro valor (enviado a
-        # mano, no desde el formulario) cae a 'estandar' por seguridad. 'gestion_humana' es un
-        # rol acotado (ver certificacion_devolucion_required): no tiene el resto de accesos de
-        # soporte TI que sí tiene 'agente'.
         if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
             nuevo_rol = 'estandar'
-        # 🛡️ Solo la cuenta 'admin' (super-admin) puede otorgar el rol 'admin' a un usuario
-        # nuevo. Cualquier otro admin sí puede crear cuentas 'agente' (analistas de soporte
-        # TI) libremente, igual que ya podía crear cuentas 'estandar'. Esto evita que un admin
-        # cualquiera se cree una cuenta admin "aliada" para sortear las protecciones entre
-        # administradores.
         if nuevo_rol == 'admin' and session.get('username') != 'admin':
             nuevo_rol = 'estandar'
         form_data = {
-            'primer_nombre': primer_nombre, 'segundo_nombre': segundo_nombre,
-            'primer_apellido': primer_apellido, 'segundo_apellido': segundo_apellido,
-            'email': nuevo_email, 'rol': nuevo_rol, 'telefono': nuevo_telefono, 'cedula': nueva_cedula,
-            'especialidad': nueva_especialidad
+            'primer_nombre': (request.form.get('primer_nombre') or '').strip(),
+            'segundo_nombre': (request.form.get('segundo_nombre') or '').strip(),
+            'primer_apellido': (request.form.get('primer_apellido') or '').strip(),
+            'segundo_apellido': (request.form.get('segundo_apellido') or '').strip(),
+            'email': (request.form.get('email') or '').strip(),
+            'rol': nuevo_rol,
+            'telefono': (request.form.get('telefono') or '').strip() or None,
+            'cedula': (request.form.get('cedula') or '').strip() or None,
+            'especialidad': (request.form.get('especialidad') or '').strip() or None,
         }
-
-        if not primer_nombre or not primer_apellido or not nuevo_pass or not nuevo_email or not nueva_especialidad:
-            error = "Nombre, primer apellido, correo, contraseña y especialidad son obligatorios para crear un usuario."
-
-        # 🔒 Misma política de longitud mínima que el autoservicio (hallazgo QA H-02): antes un
-        # admin podía crear una cuenta con una contraseña temporal de cualquier longitud.
-        if not error and nuevo_pass and not _password_cuenta_valida(nuevo_pass):
-            error = f"La contraseña debe tener al menos {LONGITUD_MINIMA_PASSWORD_CUENTA} caracteres."
-
-        # 📧 Formato de correo válido (ver _email_tiene_formato_valido) — el navegador ya lo
-        # exige con type="email", pero eso se salta enviando el formulario a mano; esta es la
-        # validación real, del lado del servidor.
-        if not error and nuevo_email and not _email_tiene_formato_valido(nuevo_email):
-            error = "El correo electrónico no tiene un formato válido (ej: nombre@dominio.com)."
-
-        # 🪪 La cédula sigue siendo opcional, pero si se indica no puede repetirse: dos cuentas
-        # distintas no pueden compartir el mismo número de documento. (No se toca a ningún
-        # usuario que ya exista con una cédula duplicada de antes de esta validación — solo se
-        # bloquean los duplicados NUEVOS a partir de ahora.)
-        if not error and nueva_cedula:
-            q_dup_cedula = "SELECT id FROM usuarios WHERE cedula = %s" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE cedula = ?"
-            cursor.execute(q_dup_cedula, (nueva_cedula,))
-            if cursor.fetchone():
-                error = f"Ya existe un usuario registrado con la cédula {nueva_cedula}."
-
+        error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
+            {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl')},
+            session['username'], conn, cursor, db_type
+        )
         if not error:
-            try:
-                # 🧑 El nombre de usuario (login) ya NO lo escribe el admin a mano: se genera
-                # automáticamente con la estructura "primer nombre + primer apellido" y, si ya
-                # existe, se prueban estructuras alternativas hasta encontrar una libre (ver
-                # _generar_username_unico). El nombre completo sí se guarda tal cual para
-                # mostrarlo en pantalla — antes quedaba vacío ("None") porque este formulario
-                # nunca lo pedía.
-                nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
-                nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
-                nuevo_hash = generate_password_hash(nuevo_pass)
-                # 🔒 debe_cambiar_password = TRUE: esta contraseña la eligió el admin (no el
-                # propio usuario), así que se obliga a cambiarla en el primer inicio de sesión.
-                q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, TRUE)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, 1)"
-                cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad))
-                conn.commit()
-                registrar_log(session['username'], "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
-                conn.close()
-
-                # 👋 Correo de bienvenida (usuario + contraseña temporal) al correo del nuevo
-                # usuario, y notificación de campanita dentro de Arkiv para su propia cuenta.
-                # El correo se manda en un hilo aparte para no hacer esperar al admin.
-                threading.Thread(
-                    target=enviar_correo_bienvenida,
-                    args=(nuevo_email, nuevo_user, nombre_completo, nuevo_pass)
-                ).start()
-                crear_notificacion(
-                    nuevo_user,
-                    f"¡Bienvenido a Arkiv, {primer_nombre}! Tu cuenta ya está activa. Revisa tu correo "
-                    f"({nuevo_email}) para conocer tu contraseña temporal y recuerda cambiarla en tu "
-                    f"primer inicio de sesión.",
-                    tipo='bienvenida'
-                )
-
-                return redirect(url_for('gestion_usuarios', creado=nuevo_user))
-            except Exception as e:
-                conn.rollback()
-                error = "No se pudo crear el usuario. Verifica los datos e intenta de nuevo."
+            conn.close()
+            return redirect(url_for('gestion_usuarios', creado=nuevo_user))
 
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
@@ -8940,6 +9716,39 @@ def gestion_usuarios():
         error_cedula=error_cedula, error_pass_corta=error_pass_corta,
         longitud_minima_password=LONGITUD_MINIMA_PASSWORD_CUENTA
     )
+
+
+@app.route('/tickets/inventario/usuarios/crear_rapido', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def crear_usuario_rapido_inventario():
+    """Alta rápida de usuario desde el modal de asignación de Inventario: si la persona a quien
+    se le va a asignar un activo todavía no tiene cuenta en Arkiv, esto evita salir a Gestión de
+    Usuarios y perder el formulario de asignación a medio llenar. Reutiliza exactamente las
+    mismas reglas de _crear_usuario_interno (usuario generado, correo de bienvenida, etc.) — la
+    única diferencia es que la contraseña temporal se genera sola (quien asigna el activo no
+    necesita inventarla) y el rol queda fijo en 'estandar': este atajo es para dar de alta a un
+    colaborador que va a recibir un equipo, no para crear cuentas de agente/admin."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    datos = {
+        'primer_nombre': request.form.get('primer_nombre', ''),
+        'segundo_nombre': request.form.get('segundo_nombre', ''),
+        'primer_apellido': request.form.get('primer_apellido', ''),
+        'segundo_apellido': request.form.get('segundo_apellido', ''),
+        'email': request.form.get('email', ''),
+        'telefono': request.form.get('telefono', ''),
+        'cedula': request.form.get('cedula', ''),
+        'especialidad': request.form.get('especialidad', ''),
+        'rol': 'estandar',
+        'password': secrets.token_urlsafe(12),
+        'firma_dataurl': request.form.get('firma_dataurl'),
+    }
+    error, nuevo_user, nombre_completo, firma_url = _crear_usuario_interno(datos, session['username'], conn, cursor, db_type)
+    conn.close()
+    if error:
+        return jsonify({'ok': False, 'error': error}), 400
+    return jsonify({'ok': True, 'usuario': nuevo_user, 'nombre': nombre_completo, 'firma': firma_url})
 
 
 @app.route('/usuarios/<usuario>/2fa/desactivar', methods=['POST'])
@@ -8980,7 +9789,9 @@ def buscar_usuario_por_cedula():
     memoria. Antes lo podía consultar cualquier usuario logueado (incluido el rol Estándar);
     esto permitía enumerar nombres asociados a cédulas probando números al azar (hallazgo QA
     H-03, 30/08/2026). Ahora queda restringido a los roles operativos que de verdad lo usan:
-    agentes y admins registrando/gestionando activos."""
+    agentes y admins registrando/gestionando activos. Incluye 'firma' (URL de Cloudinary, o None
+    si esa persona nunca registró una) para que el modal de asignar activo pueda reutilizarla
+    como constancia de aceptación en vez de pedir que firme otra vez."""
     cedula = request.args.get('cedula', '').strip()
     if not cedula:
         return jsonify({'encontrado': False})
@@ -8988,7 +9799,7 @@ def buscar_usuario_por_cedula():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q = "SELECT usuario, nombre FROM usuarios WHERE cedula = %s AND COALESCE(estado, 'activo') = 'activo'" if db_type == 'postgres' else "SELECT usuario, nombre FROM usuarios WHERE cedula = ? AND COALESCE(estado, 'activo') = 'activo'"
+        q = "SELECT usuario, nombre, firma FROM usuarios WHERE cedula = %s AND COALESCE(estado, 'activo') = 'activo'" if db_type == 'postgres' else "SELECT usuario, nombre, firma FROM usuarios WHERE cedula = ? AND COALESCE(estado, 'activo') = 'activo'"
         cursor.execute(q, (cedula,))
         row = cursor.fetchone()
     except Exception as e:
@@ -8998,7 +9809,7 @@ def buscar_usuario_por_cedula():
 
     if not row:
         return jsonify({'encontrado': False})
-    return jsonify({'encontrado': True, 'usuario': row[0], 'nombre': row[1] or row[0]})
+    return jsonify({'encontrado': True, 'usuario': row[0], 'nombre': row[1] or row[0], 'firma': row[2]})
 
 
 @app.route('/usuarios/buscar')
@@ -9568,12 +10379,13 @@ def exportar_logs_correos_csv():
 @app.route('/perfil/tema', methods=['POST'])
 @login_required
 def cambiar_tema():
-    """Alterna el tema claro/oscuro del usuario que tiene la sesión abierta. Se guarda en su
-    cuenta (no solo en el navegador) para que lo siga a donde inicie sesión — y de paso se
-    actualiza la sesión actual para que se vea reflejado de inmediato, sin tener que
+    """Alterna entre los 3 temas del usuario que tiene la sesión abierta: claro, oscuro y
+    'descanso' (variante sepia/tenue para descansar la vista — ver static/css/tema-descanso.css).
+    Se guarda en su cuenta (no solo en el navegador) para que lo siga a donde inicie sesión — y
+    de paso se actualiza la sesión actual para que se vea reflejado de inmediato, sin tener que
     volver a iniciar sesión."""
     nuevo_tema = request.form.get('tema', '').strip()
-    if nuevo_tema not in ('claro', 'oscuro'):
+    if nuevo_tema not in ('claro', 'oscuro', 'descanso'):
         nuevo_tema = 'oscuro'
     try:
         conn, db_type = get_db()
