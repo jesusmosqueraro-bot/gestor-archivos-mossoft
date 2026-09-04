@@ -51,11 +51,11 @@
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
         <div>
-            <h2 class="text-xl font-extrabold text-white mb-1">Configuración de Áreas, Sedes y Categorías</h2>
-            <p class="text-sm text-slate-400">Estos valores alimentan los desplegables al crear una solicitud y los filtros de la lista de tickets. Áreas y Sedes son específicas de {{ 'tu organización' }}: agrégalas según corresponda.</p>
+            <h2 class="text-xl font-extrabold text-white mb-1">Configuración de Áreas, Sedes, Categorías y Proveedores</h2>
+            <p class="text-sm text-slate-400">Estos valores alimentan los desplegables al crear una solicitud o un activo, y los filtros de las listas de tickets e inventario. Áreas, Sedes y Proveedores son específicos de {{ 'tu organización' }}: agrégalos según corresponda.</p>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-5">
 
             <!-- ÁREAS -->
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
@@ -221,6 +221,57 @@
                     <p class="text-[11px] text-slate-500 text-center py-3">Sin categorías configuradas todavía.</p>
                     {% endfor %}
                     <p class="config-sin-resultados hidden text-[11px] text-slate-500 text-center py-3">Ninguna categoría coincide con la búsqueda.</p>
+                </div>
+            </div>
+
+            <!-- PROVEEDORES -->
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-truck-field text-emerald-400"></i> Proveedores <span class="text-slate-500 font-normal">({{ proveedores|length }})</span></h3>
+                <form method="POST" action="/tickets/configuracion/nuevo" class="flex flex-col gap-2 mb-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="tipo" value="proveedor"/>
+                    <input type="text" name="nombre" required maxlength="150" placeholder="Nombre / marca comercial *" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <input type="text" name="nit" maxlength="50" placeholder="NIT (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <input type="text" name="razon_social" maxlength="200" placeholder="Razón social (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Agregar proveedor</button>
+                </form>
+                <p class="text-[10px] text-slate-500 -mt-2 mb-2">Al registrar o asignar un activo en Inventario podrás elegir el proveedor de esta lista.</p>
+
+                {% if proveedores %}
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]"></i>
+                    <input type="text" oninput="filtrarConfigLista(this, 'lista-proveedores')" placeholder="Buscar por nombre o NIT..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-8 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="button" onclick="filtrarConfigLista(this.previousElementSibling, 'lista-proveedores')" title="Buscar" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-orange-400 text-[11px]"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+                {% endif %}
+
+                <div class="space-y-2" id="lista-proveedores">
+                    {% for p in proveedores %}
+                    <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl overflow-hidden" data-nombre-config="{{ (p.nombre ~ ' ' ~ (p.nit or '') ~ ' ' ~ (p.razon_social or ''))|lower }}">
+                        <button type="button" onclick="toggleConfigItem(this)" class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left">
+                            <span class="text-xs font-bold text-slate-200 truncate"><i class="fa-solid fa-truck-field text-emerald-400/70 text-[10px] mr-1.5"></i>{{ p.nombre }}{% if p.nit %} <span class="text-slate-500 font-normal">· NIT {{ p.nit }}</span>{% endif %}</span>
+                            <i class="fa-solid fa-chevron-down text-slate-500 text-[10px] flex-none transition-transform"></i>
+                        </button>
+                        <div class="hidden px-3 pb-3">
+                            <form method="POST" action="/tickets/configuracion/{{ p.id }}/editar" class="flex flex-col gap-1.5">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" name="nombre" value="{{ p.nombre }}" placeholder="Nombre / marca comercial" class="flex-1 bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                    <button type="submit" class="text-slate-500 hover:text-orange-400 text-[11px]" title="Guardar cambios"><i class="fa-solid fa-floppy-disk"></i></button>
+                                </div>
+                                <input type="text" name="nit" value="{{ p.nit or '' }}" placeholder="NIT" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                                <input type="text" name="razon_social" value="{{ p.razon_social or '' }}" placeholder="Razón social" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
+                            </form>
+                            <form method="POST" action="/tickets/configuracion/{{ p.id }}/eliminar" onsubmit="return confirm('¿Eliminar el proveedor {{ p.nombre }}?');" class="mt-1.5 text-right">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px]"><i class="fa-solid fa-trash"></i> Eliminar proveedor</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-[11px] text-slate-500 text-center py-3">Sin proveedores configurados todavía.</p>
+                    {% endfor %}
+                    <p class="config-sin-resultados hidden text-[11px] text-slate-500 text-center py-3">Ningún proveedor coincide con la búsqueda.</p>
                 </div>
             </div>
 
