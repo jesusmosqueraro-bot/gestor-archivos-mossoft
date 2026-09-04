@@ -166,7 +166,7 @@
         {% endif %}
 
         <!-- BARRA DE FILTROS -->
-        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
                 <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -189,6 +189,13 @@
                 </select>
             </div>
             <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                <select name="area" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for ar in areas %}<option value="{{ ar.nombre }}" {% if ar.nombre == q_area %}selected{% endif %}>{{ ar.nombre }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
                 <div class="relative">
                     <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Placa, marca, serie, asignado a..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -196,7 +203,7 @@
                 </div>
             </div>
         </form>
-        {% if q_estado or q_tipo or q_sede or q_busqueda %}
+        {% if q_estado or q_tipo or q_sede or q_area or q_busqueda %}
         <div class="-mt-3">
             <a href="/tickets/inventario" class="text-[11px] text-slate-400 hover:text-orange-400 font-bold"><i class="fa-solid fa-filter-circle-xmark mr-1"></i>Limpiar filtros</a>
         </div>
@@ -214,6 +221,7 @@
                         <th class="pb-3 px-3 font-bold">Estado</th>
                         <th class="pb-3 px-3 font-bold">Asignado a</th>
                         <th class="pb-3 px-3 font-bold">Sede</th>
+                        <th class="pb-3 px-3 font-bold">Área</th>
                         <th class="pb-3 px-3 font-bold text-right">Acciones</th>
                     </tr>
                 </thead>
@@ -240,6 +248,7 @@
                             </td>
                             <td class="py-3.5 px-3 text-slate-400 italic">{{ a.asignado_a or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.area or '-' }}</td>
                             <td class="py-3.5 px-3 text-right">
                                 <button type="button" onclick='abrirModalHistorialTickets({{ a | tojson }})' class="text-slate-400 hover:text-indigo-400 text-xs mr-2" title="Historial de tickets ({{ a.tickets_historial|length }})">
                                     <i class="fa-solid fa-clock-rotate-left"></i>{% if a.tickets_historial %} <span class="text-[10px] font-bold">{{ a.tickets_historial|length }}</span>{% endif %}
@@ -261,8 +270,8 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="8" class="text-center py-10 text-slate-500 font-bold">
-                                {% if q_busqueda or q_estado or q_tipo or q_sede %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
+                            <td colspan="9" class="text-center py-10 text-slate-500 font-bold">
+                                {% if q_busqueda or q_estado or q_tipo or q_sede or q_area %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
                             </td>
                         </tr>
                     {% endif %}
@@ -336,12 +345,22 @@
                             <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
                             <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
                         </div>
-                        <div>
-                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
-                            <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                <option value="">Sin especificar</option>
-                                {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
-                            </select>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                                <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                                <select name="area" id="input-activo-area" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    {% for ar in areas %}<option value="{{ ar.nombre }}">{{ ar.nombre }}</option>{% endfor %}
+                                </select>
+                                <p class="text-[10px] text-slate-500 mt-1">Para ubicar con más precisión el equipo dentro de la sede (ej: Sistemas, Urgencias, Facturación).</p>
+                            </div>
                         </div>
                         <div class="flex-1 flex flex-col">
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
@@ -538,10 +557,11 @@
             document.getElementById('input-activo-asignado').value = '';
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
-            // 🏢 Si el agente ya está viendo una sede filtrada, se la sugerimos de una vez en
-            // el formulario de "Nuevo Activo" — lo más probable es que esté registrando un
-            // equipo de esa misma sede.
+            // 🏢 Si el agente ya está viendo una sede o área filtrada, se la sugerimos de una vez
+            // en el formulario de "Nuevo Activo" — lo más probable es que esté registrando un
+            // equipo de esa misma sede/área.
             document.getElementById('input-activo-sede').value = {{ q_sede | tojson }};
+            document.getElementById('input-activo-area').value = {{ q_area | tojson }};
             document.getElementById('input-activo-observaciones').value = '';
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
@@ -560,6 +580,7 @@
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
             document.getElementById('input-activo-sede').value = activo.sede || '';
+            document.getElementById('input-activo-area').value = activo.area || '';
             document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
