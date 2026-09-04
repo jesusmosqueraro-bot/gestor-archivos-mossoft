@@ -6740,13 +6740,18 @@ def inventario_exportar_csv():
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
     writer.writerow(['PLACA', 'TIPO', 'MARCA', 'MODELO', 'N° SERIE', 'ESTADO', 'ASIGNADO A', 'SEDE', 'ÁREA',
                       'PROVEEDOR', 'TIPO DE COSTO', 'COSTO DE COMPRA', 'COSTO ALQUILER MENSUAL',
-                      'OBSERVACIONES', 'FECHA DE CREACIÓN', 'CREADO POR'])
+                      'COSTO ALQUILER ANUAL', 'OBSERVACIONES', 'FECHA DE CREACIÓN', 'CREADO POR'])
     for a in activos:
+        # 💰 "Costo alquiler anual" es mensual × 12 — se calcula aquí (no se guarda en la base)
+        # para que quien exporte no tenga que multiplicar a mano cada fila; queda vacía si el
+        # activo no es 'alquilado' o no tiene costo mensual guardado.
+        costo_alquiler_anual = a['costo_alquiler_mensual'] * 12 if a['tipo_costo'] == 'alquilado' and a['costo_alquiler_mensual'] is not None else ''
         writer.writerow([
             a['nombre'], a['tipo_activo'] or '', a['marca'] or '', a['modelo'] or '', a['numero_serie'] or '',
             a['estado'], a['asignado_a'] or '', a['sede'] or '', a['area'] or '', a['proveedor'] or '',
             a['tipo_costo'] or '', a['costo_compra'] if a['costo_compra'] is not None else '',
             a['costo_alquiler_mensual'] if a['costo_alquiler_mensual'] is not None else '',
+            costo_alquiler_anual,
             a['observaciones'] or '', a['fecha_creacion'] or '', a['creado_por'] or ''
         ])
 
@@ -6773,20 +6778,23 @@ def inventario_exportar_xlsx():
     ws.title = 'Inventario'
     encabezados = ['Placa', 'Tipo', 'Marca', 'Modelo', 'N° Serie', 'Estado', 'Asignado a', 'Sede', 'Área',
                    'Proveedor', 'Tipo de costo', 'Costo de compra', 'Costo alquiler mensual',
-                   'Observaciones', 'Fecha de creación', 'Creado por']
+                   'Costo alquiler anual', 'Observaciones', 'Fecha de creación', 'Creado por']
     ws.append(encabezados)
     for celda in ws[1]:
         celda.font = Font(bold=True, color='FFFFFF')
         celda.fill = PatternFill(start_color='EA580C', end_color='EA580C', fill_type='solid')
     for a in activos:
+        # 💰 Igual que en el CSV: el costo anual de alquiler (mensual × 12) se calcula al exportar,
+        # no vive en la base de datos.
+        costo_alquiler_anual = a['costo_alquiler_mensual'] * 12 if a['tipo_costo'] == 'alquilado' and a['costo_alquiler_mensual'] is not None else None
         ws.append([
             a['nombre'], a['tipo_activo'] or '', a['marca'] or '', a['modelo'] or '', a['numero_serie'] or '',
             a['estado'], a['asignado_a'] or '', a['sede'] or '', a['area'] or '', a['proveedor'] or '',
-            a['tipo_costo'] or '', a['costo_compra'], a['costo_alquiler_mensual'],
+            a['tipo_costo'] or '', a['costo_compra'], a['costo_alquiler_mensual'], costo_alquiler_anual,
             a['observaciones'] or '', a['fecha_creacion'] or '', a['creado_por'] or ''
         ])
     ws.freeze_panes = 'A2'
-    anchos = [12, 16, 14, 18, 16, 14, 22, 16, 14, 16, 14, 16, 18, 32, 18, 14]
+    anchos = [12, 16, 14, 18, 16, 14, 22, 16, 14, 16, 14, 16, 18, 18, 32, 18, 14]
     for i, ancho in enumerate(anchos, start=1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
 
@@ -6833,7 +6841,9 @@ def inventario_exportar_pdf():
         if a['tipo_costo'] == 'propio' and a['costo_compra'] is not None:
             costo_texto = f"Compra: ${a['costo_compra']:,.0f}"
         elif a['tipo_costo'] == 'alquilado' and a['costo_alquiler_mensual'] is not None:
-            costo_texto = f"Alquiler: ${a['costo_alquiler_mensual']:,.0f}/mes"
+            # 💰 Se muestra mensual Y anual (mensual × 12) por activo — antes el PDF solo traía el
+            # valor mensual, y Tomás pidió poder ver también la proyección anual por artículo.
+            costo_texto = f"${a['costo_alquiler_mensual']:,.0f}/mes (${a['costo_alquiler_mensual'] * 12:,.0f}/año)"
         else:
             costo_texto = '-'
         datos.append([a['nombre'], a['tipo_activo'] or '-', marca_modelo, a['estado'], a['asignado_a'] or '-',
