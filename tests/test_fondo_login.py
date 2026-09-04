@@ -67,6 +67,19 @@ def test_login_muestra_la_imagen_completa_sin_recortar(client, app):
     assert 'object-cover' not in texto
 
 
+def test_login_sin_ningun_archivo_activo_centra_el_formulario_en_toda_la_pantalla(client, app):
+    """Si todos los archivos del panel quedaron pausados (o nunca se activó ninguno), el panel
+    de marca no se imprime — y en ese caso el login NO debe quedar encajonado en la columna
+    angosta del 40% (pegado a la izquierda, con todo el resto de la pantalla vacío). Debe usar
+    todo el ancho para quedar centrado en medio de la pantalla."""
+    _crear_item_fondo(app, estado='inactivo')
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'fondo-login-slide' not in texto
+    assert 'md:w-2/5' not in texto
+
+
 def test_login_ignora_items_pausados(client, app):
     _crear_item_fondo(app, estado='inactivo', url='https://res.cloudinary.com/demo/image/upload/pausado.jpg')
 
