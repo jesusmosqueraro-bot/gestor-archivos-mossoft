@@ -259,21 +259,28 @@
                             <td class="py-3.5 px-3 text-slate-400">{{ a.area or '-' }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.proveedor or '-' }}</td>
                             <td class="py-3.5 px-3 text-right">
-                                <button type="button" onclick='abrirModalHistorialTickets({{ a | tojson }})' class="text-slate-400 hover:text-indigo-400 text-xs mr-2" title="Historial de tickets ({{ a.tickets_historial|length }})">
-                                    <i class="fa-solid fa-clock-rotate-left"></i>{% if a.tickets_historial %} <span class="text-[10px] font-bold">{{ a.tickets_historial|length }}</span>{% endif %}
-                                </button>
-                                <button type="button" onclick='abrirModalTrazabilidad({{ a | tojson }})' class="text-slate-400 hover:text-violet-400 text-xs mr-2" title="Trazabilidad del activo">
-                                    <i class="fa-solid fa-code-branch"></i>
-                                </button>
-                                <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs mr-2" title="Adjuntos ({{ a.adjuntos|length }})">
-                                    <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
-                                </button>
-                                <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs mr-2" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
-                                <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs mr-2"><i class="fa-solid fa-pen"></i></button>
-                                <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
-                                </form>
+                                <!-- 🔧 flex + gap (en vez de mr-2 suelto) para que los 6 íconos siempre
+                                     queden en una sola fila: flex no hace wrap por defecto, así que si
+                                     no caben, es la tabla completa la que se desplaza horizontalmente
+                                     (ver overflow-x-auto del contenedor) en vez de partirse la celda
+                                     en dos líneas apretadas. -->
+                                <div class="flex items-center justify-end gap-3 whitespace-nowrap">
+                                    <button type="button" onclick='abrirModalHistorialTickets({{ a | tojson }})' class="text-slate-400 hover:text-indigo-400 text-xs" title="Historial de tickets ({{ a.tickets_historial|length }})">
+                                        <i class="fa-solid fa-clock-rotate-left"></i>{% if a.tickets_historial %} <span class="text-[10px] font-bold">{{ a.tickets_historial|length }}</span>{% endif %}
+                                    </button>
+                                    <button type="button" onclick='abrirModalTrazabilidad({{ a | tojson }})' class="text-slate-400 hover:text-violet-400 text-xs" title="Trazabilidad del activo">
+                                        <i class="fa-solid fa-code-branch"></i>
+                                    </button>
+                                    <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs" title="Adjuntos ({{ a.adjuntos|length }})">
+                                        <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
+                                    </button>
+                                    <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
+                                    <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs"><i class="fa-solid fa-pen"></i></button>
+                                    <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
