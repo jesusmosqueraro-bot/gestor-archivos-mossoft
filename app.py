@@ -595,6 +595,11 @@ def validar_instancia_y_sesion():
         if session.get('instance_id') != SERVER_INSTANCE_ID:
             session.clear()
             return redirect(url_for('login', expirado='1'))
+        # 🟢 Heartbeat de "en línea" del Chat Interno (ver _registrar_actividad_usuario) — se
+        # salta en /static/... porque esos archivos no dicen nada de si la persona sigue
+        # activa en la app (el navegador los pide solo, sin que haya nadie mirando).
+        if request.endpoint != 'static':
+            _registrar_actividad_usuario()
         if request.endpoint in ENDPOINTS_SOLO_SIN_SESION:
             return redirect(url_for('bienvenida'))
         if session.get('debe_cambiar_password') and request.endpoint not in ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO:
@@ -1013,7 +1018,14 @@ def init_db():
                 # chat_canal_enviar/chat_directo_enviar. Un mensaje puede traer texto, adjunto,
                 # o ambos (nunca ninguno de los dos).
                 "ALTER TABLE chat_mensajes ADD COLUMN IF NOT EXISTS adjunto_url TEXT;",
-                "ALTER TABLE chat_mensajes ADD COLUMN IF NOT EXISTS adjunto_nombre VARCHAR(255);"
+                "ALTER TABLE chat_mensajes ADD COLUMN IF NOT EXISTS adjunto_nombre VARCHAR(255);",
+                # 🟢 Indicador "en línea/desconectado" del Chat Interno (pedido por Tomás): en vez
+                # de depender de una conexión de Socket.IO persistente (poco confiable con los 2
+                # procesos gunicorn de Render sin un message queue compartido como Redis), se usa
+                # actividad reciente en la app como heurística — ver _registrar_actividad_usuario/
+                # _esta_en_linea. Se actualiza como mucho una vez cada ACTIVIDAD_HEARTBEAT_SEGUNDOS
+                # por usuario (ver el before_request), así que el costo extra es mínimo.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultima_actividad VARCHAR(20);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1395,6 +1407,14 @@ def init_db():
                     conn.commit()
                 except Exception:
                     pass
+
+            # 🟢 Indicador "en línea/desconectado" del Chat Interno. Ver comentario equivalente
+            # en la rama de Postgres.
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN ultima_actividad TEXT;")
+                conn.commit()
+            except Exception:
+                pass
 
         # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
         # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
@@ -3671,16 +3691,71 @@ def _es_adjunto_imagen(nombre_original):
     return nombre_original.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
+# 🟢🔴 Indicador "en línea/desconectado" del Chat Interno (pedido por Tomás, 05/09/2026): en
+# vez de una conexión de Socket.IO persistente (poco confiable acá — Render corre 2 procesos
+# gunicorn de esta misma app en paralelo, sin un message queue compartido como Redis, así que
+# la conexión de un usuario solo la vería el proceso que la atendió), se usa una heurística
+# de actividad reciente: cada petición autenticada "marca presencia" en usuarios.ultima_actividad
+# (con un límite de una escritura cada ACTIVIDAD_HEARTBEAT_SEGUNDOS por usuario, para no
+# recargar la base de datos), y se considera "en línea" a quien tuvo actividad hace menos de
+# EN_LINEA_UMBRAL_SEGUNDOS. Funciona igual sin importar cuántos procesos esté corriendo Render.
+ACTIVIDAD_HEARTBEAT_SEGUNDOS = 20
+EN_LINEA_UMBRAL_SEGUNDOS = 90
+
+
+def _registrar_actividad_usuario():
+    """Actualiza 'usuarios.ultima_actividad' para la cuenta en sesión — se llama desde el
+    before_request en cada petición autenticada, pero de verdad escribe en la base de datos
+    como mucho una vez cada ACTIVIDAD_HEARTBEAT_SEGUNDOS (el resto de las veces, la propia
+    sesión ya sabe que se registró hace poco y no hace nada). Nunca lanza: si falla, el
+    indicador de en línea simplemente queda desactualizado, no debe tumbar la petición real."""
+    usuario = session.get('username')
+    if not usuario:
+        return
+    ahora = time.time()
+    ultimo_registro = session.get('_ultima_actividad_heartbeat', 0)
+    if ahora - ultimo_registro < ACTIVIDAD_HEARTBEAT_SEGUNDOS:
+        return
+    session['_ultima_actividad_heartbeat'] = ahora
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "UPDATE usuarios SET ultima_actividad = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET ultima_actividad = ? WHERE usuario = ?"
+        cursor.execute(q, (obtener_fecha_actual(), usuario))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error registrando actividad de '{usuario}': {e}")
+    finally:
+        conn.close()
+
+
+def _esta_en_linea(ultima_actividad_str):
+    """True si 'ultima_actividad_str' (el valor crudo de usuarios.ultima_actividad, o None si
+    la cuenta nunca tuvo actividad registrada) cae dentro de los últimos
+    EN_LINEA_UMBRAL_SEGUNDOS. Nunca lanza — un valor corrupto o ausente simplemente cuenta
+    como 'desconectado'."""
+    if not ultima_actividad_str:
+        return False
+    try:
+        ultima = datetime.strptime(str(ultima_actividad_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZONA_HORARIA_COLOMBIA)
+        ahora = datetime.now(ZONA_HORARIA_COLOMBIA)
+        return (ahora - ultima).total_seconds() <= EN_LINEA_UMBRAL_SEGUNDOS
+    except Exception:
+        return False
+
+
 def _usuarios_operativos_activos(excluir=None):
-    """Lista de {usuario, nombre} de cuentas activas con rol admin/agente (con quién se puede
-    chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por nombre."""
+    """Lista de {usuario, nombre, en_linea} de cuentas activas con rol admin/agente (con quién
+    se puede chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por
+    nombre. 'en_linea' viene de _esta_en_linea() sobre la actividad reciente de cada cuenta."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         placeholders = ', '.join(['%s' if db_type == 'postgres' else '?'] * len(ROLES_CON_ACCESO_OPERATIVO))
-        q = f"SELECT usuario, nombre FROM usuarios WHERE estado = 'activo' AND rol IN ({placeholders})"
+        q = f"SELECT usuario, nombre, ultima_actividad FROM usuarios WHERE estado = 'activo' AND rol IN ({placeholders})"
         cursor.execute(q, ROLES_CON_ACCESO_OPERATIVO)
-        filas = [{'usuario': u, 'nombre': n or u} for u, n in cursor.fetchall() if u != excluir]
+        filas = [{'usuario': u, 'nombre': n or u, 'en_linea': _esta_en_linea(ua)} for u, n, ua in cursor.fetchall() if u != excluir]
         conn.close()
         filas.sort(key=lambda f: f['nombre'].lower())
         return filas
@@ -3805,6 +3880,7 @@ def chat_contactos():
             contactos.append({
                 'usuario': c['usuario'], 'nombre': c['nombre'], 'no_leidos': no_leidos,
                 'ultimo_mensaje': fila[0] if fila else None, 'ultima_fecha': fila[1] if fila else None,
+                'en_linea': c['en_linea'],
             })
         conn.close()
     except Exception as e:
