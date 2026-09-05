@@ -3297,10 +3297,14 @@ def crear_notificacion(usuario, mensaje, url='', tipo='ticket'):
     el flujo que la llama: cualquier error se registra en consola y se ignora.
 
     🔴 Como esta es la única función por la que pasan TODAS las notificaciones de la app
-    (tickets, comunicados, chat directo, etc. — crear_notificacion_para_varios también cae
-    aquí), es el único lugar que hace falta instrumentar para que la campanita se entere en
-    vivo: emite 'notificacion_nueva' a la sala del destinatario, y notificaciones.js hace el
-    resto (refresca el contador/lista y muestra el pop-up) apenas lo recibe."""
+    (tickets, comunicados, etc. — crear_notificacion_para_varios también cae aquí), es el único
+    lugar que hace falta instrumentar para que la campanita se entere en vivo: emite
+    'notificacion_nueva' a la sala del destinatario, y notificaciones.js hace el resto (refresca
+    el contador/lista y muestra el pop-up) apenas lo recibe.
+
+    🔔 El Chat Interno (Canal General y directos) a propósito NUNCA llama a esta función — ver
+    chat_canal_enviar()/chat_directo_enviar() — para no saturar la campanita con mensajes; solo
+    actualizan el contador del ícono de Chat Interno (chat_no_leidos, ver notificaciones_resumen)."""
     if not usuario:
         return
     try:
@@ -3327,10 +3331,14 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
 # 💬 CHAT INTERNO (pedido por Tomás): "Canal General" para todo el equipo operativo (admin +
 # agente) más mensajes directos 1 a 1 entre ellos. La página sigue consultando por fetch() cada
 # pocos segundos mientras está abierta (ver /static/js/chat.js) como respaldo, pero desde que se
-# agregó Socket.IO (ver _emitir_evento_tiempo_real más arriba) el mensaje llega en vivo: un
-# directo reutiliza crear_notificacion() (que ya emite 'notificacion_nueva'), y el Canal General
-# emite su propio 'chat_canal_mensaje' a la sala compartida — ver chat_canal_enviar() y
-# chat_directo_enviar() más abajo.
+# agregó Socket.IO (ver _emitir_evento_tiempo_real más arriba) el mensaje llega en vivo: tanto el
+# Canal General como los directos emiten su propio evento ('chat_canal_mensaje'/'chat_directo_mensaje')
+# a la sala correspondiente — ver chat_canal_enviar() y chat_directo_enviar() más abajo.
+#
+# 🔔 Ninguno de los dos pasa por crear_notificacion() (pedido por Tomás: los mensajes NUNCA deben
+# saturar la campanita general de notificaciones, solo el contador del ícono de Chat Interno —
+# ver chat_no_leidos en notificaciones_resumen()). El Canal General ya funcionaba así desde el
+# principio; los directos se corrigieron para hacer lo mismo.
 def _usuarios_operativos_activos(excluir=None):
     """Lista de {usuario, nombre} de cuentas activas con rol admin/agente (con quién se puede
     chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por nombre."""
@@ -3626,13 +3634,13 @@ def chat_directo_enviar(usuario):
         print(f"⚠️ Error enviando mensaje directo de '{usuario_actual}' a '{usuario}': {e}")
         return jsonify({'success': False, 'error': 'No se pudo enviar el mensaje.'}), 500
 
-    nombres_para_notif = _mapa_nombres_usuarios()
-    nombre_remitente = _nombre_para_mostrar(usuario_actual, nombres_para_notif)
-    vista_previa = mensaje if len(mensaje) <= 80 else (mensaje[:77] + '...')
-    crear_notificacion(usuario, f"💬 {nombre_remitente}: {vista_previa}", url=f"/chat?con={usuario_actual}", tipo='chat')
-    # 🔴 Empujón en vivo del mensaje en sí (no solo la notificación de campanita de arriba): si
-    # el destinatario YA tiene abierta justo esta conversación, chat.js lo agrega al toque —
-    # también a la sala de quien envía, por si tiene otra pestaña/dispositivo con el chat abierto.
+    # 🔔 A propósito NO se llama crear_notificacion() aquí (pedido por Tomás: un mensaje directo
+    # no debe saturar la campanita general, igual que ya pasaba con el Canal General) — el
+    # destinatario se entera por el contador del ícono de Chat Interno (chat_no_leidos, ver
+    # notificaciones_resumen) y por el empujón en vivo de abajo si tiene el chat abierto.
+    # 🔴 Empujón en vivo del mensaje en sí: si el destinatario YA tiene abierta justo esta
+    # conversación, chat.js lo agrega al toque — también a la sala de quien envía, por si tiene
+    # otra pestaña/dispositivo con el chat abierto.
     payload_directo = {'id': nuevo_id, 'remitente': usuario_actual, 'destinatario': usuario, 'mensaje': mensaje, 'fecha': fecha_actual}
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario}")
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario_actual}")
@@ -11613,7 +11621,12 @@ def notificaciones_resumen():
     💬 'chat_no_leidos' viaja en esta misma respuesta (directos sin leer + no vistos del Canal
     General) para que el botón de Chat Interno de la barra de navegación (partials/chat_boton.html)
     pinte su propio contador con el mismo sondeo de 30s que ya usa la campanita, sin agregar una
-    ruta ni un temporizador nuevos. Solo aplica a admin/agente (los únicos con acceso al chat)."""
+    ruta ni un temporizador nuevos. Solo aplica a admin/agente (los únicos con acceso al chat).
+
+    🔔 Pedido por Tomás: los mensajes de chat nunca deben saturar la campanita general (solo el
+    contador de arriba). Ya no se crean notificaciones tipo='chat' (ver chat_directo_enviar), pero
+    'AND tipo != chat' también excluye cualquier residuo tipo='chat' de antes de este cambio que
+    ya estuviera pendiente en la campanita de alguien."""
     usuario = session.get('username')
     vista = 'papelera' if request.args.get('vista') == 'papelera' else 'activas'
     estado_filtro = 'archivada' if vista == 'papelera' else 'activa'
@@ -11623,12 +11636,12 @@ def notificaciones_resumen():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_count = "SELECT COUNT(*) FROM notificaciones WHERE usuario = %s AND leida = 0 AND COALESCE(estado, 'activa') = 'activa'" if db_type == 'postgres' else "SELECT COUNT(*) FROM notificaciones WHERE usuario = ? AND leida = 0 AND COALESCE(estado, 'activa') = 'activa'"
+        q_count = "SELECT COUNT(*) FROM notificaciones WHERE usuario = %s AND leida = 0 AND COALESCE(estado, 'activa') = 'activa' AND tipo != 'chat'" if db_type == 'postgres' else "SELECT COUNT(*) FROM notificaciones WHERE usuario = ? AND leida = 0 AND COALESCE(estado, 'activa') = 'activa' AND tipo != 'chat'"
         cursor.execute(q_count, (usuario,))
         no_leidas = cursor.fetchone()[0]
 
-        q_lista = ("SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = %s AND COALESCE(estado, 'activa') = %s ORDER BY id DESC LIMIT 30" if db_type == 'postgres'
-                   else "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = ? AND COALESCE(estado, 'activa') = ? ORDER BY id DESC LIMIT 30")
+        q_lista = ("SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = %s AND COALESCE(estado, 'activa') = %s AND tipo != 'chat' ORDER BY id DESC LIMIT 30" if db_type == 'postgres'
+                   else "SELECT id, tipo, mensaje, url, leida, fecha FROM notificaciones WHERE usuario = ? AND COALESCE(estado, 'activa') = ? AND tipo != 'chat' ORDER BY id DESC LIMIT 30")
         cursor.execute(q_lista, (usuario, estado_filtro))
         recientes = [{'id': r[0], 'tipo': r[1], 'mensaje': r[2], 'url': r[3], 'leida': bool(r[4]), 'fecha': r[5]} for r in cursor.fetchall()]
         conn.close()
