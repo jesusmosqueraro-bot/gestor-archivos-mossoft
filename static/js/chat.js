@@ -10,6 +10,15 @@ var POLL_CONTACTOS_MS = 15000;
 var _chatActual = { tipo: 'canal', usuario: null, nombre: null };
 var _chatUltimoId = 0;
 
+// 🐛 Bug reportado por Tomás: al enviar un mensaje al Canal General, el propio remitente lo veía
+// duplicado. Causa: al enviar, el propio enviarMensajeChat() pide los mensajes nuevos (desde_id)
+// Y, casi al mismo tiempo, tiempo_real.js recibe el 'empujón' del socket (el remitente también
+// está en la sala del canal) y pide los mismos mensajes nuevos otra vez — dos fetch() en
+// paralelo pueden llegar los dos con el mismo mensaje antes de que _chatUltimoId se actualice.
+// Este set recuerda qué ids YA se pintaron en la conversación abierta, sin importar por cuál de
+// los dos caminos llegaron, para nunca pintar el mismo mensaje dos veces.
+var _idsMensajesRenderizadosChat = {};
+
 function _wrapperChat() {
     return document.getElementById('wrapper-chat');
 }
@@ -75,6 +84,7 @@ function _limpiarMensajesChat() {
     lista.innerHTML = '<p class="text-slate-500 text-center text-[11px] py-6">Cargando...</p>';
     var errorDiv = document.getElementById('error-chat');
     if (errorDiv) errorDiv.classList.add('hidden');
+    _idsMensajesRenderizadosChat = {}; // nueva conversación: ningún mensaje pintado todavía
 }
 
 function _mostrarPanelMensajesMovilChat() {
@@ -137,8 +147,10 @@ function cargarMensajesChat(esCargaInicial) {
             }
             var estabaAbajo = (lista.scrollHeight - lista.scrollTop - lista.clientHeight) < 80;
             mensajes.forEach(function (m) {
-                lista.insertAdjacentHTML('beforeend', _burbujaMensajeChat(m));
                 _chatUltimoId = Math.max(_chatUltimoId, m.id);
+                if (_idsMensajesRenderizadosChat[m.id]) return; // ya pintado (ver comentario arriba)
+                _idsMensajesRenderizadosChat[m.id] = true;
+                lista.insertAdjacentHTML('beforeend', _burbujaMensajeChat(m));
             });
             if (esCargaInicial || estabaAbajo) {
                 lista.scrollTop = lista.scrollHeight;
@@ -193,6 +205,37 @@ function enviarMensajeChat(evento) {
             errorDiv.classList.remove('hidden');
         });
     return false;
+}
+
+// 🔎 Buscador de conversaciones (pedido por Tomás): filtra en el momento la barra lateral por
+// nombre o usuario, sin golpear al servidor — los contactos ya están todos en el DOM desde que
+// cargó la página (con quién se puede chatear no cambia a cada rato), así que basta con
+// mostrar/ocultar. Se ignoran tildes/mayúsculas para que "jose" encuentre "José".
+function _normalizarBusquedaChat(texto) {
+    return (texto || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function filtrarContactosChat() {
+    var input = document.getElementById('buscar-chat-contactos');
+    var consulta = _normalizarBusquedaChat(input ? input.value : '').trim();
+
+    var itemCanal = document.getElementById('item-canal-general');
+    if (itemCanal) {
+        var coincideCanal = !consulta || _normalizarBusquedaChat('Canal General').indexOf(consulta) !== -1;
+        itemCanal.classList.toggle('hidden', !coincideCanal);
+    }
+
+    var algunoVisible = false;
+    document.querySelectorAll('.item-contacto-chat').forEach(function (el) {
+        var usuario = _normalizarBusquedaChat(el.getAttribute('data-usuario'));
+        var nombre = _normalizarBusquedaChat(el.getAttribute('data-nombre'));
+        var coincide = !consulta || usuario.indexOf(consulta) !== -1 || nombre.indexOf(consulta) !== -1;
+        el.classList.toggle('hidden', !coincide);
+        if (coincide) algunoVisible = true;
+    });
+
+    var sinResultados = document.getElementById('mensaje-sin-resultados-chat');
+    if (sinResultados) sinResultados.classList.toggle('hidden', !consulta || algunoVisible);
 }
 
 function cargarContactosChat() {
