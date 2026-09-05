@@ -3,7 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Iniciar Sesión</title>
+    <title>Arkiv | Software de Gestión Documental y Archivo</title>
+    <!-- 🔎 SEO básico (pedido por Tomás, 05/09/2026): esta es la ÚNICA pantalla pública de Arkiv
+         (todo lo demás vive detrás de @login_required y redirige aquí), así que es la única que
+         tiene sentido posicionar en buscadores — de ahí que el title/description mencionen
+         "gestión documental" y no cosas internas de la app. Ver también /robots.txt y
+         /sitemap.xml en app.py, que apuntan exactamente a esta página. -->
+    <meta name="description" content="Arkiv es el software de gestión documental y archivo de Preventiva IPS: control de documentos, tickets de soporte TI, comunicados e inventario en un solo lugar. Inicia sesión para continuar.">
+    <meta name="robots" content="index, follow">
+    <meta property="og:title" content="Arkiv | Software de Gestión Documental y Archivo">
+    <meta property="og:description" content="Gestión documental, archivo, tickets de soporte TI e inventario para Preventiva IPS.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://arkivapp.co/">
     <!-- Favicon Unificado (Mineral Atemporal) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -44,7 +55,8 @@
             <div class="text-center mb-6">
                 <!-- ISOTIPO VECTORIAL ARKIV -->
                 <div class="w-16 h-16 mx-auto mb-3 drop-shadow-md">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full" role="img" aria-label="Logo de Arkiv, software de gestión documental y archivo">
+                        <title>Arkiv — Gestión Documental y Archivo</title>
                         <defs>
                             <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
                                 <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
