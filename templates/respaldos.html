@@ -87,7 +87,7 @@
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 text-xs text-slate-400 leading-relaxed space-y-1.5">
             <p><i class="fa-solid fa-circle-info text-indigo-400 mr-1.5"></i> Cada respaldo es un archivo <span class="font-mono text-slate-300">.json</span> con todas las tablas de la base de datos (usuarios, tickets, comunicados, credenciales, etc.). Los archivos adjuntos (imágenes, PDFs) NO se incluyen aquí: esos ya viven aparte, en Cloudinary.</p>
             <p><i class="fa-solid fa-clock-rotate-left text-indigo-400 mr-1.5"></i> Además del botón manual, Arkiv genera automáticamente un respaldo diario y lo guarda aquí mismo. Los automáticos con más de {{ 30 }} días se eliminan solos; los manuales se conservan hasta que los borres tú.</p>
-            <p><i class="fa-solid fa-paper-plane text-indigo-400 mr-1.5"></i> Cada vez que se genera un respaldo (manual o automático), Arkiv también envía una copia comprimida por correo a <span class="font-mono text-slate-300">{{ respaldo_email_destino }}</span> — una copia totalmente independiente de Render, por si algo le pasa a la cuenta o al disco.</p>
+            <p><i class="fa-solid fa-cloud-arrow-up text-indigo-400 mr-1.5"></i> Cada vez que se genera un respaldo (manual o automático), Arkiv también sube una copia comprimida a Cloudinary — una copia totalmente independiente de Render, por si algo le pasa a la cuenta o al disco — y avisa por correo a <span class="font-mono text-slate-300">{{ respaldo_email_destino }}</span> con el enlace. Esa subida toma unos segundos después de generarse el respaldo; si la columna "Copia externa" de un respaldo muy reciente todavía dice "Pendiente", espera un momento y recarga la página.</p>
         </div>
 
         <!-- LISTA DE RESPALDOS -->
@@ -103,6 +103,7 @@
                             <th class="p-3">Tipo</th>
                             <th class="p-3">Fecha</th>
                             <th class="p-3">Tamaño</th>
+                            <th class="p-3">Copia externa</th>
                             <th class="p-3 text-right">Acciones</th>
                         </tr>
                     </thead>
@@ -116,6 +117,17 @@
                                 </td>
                                 <td class="p-3 font-mono text-[11px]">{{ r.fecha }}</td>
                                 <td class="p-3 font-mono text-[11px]">{{ r.tamano_kb }} KB</td>
+                                <td class="p-3">
+                                    {% if r.copia_externa_url %}
+                                    <a href="{{ r.copia_externa_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors" title="Ver copia en Cloudinary">
+                                        <i class="fa-solid fa-check"></i> En Cloudinary
+                                    </a>
+                                    {% else %}
+                                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-700/50 text-slate-400 border border-slate-600/50" title="Todavía no se subió (puede tardar unos segundos, o haber fallado la subida)">
+                                        <i class="fa-solid fa-clock"></i> Pendiente
+                                    </span>
+                                    {% endif %}
+                                </td>
                                 <td class="p-3 text-right">
                                     <div class="flex items-center justify-end gap-2">
                                         <a href="/admin/respaldos/descargar/{{ r.nombre }}" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors" title="Descargar"><i class="fa-solid fa-download text-emerald-400"></i></a>
@@ -129,7 +141,7 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="5" class="p-8 text-center text-slate-500">Todavía no hay respaldos generados. Usa el botón "Generar y descargar ahora" para crear el primero.</td>
+                                <td colspan="6" class="p-8 text-center text-slate-500">Todavía no hay respaldos generados. Usa el botón "Generar y descargar ahora" para crear el primero.</td>
                             </tr>
                         {% endif %}
                     </tbody>
