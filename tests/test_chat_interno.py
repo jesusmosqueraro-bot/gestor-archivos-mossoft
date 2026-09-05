@@ -2,6 +2,9 @@
 acceso operativo (admin/agente) más mensajes directos 1 a 1 entre ellos — nadie más (estándar,
 gestión humana) puede entrar, y un mensaje directo nuevo debe avisar en la campanita de
 notificaciones a quien no tenga el chat abierto."""
+import io
+
+import cloudinary.uploader
 
 
 def _sesion_como(client, app, usuario, rol):
@@ -381,3 +384,104 @@ def test_burbuja_flotante_abre_el_panel_del_widget_en_vez_de_enlazar_a_chat(clie
     html_estandar = client.get('/bienvenida').get_data(as_text=True)
     assert 'onclick="toggleChatFlotante()"' not in html_estandar
     assert '/static/js/chat_widget.js' not in html_estandar
+
+
+# 📎 ADJUNTOS MULTIMEDIA (pedido por Tomás): imágenes —incluido pegar desde el portapapeles, que
+# en el navegador termina llegando igual que un archivo elegido con el clip— y cualquier otro
+# archivo permitido en la app. Estas pruebas mockean cloudinary.uploader.upload (mismo patrón que
+# test_firma_digital.py/test_fondo_login.py) para no depender de la red real.
+def _mock_cloudinary_chat(monkeypatch, url='https://res.cloudinary.com/demo/image/upload/adjunto_chat.png'):
+    monkeypatch.setattr(cloudinary.uploader, 'upload', lambda *a, **k: {'secure_url': url})
+    monkeypatch.setattr(cloudinary.uploader, 'upload_large', lambda *a, **k: {'secure_url': url})
+
+
+def test_mensaje_de_canal_solo_con_adjunto_se_envia_sin_texto(client, app, crear_usuario, monkeypatch):
+    """Un mensaje puede ser solo una imagen/archivo, sin ningún texto — antes esto se rechazaba
+    como 'mensaje vacío'."""
+    admin1 = crear_usuario(usuario='admin_chat22', rol='admin')
+    _sesion_como(client, app, admin1, 'admin')
+    _mock_cloudinary_chat(monkeypatch, url='https://res.cloudinary.com/demo/image/upload/foto.png')
+
+    r = client.post('/chat/canal/enviar', data={
+        'mensaje': '',
+        'adjunto': (io.BytesIO(b'contenido falso de imagen'), 'foto.png'),
+    }, content_type='multipart/form-data')
+
+    assert r.status_code == 200
+    assert r.get_json()['success'] is True
+
+    data = client.get('/chat/canal/mensajes').get_json()
+    m = data['mensajes'][-1]
+    assert m['mensaje'] == ''
+    assert m['adjunto_url'] == 'https://res.cloudinary.com/demo/image/upload/foto.png'
+    assert m['adjunto_nombre'] == 'foto.png'
+    assert m['adjunto_es_imagen'] is True
+
+
+def test_mensaje_directo_con_texto_y_adjunto_no_imagen(client, app, crear_usuario, monkeypatch):
+    """Un mensaje puede traer texto Y adjunto a la vez; un PDF/documento no debe marcarse como
+    imagen (para que el navegador pinte la tarjeta genérica, no una miniatura rota)."""
+    admin1 = crear_usuario(usuario='admin_chat23', rol='admin')
+    agente1 = crear_usuario(usuario='agente_chat23', rol='agente')
+    _sesion_como(client, app, admin1, 'admin')
+    _mock_cloudinary_chat(monkeypatch, url='https://res.cloudinary.com/demo/raw/upload/informe.pdf')
+
+    r = client.post(f'/chat/directo/{agente1}/enviar', data={
+        'mensaje': 'Te comparto el informe',
+        'adjunto': (io.BytesIO(b'contenido falso de pdf'), 'informe.pdf'),
+    }, content_type='multipart/form-data')
+
+    assert r.status_code == 200
+    assert r.get_json()['success'] is True
+
+    _sesion_como(client, app, agente1, 'agente')
+    data = client.get(f'/chat/directo/{admin1}/mensajes').get_json()
+    m = data['mensajes'][-1]
+    assert m['mensaje'] == 'Te comparto el informe'
+    assert m['adjunto_url'] == 'https://res.cloudinary.com/demo/raw/upload/informe.pdf'
+    assert m['adjunto_nombre'] == 'informe.pdf'
+    assert m['adjunto_es_imagen'] is False
+
+
+def test_mensaje_sin_texto_ni_adjunto_es_rechazado(client, app, crear_usuario):
+    admin1 = crear_usuario(usuario='admin_chat24', rol='admin')
+    _sesion_como(client, app, admin1, 'admin')
+
+    r = client.post('/chat/canal/enviar', data={'mensaje': ''})
+
+    assert r.status_code == 400
+    assert r.get_json()['success'] is False
+
+
+def test_adjunto_con_extension_no_permitida_es_rechazado(client, app, crear_usuario):
+    admin1 = crear_usuario(usuario='admin_chat25', rol='admin')
+    _sesion_como(client, app, admin1, 'admin')
+
+    r = client.post('/chat/canal/enviar', data={
+        'mensaje': '',
+        'adjunto': (io.BytesIO(b'contenido'), 'virus.exe'),
+    }, content_type='multipart/form-data')
+
+    assert r.status_code == 400
+    assert 'no está permitido' in r.get_json()['error']
+
+    # Tampoco debe haber quedado ningún mensaje a medias en la conversación.
+    data = client.get('/chat/canal/mensajes').get_json()
+    assert data['mensajes'] == []
+
+
+def test_adjunto_demasiado_grande_es_rechazado(client, app, crear_usuario, monkeypatch):
+    """El tope real es 25 MB — se baja a unos pocos bytes con monkeypatch para no tener que
+    generar un archivo enorme solo para la prueba."""
+    import app as arkiv
+    monkeypatch.setattr(arkiv, 'TAMANO_MAXIMO_ADJUNTO_CHAT', 5)
+    admin1 = crear_usuario(usuario='admin_chat26', rol='admin')
+    _sesion_como(client, app, admin1, 'admin')
+
+    r = client.post('/chat/canal/enviar', data={
+        'mensaje': '',
+        'adjunto': (io.BytesIO(b'esto pesa mas de 5 bytes'), 'foto.png'),
+    }, content_type='multipart/form-data')
+
+    assert r.status_code == 400
+    assert 'no puede superar' in r.get_json()['error']
