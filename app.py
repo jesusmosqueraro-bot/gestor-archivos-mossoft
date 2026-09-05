@@ -578,6 +578,16 @@ ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', '
 # validar_instancia_y_sesion, se resuelve antes de llegar aquí).
 ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'cambiar_password_perfil', 'logout', 'static'}
 
+# 🔙 Hallazgo QA (05/09/2026): con la sesión ya iniciada, el botón "atrás" del navegador
+# podía volver a mostrar la pantalla de login (con las cabeceras Cache-Control: no-store de
+# _agregar_cabeceras_seguridad, el navegador SÍ vuelve a pedirle la página al servidor en vez
+# de sacarla de su caché/bfcache — pero el servidor, al no revisar si ya había una sesión
+# activa, simplemente volvía a dibujar el formulario de login). Estas rutas son "solo para
+# quien todavía no inició sesión": si alguien con sesión válida las visita (típicamente
+# presionando "atrás"), se le manda derecho al panel principal en vez de mostrarle el login
+# de nuevo — así "atrás" nunca deja ver el formulario de login ni "sacar" de la sesión activa.
+ENDPOINTS_SOLO_SIN_SESION = {'login', 'login_2fa', 'recuperar_clave'}
+
 @app.before_request
 def validar_instancia_y_sesion():
     session.permanent = True
@@ -585,6 +595,8 @@ def validar_instancia_y_sesion():
         if session.get('instance_id') != SERVER_INSTANCE_ID:
             session.clear()
             return redirect(url_for('login', expirado='1'))
+        if request.endpoint in ENDPOINTS_SOLO_SIN_SESION:
+            return redirect(url_for('bienvenida'))
         if session.get('debe_cambiar_password') and request.endpoint not in ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO:
             return redirect(url_for('cambiar_password_perfil'))
         if session.get('debe_activar_2fa') and request.endpoint not in ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO:
