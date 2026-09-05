@@ -50,7 +50,7 @@ def _sin_correos_reales(monkeypatch):
     monkeypatch.setattr(arkiv, 'enviar_correo_recuperacion', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, 'enviar_correo_bienvenida', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, 'enviar_correo_ticket', lambda *a, **k: None)
-    monkeypatch.setattr(arkiv, '_enviar_respaldo_por_correo', lambda *a, **k: None)
+    monkeypatch.setattr(arkiv, '_respaldar_copia_externa', lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)
