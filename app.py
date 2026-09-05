@@ -12350,6 +12350,33 @@ def buscar_global_api():
 def home():
     return redirect(url_for('bienvenida')) if session.get('logged_in') else redirect(url_for('login'))
 
+
+# 🔎 SEO básico (pedido por Tomás, 05/09/2026): Arkiv es casi toda una app privada — todo excepto
+# /login (y sus primos /login/2fa, /recuperar) exige sesión y redirige ahí — así que lo único que
+# tiene sentido que Google rastree/indexe es esa página pública. 'Disallow: /' + un 'Allow' puntual
+# evita que un buscador pierda tiempo/crawl-budget entrando a rutas protegidas (que de todas formas
+# solo le devolverían un redirect al login), y el sitemap le señala directamente la URL que importa.
+@app.route('/robots.txt')
+def robots_txt():
+    contenido = (
+        "User-agent: *\n"
+        "Allow: /login\n"
+        "Disallow: /\n"
+        "Sitemap: https://arkivapp.co/sitemap.xml\n"
+    )
+    return Response(contenido, mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    contenido = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        '  <url><loc>https://arkivapp.co/</loc></url>\n'
+        '</urlset>\n'
+    )
+    return Response(contenido, mimetype='application/xml')
+
 @app.route('/bienvenida')
 @login_required
 def bienvenida():
