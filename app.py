@@ -8605,7 +8605,7 @@ def enviar_correo_bienvenida(email_destino, usuario, nombre_completo, password_t
             f"Contraseña temporal: {password_temporal}\n\n"
             f"Por seguridad, te pedimos cambiar esta contraseña apenas inicies sesión por primera vez "
             f"(la puedes cambiar desde tu perfil, o con la opción '¿Olvidaste tu contraseña?' del login).\n\n"
-            f"Ingresa aquí: https://gestor-archivos-mossoft-1.onrender.com/login\n\n"
+            f"Ingresa aquí: https://arkivapp.co/login\n\n"
             "Si no esperabas este correo, contacta a tu administrador.\n"
             "---\nEquipo de Soporte - ARKIV System"
         )
