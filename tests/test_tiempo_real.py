@@ -118,12 +118,14 @@ def test_mensaje_directo_llega_al_destinatario_y_al_remitente_pero_no_a_un_terce
     r = client_admin.post(f'/chat/directo/{agente1}/enviar', data={'mensaje': 'Hola, ¿tienes un momento?'})
     assert r.status_code == 200
 
-    # Al destinatario: le llega el mensaje en vivo Y la notificación de campanita.
+    # Al destinatario: le llega el mensaje en vivo, pero SIN notificación de campanita — pedido
+    # por Tomás, para que los mensajes no saturen la campanita general, solo el ícono del chat
+    # (igual que ya pasaba con el Canal General, ver el test de arriba).
     recibidos_destinatario = _nombres_de_eventos(sio_agente1.get_received())
     assert 'chat_directo_mensaje' in recibidos_destinatario
-    assert 'notificacion_nueva' in recibidos_destinatario
+    assert 'notificacion_nueva' not in recibidos_destinatario
 
-    # A quien envía (otra pestaña/dispositivo suyo): también le llega el mensaje, pero SIN
+    # A quien envía (otra pestaña/dispositivo suyo): también le llega el mensaje, y tampoco
     # notificación de campanita para sí mismo.
     recibidos_remitente = _nombres_de_eventos(sio_admin.get_received())
     assert 'chat_directo_mensaje' in recibidos_remitente
@@ -133,7 +135,11 @@ def test_mensaje_directo_llega_al_destinatario_y_al_remitente_pero_no_a_un_terce
     assert _nombres_de_eventos(sio_agente2.get_received()) == []
 
 
-def test_notificacion_nueva_trae_mensaje_y_url_para_el_pop_up(app, crear_usuario):
+def test_mensaje_directo_no_crea_notificacion_de_campanita_solo_actualiza_el_icono_del_chat(app, crear_usuario):
+    """Pedido por Tomás: un mensaje directo no debe aparecer en la campanita general (ni en su
+    contador 'no_leidas' ni en su lista 'recientes') — solo debe reflejarse en 'chat_no_leidos',
+    el contador que pinta el ícono de Chat Interno. Verificado a nivel HTTP (no solo del socket),
+    consultando la misma ruta que usa la campanita de verdad."""
     admin1 = crear_usuario(usuario='admin_tr4', rol='admin', nombre='Admin Cuatro')
     agente1 = crear_usuario(usuario='agente_tr4', rol='agente', nombre='Agente Cuatro')
 
@@ -141,13 +147,11 @@ def test_notificacion_nueva_trae_mensaje_y_url_para_el_pop_up(app, crear_usuario
     _sesion_como(client_admin, app, admin1, 'admin')
     client_agente = app.app.test_client()
     _sesion_como(client_agente, app, agente1, 'agente')
-    sio_agente = app.socketio.test_client(app.app, flask_test_client=client_agente)
 
-    client_admin.post(f'/chat/directo/{agente1}/enviar', data={'mensaje': 'Mensaje para el pop-up'})
+    r = client_admin.post(f'/chat/directo/{agente1}/enviar', data={'mensaje': 'Mensaje que no debe saturar la campanita'})
+    assert r.status_code == 200
 
-    recibidos = sio_agente.get_received()
-    evento = next(ev for ev in recibidos if ev['name'] == 'notificacion_nueva')
-    datos = evento['args'][0]
-    assert 'Mensaje para el pop-up' in datos['mensaje']
-    assert datos['url'] == f'/chat?con={admin1}'
-    assert datos['tipo'] == 'chat'
+    data = client_agente.get('/notificaciones/resumen').get_json()
+    assert data['no_leidas'] == 0
+    assert data['recientes'] == []
+    assert data['chat_no_leidos'] == 1

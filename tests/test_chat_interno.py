@@ -147,7 +147,10 @@ def test_mensaje_directo_se_marca_leido_al_abrir_la_conversacion(client, app, cr
     conn.close()
 
 
-def test_mensaje_directo_crea_notificacion_de_campanita_para_el_destinatario(client, app, crear_usuario):
+def test_mensaje_directo_no_crea_notificacion_de_campanita_para_el_destinatario(client, app, crear_usuario):
+    """Pedido por Tomás: los mensajes de chat no deben saturar la campanita general — solo el
+    ícono de Chat Interno (ver chat_no_leidos en notificaciones_resumen). Antes esto creaba una
+    fila en 'notificaciones'; ahora no debe crear ninguna."""
     admin1 = crear_usuario(usuario='admin_chat7', rol='admin', nombre='Admin Siete')
     agente1 = crear_usuario(usuario='agente_chat7', rol='agente')
 
@@ -159,11 +162,7 @@ def test_mensaje_directo_crea_notificacion_de_campanita_para_el_destinatario(cli
     cur.execute("SELECT mensaje, url, tipo FROM notificaciones WHERE usuario = ?", (agente1,))
     fila = cur.fetchone()
     conn.close()
-    assert fila is not None
-    assert 'Admin Siete' in fila[0]
-    assert 'Revisa el ticket 123' in fila[0]
-    assert fila[1] == f'/chat?con={admin1}'
-    assert fila[2] == 'chat'
+    assert fila is None
 
 
 def test_no_se_puede_chatear_directo_con_un_usuario_estandar(client, app, crear_usuario):
