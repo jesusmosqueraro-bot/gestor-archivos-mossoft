@@ -53,6 +53,16 @@
                 <div class="px-4 py-3 border-b border-slate-800/80">
                     <h2 class="text-xs font-bold text-white uppercase tracking-wider">Conversaciones</h2>
                 </div>
+                <!-- 🔎 Buscar por nombre o usuario (pedido por Tomás): filtra la lista de abajo al
+                     momento, sin recargar nada — ver filtrarContactosChat() en chat.js. -->
+                <div class="px-3 py-2.5 border-b border-slate-800/60">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none"></i>
+                        <input type="text" id="buscar-chat-contactos" oninput="filtrarContactosChat()"
+                               placeholder="Buscar por nombre o usuario..." autocomplete="off"
+                               class="w-full pl-8 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
+                    </div>
+                </div>
                 <button type="button" id="item-canal-general" onclick="abrirCanalGeneral()"
                         class="text-left px-4 py-3 flex items-center gap-3 border-b border-slate-800/60 hover:bg-slate-800/60 transition-colors bg-sky-500/10">
                     <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm flex-shrink-0">
@@ -66,7 +76,7 @@
                 </button>
                 <div id="lista-contactos-chat" class="flex-1 overflow-y-auto divide-y divide-slate-800/50">
                     {% for c in contactos %}
-                    <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})' data-usuario="{{ c.usuario }}"
+                    <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})' data-usuario="{{ c.usuario }}" data-nombre="{{ c.nombre }}"
                             class="item-contacto-chat text-left w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-800/60 transition-colors">
                         <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
                             {{ c.nombre[:1] | upper }}
@@ -80,6 +90,7 @@
                     {% else %}
                     <p class="text-slate-500 text-center text-[11px] py-6 px-4">No hay más admin/agente activos para chatear.</p>
                     {% endfor %}
+                    <p id="mensaje-sin-resultados-chat" class="hidden text-slate-500 text-center text-[11px] py-6 px-4">Sin resultados para tu búsqueda.</p>
                 </div>
             </div>
 
