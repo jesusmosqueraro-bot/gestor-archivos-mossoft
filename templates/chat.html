@@ -112,13 +112,32 @@
                     <p class="text-slate-500 text-center text-[11px] py-6">Cargando...</p>
                 </div>
                 <div id="error-chat" class="hidden px-5 py-2 text-[11px] text-rose-400 bg-rose-500/10 border-t border-rose-500/20"></div>
-                <form id="form-enviar-chat" onsubmit="return enviarMensajeChat(event)" class="border-t border-slate-800/80 p-3 flex items-end gap-2">
-                    <textarea id="input-mensaje-chat" rows="1" maxlength="2000" placeholder="Escribe un mensaje... (Enter para enviar, Shift+Enter para salto de línea)"
-                              class="flex-1 resize-none px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
-                              onkeydown="return _teclaMensajeChat(event)"></textarea>
-                    <button type="submit" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all flex-shrink-0">
-                        <i class="fa-solid fa-paper-plane"></i>
-                    </button>
+                <form id="form-enviar-chat" onsubmit="return enviarMensajeChat(event)" class="border-t border-slate-800/80 p-3">
+                    <!-- 📎 Adjuntos (pedido por Tomás): clip para elegir archivo, o pegar (Ctrl+V) una
+                         imagen copiada directo en el cuadro de texto — ver _seleccionarAdjuntoChat/
+                         _pegarEnMensajeChat en chat.js. Un mensaje puede llevar texto, adjunto, o ambos. -->
+                    <div id="previsualizacion-adjunto-chat" class="hidden mb-2 flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-300">
+                        <i class="fa-solid fa-paperclip text-sky-400"></i>
+                        <span id="nombre-adjunto-chat" class="flex-1 min-w-0 truncate"></span>
+                        <button type="button" onclick="_quitarAdjuntoChat()" title="Quitar adjunto" class="text-slate-500 hover:text-rose-400 px-1">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <div class="flex items-end gap-2">
+                        <input type="file" id="input-adjunto-chat" class="hidden"
+                               accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.docx,.xlsx,.pptx,.mp4,.mov,.webm,.avi,.zip,.rar,.7z,.tar,.gz"
+                               onchange="_seleccionarAdjuntoChat(event)">
+                        <button type="button" onclick="document.getElementById('input-adjunto-chat').click()" title="Adjuntar archivo"
+                                class="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl transition-all flex-shrink-0">
+                            <i class="fa-solid fa-paperclip"></i>
+                        </button>
+                        <textarea id="input-mensaje-chat" rows="1" maxlength="2000" placeholder="Escribe un mensaje... (Enter para enviar, Shift+Enter para salto de línea)"
+                                  class="flex-1 resize-none px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                                  onkeydown="return _teclaMensajeChat(event)" onpaste="_pegarEnMensajeChat(event)"></textarea>
+                        <button type="submit" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all flex-shrink-0">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>
