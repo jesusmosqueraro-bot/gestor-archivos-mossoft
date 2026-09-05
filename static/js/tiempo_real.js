@@ -36,6 +36,9 @@
             cargarMensajesChat(false);
         }
         if (typeof cargarContactosChat === 'function') cargarContactosChat();
+        // 🪟 Mismo aviso, para quien tenga abierto el widget flotante (chat_widget.js) en vez de
+        // (o además de) la página /chat completa — ver ese archivo para el detalle.
+        if (typeof _widgetRefrescarCanal === 'function') _widgetRefrescarCanal();
     });
 
     socket.on('chat_directo_mensaje', function (datos) {
@@ -46,6 +49,7 @@
             cargarMensajesChat(false);
         }
         if (typeof cargarContactosChat === 'function') cargarContactosChat();
+        if (typeof _widgetRefrescarDirecto === 'function') _widgetRefrescarDirecto(datos);
     });
 
     // 🍞 Pop-up (toast) simple y apilable, esquina inferior IZQUIERDA — la derecha ya tiene el
