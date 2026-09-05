@@ -27,6 +27,10 @@
     var _widgetContactos = [];
     var _widgetCanalNoLeidos = 0;
     var _widgetEnviando = false;
+    // 📎 Mismo adjunto pendiente que chat.js (ver ese archivo) — un archivo elegido con el clip
+    // o pegado desde el portapapeles, listo para viajar junto con el próximo mensaje.
+    var _widgetAdjuntoSeleccionado = null;
+    var TAMANO_MAXIMO_ADJUNTO_WIDGET_MB = 25;
 
     function _csrfTokenWidget() {
         var w = document.getElementById('wrapper-notificaciones'); // ya vive en toda página con campanita
@@ -62,6 +66,23 @@
         return '/chat/canal/enviar';
     }
 
+    // 📎 Mismo patrón que chat.js: miniatura clicable si el adjunto es imagen, tarjeta genérica
+    // con el nombre si es cualquier otro archivo permitido.
+    function _widgetAdjuntoHtml(m) {
+        if (!m.adjunto_url) return '';
+        if (m.adjunto_es_imagen) {
+            return '<a href="' + _escapeAtributoWidget(m.adjunto_url) + '" target="_blank" rel="noopener" class="block mt-1.5">' +
+                '<img src="' + _escapeAtributoWidget(m.adjunto_url) + '" alt="' + _escapeAtributoWidget(m.adjunto_nombre || 'imagen') + '" ' +
+                'class="max-w-[160px] max-h-[160px] rounded-lg border border-slate-700/60 object-cover">' +
+                '</a>';
+        }
+        return '<a href="' + _escapeAtributoWidget(m.adjunto_url) + '" target="_blank" rel="noopener" ' +
+            'class="flex items-center gap-1.5 mt-1.5 bg-slate-900/40 border border-slate-700/60 rounded-lg px-2 py-1.5 text-[10px]">' +
+            '<i class="fa-solid fa-file-lines"></i>' +
+            '<span class="max-w-[8rem] truncate">' + _escapeHtmlWidget(m.adjunto_nombre || 'Archivo') + '</span>' +
+            '<i class="fa-solid fa-arrow-up-right-from-square text-[8px] opacity-70"></i></a>';
+    }
+
     function _widgetBurbujaMensaje(m) {
         var base = 'w-fit max-w-[80%] px-3 py-1.5 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap break-words';
         var clasePropia = 'ml-auto bg-sky-600 text-white rounded-br-sm';
@@ -69,8 +90,9 @@
         var nombreLinea = (!m.es_mio && m.remitente_nombre)
             ? '<div class="text-[9px] font-bold text-sky-400 mb-0.5">' + _escapeHtmlWidget(m.remitente_nombre) + '</div>'
             : '';
+        var textoMensaje = m.mensaje ? _escapeHtmlWidget(m.mensaje) : '';
         return '<div class="' + base + ' ' + (m.es_mio ? clasePropia : claseAjena) + '">' +
-            nombreLinea + _escapeHtmlWidget(m.mensaje) +
+            nombreLinea + textoMensaje + _widgetAdjuntoHtml(m) +
             '<div class="text-[8px] mt-1 ' + (m.es_mio ? 'text-sky-100/70' : 'text-slate-500') + ' font-mono">' +
             _escapeHtmlWidget(m.fecha) + '</div></div>';
     }
@@ -116,10 +138,23 @@
                 '</div>' +
                 '<div id="widget-lista-mensajes" class="flex-1 overflow-y-auto px-3 py-3 space-y-2"></div>' +
                 '<div id="widget-error-chat" class="hidden px-3 py-1.5 text-[10px] text-rose-400 bg-rose-500/10 border-t border-rose-500/20"></div>' +
-                '<form id="widget-form-enviar" class="border-t border-slate-800 p-2 flex items-end gap-1.5 flex-shrink-0">' +
-                    '<textarea id="widget-input-mensaje" rows="1" maxlength="2000" placeholder="Escribe un mensaje..." ' +
-                        'class="flex-1 resize-none px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"></textarea>' +
-                    '<button type="submit" class="w-8 h-8 flex-shrink-0 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded-xl flex items-center justify-center"><i class="fa-solid fa-paper-plane"></i></button>' +
+                '<form id="widget-form-enviar" class="border-t border-slate-800 p-2 flex-shrink-0">' +
+                    // 📎 Mismo patrón que chat.html: clip + previsualización + pegar imagen (ver
+                    // _widgetSeleccionarAdjunto/_widgetPegarEnMensaje más abajo).
+                    '<div id="widget-previsualizacion-adjunto" class="hidden mb-1.5 flex items-center gap-1.5 bg-slate-800/70 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">' +
+                        '<i class="fa-solid fa-paperclip text-sky-400"></i>' +
+                        '<span id="widget-nombre-adjunto" class="flex-1 min-w-0 truncate"></span>' +
+                        '<button type="button" id="widget-quitar-adjunto" title="Quitar adjunto" class="text-slate-500 hover:text-rose-400 px-1"><i class="fa-solid fa-xmark"></i></button>' +
+                    '</div>' +
+                    '<div class="flex items-end gap-1.5">' +
+                        '<input type="file" id="widget-input-adjunto" class="hidden" ' +
+                            'accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.docx,.xlsx,.pptx,.mp4,.mov,.webm,.avi,.zip,.rar,.7z,.tar,.gz">' +
+                        '<button type="button" id="widget-boton-adjuntar" title="Adjuntar archivo" ' +
+                            'class="w-8 h-8 flex-shrink-0 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl flex items-center justify-center"><i class="fa-solid fa-paperclip"></i></button>' +
+                        '<textarea id="widget-input-mensaje" rows="1" maxlength="2000" placeholder="Escribe un mensaje..." ' +
+                            'class="flex-1 resize-none px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"></textarea>' +
+                        '<button type="submit" class="w-8 h-8 flex-shrink-0 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded-xl flex items-center justify-center"><i class="fa-solid fa-paper-plane"></i></button>' +
+                    '</div>' +
                 '</form>' +
             '</div>';
         document.body.appendChild(panel);
@@ -141,9 +176,15 @@
         document.getElementById('widget-boton-cerrar-lista').addEventListener('click', cerrarChatFlotante);
         document.getElementById('widget-boton-cerrar-conversacion').addEventListener('click', cerrarChatFlotante);
         document.getElementById('widget-form-enviar').addEventListener('submit', _widgetEnviarMensaje);
+        document.getElementById('widget-boton-adjuntar').addEventListener('click', function () {
+            document.getElementById('widget-input-adjunto').click();
+        });
+        document.getElementById('widget-input-adjunto').addEventListener('change', _widgetSeleccionarAdjunto);
+        document.getElementById('widget-quitar-adjunto').addEventListener('click', _widgetQuitarAdjunto);
 
         var input = document.getElementById('widget-input-mensaje');
         input.addEventListener('keydown', _widgetTeclaMensaje);
+        input.addEventListener('paste', _widgetPegarEnMensaje);
         input.addEventListener('input', function () {
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 100) + 'px';
@@ -228,6 +269,7 @@
         var errorDiv = document.getElementById('widget-error-chat');
         if (errorDiv) errorDiv.classList.add('hidden');
         _widgetIdsRenderizados = {};
+        _widgetQuitarAdjunto(); // un adjunto pendiente no debe viajar a la conversación nueva
     }
 
     function _widgetAbrirCanalGeneral() {
@@ -298,15 +340,19 @@
         if (_widgetEnviando || _widgetChatActual.tipo === null) return false;
         var input = document.getElementById('widget-input-mensaje');
         var mensaje = (input.value || '').trim();
-        if (!mensaje) return false;
+        if (!mensaje && !_widgetAdjuntoSeleccionado) return false;
         _widgetEnviando = true;
         var errorDiv = document.getElementById('widget-error-chat');
         errorDiv.classList.add('hidden');
 
+        var datosFormulario = new FormData();
+        datosFormulario.append('mensaje', mensaje);
+        if (_widgetAdjuntoSeleccionado) datosFormulario.append('adjunto', _widgetAdjuntoSeleccionado);
+
         fetch(_widgetUrlEnviarActual(), {
             method: 'POST',
-            headers: { 'X-CSRFToken': _csrfTokenWidget(), 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'mensaje=' + encodeURIComponent(mensaje)
+            headers: { 'X-CSRFToken': _csrfTokenWidget() },
+            body: datosFormulario
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -314,6 +360,7 @@
                 if (data && data.success) {
                     input.value = '';
                     input.style.height = 'auto';
+                    _widgetQuitarAdjunto();
                     _widgetCargarMensajes(false);
                     _widgetCargarContactos();
                 } else {
@@ -327,6 +374,53 @@
                 errorDiv.classList.remove('hidden');
             });
         return false;
+    }
+
+    // 📎 Elegir un archivo con el clip.
+    function _widgetSeleccionarAdjunto(evento) {
+        var archivo = evento.target.files && evento.target.files[0];
+        if (archivo) _widgetFijarAdjunto(archivo);
+    }
+
+    // 📋 Pegar una imagen copiada directo en el cuadro de texto del widget — mismo comportamiento
+    // que chat.js (ver _pegarEnMensajeChat ahí para el detalle).
+    function _widgetPegarEnMensaje(evento) {
+        var items = (evento.clipboardData && evento.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.indexOf('image/') === 0) {
+                var archivo = items[i].getAsFile();
+                if (archivo) {
+                    evento.preventDefault();
+                    _widgetFijarAdjunto(archivo);
+                }
+                return;
+            }
+        }
+    }
+
+    function _widgetFijarAdjunto(archivo) {
+        var errorDiv = document.getElementById('widget-error-chat');
+        if (archivo.size > TAMANO_MAXIMO_ADJUNTO_WIDGET_MB * 1024 * 1024) {
+            if (errorDiv) {
+                errorDiv.textContent = 'El archivo no puede superar ' + TAMANO_MAXIMO_ADJUNTO_WIDGET_MB + ' MB.';
+                errorDiv.classList.remove('hidden');
+            }
+            return;
+        }
+        if (errorDiv) errorDiv.classList.add('hidden');
+        _widgetAdjuntoSeleccionado = archivo;
+        var previsualizacion = document.getElementById('widget-previsualizacion-adjunto');
+        var nombreSpan = document.getElementById('widget-nombre-adjunto');
+        if (nombreSpan) nombreSpan.textContent = archivo.name || 'Archivo adjunto';
+        if (previsualizacion) previsualizacion.classList.remove('hidden');
+    }
+
+    function _widgetQuitarAdjunto() {
+        _widgetAdjuntoSeleccionado = null;
+        var previsualizacion = document.getElementById('widget-previsualizacion-adjunto');
+        if (previsualizacion) previsualizacion.classList.add('hidden');
+        var inputArchivo = document.getElementById('widget-input-adjunto');
+        if (inputArchivo) inputArchivo.value = '';
     }
 
     function _widgetAsegurarSondeoMensajes() {

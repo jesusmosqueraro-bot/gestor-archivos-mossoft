@@ -19,6 +19,13 @@ var _chatUltimoId = 0;
 // los dos caminos llegaron, para nunca pintar el mismo mensaje dos veces.
 var _idsMensajesRenderizadosChat = {};
 
+// 📎 Adjunto multimedia (pedido por Tomás): imagen o archivo elegido con el clip, o pegado
+// directo desde el portapapeles (Ctrl+V de una captura de pantalla, por ejemplo). Un solo
+// adjunto pendiente a la vez, igual que WhatsApp/Slack — se manda junto con el mensaje (o
+// solo, si no se escribió texto) y se limpia apenas se envía o se cambia de conversación.
+var _adjuntoChatSeleccionado = null;
+var TAMANO_MAXIMO_ADJUNTO_CHAT_MB = 25;
+
 function _wrapperChat() {
     return document.getElementById('wrapper-chat');
 }
@@ -32,6 +39,13 @@ function _escapeHtmlChat(texto) {
     var div = document.createElement('div');
     div.textContent = texto || '';
     return div.innerHTML;
+}
+
+// 🛡️ _escapeHtmlChat no basta para meter texto dinámico DENTRO de un atributo entre comillas
+// dobles (no escapa " ni ') — hace falta para el nombre del adjunto en alt="..." (el nombre
+// original del archivo lo elige quien lo sube, no es texto de confianza).
+function _escapeAtributoChat(texto) {
+    return _escapeHtmlChat(texto).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function _urlMensajesActual() {
@@ -85,6 +99,7 @@ function _limpiarMensajesChat() {
     var errorDiv = document.getElementById('error-chat');
     if (errorDiv) errorDiv.classList.add('hidden');
     _idsMensajesRenderizadosChat = {}; // nueva conversación: ningún mensaje pintado todavía
+    _quitarAdjuntoChat(); // un adjunto pendiente no debe viajar a la conversación nueva
 }
 
 function _mostrarPanelMensajesMovilChat() {
@@ -108,6 +123,24 @@ function _volverListaChatMovil() {
     }
 }
 
+// 📎 Pinta el adjunto de un mensaje (si trae uno): miniatura clicable si es imagen, o una
+// tarjeta genérica con el nombre del archivo — mismo patrón que ya usan los adjuntos de
+// tickets (ver templates/ticket_detalle.html).
+function _adjuntoHtmlChat(m) {
+    if (!m.adjunto_url) return '';
+    if (m.adjunto_es_imagen) {
+        return '<a href="' + _escapeAtributoChat(m.adjunto_url) + '" target="_blank" rel="noopener" class="block mt-1.5">' +
+            '<img src="' + _escapeAtributoChat(m.adjunto_url) + '" alt="' + _escapeAtributoChat(m.adjunto_nombre || 'imagen') + '" ' +
+            'class="max-w-[220px] max-h-[220px] rounded-xl border border-slate-700/60 object-cover">' +
+            '</a>';
+    }
+    return '<a href="' + _escapeAtributoChat(m.adjunto_url) + '" target="_blank" rel="noopener" ' +
+        'class="flex items-center gap-2 mt-1.5 bg-slate-900/40 border border-slate-700/60 rounded-xl px-3 py-2 text-[11px]">' +
+        '<i class="fa-solid fa-file-lines"></i>' +
+        '<span class="max-w-[10rem] truncate">' + _escapeHtmlChat(m.adjunto_nombre || 'Archivo') + '</span>' +
+        '<i class="fa-solid fa-arrow-up-right-from-square text-[9px] opacity-70"></i></a>';
+}
+
 function _burbujaMensajeChat(m) {
     // 🐛 w-fit es necesario para que ml-auto funcione: un <div> de bloque normal ocupa todo el
     // ancho disponible (margin-left:auto no tendría "espacio libre" que empujar), así que sin
@@ -118,8 +151,10 @@ function _burbujaMensajeChat(m) {
     var nombreLinea = (!m.es_mio && m.remitente_nombre)
         ? '<div class="text-[10px] font-bold text-sky-400 mb-0.5">' + _escapeHtmlChat(m.remitente_nombre) + '</div>'
         : '';
+    // Un mensaje puede traer solo adjunto (sin texto) — nunca los dos vacíos, el servidor no lo permite.
+    var textoMensaje = m.mensaje ? _escapeHtmlChat(m.mensaje) : '';
     return '<div class="' + base + ' ' + (m.es_mio ? clasePropia : claseAjena) + '">' +
-        nombreLinea + _escapeHtmlChat(m.mensaje) +
+        nombreLinea + textoMensaje + _adjuntoHtmlChat(m) +
         '<div class="text-[9px] mt-1 ' + (m.es_mio ? 'text-sky-100/70' : 'text-slate-500') + ' font-mono">' +
         _escapeHtmlChat(m.fecha) + '</div></div>';
 }
@@ -176,15 +211,21 @@ function enviarMensajeChat(evento) {
     if (_chatEnviando) return false;
     var input = document.getElementById('input-mensaje-chat');
     var mensaje = (input.value || '').trim();
-    if (!mensaje) return false;
+    if (!mensaje && !_adjuntoChatSeleccionado) return false; // ni texto ni adjunto: nada que mandar
     _chatEnviando = true;
     var errorDiv = document.getElementById('error-chat');
     errorDiv.classList.add('hidden');
 
+    // FormData (no urlencoded) desde que se puede mandar un archivo — el navegador arma el
+    // 'Content-Type: multipart/form-data' con su boundary solo, no hay que ponerlo a mano.
+    var datosFormulario = new FormData();
+    datosFormulario.append('mensaje', mensaje);
+    if (_adjuntoChatSeleccionado) datosFormulario.append('adjunto', _adjuntoChatSeleccionado);
+
     fetch(_urlEnviarActual(), {
         method: 'POST',
-        headers: { 'X-CSRFToken': _csrfTokenChat(), 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'mensaje=' + encodeURIComponent(mensaje)
+        headers: { 'X-CSRFToken': _csrfTokenChat() },
+        body: datosFormulario
     })
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -192,6 +233,7 @@ function enviarMensajeChat(evento) {
             if (data && data.success) {
                 input.value = '';
                 input.style.height = 'auto';
+                _quitarAdjuntoChat();
                 cargarMensajesChat(false);
                 cargarContactosChat();
             } else {
@@ -205,6 +247,55 @@ function enviarMensajeChat(evento) {
             errorDiv.classList.remove('hidden');
         });
     return false;
+}
+
+// 📎 Elegir un archivo con el clip (input[type=file] oculto, ver chat.html).
+function _seleccionarAdjuntoChat(evento) {
+    var archivo = evento.target.files && evento.target.files[0];
+    if (archivo) _fijarAdjuntoChat(archivo);
+}
+
+// 📋 Pegar una imagen copiada (captura de pantalla, "Copiar imagen" de otra página, etc.)
+// directo en el cuadro de texto — pedido por Tomás. Si el portapapeles trae una imagen se
+// adjunta igual que con el clip; si lo que se pega es texto normal, se deja que el navegador
+// lo pegue como siempre (no se cancela el evento en ese caso).
+function _pegarEnMensajeChat(evento) {
+    var items = (evento.clipboardData && evento.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf('image/') === 0) {
+            var archivo = items[i].getAsFile();
+            if (archivo) {
+                evento.preventDefault();
+                _fijarAdjuntoChat(archivo);
+            }
+            return;
+        }
+    }
+}
+
+function _fijarAdjuntoChat(archivo) {
+    var errorDiv = document.getElementById('error-chat');
+    if (archivo.size > TAMANO_MAXIMO_ADJUNTO_CHAT_MB * 1024 * 1024) {
+        if (errorDiv) {
+            errorDiv.textContent = 'El archivo no puede superar ' + TAMANO_MAXIMO_ADJUNTO_CHAT_MB + ' MB.';
+            errorDiv.classList.remove('hidden');
+        }
+        return;
+    }
+    if (errorDiv) errorDiv.classList.add('hidden');
+    _adjuntoChatSeleccionado = archivo;
+    var previsualizacion = document.getElementById('previsualizacion-adjunto-chat');
+    var nombreSpan = document.getElementById('nombre-adjunto-chat');
+    if (nombreSpan) nombreSpan.textContent = archivo.name || 'Archivo adjunto';
+    if (previsualizacion) previsualizacion.classList.remove('hidden');
+}
+
+function _quitarAdjuntoChat() {
+    _adjuntoChatSeleccionado = null;
+    var previsualizacion = document.getElementById('previsualizacion-adjunto-chat');
+    if (previsualizacion) previsualizacion.classList.add('hidden');
+    var inputArchivo = document.getElementById('input-adjunto-chat');
+    if (inputArchivo) inputArchivo.value = '';
 }
 
 // 🔎 Buscador de conversaciones (pedido por Tomás): filtra en el momento la barra lateral por
