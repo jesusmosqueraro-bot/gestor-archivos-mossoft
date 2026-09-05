@@ -83,10 +83,44 @@
         </div>
         {% endif %}
 
+        <!-- FRECUENCIA DEL RESPALDO AUTOMÁTICO -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+            <div class="flex items-center justify-between flex-wrap gap-x-4 gap-y-1 mb-1">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                    <i class="fa-solid fa-clock text-indigo-400"></i> Frecuencia del respaldo automático
+                </h3>
+                {% if proximo_respaldo_automatico %}
+                <span class="text-[10px] text-slate-400">Próximo respaldo estimado: <span class="font-mono text-slate-300">{{ proximo_respaldo_automatico }}</span></span>
+                {% endif %}
+            </div>
+            <p class="text-[11px] text-slate-500 mb-4">Arkiv revisa esta configuración cada 5 minutos, así que la hora exacta puede variar por unos minutos.</p>
+            <form method="POST" action="/admin/respaldos/configurar" class="flex flex-wrap items-end gap-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Cada</label>
+                    <input type="number" name="valor" min="1" max="{{ 30 if config_respaldo.tipo == 'dias' else 168 }}" value="{{ config_respaldo.valor }}" id="input-valor-respaldo" class="w-20 text-xs p-2.5 border border-slate-600 rounded-xl bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unidad</label>
+                    <select name="tipo" id="select-tipo-respaldo" class="text-xs p-2.5 border border-slate-600 rounded-xl bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="dias" {% if config_respaldo.tipo == 'dias' %}selected{% endif %}>Día(s)</option>
+                        <option value="horas" {% if config_respaldo.tipo == 'horas' %}selected{% endif %}>Hora(s)</option>
+                    </select>
+                </div>
+                <div id="campo-hora-respaldo" {% if config_respaldo.tipo != 'dias' %}style="display:none;"{% endif %}>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">A las</label>
+                    <input type="time" name="hora" value="{{ config_respaldo.hora }}" class="text-xs p-2.5 border border-slate-600 rounded-xl bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-indigo-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar
+                </button>
+            </form>
+        </div>
+
         <!-- EXPLICACIÓN -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 text-xs text-slate-400 leading-relaxed space-y-1.5">
             <p><i class="fa-solid fa-circle-info text-indigo-400 mr-1.5"></i> Cada respaldo es un archivo <span class="font-mono text-slate-300">.json</span> con todas las tablas de la base de datos (usuarios, tickets, comunicados, credenciales, etc.). Los archivos adjuntos (imágenes, PDFs) NO se incluyen aquí: esos ya viven aparte, en Cloudinary.</p>
-            <p><i class="fa-solid fa-clock-rotate-left text-indigo-400 mr-1.5"></i> Además del botón manual, Arkiv genera automáticamente un respaldo diario y lo guarda aquí mismo. Los automáticos con más de {{ 30 }} días se eliminan solos; los manuales se conservan hasta que los borres tú.</p>
+            <p><i class="fa-solid fa-clock-rotate-left text-indigo-400 mr-1.5"></i> Además del botón manual, Arkiv genera automáticamente un respaldo con la frecuencia configurada arriba y lo guarda aquí mismo. Los automáticos con más de {{ 30 }} días se eliminan solos; los manuales se conservan hasta que los borres tú.</p>
             <p><i class="fa-solid fa-cloud-arrow-up text-indigo-400 mr-1.5"></i> Cada vez que se genera un respaldo (manual o automático), Arkiv también sube una copia comprimida a Cloudinary — una copia totalmente independiente de Render, por si algo le pasa a la cuenta o al disco — y avisa por correo a <span class="font-mono text-slate-300">{{ respaldo_email_destino }}</span> con el enlace. Esa subida toma unos segundos después de generarse el respaldo; si la columna "Copia externa" de un respaldo muy reciente todavía dice "Pendiente", espera un momento y recarga la página.</p>
         </div>
 
@@ -170,5 +204,26 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+
+    <!-- 🕐 Formulario de frecuencia del respaldo automático: el campo "A las" solo tiene
+         sentido cuando la unidad es "Día(s)" (con "Hora(s)" el respaldo corre cada N horas,
+         sin una hora fija), y el tope del campo "Cada" cambia según la unidad (30 días máx.,
+         168 horas máx. = 1 semana) — ver /admin/respaldos/configurar en app.py. -->
+    <script>
+        (function () {
+            var select = document.getElementById('select-tipo-respaldo');
+            var campoHora = document.getElementById('campo-hora-respaldo');
+            var inputValor = document.getElementById('input-valor-respaldo');
+            if (!select || !campoHora || !inputValor) return;
+            select.addEventListener('change', function () {
+                var esDias = select.value === 'dias';
+                campoHora.style.display = esDias ? '' : 'none';
+                inputValor.max = esDias ? 30 : 168;
+                if (parseInt(inputValor.value, 10) > parseInt(inputValor.max, 10)) {
+                    inputValor.value = inputValor.max;
+                }
+            });
+        })();
+    </script>
 </body>
 </html>
