@@ -126,23 +126,27 @@
         </div>
 
         <!-- TARJETAS KPI -->
+        <!-- 🖱️ Pedido por Tomás: estas 4 tarjetas (Total/Vigentes/Próx. a vencer/Vencidos) y las
+             gráficas de más abajo eran puramente decorativas — ahora son clicables y llevan
+             directo al listado de Tickets ya filtrado por lo que representan (mismo query param
+             'cumplimiento' que usan las pestañas de tickets.html, ver _base_qs/url_for ahí). -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
+            <a href="{{ url_for('ver_tickets') }}" title="Ver todas las solicitudes activas" class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4 hover:border-blue-400/60 hover:bg-slate-800 transition-all cursor-pointer">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total Solicitudes</p>
                 <p class="text-2xl font-extrabold text-white">{{ total }}</p>
-            </div>
-            <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
+            </a>
+            <a href="{{ url_for('ver_tickets', cumplimiento='vigente') }}" title="Ver solicitudes vigentes" class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4 hover:border-cyan-400/60 hover:bg-slate-800 transition-all cursor-pointer">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vigentes</p>
                 <p class="text-2xl font-extrabold text-cyan-400">{{ por_cumplimiento.vigente }}</p>
-            </div>
-            <div class="bg-slate-800/60 border border-orange-500/30 rounded-2xl p-4">
+            </a>
+            <a href="{{ url_for('ver_tickets', cumplimiento='proximo_a_vencer') }}" title="Ver solicitudes próximas a vencer" class="bg-slate-800/60 border border-orange-500/30 rounded-2xl p-4 hover:border-orange-400/60 hover:bg-slate-800 transition-all cursor-pointer">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Próx. a vencer</p>
                 <p class="text-2xl font-extrabold text-orange-400">{{ por_cumplimiento.proximo_a_vencer }}</p>
-            </div>
-            <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
+            </a>
+            <a href="{{ url_for('ver_tickets', cumplimiento='vencido') }}" title="Ver solicitudes vencidas" class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4 hover:border-rose-400/60 hover:bg-slate-800 transition-all cursor-pointer">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Vencidos</p>
                 <p class="text-2xl font-extrabold text-rose-400">{{ por_cumplimiento.vencido }}</p>
-            </div>
+            </a>
             <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Satisfacción promedio</p>
                 {% if promedio_calificacion %}
@@ -182,31 +186,31 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Cumplimiento de SLA</h3>
-                <div class="h-52"><canvas id="chart-cumplimiento"></canvas></div>
+                <div class="h-52"><canvas id="chart-cumplimiento" title="Clic en un segmento para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por estado</h3>
-                <div class="h-52"><canvas id="chart-estado"></canvas></div>
+                <div class="h-52"><canvas id="chart-estado" title="Clic en una barra para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por prioridad</h3>
-                <div class="h-52"><canvas id="chart-prioridad"></canvas></div>
+                <div class="h-52"><canvas id="chart-prioridad" title="Clic en una barra para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por categoría</h3>
-                <div class="h-52"><canvas id="chart-categoria"></canvas></div>
+                <div class="h-52"><canvas id="chart-categoria" title="Clic en una barra para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por área</h3>
-                <div class="h-52"><canvas id="chart-area"></canvas></div>
+                <div class="h-52"><canvas id="chart-area" title="Clic en una barra para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por sede</h3>
-                <div class="h-52"><canvas id="chart-sede"></canvas></div>
+                <div class="h-52"><canvas id="chart-sede" title="Clic en una barra para ver esas solicitudes"></canvas></div>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
                 <h3 class="text-sm font-bold text-white mb-3">Por tipo</h3>
-                <div class="h-52"><canvas id="chart-tipo"></canvas></div>
+                <div class="h-52"><canvas id="chart-tipo" title="Clic en un segmento para ver esas solicitudes"></canvas></div>
             </div>
         </div>
 
@@ -258,21 +262,50 @@
         Chart.defaults.color = '#94a3b8';
         Chart.defaults.font.family = "'Inter', sans-serif";
 
-        function donut(id, labels, data, colors) {
+        // 🖱️ Pedido por Tomás: al hacer clic en un segmento de dona o en una barra, ir directo al
+        // listado de Tickets ya filtrado por lo que ese segmento representa. 'paramName' es el
+        // query param que entiende /tickets (ver ver_tickets() en app.py: estado, prioridad,
+        // categoria, area, sede, tipo, cumplimiento); 'valoresReales' son los valores exactos que
+        // ese filtro espera cuando no coinciden con la etiqueta que se muestra en el gráfico (p.
+        // ej. "Próx. a vencer" en pantalla vs. "proximo_a_vencer" que espera el filtro) — si no se
+        // pasa, se usan las mismas etiquetas ('labels') tal cual.
+        function irATickets(paramName, valor) {
+            if (!paramName || !valor) return;
+            window.location.href = '/tickets?' + paramName + '=' + encodeURIComponent(valor);
+        }
+        function _clicGrafico(paramName, labels, valoresReales) {
+            return function(evt, elements) {
+                if (!elements.length) return;
+                const etiquetas = valoresReales || labels;
+                irATickets(paramName, etiquetas[elements[0].index]);
+            };
+        }
+        function _hoverGrafico(evt, elements) {
+            evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        }
+
+        function donut(id, labels, data, colors, paramName, valoresReales) {
             new Chart(document.getElementById(id), {
                 type: 'doughnut',
                 data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
-                options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, maintainAspectRatio: false }
+                options: {
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+                    maintainAspectRatio: false,
+                    onClick: paramName ? _clicGrafico(paramName, labels, valoresReales) : undefined,
+                    onHover: paramName ? _hoverGrafico : undefined
+                }
             });
         }
-        function barra(id, labels, data, color) {
+        function barra(id, labels, data, color, paramName, valoresReales) {
             new Chart(document.getElementById(id), {
                 type: 'bar',
                 data: { labels: labels, datasets: [{ data: data, backgroundColor: color, borderRadius: 6 }] },
                 options: {
                     plugins: { legend: { display: false } },
                     maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } }
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } },
+                    onClick: paramName ? _clicGrafico(paramName, labels, valoresReales) : undefined,
+                    onHover: paramName ? _hoverGrafico : undefined
                 }
             });
         }
@@ -285,14 +318,15 @@
         donut('chart-cumplimiento',
             ['Vigentes', 'Próx. a vencer', 'Vencidos', 'Cerrados'],
             [{{ por_cumplimiento.vigente }}, {{ por_cumplimiento.proximo_a_vencer }}, {{ por_cumplimiento.vencido }}, {{ por_cumplimiento.cerrado }}],
-            ['#00A3DA', '#E67E00', '#f43f5e', '#64748b']
+            ['#00A3DA', '#E67E00', '#f43f5e', '#64748b'],
+            'cumplimiento', ['vigente', 'proximo_a_vencer', 'vencido', 'cerrado']
         );
-        barra('chart-estado', {{ por_estado.keys() | list | tojson }}, {{ por_estado.values() | list | tojson }}, '#3D6BB5');
-        barra('chart-prioridad', {{ por_prioridad.keys() | list | tojson }}, {{ por_prioridad.values() | list | tojson }}, '#33B8E0');
-        barra('chart-categoria', {{ por_categoria.keys() | list | tojson }}, {{ por_categoria.values() | list | tojson }}, '#6690D6');
-        barra('chart-area', {{ por_area.keys() | list | tojson }}, {{ por_area.values() | list | tojson }}, '#007FAE');
-        barra('chart-sede', {{ por_sede.keys() | list | tojson }}, {{ por_sede.values() | list | tojson }}, '#1A4B9C');
-        donut('chart-tipo', {{ por_tipo.keys() | list | tojson }}, {{ por_tipo.values() | list | tojson }}, ['#1A4B9C', '#00A3DA', '#6690D6']);
+        barra('chart-estado', {{ por_estado.keys() | list | tojson }}, {{ por_estado.values() | list | tojson }}, '#3D6BB5', 'estado');
+        barra('chart-prioridad', {{ por_prioridad.keys() | list | tojson }}, {{ por_prioridad.values() | list | tojson }}, '#33B8E0', 'prioridad');
+        barra('chart-categoria', {{ por_categoria.keys() | list | tojson }}, {{ por_categoria.values() | list | tojson }}, '#6690D6', 'categoria');
+        barra('chart-area', {{ por_area.keys() | list | tojson }}, {{ por_area.values() | list | tojson }}, '#007FAE', 'area');
+        barra('chart-sede', {{ por_sede.keys() | list | tojson }}, {{ por_sede.values() | list | tojson }}, '#1A4B9C', 'sede');
+        donut('chart-tipo', {{ por_tipo.keys() | list | tojson }}, {{ por_tipo.values() | list | tojson }}, ['#1A4B9C', '#00A3DA', '#6690D6'], 'tipo');
 
         new Chart(document.getElementById('chart-tendencia'), {
             type: 'line',
