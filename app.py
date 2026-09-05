@@ -1,4 +1,5 @@
 import os
+import sys
 import calendar
 import math
 import uuid
@@ -26,6 +27,18 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
+
+# 🪵 Bajo gunicorn, stdout/stderr NO son una terminal (TTY), así que Python los deja en modo
+# "block buffering": los print() se acumulan en un buffer interno y solo salen cuando ese
+# buffer se llena o el proceso termina — en Render, eso significa que un print() de
+# diagnóstico (como el de _subir_adjunto_chat cuando falla Cloudinary) puede NUNCA aparecer
+# en "Logs" mientras el worker siga vivo. Forzar line-buffering acá hace que cada print()
+# salga de inmediato, línea por línea, como si fuera una terminal normal.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 # 📧 Validación de formato de correo electrónico del lado del SERVIDOR. Hasta ahora los
 # formularios de Gestión de Usuarios solo se apoyaban en el atributo HTML type="email" del
@@ -3402,7 +3415,11 @@ def _subir_adjunto_chat(file):
             )
         return upload_result['secure_url'], file.filename, None
     except Exception as e:
-        print(f"⚠️ Error subiendo adjunto de chat '{file.filename}': {e}")
+        # 🔎 Se imprime el tipo de excepción + traceback completo (no solo str(e), que en
+        # errores de red/Cloudinary a veces viene vacío o poco útil) para poder diagnosticar
+        # esto desde los Logs de Render la próxima vez que falle.
+        print(f"⚠️ Error subiendo adjunto de chat '{file.filename}': [{type(e).__name__}] {e}")
+        traceback.print_exc()
         return None, None, 'No se pudo subir el archivo. Intenta de nuevo.'
 
 
