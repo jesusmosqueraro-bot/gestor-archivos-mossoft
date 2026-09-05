@@ -56,6 +56,21 @@ try:
 except Exception:
     Limiter = None
 
+# 🔴 Flask-SocketIO: el "empujón" en tiempo real de mensajes del Chat Interno y notificaciones
+# de la campanita (pedido por Tomás — antes solo se enteraban al sondear cada pocos segundos,
+# o tenían que refrescar). Requiere que el servicio corra con un worker "gevent-websocket" (ver
+# Procfile) en vez de los "gthread" de antes — un socket abierto por cada pestaña con sesión
+# no puede quedarse ocupando uno de los pocos hilos que también atienden el resto de la app.
+# (gevent en vez de eventlet: eventlet quedó deprecado por su propio proyecto en modo solo
+# corrección de errores; gevent sigue activamente mantenido y es la otra opción oficial de
+# Flask-SocketIO para producción sin cola de mensajes externa.)
+try:
+    from flask_socketio import SocketIO, join_room, emit as _socketio_emit
+except Exception:
+    SocketIO = None
+    join_room = None
+    _socketio_emit = None
+
 # psycopg2 seguro para Render
 try:
     import psycopg2
@@ -201,10 +216,11 @@ else:
 # que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
 # vez de la IP cruda de Flask-Limiter, así el límite es por visitante real y no por el balanceador.
 #
-# 📦 Almacenamiento de los contadores: por defecto en memoria del proceso — con los 2 workers de
-# gunicorn de este servicio (ver Procfile) cada uno cuenta por su lado, así que el tope real puede
-# llegar a ser hasta el doble del configurado. Sigue siendo una barrera muy superior a no tener
-# ningún límite, pero deja de ser exacto en cuanto haya más de un worker/instancia.
+# 📦 Almacenamiento de los contadores: por defecto en memoria del proceso — con el único worker
+# gevent de este servicio (ver Procfile; necesario para Socket.IO, ver más abajo) el conteo en
+# memoria ya es exacto para una sola instancia. Si Render llega a correr más de una instancia/dyno
+# de este servicio, cada una contaría por su lado (el tope real sería más alto que el configurado),
+# de ahí que siga existiendo la opción de Redis compartido descrita abajo.
 #
 # Si en Render se agrega un addon de Redis y se define la variable de entorno RATELIMIT_STORAGE_URI
 # (o REDIS_URL, la que Render suele exponer para su addon "Key Value") con algo como
@@ -249,6 +265,42 @@ else:
                 return f
             return decorador
     limiter = _LimiterExemptDummy()
+
+# 🔴 Inicialización de Socket.IO — ver el comentario junto al import de arriba. Cada pestaña
+# con sesión abierta se conecta sola (ver static/js/tiempo_real.js) y esta parte del servidor
+# solo decide QUIÉN puede unirse a qué "sala": una por usuario (para notificaciones/directos
+# suyos) y una compartida 'chat_canal_general' (solo admin/agente, para el Canal General).
+# cors_allowed_origins='*' es seguro aquí porque la conexión de Socket.IO en sí no hace nada
+# sin antes pasar por _socketio_conectar() de abajo, que exige sesión ya autenticada (la misma
+# cookie de sesión de Flask, que si no es de este dominio no llega Válida).
+if SocketIO:
+    socketio = SocketIO(app, cors_allowed_origins='*', async_mode='gevent')
+
+    @socketio.on('connect')
+    def _socketio_conectar():
+        # 🚪 Sin sesión iniciada, no hay nada que unir a ninguna sala — se rechaza la conexión
+        # (equivalente al login_required de las rutas normales, pero para el socket).
+        if not session.get('logged_in'):
+            return False
+        usuario_actual = session.get('username')
+        if usuario_actual:
+            join_room(f"usuario_{usuario_actual}")
+        if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+            join_room('chat_canal_general')
+
+    def _emitir_evento_tiempo_real(evento, datos, room):
+        """Envoltura segura: si Socket.IO no pudo inicializarse (o algo falla al emitir), nunca
+        debe tumbar la petición HTTP que disparó el evento — el mensaje/notificación ya se guardó
+        en la base de datos, y el sondeo periódico (notificaciones.js/chat.js) sigue siendo el
+        respaldo si el 'empujón' en vivo no llega."""
+        try:
+            socketio.emit(evento, datos, room=room)
+        except Exception as e:
+            print(f"⚠️ Error emitiendo evento Socket.IO '{evento}' a la sala '{room}': {e}")
+else:
+    print("⚠️ flask_socketio no está instalado: no habrá notificaciones ni mensajes en tiempo real (solo el sondeo periódico). Agrega Flask-SocketIO y gevent a requirements.txt.")
+    def _emitir_evento_tiempo_real(evento, datos, room):
+        pass
 
 # 🇨🇴 ZONA HORARIA COLOMBIA CON FALLBACK SEGURO
 try:
@@ -3242,7 +3294,13 @@ def _admins_activos():
 
 def crear_notificacion(usuario, mensaje, url='', tipo='ticket'):
     """Crea una notificación interna (campanita) para un usuario puntual. Nunca debe tumbar
-    el flujo que la llama: cualquier error se registra en consola y se ignora."""
+    el flujo que la llama: cualquier error se registra en consola y se ignora.
+
+    🔴 Como esta es la única función por la que pasan TODAS las notificaciones de la app
+    (tickets, comunicados, chat directo, etc. — crear_notificacion_para_varios también cae
+    aquí), es el único lugar que hace falta instrumentar para que la campanita se entere en
+    vivo: emite 'notificacion_nueva' a la sala del destinatario, y notificaciones.js hace el
+    resto (refresca el contador/lista y muestra el pop-up) apenas lo recibe."""
     if not usuario:
         return
     try:
@@ -3255,6 +3313,8 @@ def crear_notificacion(usuario, mensaje, url='', tipo='ticket'):
         conn.close()
     except Exception as e:
         print(f"⚠️ Error creando notificación para '{usuario}': {e}")
+        return
+    _emitir_evento_tiempo_real('notificacion_nueva', {'mensaje': mensaje, 'url': url, 'tipo': tipo, 'fecha': fecha}, room=f"usuario_{usuario}")
 
 
 def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
@@ -3265,10 +3325,12 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
 
 
 # 💬 CHAT INTERNO (pedido por Tomás): "Canal General" para todo el equipo operativo (admin +
-# agente) más mensajes directos 1 a 1 entre ellos. Sigue el mismo patrón de la campanita de
-# notificaciones — sin WebSockets, la página consulta por fetch() cada pocos segundos mientras
-# está abierta (ver /static/js/chat.js) — y reutiliza crear_notificacion() para avisar en la
-# campanita de un mensaje directo nuevo a quien no tenga el chat abierto en ese momento.
+# agente) más mensajes directos 1 a 1 entre ellos. La página sigue consultando por fetch() cada
+# pocos segundos mientras está abierta (ver /static/js/chat.js) como respaldo, pero desde que se
+# agregó Socket.IO (ver _emitir_evento_tiempo_real más arriba) el mensaje llega en vivo: un
+# directo reutiliza crear_notificacion() (que ya emite 'notificacion_nueva'), y el Canal General
+# emite su propio 'chat_canal_mensaje' a la sala compartida — ver chat_canal_enviar() y
+# chat_directo_enviar() más abajo.
 def _usuarios_operativos_activos(excluir=None):
     """Lista de {usuario, nombre} de cuentas activas con rol admin/agente (con quién se puede
     chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por nombre."""
@@ -3466,8 +3528,10 @@ def chat_canal_enviar():
     cursor = conn.cursor()
     try:
         fecha_actual = obtener_fecha_actual()
-        q = "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', ?, ?, ?)"
+        q = ("INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', %s, %s, %s) RETURNING id" if db_type == 'postgres'
+             else "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', ?, ?, ?)")
         cursor.execute(q, (usuario_actual, mensaje, fecha_actual))
+        nuevo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
         conn.commit()
         conn.close()
     except Exception as e:
@@ -3477,6 +3541,13 @@ def chat_canal_enviar():
         return jsonify({'success': False, 'error': 'No se pudo enviar el mensaje.'}), 500
 
     _chat_marcar_canal_visto(usuario_actual)  # su propio mensaje no debe contarle como no leído
+    # 🔴 Empujón en vivo a todo admin/agente conectado (sala 'chat_canal_general'): si alguien
+    # tiene el Canal General abierto, chat.js lo pinta al toque en vez de esperar el sondeo.
+    _emitir_evento_tiempo_real('chat_canal_mensaje', {
+        'id': nuevo_id, 'remitente': usuario_actual,
+        'remitente_nombre': _nombre_para_mostrar(usuario_actual, _mapa_nombres_usuarios()),
+        'mensaje': mensaje, 'fecha': fecha_actual,
+    }, room='chat_canal_general')
     return jsonify({'success': True})
 
 
@@ -3543,8 +3614,10 @@ def chat_directo_enviar(usuario):
     cursor = conn.cursor()
     try:
         fecha_actual = obtener_fecha_actual()
-        q = "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', ?, ?, ?, ?)"
+        q = ("INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', %s, %s, %s, %s) RETURNING id" if db_type == 'postgres'
+             else "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', ?, ?, ?, ?)")
         cursor.execute(q, (usuario_actual, usuario, mensaje, fecha_actual))
+        nuevo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
         conn.commit()
         conn.close()
     except Exception as e:
@@ -3557,6 +3630,12 @@ def chat_directo_enviar(usuario):
     nombre_remitente = _nombre_para_mostrar(usuario_actual, nombres_para_notif)
     vista_previa = mensaje if len(mensaje) <= 80 else (mensaje[:77] + '...')
     crear_notificacion(usuario, f"💬 {nombre_remitente}: {vista_previa}", url=f"/chat?con={usuario_actual}", tipo='chat')
+    # 🔴 Empujón en vivo del mensaje en sí (no solo la notificación de campanita de arriba): si
+    # el destinatario YA tiene abierta justo esta conversación, chat.js lo agrega al toque —
+    # también a la sala de quien envía, por si tiene otra pestaña/dispositivo con el chat abierto.
+    payload_directo = {'id': nuevo_id, 'remitente': usuario_actual, 'destinatario': usuario, 'mensaje': mensaje, 'fecha': fecha_actual}
+    _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario}")
+    _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario_actual}")
     return jsonify({'success': True})
 
 
@@ -12751,4 +12830,11 @@ if __name__ == '__main__':
     # ver Procfile), pero si algún día el comando de arranque cambiara a "python app.py",
     # debug=True habilita el depurador interactivo de Werkzeug, que permite ejecutar
     # código Python arbitrario desde el navegador. Mejor dejarlo en False siempre.
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    #
+    # 🔴 socketio.run() en vez de app.run(): así el socket de Socket.IO también funciona
+    # corriendo local ("python app.py"), igual que en Render vía gunicorn (Procfile, worker
+    # gevent). Si Flask-SocketIO no está instalado, se cae de vuelta al app.run() de siempre.
+    if SocketIO:
+        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    else:
+        app.run(host='0.0.0.0', port=5000, debug=False)

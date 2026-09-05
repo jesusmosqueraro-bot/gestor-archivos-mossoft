@@ -1,1 +1,1 @@
-web: gunicorn app:app --workers 2 --worker-class gthread --threads 4 --timeout 600
+web: gunicorn app:app --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 --timeout 600
