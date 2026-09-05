@@ -363,3 +363,22 @@ def test_pagina_de_chat_incluye_el_buscador_de_conversaciones(client, app, crear
     assert 'id="buscar-chat-contactos"' in html
     assert 'filtrarContactosChat()' in html
     assert 'data-nombre="Beto Buscable"' in html
+
+
+def test_burbuja_flotante_abre_el_panel_del_widget_en_vez_de_enlazar_a_chat(client, app, crear_usuario):
+    """Pedido por Tomás (como el chatbot flotante de copnia.gov.co): el botón de
+    partials/chat_flotante.html ya no debe ser un enlace a /chat, sino un botón que abre el
+    panel de chat_widget.js ahí mismo, sin salir de la página. Solo debe verse para
+    admin/agente, igual que antes."""
+    admin1 = crear_usuario(usuario='admin_chat21', rol='admin')
+    estandar1 = crear_usuario(usuario='estandar_chat21', rol='estandar')
+
+    _sesion_como(client, app, admin1, 'admin')
+    html_admin = client.get('/bienvenida').get_data(as_text=True)
+    assert 'onclick="toggleChatFlotante()"' in html_admin
+    assert '/static/js/chat_widget.js' in html_admin
+
+    _sesion_como(client, app, estandar1, 'estandar')
+    html_estandar = client.get('/bienvenida').get_data(as_text=True)
+    assert 'onclick="toggleChatFlotante()"' not in html_estandar
+    assert '/static/js/chat_widget.js' not in html_estandar
