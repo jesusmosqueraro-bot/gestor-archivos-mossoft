@@ -361,6 +361,15 @@ function cargarContactosChat() {
                         badge.classList.add('hidden');
                     }
                 }
+                // 🟢🔴 En línea/desconectado: se recalcula en el servidor en cada respuesta de
+                // /chat/contactos (ver _esta_en_linea en app.py), así que basta con reflejar
+                // aquí el valor más reciente de 'c.en_linea'.
+                var dot = el.querySelector('.dot-en-linea-contacto-chat');
+                if (dot) {
+                    dot.classList.toggle('bg-emerald-400', !!c.en_linea);
+                    dot.classList.toggle('bg-rose-500', !c.en_linea);
+                    dot.title = c.en_linea ? 'En línea' : 'Desconectado';
+                }
             });
         })
         .catch(function () { /* silencioso */ });
