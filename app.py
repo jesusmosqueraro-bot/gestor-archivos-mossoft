@@ -982,7 +982,13 @@ def init_db():
                 # editar_activo y reemplazar_activo rechazan cualquier cambio de quien no sea
                 # 'admin' (ver el chequeo al inicio de ambas rutas). Solo un administrador puede
                 # "desbloquearlo" editando el activo y eligiendo su siguiente estado real.
-                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS fecha_devolucion VARCHAR(100);"
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS fecha_devolucion VARCHAR(100);",
+                # 📎 Adjunto multimedia en el Chat Interno (pedido por Tomás): imagen o archivo
+                # opcional en un mensaje del Canal General o directo — ver _subir_adjunto_chat/
+                # chat_canal_enviar/chat_directo_enviar. Un mensaje puede traer texto, adjunto,
+                # o ambos (nunca ninguno de los dos).
+                "ALTER TABLE chat_mensajes ADD COLUMN IF NOT EXISTS adjunto_url TEXT;",
+                "ALTER TABLE chat_mensajes ADD COLUMN IF NOT EXISTS adjunto_nombre VARCHAR(255);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1350,6 +1356,17 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_fecha_devolucion_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 📎 Adjunto multimedia en el Chat Interno. Ver comentario equivalente en la rama de
+            # Postgres.
+            for col_chat_adjunto_sql in [
+                "ALTER TABLE chat_mensajes ADD COLUMN adjunto_url TEXT;",
+                "ALTER TABLE chat_mensajes ADD COLUMN adjunto_nombre TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_chat_adjunto_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -3339,6 +3356,65 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
 # saturar la campanita general de notificaciones, solo el contador del ícono de Chat Interno —
 # ver chat_no_leidos en notificaciones_resumen()). El Canal General ya funcionaba así desde el
 # principio; los directos se corrigieron para hacer lo mismo.
+
+# 📎 ADJUNTOS DEL CHAT (pedido por Tomás: imágenes —incluido pegar desde el portapapeles—, y el
+# clip para adjuntar cualquier otro archivo permitido). Mismas extensiones que ya se aceptan en
+# toda la app (ver ALLOWED_EXTENSIONS/archivo_permitido), pero con un tope de tamaño más chico que
+# el global: esto lo sube cualquier admin/agente sin revisión, en una conversación pensada para
+# ser ágil, no para mover archivos pesados (para eso ya existe el Gestor de Archivos).
+TAMANO_MAXIMO_ADJUNTO_CHAT = 25 * 1024 * 1024  # 25 MB
+
+
+def _subir_adjunto_chat(file):
+    """Sube el adjunto (opcional) de un mensaje de chat a Cloudinary. Devuelve (url, nombre,
+    error): 'error' trae un mensaje para el usuario si el archivo no es válido, es demasiado
+    grande, o falla la subida; en ese caso url/nombre vienen en None. Si 'file' no viene (mensaje
+    sin adjunto, el caso normal), devuelve (None, None, None) sin quejarse — no es un error."""
+    if not file or not file.filename:
+        return None, None, None
+    if not archivo_permitido(file.filename):
+        return None, None, 'Ese tipo de archivo no está permitido.'
+    file.stream.seek(0, os.SEEK_END)
+    tamano = file.stream.tell()
+    file.stream.seek(0)
+    if tamano > TAMANO_MAXIMO_ADJUNTO_CHAT:
+        return None, None, 'El archivo no puede superar 25 MB.'
+    try:
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext in ['mp4', 'mov', 'webm', 'avi']:
+            upload_result = cloudinary.uploader.upload_large(
+                file.stream, resource_type="video", filename=file.filename,
+                use_filename=True, unique_filename=True, chunk_size=6000000, timeout=120
+            )
+        elif ext == 'pdf':
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="image", format="pdf",
+                use_filename=True, unique_filename=True, timeout=60
+            )
+        elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'txt', 'docx', 'xlsx', 'pptx']:
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="raw",
+                use_filename=True, unique_filename=True, timeout=60
+            )
+        else:
+            upload_result = cloudinary.uploader.upload(
+                file, resource_type="image", use_filename=True, unique_filename=True, timeout=60
+            )
+        return upload_result['secure_url'], file.filename, None
+    except Exception as e:
+        print(f"⚠️ Error subiendo adjunto de chat '{file.filename}': {e}")
+        return None, None, 'No se pudo subir el archivo. Intenta de nuevo.'
+
+
+def _es_adjunto_imagen(nombre_original):
+    """True si el nombre de archivo del adjunto corresponde a una imagen (para pintar una
+    miniatura en vez de la tarjeta genérica de archivo) — mismo criterio que ya usan las
+    plantillas de adjuntos de tickets."""
+    if not nombre_original or '.' not in nombre_original:
+        return False
+    return nombre_original.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+
 def _usuarios_operativos_activos(excluir=None):
     """Lista de {usuario, nombre} de cuentas activas con rol admin/agente (con quién se puede
     chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por nombre."""
@@ -3499,18 +3575,20 @@ def chat_canal_mensajes():
     try:
         if desde_id > 0:
             # Poll incremental: solo lo nuevo desde el último mensaje que ya tiene el navegador.
-            q = "SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' AND id > %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' AND id > ? ORDER BY id ASC"
+            q = "SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'canal' AND id > %s ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'canal' AND id > ? ORDER BY id ASC"
             cursor.execute(q, (desde_id,))
         else:
             # Primera carga: los últimos 200 nada más (no todo el historial del canal desde
             # siempre), reordenados de más viejo a más nuevo para pintarlos de arriba a abajo.
-            q = ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'canal' ORDER BY id DESC LIMIT 200) t ORDER BY id ASC")
+            q = ("SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM (SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'canal' ORDER BY id DESC LIMIT 200) t ORDER BY id ASC")
             cursor.execute(q)
         nombres = _mapa_nombres_usuarios()
-        for mid, remitente, mensaje, fecha in cursor.fetchall():
+        for mid, remitente, mensaje, fecha, adjunto_url, adjunto_nombre in cursor.fetchall():
             mensajes.append({
                 'id': mid, 'remitente': remitente, 'remitente_nombre': _nombre_para_mostrar(remitente, nombres),
                 'mensaje': mensaje, 'fecha': fecha, 'es_mio': remitente == usuario_actual,
+                'adjunto_url': adjunto_url or None, 'adjunto_nombre': adjunto_nombre or None,
+                'adjunto_es_imagen': _es_adjunto_imagen(adjunto_nombre),
             })
         conn.close()
     except Exception as e:
@@ -3527,18 +3605,23 @@ def chat_canal_mensajes():
 def chat_canal_enviar():
     usuario_actual = session.get('username')
     mensaje = (request.form.get('mensaje') or '').strip()
-    if not mensaje:
-        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
     if len(mensaje) > 2000:
         return jsonify({'success': False, 'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
+
+    # 📎 Adjunto opcional (imagen pegada o archivo elegido con el clip) — ver _subir_adjunto_chat.
+    adjunto_url, adjunto_nombre, error_adjunto = _subir_adjunto_chat(request.files.get('adjunto'))
+    if error_adjunto:
+        return jsonify({'success': False, 'error': error_adjunto}), 400
+    if not mensaje and not adjunto_url:
+        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         fecha_actual = obtener_fecha_actual()
-        q = ("INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', %s, %s, %s) RETURNING id" if db_type == 'postgres'
-             else "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha) VALUES ('canal', ?, ?, ?)")
-        cursor.execute(q, (usuario_actual, mensaje, fecha_actual))
+        q = ("INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha, adjunto_url, adjunto_nombre) VALUES ('canal', %s, %s, %s, %s, %s) RETURNING id" if db_type == 'postgres'
+             else "INSERT INTO chat_mensajes (tipo, remitente, mensaje, fecha, adjunto_url, adjunto_nombre) VALUES ('canal', ?, ?, ?, ?, ?)")
+        cursor.execute(q, (usuario_actual, mensaje, fecha_actual, adjunto_url, adjunto_nombre))
         nuevo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
         conn.commit()
         conn.close()
@@ -3555,6 +3638,8 @@ def chat_canal_enviar():
         'id': nuevo_id, 'remitente': usuario_actual,
         'remitente_nombre': _nombre_para_mostrar(usuario_actual, _mapa_nombres_usuarios()),
         'mensaje': mensaje, 'fecha': fecha_actual,
+        'adjunto_url': adjunto_url, 'adjunto_nombre': adjunto_nombre,
+        'adjunto_es_imagen': _es_adjunto_imagen(adjunto_nombre),
     }, room='chat_canal_general')
     return jsonify({'success': True})
 
@@ -3573,20 +3658,24 @@ def chat_directo_mensajes(usuario):
     mensajes = []
     try:
         if desde_id > 0:
-            q = ("SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND id > %s AND "
+            q = ("SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'directo' AND id > %s AND "
                  "((remitente = %s AND destinatario = %s) OR (remitente = %s AND destinatario = %s)) ORDER BY id ASC") if db_type == 'postgres' else \
-                ("SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND id > ? AND "
+                ("SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'directo' AND id > ? AND "
                  "((remitente = ? AND destinatario = ?) OR (remitente = ? AND destinatario = ?)) ORDER BY id ASC")
             cursor.execute(q, (desde_id, usuario_actual, usuario, usuario, usuario_actual))
         else:
             # Primera carga: los últimos 300 mensajes de esta conversación nada más.
-            q = ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+            q = ("SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM (SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'directo' AND "
                  "((remitente = %s AND destinatario = %s) OR (remitente = %s AND destinatario = %s)) ORDER BY id DESC LIMIT 300) t ORDER BY id ASC") if db_type == 'postgres' else \
-                ("SELECT id, remitente, mensaje, fecha FROM (SELECT id, remitente, mensaje, fecha FROM chat_mensajes WHERE tipo = 'directo' AND "
+                ("SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM (SELECT id, remitente, mensaje, fecha, adjunto_url, adjunto_nombre FROM chat_mensajes WHERE tipo = 'directo' AND "
                  "((remitente = ? AND destinatario = ?) OR (remitente = ? AND destinatario = ?)) ORDER BY id DESC LIMIT 300) t ORDER BY id ASC")
             cursor.execute(q, (usuario_actual, usuario, usuario, usuario_actual))
-        for mid, remitente, mensaje, fecha in cursor.fetchall():
-            mensajes.append({'id': mid, 'remitente': remitente, 'mensaje': mensaje, 'fecha': fecha, 'es_mio': remitente == usuario_actual})
+        for mid, remitente, mensaje, fecha, adjunto_url, adjunto_nombre in cursor.fetchall():
+            mensajes.append({
+                'id': mid, 'remitente': remitente, 'mensaje': mensaje, 'fecha': fecha, 'es_mio': remitente == usuario_actual,
+                'adjunto_url': adjunto_url or None, 'adjunto_nombre': adjunto_nombre or None,
+                'adjunto_es_imagen': _es_adjunto_imagen(adjunto_nombre),
+            })
 
         # 👁️ Entrar a esta conversación marca como leídos los mensajes que ESE contacto me envió.
         q_upd = "UPDATE chat_mensajes SET leido = 1 WHERE tipo = 'directo' AND remitente = %s AND destinatario = %s AND leido = 0" if db_type == 'postgres' else "UPDATE chat_mensajes SET leido = 1 WHERE tipo = 'directo' AND remitente = ? AND destinatario = ? AND leido = 0"
@@ -3613,18 +3702,23 @@ def chat_directo_enviar(usuario):
         return jsonify({'success': False, 'error': 'No puedes enviarte un mensaje a ti mismo.'}), 400
 
     mensaje = (request.form.get('mensaje') or '').strip()
-    if not mensaje:
-        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
     if len(mensaje) > 2000:
         return jsonify({'success': False, 'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
+
+    # 📎 Adjunto opcional (imagen pegada o archivo elegido con el clip) — ver _subir_adjunto_chat.
+    adjunto_url, adjunto_nombre, error_adjunto = _subir_adjunto_chat(request.files.get('adjunto'))
+    if error_adjunto:
+        return jsonify({'success': False, 'error': error_adjunto}), 400
+    if not mensaje and not adjunto_url:
+        return jsonify({'success': False, 'error': 'El mensaje no puede estar vacío.'}), 400
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         fecha_actual = obtener_fecha_actual()
-        q = ("INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', %s, %s, %s, %s) RETURNING id" if db_type == 'postgres'
-             else "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha) VALUES ('directo', ?, ?, ?, ?)")
-        cursor.execute(q, (usuario_actual, usuario, mensaje, fecha_actual))
+        q = ("INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha, adjunto_url, adjunto_nombre) VALUES ('directo', %s, %s, %s, %s, %s, %s) RETURNING id" if db_type == 'postgres'
+             else "INSERT INTO chat_mensajes (tipo, remitente, destinatario, mensaje, fecha, adjunto_url, adjunto_nombre) VALUES ('directo', ?, ?, ?, ?, ?, ?)")
+        cursor.execute(q, (usuario_actual, usuario, mensaje, fecha_actual, adjunto_url, adjunto_nombre))
         nuevo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
         conn.commit()
         conn.close()
@@ -3641,7 +3735,10 @@ def chat_directo_enviar(usuario):
     # 🔴 Empujón en vivo del mensaje en sí: si el destinatario YA tiene abierta justo esta
     # conversación, chat.js lo agrega al toque — también a la sala de quien envía, por si tiene
     # otra pestaña/dispositivo con el chat abierto.
-    payload_directo = {'id': nuevo_id, 'remitente': usuario_actual, 'destinatario': usuario, 'mensaje': mensaje, 'fecha': fecha_actual}
+    payload_directo = {
+        'id': nuevo_id, 'remitente': usuario_actual, 'destinatario': usuario, 'mensaje': mensaje, 'fecha': fecha_actual,
+        'adjunto_url': adjunto_url, 'adjunto_nombre': adjunto_nombre, 'adjunto_es_imagen': _es_adjunto_imagen(adjunto_nombre),
+    }
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario}")
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario_actual}")
     return jsonify({'success': True})
