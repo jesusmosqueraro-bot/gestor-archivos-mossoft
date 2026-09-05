@@ -2182,83 +2182,135 @@ def _guardar_respaldo_en_disco(prefijo='manual'):
         return None
 
 
-# 📧 Copia de los respaldos fuera de Render: además de quedar guardados en el disco
-# persistente (RESPALDOS_DIR), cada respaldo (manual o automático) se envía también por
-# correo a RESPALDO_EMAIL_DESTINO, reutilizando el mismo webhook de Apps Script que ya usan
-# los demás correos del sistema (ver GMAIL_SCRIPT_URL, más abajo). Así, si algo le pasa a la
-# cuenta de Render o al disco persistente mismo, sigue existiendo una copia totalmente
-# independiente. El archivo se comprime con gzip antes de codificarlo en base64 (los
-# respaldos son JSON — comprimen muy bien) para no acercarse al límite de adjuntos de Gmail.
+# ☁️ Copia de los respaldos fuera de Render: además de quedar guardados en el disco
+# persistente (RESPALDOS_DIR), cada respaldo (manual o automático) se sube también a
+# Cloudinary (resource_type='raw', mismo mecanismo que ya usan los adjuntos de tickets/chat —
+# ver _subir_archivo_a_cloudinary / _subir_adjunto_chat) y queda registrado en
+# RESPALDOS_INDICE_EXTERNO. Así, si algo le pasa a la cuenta de Render o al disco persistente
+# mismo, sigue existiendo una copia totalmente independiente. El archivo se comprime con gzip
+# antes de subirlo (los respaldos son JSON — comprimen muy bien).
 #
-# ⚠️ El Apps Script detrás de GMAIL_SCRIPT_URL hoy solo sabe recibir {para, asunto, cuerpo} —
-# hay que agregarle el manejo de 'adjunto_nombre' / 'adjunto_tipo' / 'adjunto_base64' para que
-# el adjunto realmente llegue (instrucciones aparte). Mientras eso no se haga, el correo sale
-# pero sin el archivo adjunto.
+# 🩹 Antes esta copia se intentaba mandar por correo como adjunto en base64, pero el Apps
+# Script detrás de GMAIL_SCRIPT_URL nunca llegó a soportar adjuntos — el correo salía, pero
+# el archivo real jamás llegaba. Se reemplazó por Cloudinary, que ya está integrado y probado
+# en el resto de la app, y no tiene ese límite. El correo se conserva, pero ahora solo avisa
+# con un enlace de descarga en vez de intentar (sin éxito) adjuntar el archivo.
 RESPALDO_EMAIL_DESTINO = os.environ.get('RESPALDO_EMAIL_DESTINO', 'notificacionesarkiv@gmail.com')
-RESPALDO_EMAIL_MAX_MB = 20  # Margen bajo el límite real de Gmail (25 MB), pensando en el overhead de base64.
+RESPALDOS_INDICE_EXTERNO = os.path.join(RESPALDOS_DIR, '_copias_externas.json')
 
 
-def _enviar_respaldo_por_correo(ruta_archivo):
-    """Comprime el respaldo ya guardado en disco y lo envía como adjunto a
-    RESPALDO_EMAIL_DESTINO. No borra ni modifica el archivo original en RESPALDOS_DIR — esto
-    es solo una copia adicional fuera de Render. Se llama siempre en un hilo aparte (ver los
-    dos puntos de llamada: el botón manual y el hilo del respaldo diario) para no demorar la
-    respuesta ni el propio ciclo de respaldo si el correo tarda o falla."""
-    if not RESPALDO_EMAIL_DESTINO:
-        return False
+def _leer_copias_externas():
+    """Lee el índice de copias externas (qué respaldos ya tienen copia en Cloudinary y su
+    URL). Devuelve {} si el archivo todavía no existe o está corrupto — nunca revienta."""
+    try:
+        with open(RESPALDOS_INDICE_EXTERNO, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _registrar_copia_externa(nombre, url):
+    """Anota en el índice que 'nombre' (el .json del respaldo) ya tiene copia externa en
+    Cloudinary, guardando su URL. No revienta si falla — el respaldo local ya existe de
+    todas formas; esto solo afecta lo que se muestra en la página."""
+    try:
+        indice = _leer_copias_externas()
+        indice[nombre] = {'url': url, 'fecha': datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S')}
+        with open(RESPALDOS_INDICE_EXTERNO, 'w', encoding='utf-8') as f:
+            json.dump(indice, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ No se pudo registrar la copia externa de '{nombre}' en el índice: {e}")
+
+
+def _subir_respaldo_a_cloudinary(ruta_archivo):
+    """Comprime el respaldo ya guardado en disco y lo sube a Cloudinary como archivo 'raw'
+    (mismo patrón que _subir_archivo_a_cloudinary/_subir_adjunto_chat). Devuelve la
+    secure_url en éxito, o None si falla (credenciales ausentes, sin red, etc.) — nunca
+    lanza, para no tumbar el flujo normal de respaldos si esto falla."""
     nombre_original = os.path.basename(ruta_archivo)
-    asunto = f"Respaldo Arkiv - {nombre_original}"
     try:
         with open(ruta_archivo, 'rb') as f:
             contenido = f.read()
         comprimido = gzip.compress(contenido)
-        tamano_mb = len(comprimido) / (1024 * 1024)
-        if tamano_mb > RESPALDO_EMAIL_MAX_MB:
-            print(f"⚠️ Respaldo '{nombre_original}' pesa {tamano_mb:.1f} MB comprimido — supera el límite de "
-                  f"{RESPALDO_EMAIL_MAX_MB} MB para enviarlo por correo. Se guardó en el disco pero NO se envió copia por correo.")
-            registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'omitido',
-                                  f"Adjunto de {tamano_mb:.1f} MB supera el límite de {RESPALDO_EMAIL_MAX_MB} MB")
-            return False
-        adjunto_base64 = base64.b64encode(comprimido).decode('ascii')
+        upload_result = cloudinary.uploader.upload(
+            io.BytesIO(comprimido),
+            resource_type="raw",
+            public_id=f"respaldos_arkiv/{nombre_original}.gz",
+            overwrite=True,
+            timeout=60
+        )
+        return upload_result['secure_url']
+    except Exception as e:
+        print(f"⚠️ Error subiendo copia externa a Cloudinary del respaldo '{nombre_original}': [{type(e).__name__}] {e}")
+        return None
+
+
+def _respaldar_copia_externa(ruta_archivo):
+    """Sube el respaldo a Cloudinary (copia fuera de Render) y, si sale bien, la registra en
+    el índice y avisa por correo con el enlace. No borra ni modifica el archivo original en
+    RESPALDOS_DIR. Se llama siempre en un hilo aparte (ver los dos puntos de llamada: el
+    botón manual y el hilo del respaldo diario) para no demorar la respuesta ni el propio
+    ciclo de respaldo si la subida o el correo tardan o fallan."""
+    nombre_original = os.path.basename(ruta_archivo)
+    asunto = f"Respaldo Arkiv - {nombre_original}"
+    url = _subir_respaldo_a_cloudinary(ruta_archivo)
+    if not url:
+        if RESPALDO_EMAIL_DESTINO:
+            cuerpo = (
+                f"⚠️ No se pudo subir la copia externa del respaldo '{nombre_original}' a Cloudinary.\n"
+                "El respaldo sigue guardado en el disco persistente de Render, pero por ahora NO "
+                "existe una copia fuera de Render de este respaldo puntual. Revisa los Logs de Render.\n"
+                "---\nEquipo de Soporte - ARKIV System"
+            )
+            _enviar_correo_simple(RESPALDO_EMAIL_DESTINO, asunto, cuerpo)
+            registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'error', 'Falló la subida a Cloudinary')
+        return False
+    _registrar_copia_externa(nombre_original, url)
+    print(f"✅ Copia externa del respaldo '{nombre_original}' subida a Cloudinary: {url}")
+    if RESPALDO_EMAIL_DESTINO:
         cuerpo = (
-            "Respaldo automático de la base de datos de Arkiv.\n\n"
-            f"Archivo: {nombre_original}.gz\n"
-            f"Tamaño comprimido: {tamano_mb:.2f} MB\n\n"
-            "Este correo se genera automáticamente como copia de seguridad fuera de Render.\n"
+            "Respaldo de la base de datos de Arkiv con copia fuera de Render.\n\n"
+            f"Archivo: {nombre_original}\n"
+            f"Enlace de descarga (Cloudinary): {url}\n\n"
+            "Este correo se genera automáticamente como aviso de la copia de seguridad fuera de Render.\n"
             "---\nEquipo de Soporte - ARKIV System"
         )
-        payload = {
-            "para": RESPALDO_EMAIL_DESTINO,
-            "asunto": asunto,
-            "cuerpo": cuerpo,
-            "adjunto_nombre": f"{nombre_original}.gz",
-            "adjunto_tipo": "application/gzip",
-            "adjunto_base64": adjunto_base64,
-        }
+        if _enviar_correo_simple(RESPALDO_EMAIL_DESTINO, asunto, cuerpo):
+            registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'enviado')
+        else:
+            registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'error', 'Falló el envío del aviso por correo')
+    return True
+
+
+def _enviar_correo_simple(destino, asunto, cuerpo):
+    """Envía un correo de texto plano (sin adjunto) vía el mismo webhook de Apps Script que
+    usa el resto de la app (GMAIL_SCRIPT_URL). Devuelve True/False; nunca lanza."""
+    payload = {"para": destino, "asunto": asunto, "cuerpo": cuerpo}
+    try:
         if requests:
             res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=30)
-            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO}. Status: {res.status_code} | Respuesta del script: {res.text[:300]!r}")
+            print(f"✅ Correo '{asunto}' enviado a {destino}. Status: {res.status_code}")
         else:
             data_json = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
             with urllib.request.urlopen(req, timeout=30) as response:
                 response.read()
-            print(f"✅ Copia del respaldo '{nombre_original}' enviada por correo a {RESPALDO_EMAIL_DESTINO} vía urllib.")
-        registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'enviado')
+            print(f"✅ Correo '{asunto}' enviado a {destino} vía urllib.")
         return True
     except Exception as e:
-        print(f"⚠️ Error enviando copia por correo del respaldo '{nombre_original}': {e}")
-        registrar_correo_log(RESPALDO_EMAIL_DESTINO, asunto, 'respaldo', 'error', str(e)[:300])
+        print(f"⚠️ Error enviando correo '{asunto}' a {destino}: {e}")
         return False
 
 
 def _listar_respaldos():
-    """Lista los archivos de respaldo ya guardados en RESPALDOS_DIR, más recientes primero.
-    Devuelve [] si la carpeta no existe todavía (nunca se ha generado un respaldo, o el
-    disco persistente no está montado)."""
+    """Lista los archivos de respaldo ya guardados en RESPALDOS_DIR, más recientes primero,
+    incluyendo si cada uno ya tiene copia externa en Cloudinary (y su URL). Devuelve [] si la
+    carpeta no existe todavía (nunca se ha generado un respaldo, o el disco persistente no
+    está montado)."""
     try:
         if not os.path.isdir(RESPALDOS_DIR):
             return []
+        copias_externas = _leer_copias_externas()
         items = []
         for nombre in os.listdir(RESPALDOS_DIR):
             if not nombre.endswith('.json'):
@@ -2270,7 +2322,8 @@ def _listar_respaldos():
                     'nombre': nombre,
                     'tipo': 'Automático (diario)' if nombre.startswith('auto_') else 'Manual',
                     'tamano_kb': round(stat.st_size / 1024, 1),
-                    'fecha': datetime.fromtimestamp(stat.st_mtime, tz=ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S')
+                    'fecha': datetime.fromtimestamp(stat.st_mtime, tz=ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d %H:%M:%S'),
+                    'copia_externa_url': copias_externas.get(nombre, {}).get('url')
                 })
             except Exception:
                 continue
@@ -2326,7 +2379,7 @@ def _respaldo_diario_automatico():
                 with open(marcador, 'w', encoding='utf-8') as f:
                     json.dump(datos, f, ensure_ascii=False)
                 print(f"✅ Respaldo automático diario generado: {marcador}")
-                threading.Thread(target=_enviar_respaldo_por_correo, args=(marcador,), daemon=True).start()
+                threading.Thread(target=_respaldar_copia_externa, args=(marcador,), daemon=True).start()
                 _limpiar_respaldos_viejos()
         except Exception as e:
             print(f"⚠️ Error en el hilo de respaldo automático: {e}")
@@ -2366,7 +2419,7 @@ def generar_respaldo():
         flash("No se pudo generar el respaldo: la carpeta de respaldos no está disponible (¿el disco persistente de Render ya está montado en /var/data?).", "error")
         return redirect(url_for('ver_respaldos'))
     registrar_log(session.get('username'), "Respaldo de Base de Datos", f"Respaldo manual generado: {os.path.basename(ruta)}")
-    threading.Thread(target=_enviar_respaldo_por_correo, args=(ruta,), daemon=True).start()
+    threading.Thread(target=_respaldar_copia_externa, args=(ruta,), daemon=True).start()
     return send_file(ruta, as_attachment=True, download_name=os.path.basename(ruta))
 
 
