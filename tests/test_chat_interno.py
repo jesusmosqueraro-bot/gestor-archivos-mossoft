@@ -325,3 +325,41 @@ def test_buscador_global_no_muestra_chat_a_roles_sin_acceso_operativo(client, ap
     _sesion_como(client, app, estandar1, 'estandar')
     data = client.get('/buscar/api?q=qwerty123').get_json()
     assert not any(r['categoria'] == 'Chat Interno' for r in data['resultados'])
+
+
+def test_canal_general_no_devuelve_mensajes_duplicados_al_pedirlos_dos_veces_seguidas(client, app, crear_usuario):
+    """Reportado por Tomás: al enviar un mensaje al Canal General, a él mismo le aparecía
+    duplicado. La causa real era del lado del navegador (chat.js pedía los mensajes nuevos justo
+    al enviar, Y tiempo_real.js pedía los mismos otra vez al recibir el aviso del propio socket
+    — dos peticiones casi simultáneas con el mismo desde_id). Esta prueba confirma que el
+    SERVIDOR nunca fue la causa: pedir /chat/canal/mensajes dos veces con el mismo desde_id
+    siempre devuelve exactamente el mismo mensaje una sola vez por respuesta, nunca duplicado
+    dentro de una misma respuesta."""
+    admin1 = crear_usuario(usuario='admin_chat19', rol='admin')
+    _sesion_como(client, app, admin1, 'admin')
+
+    client.post('/chat/canal/enviar', data={'mensaje': 'Aviso importante para todos'})
+
+    # Dos peticiones "en paralelo" con el mismo desde_id=0 (como pasaría si dos disparadores
+    # del navegador piden al mismo tiempo, justo la condición de carrera reportada).
+    data_1 = client.get('/chat/canal/mensajes?desde_id=0').get_json()
+    data_2 = client.get('/chat/canal/mensajes?desde_id=0').get_json()
+
+    assert len(data_1['mensajes']) == 1
+    assert len(data_2['mensajes']) == 1
+    assert data_1['mensajes'][0]['id'] == data_2['mensajes'][0]['id']
+
+
+def test_pagina_de_chat_incluye_el_buscador_de_conversaciones(client, app, crear_usuario):
+    """Pedido por Tomás: un buscador en /chat para filtrar la lista de conversaciones por
+    nombre o usuario. Verifica que el HTML traiga el input y que cada contacto traiga su
+    'data-nombre' (además del 'data-usuario' que ya existía) — chat.js filtra por ambos."""
+    admin1 = crear_usuario(usuario='admin_chat20', rol='admin')
+    crear_usuario(usuario='agente_chat20', rol='agente', nombre='Beto Buscable')
+    _sesion_como(client, app, admin1, 'admin')
+
+    html = client.get('/chat').get_data(as_text=True)
+
+    assert 'id="buscar-chat-contactos"' in html
+    assert 'filtrarContactosChat()' in html
+    assert 'data-nombre="Beto Buscable"' in html
