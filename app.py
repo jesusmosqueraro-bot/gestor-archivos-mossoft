@@ -2106,12 +2106,131 @@ def visor_db():
 # 💾 MÓDULO DE RESPALDOS DE BASE DE DATOS ------------------------------------------------
 # Vuelca todas las tablas (datos y metadatos — los ARCHIVOS en sí ya viven aparte, en
 # Cloudinary) a un archivo JSON. Dos vías: un botón manual "Generar y descargar ahora"
-# (esta sección), y un hilo en segundo plano que genera uno automático cada día (ver
-# _respaldo_diario_automatico más abajo). Ambos guardan el archivo en RESPALDOS_DIR, que
-# debe apuntar a un disco PERSISTENTE de Render (Mount Path /var/data) — sin eso, cualquier
-# archivo escrito en el propio servidor se pierde en el siguiente despliegue.
+# (esta sección), y un hilo en segundo plano que genera uno automático con la frecuencia que
+# el superadmin configure desde la página de Respaldos (ver _respaldo_diario_automatico más
+# abajo). Ambos guardan el archivo en RESPALDOS_DIR, que debe apuntar a un disco PERSISTENTE
+# de Render (Mount Path /var/data) — sin eso, cualquier archivo escrito en el propio servidor
+# se pierde en el siguiente despliegue.
 RESPALDOS_DIR = os.environ.get('RESPALDOS_DIR', '/var/data/respaldos')
 RESPALDOS_RETENCION_DIAS = 30  # Antigüedad máxima de los respaldos AUTOMÁTICOS antes de borrarlos solos.
+
+# ⏱️ Configuración de la frecuencia del respaldo automático (pedido por Tomás: poder elegir
+# "cada tantos días/horas" y, para el caso de días, "a qué hora específica"). Se guarda en un
+# JSON aparte en el mismo disco persistente — así sobrevive a los despliegues igual que los
+# respaldos — y la lee el hilo de fondo en cada ciclo, sin necesidad de reiniciar el servidor
+# para que un cambio de configuración surta efecto.
+RESPALDO_CONFIG_PATH = os.path.join(RESPALDOS_DIR, '_configuracion_automatica.json')
+RESPALDO_CONFIG_DEFAULT = {'tipo': 'dias', 'valor': 1, 'hora': '03:00'}
+
+
+def _leer_config_respaldo_automatico():
+    """Lee la configuración de frecuencia guardada (tipo 'dias'/'horas', el número N, y para
+    'dias' la hora específica 'HH:MM'). Si el archivo no existe todavía, o quedó corrupto, o
+    tiene valores fuera de rango, se devuelve/normaliza a RESPALDO_CONFIG_DEFAULT — nunca
+    revienta ni deja el hilo de respaldo sin poder correr."""
+    try:
+        with open(RESPALDO_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        if not isinstance(config, dict):
+            return dict(RESPALDO_CONFIG_DEFAULT)
+        tipo = config.get('tipo')
+        if tipo not in ('dias', 'horas'):
+            tipo = RESPALDO_CONFIG_DEFAULT['tipo']
+        try:
+            valor = int(config.get('valor'))
+        except (TypeError, ValueError):
+            valor = RESPALDO_CONFIG_DEFAULT['valor']
+        valor = max(1, min(valor, 30 if tipo == 'dias' else 168))
+        hora = config.get('hora')
+        if not isinstance(hora, str) or not re.match(r'^([01]\d|2[0-3]):([0-5]\d)$', hora):
+            hora = RESPALDO_CONFIG_DEFAULT['hora']
+        return {'tipo': tipo, 'valor': valor, 'hora': hora}
+    except Exception:
+        return dict(RESPALDO_CONFIG_DEFAULT)
+
+
+def _guardar_config_respaldo_automatico(config):
+    """Guarda la configuración de frecuencia en disco. Devuelve True/False; no lanza (si el
+    disco persistente todavía no está montado, simplemente no se puede guardar)."""
+    try:
+        os.makedirs(RESPALDOS_DIR, exist_ok=True)
+        with open(RESPALDO_CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"⚠️ No se pudo guardar la configuración de respaldo automático: {e}")
+        return False
+
+
+def _ultimo_respaldo_automatico_ts():
+    """Busca, entre los respaldos ya guardados en disco, el más reciente generado
+    automáticamente ('auto_...json') y devuelve su fecha/hora (según la última modificación
+    del archivo). None si todavía no existe ninguno."""
+    try:
+        if not os.path.isdir(RESPALDOS_DIR):
+            return None
+        mejor_mtime = None
+        for nombre in os.listdir(RESPALDOS_DIR):
+            if not (nombre.startswith('auto_') and nombre.endswith('.json')):
+                continue
+            try:
+                mtime = os.path.getmtime(os.path.join(RESPALDOS_DIR, nombre))
+            except Exception:
+                continue
+            if mejor_mtime is None or mtime > mejor_mtime:
+                mejor_mtime = mtime
+        if mejor_mtime is None:
+            return None
+        return datetime.fromtimestamp(mejor_mtime, tz=ZONA_HORARIA_COLOMBIA)
+    except Exception:
+        return None
+
+
+def _debe_generar_respaldo_automatico(config, ahora, ultimo_ts):
+    """Decide si toca generar un respaldo automático AHORA, según la configuración vigente:
+      - tipo 'horas': True si ya pasaron 'valor' horas desde el último respaldo automático.
+      - tipo 'dias' (por defecto): True si ya pasaron 'valor' días Y la hora actual cae dentro
+        de una ventana corta (~6 minutos) después de la 'hora' configurada — el hilo revisa
+        cada 5 minutos (ver _respaldo_diario_automatico), así que esta ventana garantiza que
+        algún ciclo la capture sin depender de que caiga justo al minuto exacto."""
+    tipo = config.get('tipo', 'dias')
+    valor = config.get('valor', 1)
+    if tipo == 'horas':
+        if ultimo_ts is None:
+            return True
+        return (ahora - ultimo_ts) >= timedelta(hours=valor)
+    # tipo == 'dias'
+    hora_str = config.get('hora') or '03:00'
+    try:
+        hh, mm = (int(x) for x in hora_str.split(':'))
+    except Exception:
+        hh, mm = 3, 0
+    objetivo_minutos = hh * 60 + mm
+    ahora_minutos = ahora.hour * 60 + ahora.minute
+    en_ventana = ((ahora_minutos - objetivo_minutos) % 1440) < 6
+    if not en_ventana:
+        return False
+    if ultimo_ts is None:
+        return True
+    return (ahora.date() - ultimo_ts.date()).days >= valor
+
+
+def _proximo_respaldo_automatico_texto(config, ultimo_ts):
+    """Texto informativo (para la página de Respaldos) de cuándo se espera el próximo
+    respaldo automático, según la configuración vigente. Devuelve None si no se pudo calcular
+    (no debería bloquear la página si algo raro pasa aquí)."""
+    try:
+        if config.get('tipo') == 'horas':
+            if ultimo_ts is None:
+                return 'Pendiente — se generará en el próximo ciclo (Arkiv revisa cada 5 minutos)'
+            proximo = ultimo_ts + timedelta(hours=config.get('valor', 1))
+            return proximo.strftime('%Y-%m-%d %H:%M')
+        if ultimo_ts is None:
+            return f"Hoy o mañana a las {config.get('hora', '03:00')} (todavía no hay respaldos automáticos)"
+        proximo_fecha = ultimo_ts.date() + timedelta(days=config.get('valor', 1))
+        return f"{proximo_fecha.strftime('%Y-%m-%d')} {config.get('hora', '03:00')}"
+    except Exception:
+        return None
 
 TABLAS_RESPALDO = [
     'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
@@ -2358,32 +2477,47 @@ def _limpiar_respaldos_viejos():
 
 
 def _respaldo_diario_automatico():
-    """Hilo en segundo plano (arranca una vez al cargar la app): cada hora revisa si ya se
-    generó el respaldo automático de HOY y, si no, lo genera. El propio nombre del archivo
-    del día actúa como candado (se crea con modo exclusivo 'x', que falla si ya existe) —
-    así, aunque Render corra 2 procesos gunicorn de esta misma app en paralelo (como está
-    configurado), solo uno de ellos termina generando el respaldo cada día."""
+    """Hilo en segundo plano (arranca una vez al cargar la app): cada 5 minutos relee la
+    configuración de frecuencia (ver _leer_config_respaldo_automatico — configurable desde la
+    página de Respaldos, sin reiniciar el servidor) y decide si ya toca generar un respaldo
+    automático (ver _debe_generar_respaldo_automatico). El nombre del archivo del período
+    actúa como candado (se crea con modo exclusivo 'x', que falla si ya existe) — así, aunque
+    Render corra 2 procesos gunicorn de esta misma app en paralelo (como está configurado),
+    en la práctica solo uno de ellos termina generando el respaldo de cada período."""
     time.sleep(30)  # Pequeña espera para no competir con el arranque del propio servidor.
     while True:
         try:
             os.makedirs(RESPALDOS_DIR, exist_ok=True)
-            hoy = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d')
-            marcador = os.path.join(RESPALDOS_DIR, f"auto_{hoy}.json")
-            try:
-                fh = os.open(marcador, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fh)
-            except FileExistsError:
-                pass  # Ya se generó hoy (por este proceso o por otro worker) — nada que hacer.
-            else:
-                datos = _generar_respaldo_datos()
-                with open(marcador, 'w', encoding='utf-8') as f:
-                    json.dump(datos, f, ensure_ascii=False)
-                print(f"✅ Respaldo automático diario generado: {marcador}")
-                threading.Thread(target=_respaldar_copia_externa, args=(marcador,), daemon=True).start()
-                _limpiar_respaldos_viejos()
+            config = _leer_config_respaldo_automatico()
+            ahora = datetime.now(ZONA_HORARIA_COLOMBIA)
+            ultimo_ts = _ultimo_respaldo_automatico_ts()
+            if _debe_generar_respaldo_automatico(config, ahora, ultimo_ts):
+                if config['tipo'] == 'dias':
+                    # Un candado por día (independiente de a qué minuto exacto caiga la
+                    # ventana de chequeo) — igual que el comportamiento original.
+                    bucket = ahora.strftime('%Y-%m-%d')
+                else:
+                    # Un candado por bloque de 5 minutos — suficiente para que los distintos
+                    # workers de gunicorn, que revisan casi al mismo tiempo, choquen en el
+                    # mismo nombre de archivo en vez de generar duplicados.
+                    minuto_bloque = ahora.minute - (ahora.minute % 5)
+                    bucket = ahora.replace(minute=minuto_bloque, second=0, microsecond=0).strftime('%Y-%m-%d_%H%M')
+                marcador = os.path.join(RESPALDOS_DIR, f"auto_{bucket}.json")
+                try:
+                    fh = os.open(marcador, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.close(fh)
+                except FileExistsError:
+                    pass  # Ya se generó en este período (por este proceso o por otro worker) — nada que hacer.
+                else:
+                    datos = _generar_respaldo_datos()
+                    with open(marcador, 'w', encoding='utf-8') as f:
+                        json.dump(datos, f, ensure_ascii=False)
+                    print(f"✅ Respaldo automático generado (cada {config['valor']} {config['tipo']}): {marcador}")
+                    threading.Thread(target=_respaldar_copia_externa, args=(marcador,), daemon=True).start()
+                    _limpiar_respaldos_viejos()
         except Exception as e:
             print(f"⚠️ Error en el hilo de respaldo automático: {e}")
-        time.sleep(3600)  # Revisa cada hora si ya cambió el día.
+        time.sleep(300)  # Revisa cada 5 minutos — permite cumplir la hora configurada con precisión razonable.
 
 
 if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
@@ -2396,7 +2530,17 @@ if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
 @superadmin_required
 def ver_respaldos():
     disco_disponible = os.path.isdir(RESPALDOS_DIR) or _crear_dir_respaldos_silencioso()
-    return render_template('respaldos.html', respaldos=_listar_respaldos(), respaldos_dir=RESPALDOS_DIR, disco_disponible=disco_disponible, respaldo_email_destino=RESPALDO_EMAIL_DESTINO)
+    config_respaldo = _leer_config_respaldo_automatico()
+    ultimo_ts_automatico = _ultimo_respaldo_automatico_ts()
+    return render_template(
+        'respaldos.html',
+        respaldos=_listar_respaldos(),
+        respaldos_dir=RESPALDOS_DIR,
+        disco_disponible=disco_disponible,
+        respaldo_email_destino=RESPALDO_EMAIL_DESTINO,
+        config_respaldo=config_respaldo,
+        proximo_respaldo_automatico=_proximo_respaldo_automatico_texto(config_respaldo, ultimo_ts_automatico)
+    )
 
 
 def _crear_dir_respaldos_silencioso():
@@ -2405,6 +2549,36 @@ def _crear_dir_respaldos_silencioso():
         return True
     except Exception:
         return False
+
+
+@app.route('/admin/respaldos/configurar', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def configurar_respaldo_automatico():
+    """Guarda la frecuencia del respaldo automático elegida en la página de Respaldos: cada
+    tantos días (a una hora específica) o cada tantas horas. La aplica el hilo de fondo en su
+    siguiente ciclo (máximo 5 minutos después), sin necesidad de reiniciar el servidor."""
+    tipo = request.form.get('tipo', 'dias')
+    if tipo not in ('dias', 'horas'):
+        tipo = 'dias'
+    try:
+        valor = int(request.form.get('valor', 1))
+    except (TypeError, ValueError):
+        valor = 1
+    tope = 30 if tipo == 'dias' else 168  # hasta 30 días, o hasta 168 horas (1 semana)
+    valor = max(1, min(valor, tope))
+    hora = (request.form.get('hora') or '03:00').strip()
+    if not re.match(r'^([01]\d|2[0-3]):([0-5]\d)$', hora):
+        hora = '03:00'
+    config = {'tipo': tipo, 'valor': valor, 'hora': hora}
+    if _guardar_config_respaldo_automatico(config):
+        descripcion = f"cada {valor} día(s) a las {hora}" if tipo == 'dias' else f"cada {valor} hora(s)"
+        registrar_log(session.get('username'), "Respaldo de Base de Datos", f"Frecuencia de respaldo automático actualizada: {descripcion}")
+        flash(f"Frecuencia de respaldo automático actualizada: {descripcion}.", "exito")
+    else:
+        flash("No se pudo guardar la configuración: la carpeta de respaldos no está disponible (¿el disco persistente de Render ya está montado en /var/data?).", "error")
+    return redirect(url_for('ver_respaldos'))
 
 
 @app.route('/admin/respaldos/generar', methods=['POST'])
