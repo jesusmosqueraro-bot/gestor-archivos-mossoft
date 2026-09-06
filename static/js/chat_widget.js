@@ -143,7 +143,7 @@
             '<div id="widget-vista-conversacion" class="hidden flex-1 flex-col min-h-0">' +
                 '<div class="px-2.5 py-2.5 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">' +
                     '<button type="button" id="widget-boton-volver" class="text-slate-400 hover:text-white w-7 h-7 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-arrow-left"></i></button>' +
-                    '<div class="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-xs flex-shrink-0" id="widget-icono-titulo"><i class="fa-solid fa-users"></i></div>' +
+                    '<div class="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-xs flex-shrink-0 overflow-hidden" id="widget-icono-titulo"><i class="fa-solid fa-users"></i></div>' +
                     '<div class="min-w-0 flex-1"><div class="text-xs font-bold text-white truncate" id="widget-titulo-conversacion">Canal General</div></div>' +
                     '<a id="widget-abrir-completo" href="/chat" title="Abrir en pantalla completa" class="text-slate-500 hover:text-white w-7 h-7 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-up-right-and-down-left-from-center text-xs"></i></a>' +
                     '<button type="button" id="widget-boton-cerrar-conversacion" class="text-slate-500 hover:text-white w-7 h-7 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-xmark"></i></button>' +
@@ -186,7 +186,7 @@
             if (itemCanal) { _widgetAbrirCanalGeneral(); return; }
             var itemContacto = e.target.closest('.widget-item-contacto');
             if (itemContacto) {
-                _widgetAbrirDirecto(itemContacto.getAttribute('data-usuario'), itemContacto.getAttribute('data-nombre'));
+                _widgetAbrirDirecto(itemContacto.getAttribute('data-usuario'), itemContacto.getAttribute('data-nombre'), itemContacto.getAttribute('data-foto'));
             }
         });
 
@@ -280,10 +280,15 @@
             // puede contener otro <button> válidamente) dentro de un mismo contenedor.
             html += '<div class="widget-item-contacto flex items-stretch hover:bg-slate-800/60 transition-colors ' + (activo ? 'bg-sky-500/10' : '') + '" ' +
                 'data-usuario="' + _escapeAtributoWidget(c.usuario) + '" data-nombre="' + _escapeAtributoWidget(c.nombre) + '" ' +
+                'data-foto="' + _escapeAtributoWidget(c.foto_perfil || '') + '" ' +
                 'data-en-linea="' + (c.en_linea ? 'true' : 'false') + '" data-favorito="' + (c.favorito ? 'true' : 'false') + '" data-anclado="' + (c.anclado ? 'true' : 'false') + '">' +
                 '<button type="button" class="flex-1 min-w-0 text-left px-3 py-2.5 flex items-center gap-2.5">' +
                     '<div class="relative flex-shrink-0">' +
-                        '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold">' + _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase()) + '</div>' +
+                        // 🖼️ Foto de perfil (pedido por Tomás): si la persona subió una desde /perfil,
+                        // se usa esa en vez de la inicial.
+                        '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold overflow-hidden">' +
+                            (c.foto_perfil ? '<img src="' + _escapeAtributoWidget(c.foto_perfil) + '" alt="" class="w-full h-full object-cover">' : _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase())) +
+                        '</div>' +
                         '<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ' + (c.en_linea ? 'bg-emerald-400' : 'bg-rose-500') + '" title="' + (c.en_linea ? 'En línea' : 'Desconectado') + '"></span>' +
                     '</div>' +
                     '<div class="min-w-0 flex-1">' +
@@ -445,11 +450,18 @@
         _widgetAsegurarSondeoMensajes();
     }
 
-    function _widgetAbrirDirecto(usuario, nombre) {
+    function _widgetAbrirDirecto(usuario, nombre, foto) {
         _widgetChatActual = { tipo: 'directo', usuario: usuario, nombre: nombre };
         _widgetUltimoId = 0;
         document.getElementById('widget-titulo-conversacion').textContent = nombre;
-        document.getElementById('widget-icono-titulo').textContent = (nombre || '?').slice(0, 1).toUpperCase();
+        // 🖼️ Foto de perfil (pedido por Tomás): si la persona subió una desde /perfil, se usa esa
+        // en vez de la inicial — mismo criterio que el avatar de la lista de contactos.
+        var iconoTitulo = document.getElementById('widget-icono-titulo');
+        if (foto) {
+            iconoTitulo.innerHTML = '<img src="' + _escapeAtributoWidget(foto) + '" alt="" class="w-full h-full object-cover">';
+        } else {
+            iconoTitulo.textContent = (nombre || '?').slice(0, 1).toUpperCase();
+        }
         document.getElementById('widget-abrir-completo').setAttribute('href', '/chat?con=' + encodeURIComponent(usuario));
         _widgetLimpiarMensajes();
         _widgetMostrarVista('conversacion');

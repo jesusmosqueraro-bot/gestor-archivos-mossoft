@@ -71,12 +71,19 @@ function abrirCanalGeneral() {
     cargarContactosChat();
 }
 
-function abrirDirecto(usuario, nombre) {
+function abrirDirecto(usuario, nombre, foto) {
     _chatActual = { tipo: 'directo', usuario: usuario, nombre: nombre };
     _chatUltimoId = 0;
     document.getElementById('titulo-conversacion-chat').textContent = nombre;
     document.getElementById('subtitulo-conversacion-chat').textContent = 'Conversación privada';
-    document.getElementById('icono-titulo-chat').textContent = (nombre || '?').slice(0, 1).toUpperCase();
+    // 🖼️ Foto de perfil (pedido por Tomás): si la persona subió una desde /perfil, se usa esa
+    // en vez de la inicial — mismo criterio que el avatar de la lista de contactos.
+    var iconoTitulo = document.getElementById('icono-titulo-chat');
+    if (foto) {
+        iconoTitulo.innerHTML = '<img src="' + _escapeAtributoChat(foto) + '" alt="" class="w-full h-full object-cover">';
+    } else {
+        iconoTitulo.textContent = (nombre || '?').slice(0, 1).toUpperCase();
+    }
     _marcarContactoActivoChat(usuario);
     _limpiarMensajesChat();
     _mostrarPanelMensajesMovilChat();
