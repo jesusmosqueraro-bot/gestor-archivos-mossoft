@@ -187,7 +187,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% elif u[1] == session.get('username') %}
@@ -508,6 +508,34 @@
                     </select>
                 </div>
 
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase">Firma digital</label>
+                        <div class="flex gap-1">
+                            <button type="button" id="firma-editar-tab-dibujar" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-cyan-600 text-white transition-all">Dibujar</button>
+                            <button type="button" id="firma-editar-tab-subir" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-300 transition-all">Subir imagen</button>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mb-1.5">Se usa como firma de esta cuenta en las actas de asignación y devolución de activos del Inventario. Puede subirse en cualquier formato de imagen (JPG, PNG, etc.) o dibujarse aquí mismo. Si no la tocas, se conserva la que ya tenía.</p>
+                    <div id="edit-firma-actual" class="hidden mb-2">
+                        <p class="text-[10px] text-slate-500 mb-1">Firma actual guardada:</p>
+                        <img id="edit-firma-actual-img" class="max-h-20 rounded-xl border border-slate-800 bg-white p-1" alt="Firma actualmente guardada">
+                        <label class="flex items-center gap-1.5 mt-1.5 text-[10px] text-slate-400">
+                            <input type="checkbox" name="quitar_firma" id="edit_quitar_firma" class="rounded border-slate-700 bg-slate-950">
+                            Quitar la firma guardada (dejar la cuenta sin firma)
+                        </label>
+                    </div>
+                    <div id="firma-editar-panel-dibujar">
+                        <canvas id="firma-editar-canvas" width="380" height="130" class="w-full bg-white rounded-xl border border-slate-800" style="height:130px; touch-action: none;"></canvas>
+                        <button type="button" id="firma-editar-borrar" class="mt-1.5 text-[10px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                    </div>
+                    <div id="firma-editar-panel-subir" class="hidden">
+                        <input type="file" id="firma-editar-archivo" accept="image/*" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300">
+                        <img id="firma-editar-preview" class="hidden mt-2 max-h-28 rounded-xl border border-slate-800 bg-white p-1" alt="Vista previa de la firma">
+                    </div>
+                    <input type="hidden" name="firma_dataurl" id="firma-editar-input">
+                </div>
+
                 <div class="pt-2 flex gap-3">
                     <button type="button" onclick="cerrarModalEditarUsuario()" class="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all">Cancelar</button>
                     <button type="submit" class="w-1/2 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">Guardar Cambios</button>
@@ -648,7 +676,7 @@
             });
         }
 
-        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad) {
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
@@ -656,6 +684,18 @@
             document.getElementById('edit_telefono').value = telefono || '';
             document.getElementById('edit_cedula').value = cedula || '';
             document.getElementById('edit_especialidad').value = especialidad || '';
+            // ✍️ Firma: se reinicia el widget (dibujo/archivo pendiente de una edición anterior no
+            // debe "arrastrarse" a la cuenta que se va a editar ahora) y, si esta cuenta ya tenía
+            // una firma guardada, se muestra como vista previa junto con la opción de quitarla.
+            if (window.firmaEditarWidget) { window.firmaEditarWidget.reiniciar(); }
+            document.getElementById('edit_quitar_firma').checked = false;
+            var contenedorFirmaActual = document.getElementById('edit-firma-actual');
+            if (firma) {
+                document.getElementById('edit-firma-actual-img').src = firma;
+                contenedorFirmaActual.classList.remove('hidden');
+            } else {
+                contenedorFirmaActual.classList.add('hidden');
+            }
             document.getElementById('modalEditarUsuario').classList.remove('hidden');
         }
         function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
@@ -768,6 +808,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             inicializarFirmaDigital('firma-nuevo');
+            window.firmaEditarWidget = inicializarFirmaDigital('firma-editar');
         });
     </script>
 </body>
