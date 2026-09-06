@@ -5708,9 +5708,20 @@ def editar_tarea_ticket(ticket_id, tarea_id):
                 f"{session['username']} respondió la tarea \"{asunto}\" en el ticket #{ticket_id}.",
                 url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
             )
+        # 💬 Aviso visible de que se guardó (pedido por Tomás: el cuadro de respuesta rápida no daba
+        # ninguna confirmación al presionar "enviar" — el texto se guardaba en la base de datos, pero
+        # como el mismo cuadro se vuelve a llenar con ese mismo texto al recargar, en pantalla parecía
+        # que "no se publicaba" nada. Ahora se confirma igual que cualquier otra acción de la app.
+        if respuesta and respuesta != respuesta_old:
+            flash("Respuesta guardada correctamente.", "success")
+        elif respuesta_old and not respuesta:
+            flash("Se eliminó la respuesta de la tarea.", "success")
+        else:
+            flash("Tarea actualizada correctamente.", "success")
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error editando la tarea {tarea_id} (ticket {ticket_id}): {e}")
+        flash("No se pudo guardar los cambios de la tarea. Intenta de nuevo.", "error")
     conn.close()
     return redirect(destino)
 
