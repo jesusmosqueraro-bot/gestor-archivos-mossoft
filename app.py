@@ -3396,6 +3396,22 @@ def _estados_disponibles_ticket(estado_actual):
     return disponibles
 
 
+def _estados_disponibles_tarea(estado_actual):
+    """Mismo criterio que _estados_disponibles_ticket() pero para una tarea interna de un
+    ticket (pedido por Tomás): no se puede saltar directo de 'pendiente' a 'completada' ni a
+    'cancelada' sin que la tarea haya pasado antes por 'en_progreso' (guardando ese cambio
+    primero) — así queda registro de que alguien de verdad empezó a atenderla antes de darla
+    por terminada o de descartarla. Una vez 'completada' o 'cancelada' la tarea queda
+    bloqueada: son estados finales para esta tarea, sin más cambios posibles desde este control
+    (si hace falta retomarla, se crea una tarea nueva)."""
+    if estado_actual in ('completada', 'cancelada'):
+        return [estado_actual]
+    disponibles = ['pendiente', 'en_progreso']
+    if estado_actual == 'en_progreso':
+        disponibles += ['completada', 'cancelada']
+    return disponibles
+
+
 def _parsear_fecha_ticket(fecha_str):
     """Convierte el formato de fecha usado en todo el módulo ('YYYY-MM-DD HH:MM:SS') a
     datetime. Devuelve None si el valor está vacío o no tiene el formato esperado."""
@@ -3899,16 +3915,20 @@ def _esta_en_linea(ultima_actividad_str):
 
 
 def _usuarios_operativos_activos(excluir=None):
-    """Lista de {usuario, nombre, en_linea} de cuentas activas con rol admin/agente (con quién
-    se puede chatear), sin incluir 'excluir' (normalmente quien está en sesión), ordenada por
-    nombre. 'en_linea' viene de _esta_en_linea() sobre la actividad reciente de cada cuenta."""
+    """Lista de {usuario, nombre, en_linea, foto_perfil} de cuentas activas con rol admin/agente
+    (con quién se puede chatear), sin incluir 'excluir' (normalmente quien está en sesión),
+    ordenada por nombre. 'en_linea' viene de _esta_en_linea() sobre la actividad reciente de cada
+    cuenta. 'foto_perfil' (pedido por Tomás: que el ícono del Chat Interno muestre la foto real,
+    no solo la inicial) es la misma URL de Cloudinary que ya administra /perfil — None si esa
+    persona nunca subió una, y entonces el frente sigue mostrando la inicial como hasta ahora."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         placeholders = ', '.join(['%s' if db_type == 'postgres' else '?'] * len(ROLES_CON_ACCESO_OPERATIVO))
-        q = f"SELECT usuario, nombre, ultima_actividad FROM usuarios WHERE estado = 'activo' AND rol IN ({placeholders})"
+        q = f"SELECT usuario, nombre, ultima_actividad, foto_perfil FROM usuarios WHERE estado = 'activo' AND rol IN ({placeholders})"
         cursor.execute(q, ROLES_CON_ACCESO_OPERATIVO)
-        filas = [{'usuario': u, 'nombre': n or u, 'en_linea': _esta_en_linea(ua)} for u, n, ua in cursor.fetchall() if u != excluir]
+        filas = [{'usuario': u, 'nombre': n or u, 'en_linea': _esta_en_linea(ua), 'foto_perfil': foto or None}
+                 for u, n, ua, foto in cursor.fetchall() if u != excluir]
         conn.close()
         filas.sort(key=lambda f: f['nombre'].lower())
         return filas
@@ -4119,7 +4139,7 @@ def chat_contactos():
             contactos.append({
                 'usuario': c['usuario'], 'nombre': c['nombre'], 'no_leidos': no_leidos,
                 'ultimo_mensaje': fila[0] if fila else None, 'ultima_fecha': fila[1] if fila else None,
-                'en_linea': c['en_linea'],
+                'en_linea': c['en_linea'], 'foto_perfil': c.get('foto_perfil'),
             })
         conn.close()
     except Exception as e:
@@ -5503,12 +5523,17 @@ def ver_ticket(ticket_id):
         nombres_agentes = {a['usuario']: a['nombre'] for a in agentes}
         for t in cursor.fetchall():
             responsable_usuario = t[3]
+            estado_tarea = t[4] or 'pendiente'
             tareas.append({
                 'id': t[0], 'asunto': t[1], 'descripcion': t[2], 'responsable': responsable_usuario,
                 'responsable_nombre': nombres_agentes.get(responsable_usuario, responsable_usuario),
-                'estado': t[4] or 'pendiente', 'fecha_limite': t[5], 'creado_por': t[6],
+                'estado': estado_tarea, 'fecha_limite': t[5], 'creado_por': t[6],
                 'fecha_creacion': t[7], 'fecha_completada': t[8],
-                'vencida': bool(t[5] and t[4] not in ('completada', 'cancelada') and t[5] < datetime.now().strftime('%Y-%m-%d')),
+                'vencida': bool(t[5] and estado_tarea not in ('completada', 'cancelada') and t[5] < datetime.now().strftime('%Y-%m-%d')),
+                # 🔒 Mismo criterio de bloqueo que el estado del ticket (ver
+                # _estados_disponibles_tarea): el desplegable de abajo solo ofrece las
+                # opciones que de verdad se pueden elegir desde el estado actual.
+                'estados_disponibles': _estados_disponibles_tarea(estado_tarea),
             })
 
     conn.close()
@@ -5585,6 +5610,55 @@ def crear_tarea_ticket(ticket_id):
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
 
+@app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/editar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def editar_tarea_ticket(ticket_id, tarea_id):
+    """Edita el asunto, la descripción/notas, el responsable y la fecha límite de una tarea ya
+    creada (pedido por Tomás: hasta ahora solo se podía completar esa información al crearla,
+    sin forma de corregirla o agregar notas después). No toca el estado —eso sigue siendo
+    exclusivo de cambiar_estado_tarea_ticket()— así que se puede editar una tarea completada o
+    cancelada (por ejemplo, para dejar una nota de cierre) sin reabrirla."""
+    asunto = (request.form.get('asunto') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip() or None
+    responsable = (request.form.get('responsable') or '').strip() or None
+    fecha_limite = (request.form.get('fecha_limite') or '').strip() or None
+
+    if not asunto:
+        flash("El asunto de la tarea no puede quedar vacío.", "error")
+        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT asunto, responsable FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, responsable FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
+        cursor.execute(q_sel, (tarea_id, ticket_id))
+        fila_tarea = cursor.fetchone()
+        if not fila_tarea:
+            conn.close()
+            return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+        asunto_old, responsable_old = fila_tarea
+
+        q_upd = ("UPDATE tickets_tareas SET asunto = %s, descripcion = %s, responsable = %s, fecha_limite = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
+                ("UPDATE tickets_tareas SET asunto = ?, descripcion = ?, responsable = ?, fecha_limite = ? WHERE id = ? AND ticket_id = ?")
+        cursor.execute(q_upd, (asunto, descripcion, responsable, fecha_limite, tarea_id, ticket_id))
+        conn.commit()
+        registrar_log(session['username'], "Tarea de Ticket Editada", f"Ticket #{ticket_id}: tarea '{asunto_old}' actualizada" + (f" (ahora '{asunto}')" if asunto != asunto_old else ""))
+        # 🔔 Si la edición reasignó la tarea a otra persona (antes no tenía responsable, o tenía
+        # uno distinto), se le avisa — mismo criterio que crear_tarea_ticket().
+        if responsable and responsable != responsable_old and responsable != session['username']:
+            crear_notificacion(
+                responsable,
+                f"Te asignaron la tarea \"{asunto}\" en el ticket #{ticket_id}.",
+                url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
+            )
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error editando la tarea {tarea_id} (ticket {ticket_id}): {e}")
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
 @app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/estado', methods=['POST'])
 @login_required
 @agente_o_admin_required
@@ -5594,6 +5668,13 @@ def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
     que ya no aplica —se distingue de 'completada' porque no se hizo el trabajo, solo dejó de
     ser necesario— y, junto con 'completada', es lo que actualizar_ticket() exige para poder
     marcar el ticket como Resuelto/Cerrado (ver ese bloqueo en app.py).
+
+    🔒 Mismas condiciones que ya rigen el cierre de un ticket (pedido por Tomás, ver
+    _estados_disponibles_tarea): no se puede marcar 'completada' ni 'cancelada' sin que la
+    tarea haya pasado antes por 'en_progreso', y una vez 'completada'/'cancelada' queda
+    bloqueada para siempre (ver ese chequeo en app.py). Se valida SIEMPRE del lado del
+    servidor —el desplegable de ticket_detalle.html/mis_tareas.html ya solo ofrece las
+    opciones permitidas— por si alguien arma el POST a mano.
 
     Cada cambio queda en Logs (bitácora): antes solo se registraba crear/eliminar una tarea, no
     sus transiciones de estado, dejando un hueco en el rastro de auditoría de quién hizo qué y
@@ -5612,7 +5693,6 @@ def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    fecha_completada = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if nuevo_estado in ('completada', 'cancelada') else None
     try:
         q_sel = "SELECT asunto, estado FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, estado FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
         cursor.execute(q_sel, (tarea_id, ticket_id))
@@ -5621,7 +5701,21 @@ def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
             conn.close()
             return redirect(destino)
         asunto_tarea, estado_tarea_old = fila_tarea
+        estado_tarea_old = estado_tarea_old or 'pendiente'
 
+        if nuevo_estado not in _estados_disponibles_tarea(estado_tarea_old):
+            conn.close()
+            if estado_tarea_old in ('completada', 'cancelada'):
+                flash(f"La tarea '{asunto_tarea}' ya quedó '{estado_tarea_old}' y no se puede volver a cambiar.", "error")
+            else:
+                flash(
+                    f"No se pudo marcar la tarea '{asunto_tarea}' como '{nuevo_estado}': primero debe pasar por "
+                    "'En progreso'.",
+                    "error"
+                )
+            return redirect(destino)
+
+        fecha_completada = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if nuevo_estado in ('completada', 'cancelada') else None
         q_upd = ("UPDATE tickets_tareas SET estado = %s, fecha_completada = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
                 ("UPDATE tickets_tareas SET estado = ?, fecha_completada = ? WHERE id = ? AND ticket_id = ?")
         cursor.execute(q_upd, (nuevo_estado, fecha_completada, tarea_id, ticket_id))
@@ -5629,7 +5723,7 @@ def cambiar_estado_tarea_ticket(ticket_id, tarea_id):
         if nuevo_estado != estado_tarea_old:
             registrar_log(
                 session['username'], "Estado de Tarea de Ticket Actualizado",
-                f"Ticket #{ticket_id}: tarea '{asunto_tarea}' pasó de '{estado_tarea_old or 'pendiente'}' a '{nuevo_estado}'"
+                f"Ticket #{ticket_id}: tarea '{asunto_tarea}' pasó de '{estado_tarea_old}' a '{nuevo_estado}'"
             )
     except Exception as e:
         conn.rollback()
@@ -5688,12 +5782,16 @@ def mis_tareas():
     for f in filas:
         (tarea_id, ticket_id, asunto, descripcion, estado, fecha_limite, fecha_completada,
          ticket_titulo, ticket_tipo, ticket_estado, ticket_fecha_creacion) = f
+        estado = estado or 'pendiente'
         tareas.append({
             'id': tarea_id, 'ticket_id': ticket_id, 'asunto': asunto, 'descripcion': descripcion,
-            'estado': estado or 'pendiente', 'fecha_limite': fecha_limite, 'fecha_completada': fecha_completada,
+            'estado': estado, 'fecha_limite': fecha_limite, 'fecha_completada': fecha_completada,
             'ticket_titulo': ticket_titulo, 'ticket_estado': ticket_estado,
             'ticket_codigo': _codigo_ticket(ticket_tipo or 'Incidente', ticket_id, ticket_fecha_creacion),
             'vencida': bool(fecha_limite and estado not in ('completada', 'cancelada') and fecha_limite < hoy),
+            # 🔒 Mismo criterio de bloqueo que en el detalle del ticket — ver
+            # _estados_disponibles_tarea() en app.py.
+            'estados_disponibles': _estados_disponibles_tarea(estado),
         })
 
     return render_template('mis_tareas.html', es_soporte=True, tareas=tareas, ver_todas=ver_todas)
