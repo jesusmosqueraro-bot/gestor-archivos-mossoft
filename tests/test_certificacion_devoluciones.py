@@ -151,3 +151,70 @@ def test_certificacion_devoluciones_tiene_boton_de_tema_claro_oscuro(admin_sessi
 
     assert 'action="/perfil/tema"' in texto
     assert 'fa-sun' in texto or 'fa-moon' in texto
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ACTA DE DEVOLUCIÓN EN PDF (pedido por Tomás): "ojo, que solo lo genere si se le marca
+# generar" — el checkbox 'generar_acta' en la confirmación decide si esa certificación puntual
+# queda con un PDF descargable o no. La fila de 'inventario_devoluciones' en sí es siempre el
+# certificado, se marque o no la casilla.
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_confirmar_devolucion_sin_marcar_generar_acta_no_deja_pdf_descargable(admin_session, app):
+    activo_id = _crear_activo(app, nombre='Laptop Acer', asignado_a='Pedro Salas')
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, acta_generada FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id, acta_generada = cur.fetchone()
+    conn.close()
+    assert bool(acta_generada) is False
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf', follow_redirects=True)
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] != 'application/pdf'
+
+
+def test_confirmar_devolucion_marcando_generar_acta_permite_descargar_el_pdf(admin_session, app):
+    activo_id = _crear_activo(app, nombre='Laptop Lenovo', asignado_a='Sofía Ramírez')
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'generar_acta': 'on'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, acta_generada FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id, acta_generada = cur.fetchone()
+    conn.close()
+    assert bool(acta_generada) is True
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] == 'application/pdf'
+    assert r.data[:4] == b'%PDF'
+
+
+def test_historial_de_certificacion_muestra_el_enlace_de_descarga_solo_si_se_genero_acta(admin_session, app):
+    activo_con_acta = _crear_activo(app, nombre='PC Con Acta', asignado_a='Con Acta')
+    activo_sin_acta = _crear_activo(app, nombre='PC Sin Acta', asignado_a='Sin Acta')
+    admin_session.post(f'/inventario/{activo_con_acta}/confirmar_devolucion', data={'generar_acta': 'on'})
+    admin_session.post(f'/inventario/{activo_sin_acta}/confirmar_devolucion', data={})
+
+    texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
+
+    assert texto.count('acta_pdf') == 1  # solo una de las dos filas trae el enlace de descarga
+
+
+def test_devolucion_requiere_rol_valido_para_descargar_acta(sesion_usuario, app):
+    activo_id = _crear_activo(app, nombre='Laptop Restringida', asignado_a='Alguien')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, acta_generada) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+         if db_type == 'postgres' else
+         "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, acta_generada) VALUES (?, ?, ?, ?, ?, ?)")
+    cur.execute(q, (activo_id, 'Alguien', 'admin', '2026-09-06 10:00:00', None, True))
+    devolucion_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    r = sesion_usuario.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+    assert r.status_code in (302, 403)
