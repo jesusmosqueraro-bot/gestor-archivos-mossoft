@@ -12095,9 +12095,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -12395,11 +12395,20 @@ def editar_usuario(usuario_id):
     nuevo_telefono = request.form.get('telefono', '').strip()
     nueva_cedula = request.form.get('cedula', '').strip()
     nueva_especialidad = request.form.get('especialidad', '').strip()
+    # ✍️ Firma digital del colaborador (pedido de Tomás, 06/09/2026): antes solo se podía capturar
+    # UNA vez, al crear la cuenta (ver _crear_usuario_interno) — si no quedó guardada entonces, o
+    # quedó mal, no había forma de agregarla/corregirla después, y las actas de asignación y
+    # devolución se quedaban sin esa firma ("Sin firma registrada") aunque la persona sí tuviera
+    # una firma en otro lado (ej. subida como "documento" — eso es un módulo aparte, no toca esta
+    # columna). Ahora Modificar Usuario también puede cargarla o reemplazarla — dibujada o subida
+    # como imagen en cualquier formato común (ver _subir_firma_desde_dataurl) — o quitarla.
+    firma_dataurl = request.form.get('firma_dataurl') or ''
+    quitar_firma = request.form.get('quitar_firma') in ('on', '1', 'true')
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
@@ -12423,6 +12432,21 @@ def editar_usuario(usuario_id):
         if user_target is None:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
+
+        # ✍️ Firma: si llegó una nueva (dibujada o subida), reemplaza la que hubiera; si no llegó
+        # ninguna pero se marcó "quitar firma", queda sin firma; si no pasó ninguna de las dos
+        # cosas, se conserva la que ya tenía (igual que nombre/teléfono/cédula/especialidad) — así
+        # abrir el modal y guardar sin tocar la firma nunca la borra por accidente.
+        firma_original = row[7] if row and len(row) > 7 else None
+        firma_final = firma_original
+        if firma_dataurl:
+            nueva_firma_url, error_firma = _subir_firma_desde_dataurl(firma_dataurl)
+            if error_firma:
+                flash(f"Los demás datos se guardaron, pero la firma no se pudo actualizar: {error_firma}", "error")
+            elif nueva_firma_url:
+                firma_final = nueva_firma_url
+        elif quitar_firma:
+            firma_final = None
 
         # 🪪 Solo se valida la unicidad de la cédula cuando el admin la está CAMBIANDO
         # activamente a un valor distinto del que este usuario ya tenía — así una pareja de
@@ -12466,12 +12490,12 @@ def editar_usuario(usuario_id):
             nuevo_hash = generate_password_hash(nueva_pass)
             # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
             # aquí, se obliga a cambiarla en su próximo inicio de sesión.
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, debe_cambiar_password = 1 WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, debe_cambiar_password = 1 WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
@@ -12479,6 +12503,8 @@ def editar_usuario(usuario_id):
     except Exception as e:
         conn.rollback()
         pass_rechazada = False
+        print(f"Error editando usuario {usuario_id}: {e}")
+        flash(_mensaje_error_para_agente(e), "error")
 
     conn.close()
     if pass_rechazada:
