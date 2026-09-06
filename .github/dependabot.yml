@@ -1,0 +1,25 @@
+# 🔒 Hallazgo de auditoría de seguridad (06/09/2026): no había ningún escaneo automático de
+# dependencias — un requirements.txt con una vulnerabilidad conocida podía quedarse así
+# indefinidamente sin que nadie se enterara. Dependabot revisa semanalmente si hay versiones
+# más nuevas (por seguridad u otro motivo) de lo que usa la app y abre un Pull Request propio
+# por cada actualización, sin tocar nada automáticamente — cada PR pasa por el workflow de
+# pruebas (.github/workflows/pruebas.yml) antes de poder mezclarse a main.
+version: 2
+updates:
+  # Dependencias de Python (requirements.txt / requirements-dev.txt).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencias"
+
+  # Las propias GitHub Actions que usa el workflow de pruebas (actions/checkout,
+  # actions/setup-python...) también se versionan y pueden tener parches de seguridad.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencias"
