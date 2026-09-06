@@ -35,3 +35,27 @@ jobs:
           # Sin DATABASE_URL, get_db() cae automáticamente a sqlite (ver app.py).
           DESHABILITAR_RESPALDO_AUTOMATICO: '1'
         run: python -m pytest tests/ -v
+
+  # 🔒 Hallazgo de auditoría de seguridad (06/09/2026): no había ningún escaneo de
+  # dependencias — pip-audit revisa requirements.txt contra la base de datos pública de
+  # vulnerabilidades conocidas (OSV) en cada push/PR a main. Es un job aparte del de pytest de
+  # arriba para que un hallazgo de seguridad se vea como su propio check en el PR, sin mezclarse
+  # con el resultado de las pruebas. No bloquea el auto-deploy de Render (que dispara con el
+  # push, no con este resultado) — es una señal para revisar y actualizar la dependencia
+  # marcada, no un despliegue detenido.
+  auditoria-dependencias:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar pip-audit
+        run: pip install pip-audit
+
+      - name: Escanear requirements.txt en busca de vulnerabilidades conocidas
+        run: pip-audit -r requirements.txt --strict
