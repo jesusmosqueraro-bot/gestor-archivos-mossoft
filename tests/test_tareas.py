@@ -79,7 +79,11 @@ def test_se_puede_resolver_ticket_con_tareas_completadas_o_canceladas(admin_sess
     conn.close()
     assert len(ids_tareas) == 2
 
+    # 🔒 Desde este cambio, una tarea no puede saltar directo de 'pendiente' a 'completada'/
+    # 'cancelada' sin pasar antes por 'en_progreso' (ver _estados_disponibles_tarea en app.py).
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{ids_tareas[0]}/estado', data={'estado': 'en_progreso'})
     admin_session.post(f'/tickets/{ticket_id}/tareas/{ids_tareas[0]}/estado', data={'estado': 'completada'})
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{ids_tareas[1]}/estado', data={'estado': 'en_progreso'})
     admin_session.post(f'/tickets/{ticket_id}/tareas/{ids_tareas[1]}/estado', data={'estado': 'cancelada'})
 
     r = admin_session.post(f'/tickets/{ticket_id}/actualizar',
@@ -135,6 +139,7 @@ def test_mis_tareas_oculta_completadas_salvo_que_se_pida_ver_todas(admin_session
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea ya resuelta", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
     admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
 
     r_activas = admin_session.get('/tickets/mis_tareas')
@@ -154,10 +159,210 @@ def test_mis_tareas_subnav_usa_el_mismo_ancho_que_los_demas_modulos(admin_sessio
     assert 'max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto' in texto
 
 
+def _estado_tarea(app, tarea_id):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cur.execute(f"SELECT estado FROM tickets_tareas WHERE id = {ph}", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    return fila[0] if fila else None
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pedido por Tomás: una tarea no se puede marcar 'completada' ni 'cancelada' sin pasar antes
+# por 'en_progreso' — mismas condiciones que ya rigen el cierre de un ticket (ver
+# _estados_disponibles_tarea en app.py).
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_no_se_puede_completar_una_tarea_pendiente_sin_pasar_por_en_progreso(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'}, follow_redirects=True)
+
+    assert r.status_code == 200
+    assert 'en progreso' in r.get_data(as_text=True).lower()
+    assert _estado_tarea(app, tarea_id) == 'pendiente'
+
+
+def test_no_se_puede_cancelar_una_tarea_pendiente_sin_pasar_por_en_progreso(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'cancelada'})
+
+    assert _estado_tarea(app, tarea_id) == 'pendiente'
+
+
+def test_se_puede_completar_una_tarea_que_ya_paso_por_en_progreso(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
+
+    assert _estado_tarea(app, tarea_id) == 'completada'
+
+
+def test_una_tarea_completada_queda_bloqueada_y_no_se_puede_reabrir(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'pendiente'}, follow_redirects=True)
+
+    assert r.status_code == 200
+    assert 'ya quedó' in r.get_data(as_text=True).lower()
+    assert _estado_tarea(app, tarea_id) == 'completada'  # no se movió
+
+
+def test_una_tarea_cancelada_queda_bloqueada_y_no_se_puede_reabrir(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'cancelada'})
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+
+    assert _estado_tarea(app, tarea_id) == 'cancelada'
+
+
+def test_detalle_de_ticket_solo_ofrece_los_estados_alcanzables_en_el_select(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+
+    html = admin_session.get(f'/tickets/{ticket_id}').get_data(as_text=True)
+
+    assert 'value="pendiente"' in html
+    assert 'value="en_progreso"' in html
+    # Desde 'pendiente' no se debe poder elegir 'completada' ni 'cancelada' directamente.
+    assert 'value="completada"' not in html
+    assert 'value="cancelada"' not in html
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pedido por Tomás: poder editar el asunto/notas/responsable/fecha límite de una tarea ya
+# creada (antes solo se podía completar esa información al crearla).
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_editar_tarea_actualiza_asunto_y_notas(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Asunto original")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Asunto corregido', 'descripcion': 'Nota agregada después de crear la tarea'
+    })
+    assert r.status_code == 302
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT asunto, descripcion FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 'Asunto corregido'
+    assert fila[1] == 'Nota agregada después de crear la tarea'
+
+
+def test_editar_tarea_no_permite_asunto_vacio(admin_session, app):
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Asunto original")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={'asunto': '   '})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT asunto FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 'Asunto original'
+
+
+def test_editar_tarea_notifica_al_nuevo_responsable(admin_session, app, crear_usuario):
+    agente = crear_usuario(rol='agente', nombre='Agente Reasignado')
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea sin asignar")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Tarea sin asignar', 'responsable': agente
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mensaje FROM notificaciones WHERE usuario = ? AND tipo = 'tarea'", (agente,))
+    filas = cur.fetchall()
+    conn.close()
+    assert any('Tarea sin asignar' in m for (m,) in filas)
+
+
+def test_editar_tarea_completada_no_cambia_su_estado(admin_session, app):
+    """Se puede corregir una nota en una tarea ya terminada sin que eso la reabra."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Tarea nueva', 'descripcion': 'Nota de cierre'
+    })
+
+    assert _estado_tarea(app, tarea_id) == 'completada'
+
+
+def test_mis_tareas_pinta_el_formulario_de_editar_notas(admin_session, app):
+    """El lápiz de editar (asunto/notas/responsable/fecha límite) también debe existir en la cola
+    personal 'Mis Tareas', no solo en el detalle del ticket — reportado por Tomás: 'Aun no esta
+    abilitado el campo testo para las tareas' (probando justo desde esa pantalla)."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea con nota", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    r = admin_session.get('/tickets/mis_tareas')
+    html = r.get_data(as_text=True)
+
+    assert f'form-editar-tarea-{tarea_id}' in html
+    assert f'/tickets/{ticket_id}/tareas/{tarea_id}/editar' in html
+    assert 'Notas / descripción' in html
+
+
+def test_editar_tarea_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app):
+    """Al guardar la edición desde 'Mis Tareas' (origen=mis_tareas), debe volver ahí y no al
+    detalle del ticket — mismo criterio que ya usa el cambio de estado en esa misma pantalla."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea original", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Tarea editada desde Mis Tareas', 'descripcion': 'Nota',
+        'origen': 'mis_tareas', 'ver_todas': ''
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    assert r.headers['Location'].endswith('/tickets/mis_tareas')
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT asunto FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 'Tarea editada desde Mis Tareas'
+
+
 def test_indicadores_muestra_top_agentes_por_tareas_completadas(admin_session, app):
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea completada por admin", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
     admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
 
     r = admin_session.get('/tickets/indicadores')

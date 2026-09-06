@@ -131,8 +131,13 @@ def test_mensaje_directo_llega_al_destinatario_y_al_remitente_pero_no_a_un_terce
     assert 'chat_directo_mensaje' in recibidos_remitente
     assert 'notificacion_nueva' not in recibidos_remitente
 
-    # A un tercero ajeno a la conversación: no le llega nada.
-    assert _nombres_de_eventos(sio_agente2.get_received()) == []
+    # A un tercero ajeno a la conversación: el mensaje directo (ni su notificación) no le llega —
+    # aunque sí puede llegarle 'usuario_conectado' (ver _registrar_actividad_usuario en app.py),
+    # que a propósito se avisa a TODO admin/agente conectado, no solo a quien participa en esta
+    # conversación.
+    recibidos_tercero = _nombres_de_eventos(sio_agente2.get_received())
+    assert 'chat_directo_mensaje' not in recibidos_tercero
+    assert 'notificacion_nueva' not in recibidos_tercero
 
 
 def test_mensaje_directo_no_crea_notificacion_de_campanita_solo_actualiza_el_icono_del_chat(app, crear_usuario):
@@ -155,3 +160,75 @@ def test_mensaje_directo_no_crea_notificacion_de_campanita_solo_actualiza_el_ico
     assert data['no_leidas'] == 0
     assert data['recientes'] == []
     assert data['chat_no_leidos'] == 1
+
+
+def test_usuario_conectado_avisa_a_otro_admin_agente_conectado(app, crear_usuario):
+    """Pedido por Tomás: el pop-up "fulano se conectó" debe verse en CUALQUIER página con
+    campanita, no solo con /chat o el panel flotante abiertos (antes se detectaba comparando el
+    'en_linea' de un sondeo del chat contra el anterior, y ese sondeo no corría en el resto de la
+    app — ver _registrar_actividad_usuario en app.py). Una cuenta recién creada nunca tuvo
+    actividad registrada, así que su primera petición autenticada cuenta como una reconexión real
+    y dispara el aviso a la sala compartida 'chat_canal_general'."""
+    agente1 = crear_usuario(usuario='agente_tr5', rol='agente', nombre='Agente Cinco')
+    agente2 = crear_usuario(usuario='agente_tr5b', rol='agente', nombre='Agente Cinco B')
+
+    client_agente1 = app.app.test_client()
+    _sesion_como(client_agente1, app, agente1, 'agente')
+    client_agente2 = app.app.test_client()
+    _sesion_como(client_agente2, app, agente2, 'agente')
+
+    sio_agente2 = app.socketio.test_client(app.app, flask_test_client=client_agente2)
+
+    r = client_agente1.get('/tickets/mis_tareas')
+    assert r.status_code == 200
+
+    recibidos = sio_agente2.get_received()
+    eventos_conexion = [ev for ev in recibidos if ev['name'] == 'usuario_conectado']
+    assert len(eventos_conexion) == 1
+    assert eventos_conexion[0]['args'][0]['usuario'] == agente1
+    assert eventos_conexion[0]['args'][0]['nombre'] == 'Agente Cinco'
+
+
+def test_usuario_conectado_no_se_repite_mientras_sigue_activo(app, crear_usuario):
+    """El aviso solo debe dispararse UNA vez por reconexión real, no en cada petición de quien ya
+    está activo — de lo contrario saturaría con un pop-up por cada clic."""
+    agente1 = crear_usuario(usuario='agente_tr6', rol='agente', nombre='Agente Seis')
+    agente2 = crear_usuario(usuario='agente_tr6b', rol='agente', nombre='Agente Seis B')
+
+    client_agente1 = app.app.test_client()
+    _sesion_como(client_agente1, app, agente1, 'agente')
+    client_agente2 = app.app.test_client()
+    _sesion_como(client_agente2, app, agente2, 'agente')
+
+    sio_agente2 = app.socketio.test_client(app.app, flask_test_client=client_agente2)
+
+    client_agente1.get('/tickets/mis_tareas')
+    sio_agente2.get_received()  # limpia el aviso de la primera conexión
+
+    # 🕒 El heartbeat solo escribe de verdad cada ACTIVIDAD_HEARTBEAT_SEGUNDOS; forzarlo a "ya
+    # tocaba" simula una segunda petición minutos después mientras la cuenta sigue en línea.
+    with client_agente1.session_transaction() as sess:
+        sess['_ultima_actividad_heartbeat'] = 0
+
+    client_agente1.get('/tickets/mis_tareas')
+
+    assert _nombres_de_eventos(sio_agente2.get_received()) == []
+
+
+def test_usuario_conectado_no_se_dispara_para_cuenta_estandar(app, crear_usuario):
+    """Una cuenta 'estandar' no aparece en el Chat Interno (ver ROLES_CON_ACCESO_OPERATIVO), así
+    que su conexión no debe disparar este aviso para nadie."""
+    agente1 = crear_usuario(usuario='agente_tr7', rol='agente', nombre='Agente Siete')
+    estandar1 = crear_usuario(usuario='estandar_tr2', rol='estandar', nombre='Estándar Uno')
+
+    client_agente1 = app.app.test_client()
+    _sesion_como(client_agente1, app, agente1, 'agente')
+    client_estandar = app.app.test_client()
+    _sesion_como(client_estandar, app, estandar1, 'estandar')
+
+    sio_agente1 = app.socketio.test_client(app.app, flask_test_client=client_agente1)
+    sio_agente1.get_received()
+
+    client_estandar.get('/')
+
+    assert _nombres_de_eventos(sio_agente1.get_received()) == []
