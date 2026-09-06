@@ -252,23 +252,25 @@ def test_detalle_de_ticket_solo_ofrece_los_estados_alcanzables_en_el_select(admi
 # creada (antes solo se podía completar esa información al crearla).
 # ────────────────────────────────────────────────────────────────────────────
 
-def test_editar_tarea_actualiza_asunto_y_notas(admin_session, app):
+def test_editar_tarea_actualiza_el_asunto(admin_session, app):
+    """Las notas/avances de la tarea ya no se editan por acá — pedido por Tomás: deben
+    comportarse como el módulo de Seguimiento de un ticket (ver
+    test_agregar_seguimiento_guarda_autor_mensaje_y_fecha más abajo)."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Asunto original")
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Asunto corregido', 'descripcion': 'Nota agregada después de crear la tarea'
+        'asunto': 'Asunto corregido'
     })
     assert r.status_code == 302
 
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    cur.execute("SELECT asunto, descripcion FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    cur.execute("SELECT asunto FROM tickets_tareas WHERE id = ?", (tarea_id,))
     fila = cur.fetchone()
     conn.close()
     assert fila[0] == 'Asunto corregido'
-    assert fila[1] == 'Nota agregada después de crear la tarea'
 
 
 def test_editar_tarea_no_permite_asunto_vacio(admin_session, app):
@@ -319,34 +321,55 @@ def _sesion_como(app, usuario, rol):
     return client
 
 
-def test_editar_tarea_guarda_la_respuesta_del_responsable(admin_session, app, crear_usuario):
-    """'respuesta' es DISTINTA de 'descripcion' (pedido por Tomás): acá es donde quien tiene la
-    tarea asignada cuenta qué hizo o en qué va, sin pisar las notas originales de quien creó la
-    tarea."""
+def test_agregar_seguimiento_guarda_autor_mensaje_y_fecha(admin_session, app, crear_usuario):
+    """El historial de una tarea (pedido por Tomás: debe comportarse como el módulo de
+    Seguimiento de un ticket) guarda cada nota con su autor y su fecha, sin pisar las
+    anteriores — a diferencia de las viejas columnas 'descripcion'/'respuesta' que se
+    sobrescribían."""
     agente = crear_usuario(rol='agente', nombre='Agente Que Responde')
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Revisar con el proveedor", responsable=agente)
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     cliente_agente = _sesion_como(app, agente, 'agente')
-    r = cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Revisar con el proveedor', 'descripcion': 'Nota original de quien la creó',
-        'respuesta': 'Ya hablé con el proveedor, envían la pieza el viernes.'
+    r = cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Ya hablé con el proveedor, envían la pieza el viernes.'
     })
     assert r.status_code == 302
 
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    cur.execute("SELECT descripcion, respuesta FROM tickets_tareas WHERE id = ?", (tarea_id,))
-    fila = cur.fetchone()
+    cur.execute("SELECT autor, mensaje FROM tickets_tareas_seguimientos WHERE tarea_id = ?", (tarea_id,))
+    filas = cur.fetchall()
     conn.close()
-    assert fila[0] == 'Nota original de quien la creó'
-    assert fila[1] == 'Ya hablé con el proveedor, envían la pieza el viernes.'
+    assert len(filas) == 1
+    assert filas[0][0] == agente
+    assert filas[0][1] == 'Ya hablé con el proveedor, envían la pieza el viernes.'
 
 
-def test_editar_tarea_notifica_a_quien_creo_la_tarea_al_responder(admin_session, app, crear_usuario):
-    """Cuando el responsable deja una respuesta/avance nuevo, se le avisa a quien creó la tarea
-    (si es alguien distinto) — para que no tenga que estar revisando el ticket a ver si ya
+def test_agregar_seguimiento_no_borra_las_notas_anteriores(admin_session, app, crear_usuario):
+    """A diferencia del viejo campo 'respuesta' que se sobrescribía, cada nota nueva se agrega
+    al historial sin borrar las que ya estaban."""
+    agente = crear_usuario(rol='agente', nombre='Agente Que Responde')
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Revisar con el proveedor", responsable=agente)
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    cliente_agente = _sesion_como(app, agente, 'agente')
+    cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={'mensaje': 'Primera nota.'})
+    cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={'mensaje': 'Segunda nota.'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mensaje FROM tickets_tareas_seguimientos WHERE tarea_id = ? ORDER BY id ASC", (tarea_id,))
+    mensajes = [m for (m,) in cur.fetchall()]
+    conn.close()
+    assert mensajes == ['Primera nota.', 'Segunda nota.']
+
+
+def test_agregar_seguimiento_notifica_a_quien_creo_la_tarea(admin_session, app, crear_usuario):
+    """Cuando el responsable deja una nota nueva, se le avisa a quien creó la tarea (si es
+    alguien distinto) — para que no tenga que estar revisando el ticket a ver si ya
     contestaron."""
     agente = crear_usuario(rol='agente', nombre='Agente Que Responde')
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
@@ -354,8 +377,8 @@ def test_editar_tarea_notifica_a_quien_creo_la_tarea_al_responder(admin_session,
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     cliente_agente = _sesion_como(app, agente, 'agente')
-    cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Confirmar con el usuario', 'respuesta': 'Confirmado, el usuario ya puede acceder.'
+    cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Confirmado, el usuario ya puede acceder.'
     })
 
     conn, db_type = app.get_db()
@@ -366,15 +389,15 @@ def test_editar_tarea_notifica_a_quien_creo_la_tarea_al_responder(admin_session,
     assert any('Confirmar con el usuario' in m for (m,) in filas)
 
 
-def test_editar_tarea_no_notifica_si_quien_responde_creo_la_tarea(admin_session, app):
-    """Si la misma persona que creó la tarea es quien deja la respuesta (p. ej. una nota para sí
-    misma), no debe autonotificarse."""
+def test_agregar_seguimiento_no_notifica_si_el_autor_creo_la_tarea_y_es_el_responsable(admin_session, app):
+    """Si la misma persona creó la tarea y es además la responsable (una nota para sí misma), no
+    debe autonotificarse."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea de admin para sí mismo", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
 
-    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Tarea de admin para sí mismo', 'respuesta': 'Ya quedó resuelto.'
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Ya quedó resuelto.'
     })
 
     conn, db_type = app.get_db()
@@ -382,11 +405,11 @@ def test_editar_tarea_no_notifica_si_quien_responde_creo_la_tarea(admin_session,
     cur.execute("SELECT mensaje FROM notificaciones WHERE usuario = 'admin' AND tipo = 'tarea'")
     filas = cur.fetchall()
     conn.close()
-    assert not any('Tarea de admin para sí mismo' in m and 'respondió' in m for (m,) in filas)
+    assert not any('Tarea de admin para sí mismo' in m for (m,) in filas)
 
 
 def test_editar_tarea_completada_no_cambia_su_estado(admin_session, app):
-    """Se puede corregir una nota en una tarea ya terminada sin que eso la reabra."""
+    """Se puede corregir el asunto de una tarea ya terminada sin que eso la reabra."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
     tarea_id = _id_tarea_creada(app, ticket_id)
@@ -394,16 +417,31 @@ def test_editar_tarea_completada_no_cambia_su_estado(admin_session, app):
     admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
 
     admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Tarea nueva', 'descripcion': 'Nota de cierre'
+        'asunto': 'Tarea nueva (corregida)'
     })
 
     assert _estado_tarea(app, tarea_id) == 'completada'
 
 
-def test_mis_tareas_pinta_el_formulario_de_editar_notas(admin_session, app):
-    """El lápiz de editar (asunto/notas/responsable/fecha límite) también debe existir en la cola
-    personal 'Mis Tareas', no solo en el detalle del ticket — reportado por Tomás: 'Aun no esta
-    abilitado el campo testo para las tareas' (probando justo desde esa pantalla)."""
+def test_agregar_seguimiento_a_una_tarea_completada_no_cambia_su_estado(admin_session, app):
+    """Agregar una nota al historial de una tarea ya terminada tampoco debe reabrirla — el
+    Seguimiento de un ticket tampoco depende de su estado."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea nueva")
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'completada'})
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={'mensaje': 'Nota de cierre'})
+
+    assert _estado_tarea(app, tarea_id) == 'completada'
+
+
+def test_mis_tareas_pinta_el_formulario_de_editar_y_el_historial(admin_session, app):
+    """El lápiz de editar (asunto/responsable/fecha límite) y el cuadro para agregar notas al
+    historial de Seguimiento también deben existir en la cola personal 'Mis Tareas', no solo en
+    el detalle del ticket — reportado por Tomás: 'Aun no esta abilitado el campo testo para las
+    tareas' (probando justo desde esa pantalla)."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea con nota", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
@@ -413,7 +451,8 @@ def test_mis_tareas_pinta_el_formulario_de_editar_notas(admin_session, app):
 
     assert f'form-editar-tarea-{tarea_id}' in html
     assert f'/tickets/{ticket_id}/tareas/{tarea_id}/editar' in html
-    assert 'Notas / descripción' in html
+    assert f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento' in html
+    assert 'Escribe una nota o avance de esta tarea...' in html
 
 
 def test_editar_tarea_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app):
@@ -424,7 +463,7 @@ def test_editar_tarea_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app)
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Tarea editada desde Mis Tareas', 'descripcion': 'Nota',
+        'asunto': 'Tarea editada desde Mis Tareas',
         'origen': 'mis_tareas', 'ver_todas': ''
     }, follow_redirects=False)
 
@@ -439,67 +478,84 @@ def test_editar_tarea_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app)
     assert fila[0] == 'Tarea editada desde Mis Tareas'
 
 
-def test_cuadro_de_respuesta_se_habilita_solo_en_progreso_ticket_detalle(admin_session, app):
-    """Pedido por Tomás: el cuadro para responder una tarea debe HABILITARSE solo mientras está
-    'En progreso' — no tiene sentido responder antes de empezarla (pendiente)."""
+def test_agregar_seguimiento_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app):
+    """Igual que al editar asunto/responsable/fecha límite: agregar una nota desde 'Mis Tareas'
+    (origen=mis_tareas) debe volver ahí y no al detalle del ticket."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea original", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Nota desde mis tareas', 'origen': 'mis_tareas', 'ver_todas': ''
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    assert r.headers['Location'].endswith('/tickets/mis_tareas')
+
+
+def test_el_historial_de_la_tarea_esta_disponible_sin_importar_el_estado_ticket_detalle(admin_session, app):
+    """Pedido por Tomás: el historial de una tarea debe comportarse como el módulo de
+    Seguimiento de un ticket, que no depende de ningún estado — se puede agregar una nota
+    aunque la tarea siga 'pendiente', sin tener que pasarla antes a 'En progreso'."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea pendiente", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     html_pendiente = admin_session.get(f'/tickets/{ticket_id}').get_data(as_text=True)
-    assert 'Marca la tarea como "En progreso" para poder responder.' in html_pendiente
-    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' not in html_pendiente
+    assert f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento' in html_pendiente
+    assert 'Escribe una nota o avance de esta tarea...' in html_pendiente
 
-    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
-    html_en_progreso = admin_session.get(f'/tickets/{ticket_id}').get_data(as_text=True)
-    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' in html_en_progreso
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={'mensaje': 'Nota en pendiente'})
+    assert r.status_code == 302
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mensaje FROM tickets_tareas_seguimientos WHERE tarea_id = ?", (tarea_id,))
+    filas = cur.fetchall()
+    conn.close()
+    assert any(m == 'Nota en pendiente' for (m,) in filas)
 
 
-def test_cuadro_de_respuesta_se_habilita_solo_en_progreso_mis_tareas(admin_session, app):
+def test_el_historial_de_la_tarea_esta_disponible_sin_importar_el_estado_mis_tareas(admin_session, app):
     """Mismo criterio que en ticket_detalle.html, pero desde la cola personal 'Mis Tareas'."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea pendiente", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
 
     html_pendiente = admin_session.get('/tickets/mis_tareas').get_data(as_text=True)
-    assert 'Marca la tarea como "En progreso" para poder responder.' in html_pendiente
-    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' not in html_pendiente
-
-    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
-    html_en_progreso = admin_session.get('/tickets/mis_tareas').get_data(as_text=True)
-    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' in html_en_progreso
+    assert f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento' in html_pendiente
+    assert 'Escribe una nota o avance de esta tarea...' in html_pendiente
 
 
-def test_guardar_respuesta_desde_el_cuadro_rapido_no_borra_los_demas_campos(admin_session, app, crear_usuario):
-    """El cuadro rápido de respuesta manda asunto/descripcion/responsable/fecha_limite como
-    campos ocultos (con el valor que ya tenían) para no borrarlos al guardar solo la respuesta —
-    reproduce exactamente ese POST (asunto + descripcion + responsable + fecha_limite + respuesta)."""
+def test_agregar_seguimiento_no_toca_asunto_responsable_ni_fecha_limite(admin_session, app, crear_usuario):
+    """Agregar una nota al historial no debe tocar el resto de los campos de la tarea —
+    reproduce el caso que antes cubría el cuadro rápido de respuesta, ahora contra el nuevo
+    historial de Seguimiento."""
     agente = crear_usuario(rol='agente', nombre='Agente En Progreso')
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     admin_session.post(f'/tickets/{ticket_id}/tareas/crear', data={
-        'asunto': 'Revisar impresora', 'descripcion': 'Nota original', 'responsable': agente,
-        'fecha_limite': '2026-12-31'
+        'asunto': 'Revisar impresora', 'responsable': agente, 'fecha_limite': '2026-12-31'
     })
     tarea_id = _id_tarea_creada(app, ticket_id)
     admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
 
-    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Revisar impresora', 'descripcion': 'Nota original', 'responsable': agente,
-        'fecha_limite': '2026-12-31', 'respuesta': 'Ya se cambió el tóner.'
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Ya se cambió el tóner.'
     })
 
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    cur.execute("SELECT descripcion, responsable, fecha_limite, respuesta FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    cur.execute("SELECT asunto, responsable, fecha_limite FROM tickets_tareas WHERE id = ?", (tarea_id,))
     fila = cur.fetchone()
+    cur.execute("SELECT mensaje FROM tickets_tareas_seguimientos WHERE tarea_id = ?", (tarea_id,))
+    seguimiento = cur.fetchone()
     conn.close()
-    assert fila[0] == 'Nota original'
+    assert fila[0] == 'Revisar impresora'
     assert fila[1] == agente
     assert fila[2] == '2026-12-31'
-    assert fila[3] == 'Ya se cambió el tóner.'
+    assert seguimiento[0] == 'Ya se cambió el tóner.'
 
 
-def test_guardar_respuesta_desde_el_cuadro_rapido_confirma_con_un_mensaje(admin_session, app):
+def test_agregar_seguimiento_confirma_con_un_mensaje(admin_session, app):
     """Reportado por Tomás con video: al presionar 'enviar' en el cuadro de respuesta rápida no
     pasaba nada visible — el texto se guardaba, pero como el mismo cuadro se vuelve a llenar con
     ese mismo valor al recargar, en pantalla parecía que 'no se publicaba'. Debe confirmarse con
@@ -507,13 +563,12 @@ def test_guardar_respuesta_desde_el_cuadro_rapido_confirma_con_un_mensaje(admin_
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea con respuesta", responsable='admin')
     tarea_id = _id_tarea_creada(app, ticket_id)
-    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
 
-    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
-        'asunto': 'Tarea con respuesta', 'respuesta': 'Ya revisé el switch y sigue sin señal.'
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/seguimiento', data={
+        'mensaje': 'Ya revisé el switch y sigue sin señal.'
     }, follow_redirects=True)
 
-    assert 'respuesta guardada' in r.get_data(as_text=True).lower()
+    assert 'nota agregada' in r.get_data(as_text=True).lower()
 
 
 def test_indicadores_muestra_top_agentes_por_tareas_completadas(admin_session, app):
