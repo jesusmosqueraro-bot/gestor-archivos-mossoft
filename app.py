@@ -1527,6 +1527,74 @@ def init_db():
                 cursor.execute(q_seed_tipo, (key_tipo, etiqueta_tipo, icono_tipo, orden_i))
             conn.commit()
 
+        # 🩺 Suma al catálogo de Tipos de activo los dispositivos biomédicos (pedido por Tomás,
+        # lista completa que compartió) — a diferencia del seed de arriba (que solo corre si la
+        # tabla está vacía), esto corre SIEMPRE en cada arranque pero es idempotente: cada 'key'
+        # se cruza contra lo que ya exista y solo se agrega si todavía no está, igual que
+        # especialidades_a_sincronizar más abajo. Así es seguro correrlo una y otra vez sin
+        # duplicar nada, incluso en la base de datos ya en producción.
+        tipos_biomedicos_a_sincronizar = [
+            ('HEMATOLOGY_ANALYZER', 'Analizador Hematológico', 'vial-virus'),
+            ('SUCTION_PUMP', 'Aspirador de Secreciones', 'filter'),
+            ('AUTOCLAVE', 'Autoclave a Vapor', 'temperature-high'),
+            ('MEDICAL_SCALE', 'Báscula Médica / Talímetro', 'weight-scale'),
+            ('BILIRUBINOMETER', 'Bilirrubinómetro', 'sun'),
+            ('INFUSION_PUMP', 'Bomba de Infusión', 'syringe'),
+            ('SYRINGE_PUMP', 'Bomba de Jeringa', 'needle'),
+            ('ELECTRIC_BED', 'Cama Hospitalaria Eléctrica', 'bed'),
+            ('CENTRIFUGE', 'Centrífuga de Laboratorio', 'rotate'),
+            ('OXYGEN_CONCENTRATOR', 'Concentrador de Oxígeno', 'gas-pump'),
+            ('PLASMA_FREEZER', 'Congelador de Plasma (-80°C)', 'icicles'),
+            ('RADIANT_WARMER', 'Cuna de Calor Radiante', 'fire-flame-curved'),
+            ('DERMATOME', 'Dermátomo Eléctrico', 'scissors'),
+            ('DEFIBRILLATOR', 'Desfibrilador / DEA', 'bolt'),
+            ('FETAL_DOPPLER', 'Doppler Fetal / Monitor Fetal', 'baby'),
+            ('ULTRASOUND', 'Ecógrafo / Ultrasonido Clínico', 'satellite-dish'),
+            ('ECG_MACHINE', 'Electrocardiógrafo (ECG)', 'wave-square'),
+            ('EEG_MACHINE', 'Electroencefalógrafo (EEG)', 'brain'),
+            ('TENS_PHYSIO', 'Electroestimulador (TENS / EMS)', 'plug-circle-bolt'),
+            ('XRAY_EQUIPMENT', 'Equipo de Rayos X (Fijo / Portátil)', 'radiation'),
+            ('SPIROMETER', 'Espirómetro', 'wind'),
+            ('DRY_HEAT_STERILIZER', 'Esterilizador por Calor Seco (Poupinel)', 'fire'),
+            ('FLOWMETER', 'Flujómetro / Humidificador de O2', 'gauge-high'),
+            ('GLUCOMETER', 'Glucómetro', 'droplet'),
+            ('PATIENT_LIFT', 'Grúa de Traslado de Pacientes', 'elevator'),
+            ('INFANT_INCUBATOR', 'Incubadora Neonatal', 'bed'),
+            ('SURGICAL_LAMP', 'Lámpara Cialítica / Quirúrgica', 'sun'),
+            ('PHOTOTHERAPY_UNIT', 'Lámpara de Fototerapia Neonatal', 'lightbulb'),
+            ('ULTASONIC_CLEANER', 'Lavadora Ultrasónica', 'soap'),
+            ('ANESTHESIA_STATION', 'Máquina de Anestesia', 'mask-ventilator'),
+            ('DIALYSIS_MACHINE', 'Máquina de Hemodiálisis', 'water'),
+            ('PACEMAKER_EXTERNAL', 'Marcapasos Externo', 'heart'),
+            ('SURGICAL_TABLE', 'Mesa de Cirugía / Camilla Quirúrgica', 'bed-pulse'),
+            ('MICROSCOPE', 'Microscopio Clínico', 'microscope'),
+            ('MEDICAL_MICROSCOPE', 'Microscopio Quirúrgico', 'eye'),
+            ('VITAL_MONITOR', 'Monitor de Signos Vitales', 'heart-pulse'),
+            ('NEBULIZER', 'Nebulizador Clínico', 'smog'),
+            ('VIEW_BOX', 'Negatoscopio', 'square'),
+            ('MEDICAL_REFRIGERATOR', 'Nevera de Medicamentos / Vacunas', 'snowflake'),
+            ('PULSE_OXIMETER', 'Pulsioxímetro / Oxímetro de Pulso', 'fingerprint'),
+            ('MRI_SCANNER', 'Resonador Magnético (RMN)', 'magnet'),
+            ('SPHYGMOMANOMETER', 'Tensiómetro (Digital / Aneroide)', 'stethoscope'),
+            ('CLINICAL_THERMOMETER', 'Termómetro Clínico / Digital', 'temperature-three-quarters'),
+            ('TOMOGRAPH', 'Tomógrafo Axial Computarizado (TAC)', 'circle-notch'),
+            ('TOURNIQUET_SYSTEM', 'Torniquete Neumático Quirúrgico', 'bandage'),
+            ('LAPAROSCOPY_TOWER', 'Torre de Laparoscopia / Endoscopia', 'tv'),
+            ('THERAPEUTIC_ULTRASOUND', 'Ultrasonido Terapéutico', 'wave-square'),
+            ('ELECTROSURGICAL_UNIT', 'Unidad Electroquirúrgica (Electrobisturí)', 'wand-magic-sparkles'),
+            ('VENTILATOR', 'Ventilador Mecánico (UCI / Transporte)', 'lungs'),
+        ]
+        q_check_tipo_bio = "SELECT id FROM tipos_activo_catalogo WHERE UPPER(key) = UPPER(%s)" if db_type == 'postgres' else "SELECT id FROM tipos_activo_catalogo WHERE UPPER(key) = UPPER(?)"
+        q_ins_tipo_bio = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (?, ?, ?, ?)"
+        cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_activo_catalogo")
+        siguiente_orden_bio = cursor.fetchone()[0] + 1
+        for key_bio, etiqueta_bio, icono_bio in tipos_biomedicos_a_sincronizar:
+            cursor.execute(q_check_tipo_bio, (key_bio,))
+            if not cursor.fetchone():
+                cursor.execute(q_ins_tipo_bio, (key_bio, etiqueta_bio, icono_bio, siguiente_orden_bio))
+                siguiente_orden_bio += 1
+        conn.commit()
+
         # 🩺 Sincroniza el catálogo de especialidades con la lista real de Preventiva. A
         # diferencia del seed de aplicativos (que solo corre si la tabla está vacía), esta
         # sincronización corre SIEMPRE en cada arranque, pero es idempotente: cada nombre se
@@ -3185,7 +3253,16 @@ ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja', 'Perdido', 
 TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor', 'Teléfono/Celular', 'Servidor', 'Red (Switch/Router/AP)', 'Otro']
 ICONOS_TIPO_ACTIVO = ['desktop', 'laptop', 'print', 'display', 'mobile-screen', 'server', 'network-wired', 'box',
                       'tablet', 'keyboard', 'headphones', 'camera', 'video', 'wifi', 'hard-drive', 'database',
-                      'microchip', 'plug', 'tv', 'phone', 'box-archive', 'shield-halved', 'briefcase']
+                      'microchip', 'plug', 'tv', 'phone', 'box-archive', 'shield-halved', 'briefcase',
+                      # 🩺 Dispositivos biomédicos (pedido por Tomás) — ver el bloque de
+                      # sincronización de tipos_activo_catalogo en init_db().
+                      'vial-virus', 'filter', 'temperature-high', 'weight-scale', 'sun', 'syringe', 'needle',
+                      'bed', 'rotate', 'gas-pump', 'icicles', 'fire-flame-curved', 'scissors', 'bolt', 'baby',
+                      'satellite-dish', 'wave-square', 'brain', 'plug-circle-bolt', 'radiation', 'wind', 'fire',
+                      'gauge-high', 'droplet', 'elevator', 'lightbulb', 'soap', 'mask-ventilator', 'water',
+                      'heart', 'bed-pulse', 'microscope', 'eye', 'heart-pulse', 'smog', 'square', 'snowflake',
+                      'fingerprint', 'magnet', 'stethoscope', 'temperature-three-quarters', 'circle-notch',
+                      'bandage', 'wand-magic-sparkles', 'lungs']
 MOTIVOS_REEMPLAZO_ACTIVO = [
     {'clave': 'Equipo dañado', 'icono': 'screwdriver-wrench', 'descripcion': 'No funciona o requiere reparación mayor'},
     {'clave': 'Renovación', 'icono': 'arrows-rotate', 'descripcion': 'Reemplazo por uno más nuevo o mejor'},
