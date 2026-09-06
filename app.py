@@ -809,6 +809,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS chat_canal_visto (
                 usuario VARCHAR(100) PRIMARY KEY, fecha_visto VARCHAR(100) NOT NULL
             )''')
+            # ⭐📌 Favoritos/anclados del Chat Interno (pedido por Tomás): preferencia PERSONAL de
+            # quien la marca (usuario_dueno) sobre un contacto — no afecta lo que ven los demás.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_preferencias_contacto (
+                usuario_dueno VARCHAR(100) NOT NULL, contacto VARCHAR(100) NOT NULL,
+                favorito BOOLEAN NOT NULL DEFAULT FALSE, anclado BOOLEAN NOT NULL DEFAULT FALSE,
+                PRIMARY KEY (usuario_dueno, contacto)
+            )''')
             conn.commit()
 
             for col_query in [
@@ -1158,6 +1165,13 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS chat_canal_visto (
                 usuario TEXT PRIMARY KEY, fecha_visto TEXT NOT NULL
+            )''')
+            # ⭐📌 Favoritos/anclados del Chat Interno (pedido por Tomás): preferencia PERSONAL de
+            # quien la marca (usuario_dueno) sobre un contacto — no afecta lo que ven los demás.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_preferencias_contacto (
+                usuario_dueno TEXT NOT NULL, contacto TEXT NOT NULL,
+                favorito INTEGER NOT NULL DEFAULT 0, anclado INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (usuario_dueno, contacto)
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -3765,6 +3779,67 @@ def _usuarios_operativos_activos(excluir=None):
         return []
 
 
+def _leer_preferencias_chat(usuario_dueno):
+    """Dict {contacto: {'favorito': bool, 'anclado': bool}} con las preferencias PERSONALES
+    (favoritos/anclados) que 'usuario_dueno' marcó sobre sus contactos del Chat Interno."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT contacto, favorito, anclado FROM chat_preferencias_contacto WHERE usuario_dueno = %s" if db_type == 'postgres' else "SELECT contacto, favorito, anclado FROM chat_preferencias_contacto WHERE usuario_dueno = ?"
+        cursor.execute(q, (usuario_dueno,))
+        filas = {contacto: {'favorito': bool(favorito), 'anclado': bool(anclado)} for contacto, favorito, anclado in cursor.fetchall()}
+        conn.close()
+        return filas
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error leyendo preferencias de chat de '{usuario_dueno}': {e}")
+        return {}
+
+
+def _aplicar_preferencias_chat(contactos, usuario_dueno):
+    """Agrega 'favorito'/'anclado' a cada contacto de la lista, según las preferencias
+    personales de 'usuario_dueno' (no toca el orden — eso lo hace cada ruta al final, con
+    los anclados siempre arriba, para no repetir el mismo sort en los dos lugares)."""
+    preferencias = _leer_preferencias_chat(usuario_dueno)
+    for c in contactos:
+        pref = preferencias.get(c['usuario'], {})
+        c['favorito'] = pref.get('favorito', False)
+        c['anclado'] = pref.get('anclado', False)
+    return contactos
+
+
+def _guardar_preferencia_chat(usuario_dueno, contacto, tipo, valor):
+    """Marca/desmarca 'favorito' o 'anclado' para un contacto — fila personal por
+    (usuario_dueno, contacto), se crea sola la primera vez (upsert). 'tipo' ya viene validado
+    contra ('favorito', 'anclado') por quien llama, nunca es texto libre del usuario."""
+    if tipo not in ('favorito', 'anclado'):
+        return False
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    valor_col = 1 if valor else 0
+    try:
+        if db_type == 'postgres':
+            q = (f"INSERT INTO chat_preferencias_contacto (usuario_dueno, contacto, {tipo}) VALUES (%s, %s, %s) "
+                 f"ON CONFLICT (usuario_dueno, contacto) DO UPDATE SET {tipo} = EXCLUDED.{tipo}")
+            cursor.execute(q, (usuario_dueno, contacto, bool(valor)))
+        else:
+            # SQLite: un INSERT OR REPLACE de una sola columna borraría la otra (favorito/anclado)
+            # de la fila existente, así que primero se revisa si ya existe para hacer UPDATE.
+            cursor.execute("SELECT 1 FROM chat_preferencias_contacto WHERE usuario_dueno = ? AND contacto = ?", (usuario_dueno, contacto))
+            if cursor.fetchone():
+                cursor.execute(f"UPDATE chat_preferencias_contacto SET {tipo} = ? WHERE usuario_dueno = ? AND contacto = ?", (valor_col, usuario_dueno, contacto))
+            else:
+                cursor.execute(f"INSERT INTO chat_preferencias_contacto (usuario_dueno, contacto, {tipo}) VALUES (?, ?, ?)", (usuario_dueno, contacto, valor_col))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error guardando preferencia de chat ({tipo}) de '{usuario_dueno}' sobre '{contacto}': {e}")
+        return False
+
+
 def _es_usuario_operativo_activo(usuario):
     """True si 'usuario' existe, está activo y tiene rol admin/agente — con quién SÍ se puede
     abrir un chat directo (evita chatear con cuentas inactivas, estándar o inexistentes)."""
@@ -3849,9 +3924,34 @@ def _chat_marcar_canal_visto(usuario):
 @login_required
 @agente_o_admin_required
 def chat_pagina():
-    return render_template('chat.html', username=session.get('username'), rol=session.get('rol'),
-                            contactos=_usuarios_operativos_activos(excluir=session.get('username')),
+    usuario_actual = session.get('username')
+    contactos = _usuarios_operativos_activos(excluir=usuario_actual)
+    _aplicar_preferencias_chat(contactos, usuario_actual)
+    # 📌 Anclados siempre arriba de todo (sort estable: no cambia el orden alfabético entre
+    # ellos ni entre el resto — ver _usuarios_operativos_activos).
+    contactos.sort(key=lambda c: c['anclado'], reverse=True)
+    return render_template('chat.html', username=usuario_actual, rol=session.get('rol'),
+                            contactos=contactos,
                             con=(request.args.get('con') or '').strip())
+
+
+@app.route('/chat/contactos/preferencia', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def chat_contactos_preferencia():
+    """Marca/desmarca un contacto como favorito (⭐) o anclado (📌) — preferencia PERSONAL de
+    quien la marca (ver _guardar_preferencia_chat), no afecta lo que ven los demás usuarios."""
+    usuario_actual = session.get('username')
+    contacto = (request.form.get('contacto') or '').strip()
+    tipo = (request.form.get('tipo') or '').strip()
+    valor = (request.form.get('valor') or '').strip() in ('1', 'true', 'True')
+    if tipo not in ('favorito', 'anclado'):
+        return jsonify({'success': False, 'error': 'Tipo de preferencia inválido.'}), 400
+    if not _es_usuario_operativo_activo(contacto):
+        return jsonify({'success': False, 'error': 'Contacto inválido.'}), 400
+    if _guardar_preferencia_chat(usuario_actual, contacto, tipo, valor):
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'No se pudo guardar la preferencia.'}), 500
 
 
 @app.route('/chat/contactos')
@@ -3887,11 +3987,15 @@ def chat_contactos():
         conn.close()
         print(f"⚠️ Error listando contactos del chat: {e}")
 
-    # 🔀 Doble sort estable: primero por nombre (para los que nunca han cruzado un mensaje),
-    # y ENCIMA por fecha del último mensaje descendente — así la conversación más reciente
-    # queda arriba de todo, y quienes no tienen ningún mensaje quedan al final, por nombre.
+    _aplicar_preferencias_chat(contactos, usuario_actual)
+
+    # 🔀 Triple sort estable: primero por nombre (para los que nunca han cruzado un mensaje),
+    # luego por fecha del último mensaje descendente (la conversación más reciente arriba de
+    # los que no están anclados), y por último ENCIMA de todo por anclado — así un contacto
+    # que se marcó con el pin (📌) queda siempre arriba, sin importar mensajes o nombre.
     contactos.sort(key=lambda c: c['nombre'].lower())
     contactos.sort(key=lambda c: c['ultima_fecha'] or '', reverse=True)
+    contactos.sort(key=lambda c: c['anclado'], reverse=True)
     return jsonify({'contactos': contactos, 'canal_no_leidos': _chat_canal_no_leidos(usuario_actual)})
 
 
