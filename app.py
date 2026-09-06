@@ -741,6 +741,16 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS actas_recibido_biomedico (
                 id SERIAL PRIMARY KEY, activo_id INTEGER NOT NULL REFERENCES activos_inventario(id) ON DELETE CASCADE, nombre_responsable VARCHAR(200) NOT NULL, relacion_responsable VARCHAR(30) NOT NULL, documento_responsable VARCHAR(50), telefono_contacto VARCHAR(30), direccion_entrega TEXT NOT NULL, firma_url TEXT NOT NULL, fecha VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL
             )''')
+            # 📝 Acta de ASIGNACIÓN de un activo (TI o Biomédico) a un usuario: igual que
+            # actas_recibido_biomedico, queda UN REGISTRO HISTÓRICO por cada generación (marcando
+            # la casilla "Generar acta" al crear/editar el activo), no solo el último — así una
+            # reasignación posterior no borra el acta de una entrega anterior. 'descripcion_breve'
+            # es el campo libre que pidió Tomás para anotar alguna modificación/excepción puntual
+            # de esa entrega. El título del PDF (TI vs Biomédico) se decide en el momento de
+            # generarlo, a partir de activos_inventario.es_biomedico — no se duplica esa bandera aquí.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS actas_asignacion (
+                id SERIAL PRIMARY KEY, activo_id INTEGER NOT NULL REFERENCES activos_inventario(id) ON DELETE CASCADE, asignado_a VARCHAR(150) NOT NULL, firma_url TEXT, descripcion_breve TEXT, fecha VARCHAR(100) NOT NULL, generado_por VARCHAR(100) NOT NULL
+            )''')
             # 🖼️ Panel de marca del login (imagen o video corto que rota junto al formulario de
             # acceso). Administrable desde Novedades y Comunicados → "Fondo de Login" — ver
             # _fondo_login_activo(). 'orden' decide en qué secuencia rotan los activos; 'estado'
@@ -1069,7 +1079,14 @@ def init_db():
                 # (las notas de quien CREA la tarea, editables por cualquier admin/agente), este
                 # campo es donde quien tiene la tarea asignada (responsable) deja su respuesta o
                 # el avance de lo que hizo — ver editar_tarea_ticket().
-                "ALTER TABLE tickets_tareas ADD COLUMN IF NOT EXISTS respuesta TEXT;"
+                "ALTER TABLE tickets_tareas ADD COLUMN IF NOT EXISTS respuesta TEXT;",
+                # 📝 Acta de devolución (pedido por Tomás): al certificar que un colaborador
+                # devolvió su activo, queda la opción de marcar "Generar acta" — si se marca,
+                # 'acta_generada' queda en true y aparece el botón de descarga del PDF en el
+                # historial de Certificación de Devoluciones (ver confirmar_devolucion_activo/
+                # acta_devolucion_pdf). Si no se marca, la fila de devolución queda igual
+                # (el "certificado" ya es esa fila en sí), simplemente sin PDF descargable.
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS acta_generada BOOLEAN DEFAULT FALSE;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1145,6 +1162,10 @@ def init_db():
             # equivalente en la rama de Postgres.
             cursor.execute('''CREATE TABLE IF NOT EXISTS actas_recibido_biomedico (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, nombre_responsable TEXT NOT NULL, relacion_responsable TEXT NOT NULL, documento_responsable TEXT, telefono_contacto TEXT, direccion_entrega TEXT NOT NULL, firma_url TEXT NOT NULL, fecha TEXT NOT NULL, creado_por TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+            )''')
+            # 📝 Acta de asignación de un activo. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS actas_asignacion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, asignado_a TEXT NOT NULL, firma_url TEXT, descripcion_breve TEXT, fecha TEXT NOT NULL, generado_por TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, url TEXT NOT NULL, public_id TEXT, orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo', fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL
@@ -1458,6 +1479,15 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_fecha_devolucion_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 📝 Acta de devolución. Ver comentario equivalente en la rama de Postgres.
+            for col_acta_devolucion_sql in [
+                "ALTER TABLE inventario_devoluciones ADD COLUMN acta_generada INTEGER DEFAULT 0;"
+            ]:
+                try:
+                    cursor.execute(col_acta_devolucion_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -2501,7 +2531,7 @@ TABLAS_RESPALDO = [
     'tickets_adjuntos', 'conocimiento_articulos', 'ticket_configuraciones',
     'activos_inventario', 'inventario_adjuntos', 'inventario_devoluciones', 'aplicativos_catalogo',
     'credenciales_colaboradores', 'login_fondo_media', 'actas_recibido_biomedico',
-    'chat_mensajes', 'chat_canal_visto'
+    'actas_asignacion', 'chat_mensajes', 'chat_canal_visto'
 ]
 
 
@@ -8654,6 +8684,186 @@ def _registrar_acta_recibido_biomedico(activo_id, form, creador, conn, cursor, d
     return 'exito', f"Acta de recibido registrada: {nombre_responsable} ({relacion_responsable}) en {direccion_entrega}."
 
 
+def _registrar_acta_asignacion(activo_id, form, creador, conn, cursor, db_type, asignado_a, firma_asignacion_url):
+    """Si al crear/editar un activo se marcó la casilla 'Generar acta de asignación', guarda un
+    registro HISTÓRICO en 'actas_asignacion' — igual que con las actas de recibido biomédico, cada
+    generación queda como una fila nueva (no se sobreescribe), así una reasignación posterior no
+    borra el acta de una entrega anterior. Se usa 'asignado_a'/'firma_asignacion_url' ya
+    resueltos por el llamador (los valores FINALES que se guardaron en activos_inventario en esta
+    misma operación, ya sea que el activo termine o no en estado 'Devolución') — nunca el valor
+    crudo del formulario, para que un activo que se está devolviendo en la misma edición no quede
+    con un acta de asignación fantasma. Devuelve (categoria, mensaje) listo para flash(), o
+    (None, None) si esta vez no se pidió generar ningún acta."""
+    if form.get('generar_acta_asignacion') not in ('on', '1', 'true'):
+        return None, None
+
+    if not asignado_a:
+        return 'error', ("El activo se guardó, pero el ACTA DE ASIGNACIÓN no: para registrarla el activo "
+                          "debe tener un usuario asignado.")
+
+    descripcion_breve = (form.get('acta_asignacion_descripcion') or '').strip() or None
+
+    try:
+        q_ins = ("INSERT INTO actas_asignacion (activo_id, asignado_a, firma_url, descripcion_breve, fecha, generado_por) "
+                 "VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO actas_asignacion (activo_id, asignado_a, firma_url, descripcion_breve, fecha, generado_por) "
+                 "VALUES (?, ?, ?, ?, ?, ?)")
+        cursor.execute(q_ins, (activo_id, asignado_a, firma_asignacion_url, descripcion_breve, obtener_fecha_actual(), creador))
+        conn.commit()
+        registrar_log(creador, "Inventario de Activos",
+                      f"Acta de asignación registrada para el activo #{activo_id} — asignado a {asignado_a}.")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error guardando acta de asignación (activo #{activo_id}): {e}")
+        return 'error', "El activo se guardó, pero no se pudo registrar el acta de asignación. Intenta de nuevo."
+
+    return 'exito', f"Acta de asignación registrada: {asignado_a}."
+
+
+@app.route('/tickets/inventario/<int:activo_id>/actas_asignacion')
+@login_required
+@agente_o_admin_required
+def listar_actas_asignacion(activo_id):
+    """JSON con el historial de actas de asignación de un activo — usado por el modal 'Actas de
+    asignación' en Inventario. Devuelve TODAS las actas del activo (no solo la más reciente): cada
+    una es evidencia de una entrega distinta a lo largo de la vida del equipo."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT id, asignado_a, firma_url, descripcion_breve, fecha, generado_por FROM actas_asignacion "
+             "WHERE activo_id = %s ORDER BY id DESC" if db_type == 'postgres' else
+             "SELECT id, asignado_a, firma_url, descripcion_breve, fecha, generado_por FROM actas_asignacion "
+             "WHERE activo_id = ? ORDER BY id DESC")
+        cursor.execute(q, (activo_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando actas de asignación del activo {activo_id}: {e}")
+        filas = []
+    conn.close()
+
+    actas = [{
+        'id': f[0], 'asignado_a': f[1], 'firma_url': f[2] or '', 'descripcion_breve': f[3] or '',
+        'fecha': f[4], 'generado_por': f[5]
+    } for f in filas]
+    return jsonify({'actas': actas})
+
+
+@app.route('/tickets/inventario/actas_asignacion/<int:acta_id>/pdf')
+@login_required
+@agente_o_admin_required
+def acta_asignacion_pdf(acta_id):
+    """Genera el PDF formal del acta de asignación — el documento que queda como constancia de que
+    tal activo (de TI o Biomédico, según 'es_biomedico') se le entregó a tal usuario, con la
+    descripción breve de cualquier novedad puntual de esa entrega."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT a.asignado_a, a.firma_url, a.descripcion_breve, a.fecha, a.generado_por, "
+             "i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, i.sede, i.area, i.proveedor, "
+             "i.estado, i.observaciones, i.es_biomedico "
+             "FROM actas_asignacion a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = %s"
+             if db_type == 'postgres' else
+             "SELECT a.asignado_a, a.firma_url, a.descripcion_breve, a.fecha, a.generado_por, "
+             "i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, i.sede, i.area, i.proveedor, "
+             "i.estado, i.observaciones, i.es_biomedico "
+             "FROM actas_asignacion a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = ?")
+        cursor.execute(q, (acta_id,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error consultando acta de asignación {acta_id}: {e}")
+        fila = None
+    conn.close()
+
+    if not fila:
+        return redirect(url_for('ver_inventario'))
+
+    (asignado_a, firma_url, descripcion_breve, fecha, generado_por, placa, tipo_activo, marca, modelo,
+     numero_serie, sede, area, proveedor, estado, observaciones, es_biomedico) = fila
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+                             leftMargin=2 * cm, rightMargin=2 * cm)
+    estilos = getSampleStyleSheet()
+    titulo = "Arkiv &mdash; Acta de Asignación de Equipo Biomédico" if es_biomedico else "Arkiv &mdash; Acta de Asignación de Activo de TI"
+
+    elementos = [
+        Paragraph(titulo, estilos['Title']),
+        Spacer(1, 0.3 * cm),
+        Paragraph(
+            "Constancia de entrega del activo al usuario indicado, con su firma cuando esté disponible, "
+            "para efectos de trazabilidad del inventario.", estilos['Normal']
+        ),
+        Spacer(1, 0.6 * cm),
+    ]
+
+    datos_equipo = [
+        ['Placa / identificación', placa],
+        ['Tipo de activo', tipo_activo or '-'],
+        ['Marca / Modelo', ' '.join(filter(None, [marca, modelo])) or '-'],
+        ['Número de serie', numero_serie or '-'],
+        ['Sede', sede or '-'],
+        ['Área', area or '-'],
+        ['Proveedor', proveedor or '-'],
+        ['Estado actual', estado or '-'],
+    ]
+    tabla_equipo = Table(datos_equipo, colWidths=[5.5 * cm, 10 * cm])
+    tabla_equipo.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Activo asignado", estilos['Heading3']), tabla_equipo, Spacer(1, 0.5 * cm)]
+
+    datos_asignacion = [
+        ['Asignado a', asignado_a],
+        ['Fecha de asignación', fecha],
+        ['Registrado por', generado_por],
+        ['Observaciones del activo', observaciones or '-'],
+        ['Descripción breve del acta', descripcion_breve or '-'],
+    ]
+    tabla_asignacion = Table(datos_asignacion, colWidths=[5.5 * cm, 10 * cm])
+    tabla_asignacion.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Datos de la asignación", estilos['Heading3']), tabla_asignacion, Spacer(1, 0.6 * cm)]
+
+    elementos.append(Paragraph("Firma de quien recibe", estilos['Heading3']))
+    firma_insertada = False
+    if firma_url:
+        try:
+            with urllib.request.urlopen(firma_url, timeout=15) as resp:
+                datos_imagen = resp.read()
+            imagen_firma = Image(io.BytesIO(datos_imagen), width=7 * cm, height=3.5 * cm)
+            imagen_firma.hAlign = 'LEFT'
+            elementos.append(imagen_firma)
+            firma_insertada = True
+        except Exception as e:
+            print(f"⚠️ No se pudo incrustar la firma del acta de asignación {acta_id} en el PDF: {e}")
+    if not firma_insertada:
+        elementos.append(Paragraph("(No hay firma guardada para este usuario al momento de generar el acta.)", estilos['Normal']))
+
+    doc.build(elementos)
+    salida.seek(0)
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_Acta_Asignacion_{acta_id}.pdf"'
+    })
+
+
 @app.route('/tickets/inventario/<int:activo_id>/actas')
 @login_required
 @agente_o_admin_required
@@ -8867,6 +9077,10 @@ def crear_activo():
             categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(nuevo_activo_id, request.form, usuario, conn, cursor, db_type)
             if mensaje_acta:
                 flash(mensaje_acta, categoria_acta)
+            categoria_acta_asig, mensaje_acta_asig = _registrar_acta_asignacion(
+                nuevo_activo_id, request.form, usuario, conn, cursor, db_type, asignado_a or None, firma_asignacion_url)
+            if mensaje_acta_asig:
+                flash(mensaje_acta_asig, categoria_acta_asig)
         conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -8950,6 +9164,10 @@ def editar_activo(activo_id):
         categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(activo_id, request.form, session.get('username'), conn, cursor, db_type)
         if mensaje_acta:
             flash(mensaje_acta, categoria_acta)
+        categoria_acta_asig, mensaje_acta_asig = _registrar_acta_asignacion(
+            activo_id, request.form, session.get('username'), conn, cursor, db_type, asignado_a or None, firma_asignacion_url)
+        if mensaje_acta_asig:
+            flash(mensaje_acta_asig, categoria_acta_asig)
         conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -9202,11 +9420,11 @@ def certificacion_devoluciones():
 
     historial = []
     try:
-        cursor.execute("""SELECT d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones
+        cursor.execute("""SELECT d.id, d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada
                            FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id
                            ORDER BY d.id DESC LIMIT 200""")
-        historial = [{'colaborador': r[0], 'nombre_activo': r[1], 'tipo_activo': r[2],
-                      'confirmado_por': r[3], 'fecha': r[4], 'observaciones': r[5]} for r in cursor.fetchall()]
+        historial = [{'id': r[0], 'colaborador': r[1], 'nombre_activo': r[2], 'tipo_activo': r[3],
+                      'confirmado_por': r[4], 'fecha': r[5], 'observaciones': r[6], 'acta_generada': bool(r[7])} for r in cursor.fetchall()]
     except Exception as e:
         print(f"⚠️ Error consultando historial de devoluciones: {e}")
     conn.close()
@@ -9221,6 +9439,11 @@ def certificacion_devoluciones():
 def confirmar_devolucion_activo(activo_id):
     usuario = session.get('username')
     observaciones = (request.form.get('observaciones') or '').strip() or None
+    # 📝 "ojo, que solo lo genere si se le marca generar" (pedido de Tomás) — el acta de
+    # devolución en PDF solo queda disponible para descarga si se marca esta casilla; si no, la
+    # fila de 'inventario_devoluciones' en sí sigue siendo el certificado (ya queda registrada,
+    # con quién la confirmó y cuándo), simplemente sin PDF descargable.
+    generar_acta = request.form.get('generar_acta') in ('on', '1', 'true')
     conn, db_type = get_db()
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
@@ -9234,10 +9457,10 @@ def confirmar_devolucion_activo(activo_id):
         else:
             nombre_activo, colaborador, _ = row
             fecha_act = obtener_fecha_actual()
-            q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones) VALUES (%s, %s, %s, %s, %s)"
+            q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, acta_generada) VALUES (%s, %s, %s, %s, %s, %s)"
                       if db_type == 'postgres' else
-                      "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones) VALUES (?, ?, ?, ?, ?)")
-            cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones))
+                      "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, acta_generada) VALUES (?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones, generar_acta))
             # 🔒 Certificar la devolución ya NO deja el activo 'Disponible' de inmediato (eso
             # permitía que cualquier agente lo reasignara al instante) — pasa a 'Devolución',
             # con la fecha registrada y BLOQUEADO hasta que un administrador lo revise y decida
@@ -9247,7 +9470,8 @@ def confirmar_devolucion_activo(activo_id):
             conn.commit()
             registrar_log(usuario, "Certificación de Devolución de Activo",
                           f"Se certificó la devolución de '{nombre_activo}' por parte de {colaborador}"
-                          + (f" — nota: {observaciones}" if observaciones else ""))
+                          + (f" — nota: {observaciones}" if observaciones else "")
+                          + (" — acta de devolución generada" if generar_acta else ""))
             flash(f"Devolución de '{nombre_activo}' certificada. El activo queda bloqueado en estado 'Devolución' hasta que un administrador lo revise y le asigne su siguiente estado.", "exito")
     except Exception as e:
         conn.rollback()
@@ -9255,6 +9479,104 @@ def confirmar_devolucion_activo(activo_id):
         flash("No se pudo registrar la certificación de devolución.", "error")
     conn.close()
     return redirect(url_for('certificacion_devoluciones'))
+
+
+@app.route('/inventario/certificacion_devoluciones/<int:devolucion_id>/acta_pdf')
+@login_required
+@certificacion_devolucion_required
+def acta_devolucion_pdf(devolucion_id):
+    """Genera el PDF del acta/certificado de devolución — solo si esa certificación puntual se
+    marcó con 'Generar acta' al confirmarla (ver confirmar_devolucion_activo). Si no se marcó,
+    no hay PDF que generar: se vuelve a la certificación de devoluciones."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT d.colaborador, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, "
+             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico "
+             "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id WHERE d.id = %s"
+             if db_type == 'postgres' else
+             "SELECT d.colaborador, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, "
+             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico "
+             "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id WHERE d.id = ?")
+        cursor.execute(q, (devolucion_id,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error consultando acta de devolución {devolucion_id}: {e}")
+        fila = None
+    conn.close()
+
+    if not fila or not fila[4]:
+        # No existe, o esta certificación puntual no se marcó para generar acta.
+        flash("Esta certificación de devolución no tiene un acta en PDF generada.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+
+    (colaborador, confirmado_por, fecha, observaciones, _acta_generada, placa, tipo_activo, marca, modelo,
+     numero_serie, sede, area, es_biomedico) = fila
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+                             leftMargin=2 * cm, rightMargin=2 * cm)
+    estilos = getSampleStyleSheet()
+    titulo = "Arkiv &mdash; Acta de Devolución de Equipo Biomédico" if es_biomedico else "Arkiv &mdash; Acta de Devolución de Activo de TI"
+
+    elementos = [
+        Paragraph(titulo, estilos['Title']),
+        Spacer(1, 0.3 * cm),
+        Paragraph(
+            "Constancia de que el colaborador indicado devolvió el activo señalado, certificada por "
+            "Gestión Humana o TI, para efectos de trazabilidad del inventario.", estilos['Normal']
+        ),
+        Spacer(1, 0.6 * cm),
+    ]
+
+    datos_equipo = [
+        ['Placa / identificación', placa],
+        ['Tipo de activo', tipo_activo or '-'],
+        ['Marca / Modelo', ' '.join(filter(None, [marca, modelo])) or '-'],
+        ['Número de serie', numero_serie or '-'],
+        ['Sede', sede or '-'],
+        ['Área', area or '-'],
+    ]
+    tabla_equipo = Table(datos_equipo, colWidths=[5.5 * cm, 10 * cm])
+    tabla_equipo.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Activo devuelto", estilos['Heading3']), tabla_equipo, Spacer(1, 0.5 * cm)]
+
+    datos_devolucion = [
+        ['Devuelto por', colaborador],
+        ['Fecha de devolución', fecha],
+        ['Certificado por', confirmado_por],
+        ['Observaciones', observaciones or '-'],
+    ]
+    tabla_devolucion = Table(datos_devolucion, colWidths=[5.5 * cm, 10 * cm])
+    tabla_devolucion.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [Paragraph("Datos de la devolución", estilos['Heading3']), tabla_devolucion, Spacer(1, 0.6 * cm)]
+
+    doc.build(elementos)
+    salida.seek(0)
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_Acta_Devolucion_{devolucion_id}.pdf"'
+    })
 
 
 @app.route('/inventario/certificacion_devoluciones/exportar_csv')
