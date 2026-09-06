@@ -506,6 +506,24 @@
                                 </button>
                                 <p id="mensaje-crear-usuario-rapido" class="text-[10px] mt-1.5"></p>
                             </div>
+
+                            <!-- 📝 Acta de asignación (pedido por Tomás): opcional, marcando la casilla —
+                                 igual que el acta de recibido biomédico, queda un historial aparte por
+                                 cada generación (no se sobreescribe con una reasignación posterior). El
+                                 PDF sale como "de TI" o "de Equipo Biomédico" según la casilla de arriba. -->
+                            <div class="mt-2 bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                                <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                    <input type="checkbox" name="generar_acta_asignacion" id="input-generar-acta-asignacion" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                    <i class="fa-solid fa-file-signature text-orange-400"></i> Generar acta de asignación (PDF)
+                                </label>
+                                <div class="mt-2">
+                                    <textarea name="acta_asignacion_descripcion" id="input-acta-asignacion-descripcion" rows="2" placeholder="Descripción breve (opcional, por si hay que anotar alguna novedad de esta entrega)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                                </div>
+                                <p class="text-[10px] text-slate-500 mt-1.5">Toma los datos del activo y de "Asignado a" para armar el acta. Se genera solo si esta casilla queda marcada al guardar.</p>
+                                <button type="button" onclick="abrirModalActasAsignacion()" id="btn-ver-actas-asignacion" class="hidden w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                    <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de asignación
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div>
@@ -735,6 +753,17 @@
         </div>
     </div>
 
+    <!-- MODAL HISTORIAL DE ACTAS DE ASIGNACIÓN -->
+    <div id="modal-actas-asignacion" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-file-signature text-orange-400"></i> Actas de asignación</h3>
+                <button onclick="cerrarModalActasAsignacion()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="lista-actas-asignacion" class="max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
     <!-- MODAL HISTORIAL DE TICKETS DEL ACTIVO -->
     <div id="modal-historial-tickets" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
         <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
@@ -887,6 +916,9 @@
             activoActualIdParaActas = null;
             limpiarFormularioActaRecibido();
             actualizarSeccionActaRecibido();
+            document.getElementById('input-generar-acta-asignacion').checked = false;
+            document.getElementById('input-acta-asignacion-descripcion').value = '';
+            document.getElementById('btn-ver-actas-asignacion').classList.add('hidden');
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
             document.getElementById('modal-activo').scrollTop = 0;
@@ -916,6 +948,12 @@
             activoActualIdParaActas = activo.id;
             limpiarFormularioActaRecibido();
             actualizarSeccionActaRecibido();
+            // 📝 La casilla "Generar acta de asignación" siempre arranca sin marcar al editar —
+            // es una acción puntual de ESTE guardado, no algo que se conserve del activo. El
+            // botón de "ver historial" sí puede mostrarse de una vez porque el activo ya existe.
+            document.getElementById('input-generar-acta-asignacion').checked = false;
+            document.getElementById('input-acta-asignacion-descripcion').value = '';
+            document.getElementById('btn-ver-actas-asignacion').classList.remove('hidden');
             document.getElementById('modal-activo').classList.remove('hidden');
             document.getElementById('modal-activo').classList.add('flex');
             document.getElementById('modal-activo').scrollTop = 0;
@@ -1009,6 +1047,62 @@
         function cerrarModalActasRecibido() {
             document.getElementById('modal-actas-recibido').classList.add('hidden');
             document.getElementById('modal-actas-recibido').classList.remove('flex');
+        }
+
+        // 📝 Acta de asignación (TI o Biomédico) — historial completo, igual que la de recibido:
+        // reutiliza 'activoActualIdParaActas' (ya solo existe cuando se está editando un activo
+        // guardado, nunca en "Nuevo Activo").
+        function abrirModalActasAsignacion() {
+            if (!activoActualIdParaActas) return;
+            const lista = document.getElementById('lista-actas-asignacion');
+            lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Cargando...</p>';
+            document.getElementById('modal-actas-asignacion').classList.remove('hidden');
+            document.getElementById('modal-actas-asignacion').classList.add('flex');
+            fetch('/tickets/inventario/' + activoActualIdParaActas + '/actas_asignacion')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    lista.innerHTML = '';
+                    const actas = data.actas || [];
+                    if (actas.length === 0) {
+                        const vacio = document.createElement('p');
+                        vacio.className = 'text-slate-500 text-xs text-center py-4';
+                        vacio.textContent = 'Este activo todavía no tiene ninguna acta de asignación registrada.';
+                        lista.appendChild(vacio);
+                        return;
+                    }
+                    actas.forEach(function(acta) {
+                        const fila = document.createElement('div');
+                        fila.className = 'bg-slate-950/60 border border-slate-800 rounded-xl p-3 mb-2 text-xs';
+                        const titulo = document.createElement('p');
+                        titulo.className = 'font-bold text-slate-200';
+                        titulo.textContent = acta.asignado_a;
+                        const detalle = document.createElement('p');
+                        detalle.className = 'text-slate-400 mt-0.5';
+                        detalle.textContent = acta.fecha + ' — registrada por ' + acta.generado_por;
+                        fila.appendChild(titulo);
+                        fila.appendChild(detalle);
+                        if (acta.descripcion_breve) {
+                            const nota = document.createElement('p');
+                            nota.className = 'text-slate-400 mt-0.5 italic';
+                            nota.textContent = acta.descripcion_breve;
+                            fila.appendChild(nota);
+                        }
+                        const enlace = document.createElement('a');
+                        enlace.href = '/tickets/inventario/actas_asignacion/' + acta.id + '/pdf';
+                        enlace.target = '_blank';
+                        enlace.className = 'inline-flex items-center gap-1.5 mt-2 text-orange-400 hover:text-orange-300 font-semibold';
+                        enlace.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Descargar acta en PDF';
+                        fila.appendChild(enlace);
+                        lista.appendChild(fila);
+                    });
+                })
+                .catch(function() {
+                    lista.innerHTML = '<p class="text-rose-400 text-xs text-center py-4">No se pudo cargar el historial. Intenta de nuevo.</p>';
+                });
+        }
+        function cerrarModalActasAsignacion() {
+            document.getElementById('modal-actas-asignacion').classList.add('hidden');
+            document.getElementById('modal-actas-asignacion').classList.remove('flex');
         }
 
         // 🪪 Busca una cuenta de Arkiv por cédula y, si la encuentra, llena "Asignado a" con
