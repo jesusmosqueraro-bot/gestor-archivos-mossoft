@@ -106,11 +106,13 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="origen" value="mis_tareas"/>
                         <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
-                        <select name="estado" onchange="this.form.submit()" class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500">
-                            <option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
-                            <option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>
-                            <option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>
-                            <option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>
+                        {# 🔒 Solo estados alcanzables desde el actual — ver _estados_disponibles_tarea
+                           en app.py (mismo criterio que ya usa ticket_detalle.html). #}
+                        <select name="estado" onchange="this.form.submit()" {% if t.estados_disponibles | length <= 1 %}disabled title="Esta tarea ya quedó '{{ t.estado }}' y no se puede volver a cambiar."{% endif %} class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60 disabled:cursor-not-allowed">
+                            {% if 'pendiente' in t.estados_disponibles %}<option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>{% endif %}
+                            {% if 'en_progreso' in t.estados_disponibles %}<option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>{% endif %}
+                            {% if 'completada' in t.estados_disponibles %}<option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>{% endif %}
+                            {% if 'cancelada' in t.estados_disponibles %}<option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>{% endif %}
                         </select>
                     </form>
                 </div>

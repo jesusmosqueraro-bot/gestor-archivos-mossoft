@@ -106,11 +106,15 @@
                          data-en-linea="{{ 'true' if c.en_linea else 'false' }}"
                          data-favorito="{{ 'true' if c.favorito else 'false' }}"
                          data-anclado="{{ 'true' if c.anclado else 'false' }}">
-                        <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})'
+                        <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }}, {{ (c.foto_perfil or "") | tojson }})'
                                 class="text-left flex-1 min-w-0 px-4 py-3 flex items-center gap-3">
                             <div class="relative flex-shrink-0">
-                                <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold">
-                                    {{ c.nombre[:1] | upper }}
+                                <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold overflow-hidden">
+                                    {% if c.foto_perfil %}
+                                        <img src="{{ c.foto_perfil }}" alt="" class="w-full h-full object-cover">
+                                    {% else %}
+                                        {{ c.nombre[:1] | upper }}
+                                    {% endif %}
                                 </div>
                                 <!-- 🟢🔴 En línea/desconectado (pedido por Tomás): basado en actividad
                                      reciente, no en una conexión de socket — ver _esta_en_linea en
@@ -155,7 +159,7 @@
                     <button type="button" onclick="_volverListaChatMovil()" class="sm:hidden text-slate-400 hover:text-white -ml-1 mr-1">
                         <i class="fa-solid fa-arrow-left"></i>
                     </button>
-                    <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm" id="icono-titulo-chat">
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm overflow-hidden" id="icono-titulo-chat">
                         <i class="fa-solid fa-users"></i>
                     </div>
                     <div class="min-w-0">
