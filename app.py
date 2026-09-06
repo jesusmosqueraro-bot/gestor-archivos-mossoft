@@ -242,13 +242,22 @@ else:
 # solo agregar la variable de entorno; sin ella, sigue funcionando igual que hasta ahora (memoria).
 _RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI') or os.environ.get('REDIS_URL') or "memory://"
 
+# 🔒 Hallazgo de auditoría de seguridad (06/09/2026): hasta ahora el límite de peticiones solo
+# existía en rutas puntuales (login, algunas de tareas) — el resto de la API no tenía ningún
+# tope. _LIMITE_GLOBAL_DEFAULT aplica un tope general a TODA la app (cualquier ruta que no
+# tenga ya su propio @limiter.limit más estricto) para frenar abuso/scraping/DoS básico sin
+# estorbar el uso normal: son números generosos porque la app hace polling de notificaciones y
+# tiempo real (ver tiempo_real.js) — el objetivo es un techo de seguridad, no limitar el uso
+# normal de un agente/admin trabajando.
+_LIMITE_GLOBAL_DEFAULT = ["300 per minute", "4000 per hour"]
+
 if Limiter:
     try:
         limiter = Limiter(
             key_func=lambda: _obtener_ip_cliente(),
             app=app,
             storage_uri=_RATELIMIT_STORAGE_URI,
-            default_limits=[],
+            default_limits=_LIMITE_GLOBAL_DEFAULT,
             # 🛟 in_memory_fallback_enabled: si Redis está configurado pero en algún momento no
             # responde (se cae el addon, URL mal escrita, problema de red puntual), Flask-Limiter
             # sigue limitando usando memoria local en vez de dejar pasar todo sin control
@@ -268,8 +277,16 @@ if Limiter:
             key_func=lambda: _obtener_ip_cliente(),
             app=app,
             storage_uri="memory://",
-            default_limits=[],
+            default_limits=_LIMITE_GLOBAL_DEFAULT,
         )
+
+    # 📡 Se exime del tope global a los archivos estáticos y al transporte de Socket.IO: ambos
+    # pueden generar ráfagas legítimas de peticiones (varios JS/CSS/imágenes en una sola carga
+    # de página, o el long-polling de Socket.IO si el navegador no logra abrir el websocket) que
+    # no son abuso — el tope de arriba apunta a las rutas de la aplicación en sí.
+    @limiter.request_filter
+    def _eximir_estaticos_y_socketio():
+        return request.path.startswith('/static/') or request.path.startswith('/socket.io')
 else:
     print("⚠️ flask_limiter no está instalado: no habrá límite de peticiones por minuto. Agrega Flask-Limiter a requirements.txt.")
     class _LimiterExemptDummy:
@@ -2118,8 +2135,96 @@ def verificar_recaptcha(response_token):
     except Exception as e:
         return False
 
-def archivo_permitido(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# 🔒 Hallazgo de auditoría de seguridad (06/09/2026, Tomás con ayuda de Gemini): la validación
+# de subida de archivos solo miraba la EXTENSIÓN del nombre (ALLOWED_EXTENSIONS más arriba), no
+# el contenido real del archivo — alguien podía renombrar un .exe a informe.pdf y pasaría el
+# filtro igual. Esta función revisa los primeros bytes del archivo (su "firma"/magic bytes)
+# contra lo que se espera para la extensión declarada, además de rechazar de una vez cualquier
+# firma de ejecutable/script sin importar qué extensión diga tener el archivo.
+_FIRMAS_PELIGROSAS = (
+    b'MZ',                # ejecutables/DLLs de Windows (.exe, .dll, .scr, .com...)
+    b'\x7fELF',           # ejecutables de Linux
+    b'\xca\xfe\xba\xbe',  # clases Java compiladas / Mach-O universal
+    b'\xfe\xed\xfa',      # Mach-O (macOS), variantes 32/64 bit
+    b'#!/',               # scripts con shebang (sh, bash, python, perl...)
+)
+
+_FIRMAS_POR_EXTENSION = {
+    'png': (b'\x89PNG\r\n\x1a\n',),
+    'jpg': (b'\xff\xd8\xff',),
+    'jpeg': (b'\xff\xd8\xff',),
+    'gif': (b'GIF87a', b'GIF89a'),
+    'pdf': (b'%PDF-',),
+    'zip': (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'),
+    # docx/xlsx/pptx son en el fondo un .zip con otra extensión (formato Office Open XML).
+    'docx': (b'PK\x03\x04',),
+    'xlsx': (b'PK\x03\x04',),
+    'pptx': (b'PK\x03\x04',),
+    'rar': (b'Rar!\x1a\x07\x00', b'Rar!\x1a\x07\x01\x00'),
+    '7z': (b'7z\xbc\xaf\x27\x1c',),
+    'gz': (b'\x1f\x8b',),
+}
+
+
+def _firma_archivo_coincide(extension, cabecera):
+    """True si los primeros bytes ('cabecera') de un archivo son compatibles con la extensión
+    declarada. Antes que nada rechaza cualquier firma de ejecutable/script conocida, sin
+    importar la extensión — así no pasa un .exe/.sh renombrado a .pdf o .jpg."""
+    if any(cabecera.startswith(firma) for firma in _FIRMAS_PELIGROSAS):
+        return False
+
+    if extension == 'webp':
+        return cabecera[:4] == b'RIFF' and cabecera[8:12] == b'WEBP'
+    if extension == 'avi':
+        return cabecera[:4] == b'RIFF' and cabecera[8:12] == b'AVI '
+    if extension == 'webm':
+        return cabecera[:4] == b'\x1a\x45\xdf\xa3'
+    if extension in ('mp4', 'mov'):
+        # Los contenedores tipo QuickTime/MP4 son una serie de "boxes"; el primero casi
+        # siempre es "ftyp" en el byte 4, pero algunos writers empiezan con otro box distinto
+        # (free, moov, wide...) — se acepta si "ftyp" aparece cerca del inicio del archivo.
+        return b'ftyp' in cabecera[:32]
+    if extension == 'tar':
+        # El "ustar" de un tar POSIX va en el byte 257 de la cabecera, no al inicio del
+        # archivo — no hay firma fiable en los primeros bytes. Ya pasó el filtro de firmas
+        # peligrosas de arriba, así que se deja pasar.
+        return True
+    if extension == 'txt':
+        # El texto plano no tiene una firma fija. Se rechaza solo si trae bytes nulos, indicio
+        # típico de que en realidad es contenido binario.
+        return b'\x00' not in cabecera
+    firmas = _FIRMAS_POR_EXTENSION.get(extension)
+    if not firmas:
+        # Extensión sin firma conocida en esta lista (no debería pasar, ALLOWED_EXTENSIONS ya
+        # se validó antes de llegar acá) — ya se aplicó el filtro de firmas peligrosas arriba.
+        return True
+    return any(cabecera.startswith(firma) for firma in firmas)
+
+
+def archivo_permitido(filename, file_storage=None):
+    """Valida un archivo antes de guardarlo/subirlo. Primero que su extensión esté en la lista
+    blanca (como ya hacía esta función). Si además se pasa el FileStorage recién subido
+    (parámetro opcional, para no romper ningún llamado existente), también valida que el
+    CONTENIDO real del archivo (su firma / magic bytes) sea compatible con esa extensión —
+    ver _firma_archivo_coincide arriba."""
+    if not filename or '.' not in filename:
+        return False
+    extension = filename.rsplit('.', 1)[1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        return False
+    if file_storage is not None:
+        try:
+            posicion_original = file_storage.stream.tell()
+            cabecera = file_storage.stream.read(64)
+            file_storage.stream.seek(posicion_original)
+        except Exception as e:
+            # Si el stream no se puede leer/rebobinar por lo que sea, no se bloquea la subida
+            # solo por eso — ya pasó la validación de extensión de arriba.
+            print(f"⚠️ No se pudo validar el contenido real de '{filename}' (se deja pasar por extensión): {e}")
+            return True
+        if not _firma_archivo_coincide(extension, cabecera):
+            return False
+    return True
 
 def login_required(f):
     @wraps(f)
@@ -2879,7 +2984,7 @@ def crear_comunicado():
     imagen = request.files.get('imagen')
 
     imagen_url = ""
-    if imagen and archivo_permitido(imagen.filename):
+    if imagen and archivo_permitido(imagen.filename, imagen):
         try:
             upload_result = cloudinary.uploader.upload(
                 imagen,
@@ -2957,7 +3062,7 @@ def editar_comunicado(com_id):
 
         # Si se adjunta una nueva imagen válida, se reemplaza; si no, se conserva la actual.
         imagen_url = imagen_url_actual
-        if imagen and imagen.filename and archivo_permitido(imagen.filename):
+        if imagen and imagen.filename and archivo_permitido(imagen.filename, imagen):
             try:
                 upload_result = cloudinary.uploader.upload(
                     imagen,
@@ -3861,7 +3966,7 @@ def _subir_adjunto_chat(file):
     sin adjunto, el caso normal), devuelve (None, None, None) sin quejarse — no es un error."""
     if not file or not file.filename:
         return None, None, None
-    if not archivo_permitido(file.filename):
+    if not archivo_permitido(file.filename, file):
         return None, None, 'Ese tipo de archivo no está permitido.'
     file.stream.seek(0, os.SEEK_END)
     tamano = file.stream.tell()
@@ -4547,7 +4652,7 @@ def _subir_archivo_a_cloudinary(file):
     """Sube un único archivo a Cloudinary aplicando las mismas reglas que /subir y
     /editar_galeria según su extensión (video/pdf/comprimido/imagen). Devuelve (url,
     nombre_original) o (None, None) si el archivo no viene, no es válido, o falla la subida."""
-    if not file or not file.filename or not archivo_permitido(file.filename):
+    if not file or not file.filename or not archivo_permitido(file.filename, file):
         return None, None
     try:
         ext = file.filename.rsplit('.', 1)[1].lower()
@@ -5011,7 +5116,7 @@ def _subir_adjuntos_ticket(files):
     del ticket/comentario que lo acompaña."""
     subidos = []
     for file in (files or [])[:MAX_ADJUNTOS_TICKET]:
-        if not file or not file.filename or not archivo_permitido(file.filename):
+        if not file or not file.filename or not archivo_permitido(file.filename, file):
             continue
         try:
             ext = file.filename.rsplit('.', 1)[1].lower()
@@ -6534,7 +6639,7 @@ def crear_conocimiento():
     descripcion = request.form.get('descripcion', '').strip()
     archivo = request.files.get('documento')
 
-    if titulo and archivo and archivo.filename and archivo_permitido(archivo.filename):
+    if titulo and archivo and archivo.filename and archivo_permitido(archivo.filename, archivo):
         subidos = _subir_adjuntos_ticket([archivo])
         if subidos:
             url_doc, nombre_doc = subidos[0]
@@ -6569,7 +6674,7 @@ def editar_conocimiento(articulo_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        if archivo and archivo.filename and archivo_permitido(archivo.filename):
+        if archivo and archivo.filename and archivo_permitido(archivo.filename, archivo):
             subidos = _subir_adjuntos_ticket([archivo])
             if subidos:
                 url_doc, nombre_doc = subidos[0]
@@ -13423,7 +13528,7 @@ def subir_archivo():
     
     archivos_guardados = []
     for file in archivos:
-        if file and archivo_permitido(file.filename):
+        if file and archivo_permitido(file.filename, file):
             try:
                 ext = file.filename.rsplit('.', 1)[1].lower()
 
@@ -13576,7 +13681,7 @@ def editar_galeria(galeria_id):
         
         archivos_agregados = 0
         for file in nuevos_archivos:
-            if file and archivo_permitido(file.filename):
+            if file and archivo_permitido(file.filename, file):
                 ext = file.filename.rsplit('.', 1)[1].lower()
                 
                 if ext in ['mp4', 'mov', 'webm', 'avi']:

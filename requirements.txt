@@ -1,7 +1,15 @@
-Flask==3.0.2
-Werkzeug==3.0.1
+# 🔒 Hallazgo de auditoría de seguridad (06/09/2026): Flask 3.0.2, Werkzeug 3.0.1 y gunicorn
+# 21.2.0 tenían vulnerabilidades ya conocidas (confirmado con `pip-audit -r requirements.txt`,
+# ver el nuevo job "auditoria-dependencias" del workflow de pruebas) — entre ellas, en Werkzeug,
+# un DoS por formularios multipart mal armados que evade el límite de tamaño (relevante acá
+# porque la app recibe archivos por multipart/form-data), y en gunicorn, contrabando de
+# peticiones HTTP (HTTP Request Smuggling) por cabeceras Transfer-Encoding mal validadas. Las
+# tres se subieron a las versiones ya probadas contra los 325 tests de la suite (sin ningún
+# cambio de comportamiento detectado) y sin vulnerabilidades conocidas restantes.
+Flask==3.1.3
+Werkzeug==3.1.8
 Flask-WTF==1.2.1
-gunicorn==21.2.0
+gunicorn==26.2.0
 psycopg2-binary
 cloudinary
 requests
