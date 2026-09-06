@@ -202,11 +202,6 @@
         </div>
     </main>
 
-    <!-- 🟢 Pop-up "fulano se conectó" (pedido por Tomás) — ver _mostrarPopupConexionChat() en
-         chat.js. Esquina superior derecha para no chocar con los toasts de notificaciones
-         (tiempo_real.js, abajo a la izquierda) ni con el botón de tema (abajo a la derecha). -->
-    <div id="contenedor-popups-conexion-chat" class="fixed top-20 right-4 z-[60] flex flex-col gap-2 items-end pointer-events-none"></div>
-
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro. -->
     <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>

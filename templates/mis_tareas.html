@@ -89,31 +89,67 @@
             {% if tareas %}
             <div class="space-y-2">
                 {% for t in tareas %}
-                <div class="flex items-start gap-3 bg-slate-900/50 border border-slate-700/50 rounded-xl p-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap mb-0.5">
-                            <a href="/tickets/{{ t.ticket_id }}" class="text-[10px] font-mono text-sky-400 hover:text-sky-300 font-bold">{{ t.ticket_codigo }}</a>
-                            <span class="text-[10px] text-slate-500">{{ t.ticket_titulo }}</span>
+                <div class="bg-slate-900/50 border border-slate-700/50 rounded-xl p-3">
+                    <div class="flex items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                                <a href="/tickets/{{ t.ticket_id }}" class="text-[10px] font-mono text-sky-400 hover:text-sky-300 font-bold">{{ t.ticket_codigo }}</a>
+                                <span class="text-[10px] text-slate-500">{{ t.ticket_titulo }}</span>
+                            </div>
+                            <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
+                            {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5 whitespace-pre-line">{{ t.descripcion }}</p>{% endif %}
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
+                                {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
+                                <span><i class="fa-solid fa-flag mr-1"></i>Ticket: {{ t.ticket_estado }}</span>
+                            </div>
                         </div>
-                        <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
-                        {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5">{{ t.descripcion }}</p>{% endif %}
-                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
-                            {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
-                            <span><i class="fa-solid fa-flag mr-1"></i>Ticket: {{ t.ticket_estado }}</span>
-                        </div>
+                        <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="origen" value="mis_tareas"/>
+                            <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
+                            {# 🔒 Solo estados alcanzables desde el actual — ver _estados_disponibles_tarea
+                               en app.py (mismo criterio que ya usa ticket_detalle.html). #}
+                            <select name="estado" onchange="this.form.submit()" {% if t.estados_disponibles | length <= 1 %}disabled title="Esta tarea ya quedó '{{ t.estado }}' y no se puede volver a cambiar."{% endif %} class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60 disabled:cursor-not-allowed">
+                                {% if 'pendiente' in t.estados_disponibles %}<option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>{% endif %}
+                                {% if 'en_progreso' in t.estados_disponibles %}<option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>{% endif %}
+                                {% if 'completada' in t.estados_disponibles %}<option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>{% endif %}
+                                {% if 'cancelada' in t.estados_disponibles %}<option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>{% endif %}
+                            </select>
+                        </form>
+                        <button type="button" onclick="document.getElementById('form-editar-tarea-{{ t.id }}').classList.toggle('hidden')" title="Editar tarea / notas" class="text-slate-600 hover:text-sky-400 text-xs px-1 mt-0.5"><i class="fa-solid fa-pen"></i></button>
                     </div>
-                    <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/estado" class="mt-0.5">
+                    {# ✏️ Editar asunto/notas/responsable/fecha límite (pedido por Tomás) — oculto por
+                       defecto, se abre con el lápiz de arriba. No toca el estado de la tarea, y vuelve
+                       a Mis Tareas (no al detalle del ticket) al guardar — ver editar_tarea_ticket en
+                       app.py y sus campos ocultos origen/ver_todas. #}
+                    <form id="form-editar-tarea-{{ t.id }}" method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/editar"
+                          class="hidden mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-950/40 border border-slate-700/50 rounded-xl p-3">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="origen" value="mis_tareas"/>
                         <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
-                        {# 🔒 Solo estados alcanzables desde el actual — ver _estados_disponibles_tarea
-                           en app.py (mismo criterio que ya usa ticket_detalle.html). #}
-                        <select name="estado" onchange="this.form.submit()" {% if t.estados_disponibles | length <= 1 %}disabled title="Esta tarea ya quedó '{{ t.estado }}' y no se puede volver a cambiar."{% endif %} class="bg-slate-800 border {{ 'border-emerald-500/50 text-emerald-300' if t.estado == 'completada' else ('border-slate-600 text-slate-500' if t.estado == 'cancelada' else 'border-slate-700 text-slate-300') }} rounded-lg py-1 px-1.5 text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60 disabled:cursor-not-allowed">
-                            {% if 'pendiente' in t.estados_disponibles %}<option value="pendiente" {% if t.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>{% endif %}
-                            {% if 'en_progreso' in t.estados_disponibles %}<option value="en_progreso" {% if t.estado == 'en_progreso' %}selected{% endif %}>En progreso</option>{% endif %}
-                            {% if 'completada' in t.estados_disponibles %}<option value="completada" {% if t.estado == 'completada' %}selected{% endif %}>Completada</option>{% endif %}
-                            {% if 'cancelada' in t.estados_disponibles %}<option value="cancelada" {% if t.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>{% endif %}
-                        </select>
+                        <div class="sm:col-span-2">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asunto *</label>
+                            <input type="text" name="asunto" required maxlength="200" value="{{ t.asunto }}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas / descripción</label>
+                            <textarea name="descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">{{ t.descripcion or '' }}</textarea>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Responsable</label>
+                            <select name="responsable" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Sin asignar</option>
+                                {% for a in agentes %}<option value="{{ a.usuario }}" {% if a.usuario == t.responsable %}selected{% endif %}>{{ a.nombre }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha límite</label>
+                            <input type="date" name="fecha_limite" value="{{ t.fecha_limite or '' }}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                        </div>
+                        <div class="sm:col-span-2 flex justify-end gap-2">
+                            <button type="button" onclick="document.getElementById('form-editar-tarea-{{ t.id }}').classList.add('hidden')" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-bold">Cancelar</button>
+                            <button type="submit" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold">Guardar</button>
+                        </div>
                     </form>
                 </div>
                 {% endfor %}
