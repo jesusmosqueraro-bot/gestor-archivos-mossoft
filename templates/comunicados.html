@@ -122,6 +122,12 @@
                                         🟢 Informativo
                                     </span>
                                 {% endif %}
+
+                                {% if c.visibilidad == 'admin' %}
+                                    <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider" title="Los usuarios Estándar no pueden ver este comunicado">
+                                        <i class="fa-solid fa-lock"></i> Solo Admin/Agente
+                                    </span>
+                                {% endif %}
                             </div>
 
                             <div class="text-[11px] text-slate-400 font-mono flex items-center gap-2">
@@ -229,6 +235,14 @@
                     <input type="file" name="imagen" accept="image/*" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
                 </div>
 
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Quién puede verlo?</label>
+                    <select name="visibilidad" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        <option value="todos">Todos los usuarios</option>
+                        <option value="admin">Solo Administradores / Agentes</option>
+                    </select>
+                </div>
+
                 <div class="flex items-center gap-2 py-1">
                     <input type="checkbox" id="fijado" name="fijado" class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500">
                     <label for="fijado" class="text-slate-300 font-bold cursor-pointer">Fijar destacado en Inicio</label>
@@ -281,6 +295,14 @@
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Reemplazar Imagen (Opcional)</label>
                     <input type="file" name="imagen" accept="image/*" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
                     <p class="text-slate-500 mt-1">Si no seleccionas un archivo nuevo, se conserva la imagen actual.</p>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Quién puede verlo?</label>
+                    <select id="editar-visibilidad" name="visibilidad" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        <option value="todos">Todos los usuarios</option>
+                        <option value="admin">Solo Administradores / Agentes</option>
+                    </select>
                 </div>
 
                 <div class="flex items-center gap-2 py-1">
@@ -337,6 +359,7 @@
             document.getElementById('form-editar-comunicado').action = '/comunicados/editar/' + c.id;
             document.getElementById('editar-titulo').value = c.titulo || '';
             document.getElementById('editar-nivel').value = c.nivel || 'info';
+            document.getElementById('editar-visibilidad').value = c.visibilidad || 'todos';
             cargarContenidoEnEditor(quillEditarComunicado, 'editar-contenido', c.contenido || '');
             document.getElementById('editar-fijado').checked = !!c.fijado;
 
