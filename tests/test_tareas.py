@@ -439,6 +439,66 @@ def test_editar_tarea_desde_mis_tareas_redirige_a_mis_tareas(admin_session, app)
     assert fila[0] == 'Tarea editada desde Mis Tareas'
 
 
+def test_cuadro_de_respuesta_se_habilita_solo_en_progreso_ticket_detalle(admin_session, app):
+    """Pedido por Tomás: el cuadro para responder una tarea debe HABILITARSE solo mientras está
+    'En progreso' — no tiene sentido responder antes de empezarla (pendiente)."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea pendiente", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    html_pendiente = admin_session.get(f'/tickets/{ticket_id}').get_data(as_text=True)
+    assert 'Marca la tarea como "En progreso" para poder responder.' in html_pendiente
+    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' not in html_pendiente
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    html_en_progreso = admin_session.get(f'/tickets/{ticket_id}').get_data(as_text=True)
+    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' in html_en_progreso
+
+
+def test_cuadro_de_respuesta_se_habilita_solo_en_progreso_mis_tareas(admin_session, app):
+    """Mismo criterio que en ticket_detalle.html, pero desde la cola personal 'Mis Tareas'."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea pendiente", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    html_pendiente = admin_session.get('/tickets/mis_tareas').get_data(as_text=True)
+    assert 'Marca la tarea como "En progreso" para poder responder.' in html_pendiente
+    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' not in html_pendiente
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+    html_en_progreso = admin_session.get('/tickets/mis_tareas').get_data(as_text=True)
+    assert 'placeholder="Escribe tu respuesta o avance de esta tarea..."' in html_en_progreso
+
+
+def test_guardar_respuesta_desde_el_cuadro_rapido_no_borra_los_demas_campos(admin_session, app, crear_usuario):
+    """El cuadro rápido de respuesta manda asunto/descripcion/responsable/fecha_limite como
+    campos ocultos (con el valor que ya tenían) para no borrarlos al guardar solo la respuesta —
+    reproduce exactamente ese POST (asunto + descripcion + responsable + fecha_limite + respuesta)."""
+    agente = crear_usuario(rol='agente', nombre='Agente En Progreso')
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    admin_session.post(f'/tickets/{ticket_id}/tareas/crear', data={
+        'asunto': 'Revisar impresora', 'descripcion': 'Nota original', 'responsable': agente,
+        'fecha_limite': '2026-12-31'
+    })
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Revisar impresora', 'descripcion': 'Nota original', 'responsable': agente,
+        'fecha_limite': '2026-12-31', 'respuesta': 'Ya se cambió el tóner.'
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT descripcion, responsable, fecha_limite, respuesta FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 'Nota original'
+    assert fila[1] == agente
+    assert fila[2] == '2026-12-31'
+    assert fila[3] == 'Ya se cambió el tóner.'
+
+
 def test_indicadores_muestra_top_agentes_por_tareas_completadas(admin_session, app):
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea completada por admin", responsable='admin')
