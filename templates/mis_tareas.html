@@ -98,9 +98,25 @@
                             </div>
                             <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
                             {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5 whitespace-pre-line">{{ t.descripcion }}</p>{% endif %}
-                            {# 💬 Respuesta/avance ya dado (pedido por Tomás) — visible sin abrir el lápiz. #}
-                            {% if t.respuesta %}
+                            {# 💬 Respuesta/avance (pedido por Tomás): el cuadro para escribirla se
+                               HABILITA solo mientras la tarea está "En progreso" — ver comentario
+                               equivalente en ticket_detalle.html. #}
+                            {% if t.estado == 'en_progreso' %}
+                            <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/editar" class="mt-1.5 flex items-start gap-1.5">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <input type="hidden" name="origen" value="mis_tareas"/>
+                                <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
+                                <input type="hidden" name="asunto" value="{{ t.asunto }}"/>
+                                <input type="hidden" name="descripcion" value="{{ t.descripcion or '' }}"/>
+                                <input type="hidden" name="responsable" value="{{ t.responsable or '' }}"/>
+                                <input type="hidden" name="fecha_limite" value="{{ t.fecha_limite or '' }}"/>
+                                <textarea name="respuesta" rows="1" placeholder="Escribe tu respuesta o avance de esta tarea..." class="flex-1 min-w-0 bg-slate-900 border border-sky-500/40 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y">{{ t.respuesta or '' }}</textarea>
+                                <button type="submit" title="Guardar respuesta" class="text-sky-400 hover:text-sky-300 text-xs px-2 py-1 flex-shrink-0"><i class="fa-solid fa-paper-plane"></i></button>
+                            </form>
+                            {% elif t.respuesta %}
                             <p class="text-[11px] text-sky-300/90 mt-1 whitespace-pre-line bg-sky-500/5 border border-sky-500/20 rounded-lg px-2 py-1"><i class="fa-solid fa-reply mr-1"></i>{{ t.respuesta }}</p>
+                            {% elif t.estado == 'pendiente' %}
+                            <p class="text-[10px] text-slate-600 italic mt-1"><i class="fa-solid fa-lock mr-1"></i>Marca la tarea como "En progreso" para poder responder.</p>
                             {% endif %}
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
                                 {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
