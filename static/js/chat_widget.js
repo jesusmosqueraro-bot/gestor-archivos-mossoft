@@ -217,9 +217,16 @@
             var activo = _widgetChatActual.tipo === 'directo' && _widgetChatActual.usuario === c.usuario;
             var noLeidos = activo ? 0 : (c.no_leidos || 0);
             var previa = c.ultimo_mensaje ? (c.ultimo_mensaje.length > 34 ? c.ultimo_mensaje.slice(0, 34) + '…' : c.ultimo_mensaje) : 'Sin mensajes todavía';
+            // 🟢🔴 En línea/desconectado (mismo indicador que /chat — ver _esta_en_linea en app.py):
+            // como este panel reconstruye toda la lista desde _widgetContactos en cada refresco
+            // (ver _widgetCargarContactos, cada POLL_CONTACTOS_WIDGET_MS), basta con pintar el
+            // punto según 'c.en_linea' de la respuesta más reciente, sin lógica aparte.
             html += '<button type="button" class="widget-item-contacto w-full text-left px-3 py-2.5 flex items-center gap-2.5 hover:bg-slate-800/60 transition-colors ' + (activo ? 'bg-sky-500/10' : '') + '" ' +
                 'data-usuario="' + _escapeAtributoWidget(c.usuario) + '" data-nombre="' + _escapeAtributoWidget(c.nombre) + '">' +
-                '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">' + _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase()) + '</div>' +
+                '<div class="relative flex-shrink-0">' +
+                    '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold">' + _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase()) + '</div>' +
+                    '<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ' + (c.en_linea ? 'bg-emerald-400' : 'bg-rose-500') + '" title="' + (c.en_linea ? 'En línea' : 'Desconectado') + '"></span>' +
+                '</div>' +
                 '<div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate">' + _escapeHtmlWidget(c.nombre) + '</div><div class="text-[10px] text-slate-500 truncate">' + _escapeHtmlWidget(previa) + '</div></div>' +
                 (noLeidos > 0 ? '<span class="bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">' + (noLeidos > 99 ? '99+' : noLeidos) + '</span>' : '') +
                 '</button>';
