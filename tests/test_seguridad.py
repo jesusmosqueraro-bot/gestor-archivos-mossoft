@@ -71,3 +71,25 @@ def test_login_respeta_limite_de_peticiones_por_minuto(client, app, monkeypatch)
     codigos = [client.post('/login', data={'usuario': 'x', 'password': 'y'}).status_code for _ in range(25)]
 
     assert 429 in codigos
+
+
+def test_codigo_de_recuperacion_es_numerico_de_seis_digitos_y_queda_en_sesion(client, app, crear_usuario, monkeypatch):
+    """Hallazgo de auditoría de seguridad (06/09/2026): el código de recuperación de clave se
+    generaba con `random.randint` (Mersenne Twister, no apto para nada de seguridad) en vez de
+    con el módulo `secrets` (aleatoriedad criptográficamente segura) que ya se usa en el resto
+    del archivo para tokens/códigos sensibles. Se corrigió a `secrets.randbelow`; esta prueba
+    solo blinda que el formato y rango del código (6 dígitos, 100000-999999) sigue igual — el
+    comportamiento externo del flujo de recuperación no debía cambiar."""
+    monkeypatch.setattr(app, 'verificar_recaptcha', lambda token: True)
+    correo = 'colaborador.recupera@preventivaips.com.co'
+    crear_usuario(usuario='colaborador_recupera', correo=correo)
+
+    r = client.post('/recuperar', data={'email': correo, 'g-recaptcha-response': 'x'})
+
+    assert r.status_code == 200
+    with client.session_transaction() as sess:
+        codigo = sess.get('reset_code')
+    assert codigo is not None
+    assert codigo.isdigit()
+    assert len(codigo) == 6
+    assert 100000 <= int(codigo) <= 999999
