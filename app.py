@@ -8339,6 +8339,7 @@ def importar_inventario_xlsx():
 
     creados = 0
     omitidos = []
+    ajustados_sin_colaborador = []
     placas_vistas_en_archivo = set()
 
     for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -8375,6 +8376,12 @@ def importar_inventario_xlsx():
         if estado == 'Devolución':
             asignado_a = None
             fecha_devolucion = fecha_act
+        elif estado == 'Asignado' and not asignado_a:
+            # 🔒 Mismo saneamiento que en crear_activo/editar_activo (ver comentario ahí): sin
+            # esto, la fila se guardaría 'Asignado' sin colaborador y más adelante su
+            # Certificación de Devolución fallaría con un error de base de datos.
+            estado = 'Disponible'
+            ajustados_sin_colaborador.append(num_fila)
         sede = str(valores[7]).strip() if valores[7] else None
         sede = sede if sede in sedes_validas else None
         area = str(valores[8]).strip() if valores[8] else None
@@ -8398,19 +8405,25 @@ def importar_inventario_xlsx():
             placas_vistas_en_archivo.add(nombre.lower())
         except Exception as e:
             conn.rollback()
-            omitidos.append((num_fila, f"error al guardar: {e}"))
+            omitidos.append((num_fila, _mensaje_error_para_agente(e)))
 
     conn.close()
 
     if creados:
         registrar_log(usuario, "Inventario de Activos", f"Carga masiva desde Excel: {creados} activo(s) registrado(s)")
 
+    nota_ajustados = ""
+    if ajustados_sin_colaborador:
+        filas_txt = ", ".join(str(f) for f in ajustados_sin_colaborador[:20])
+        nota_ajustados = (f"\n(Fila(s) {filas_txt}: se guardaron como 'Disponible' en vez de 'Asignado' porque "
+                           f"no traían un colaborador en la columna 'Asignado a'.)")
+
     if creados and not omitidos:
-        flash(f"Se cargaron {creados} activo(s) correctamente.", "exito")
+        flash(f"Se cargaron {creados} activo(s) correctamente.{nota_ajustados}", "exito")
     elif creados and omitidos:
         detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20])
         extra = f"\n(...y {len(omitidos) - 20} fila(s) más)" if len(omitidos) > 20 else ""
-        flash(f"Se cargaron {creados} activo(s). Se omitieron {len(omitidos)} fila(s):\n{detalle}{extra}", "exito")
+        flash(f"Se cargaron {creados} activo(s). Se omitieron {len(omitidos)} fila(s):\n{detalle}{extra}{nota_ajustados}", "exito")
     else:
         detalle = "\n".join(f"Fila {f}: {m}" for f, m in omitidos[:20]) or "El archivo no tiene filas con datos."
         flash(f"No se cargó ningún activo. {detalle}", "error")
@@ -8866,6 +8879,19 @@ def _pdf_clausula_style(estilos):
     return ParagraphStyle('ClausulaActa', parent=estilos['Normal'], alignment=TA_JUSTIFY, fontSize=9, leading=12.5)
 
 
+def _pdf_texto_celda(valor, estilos):
+    """Envuelve un valor de texto (nombre de colaborador, sede, descripción del activo, etc.) en
+    un Paragraph para que reportlab lo ajuste con saltos de línea dentro del ancho de la columna
+    de la tabla, en vez de desbordarse fuera de sus bordes como pasaba con celdas de texto plano
+    (pedido de Tomás, 06/09/2026: 'corregir los saltos, que se ajuste el campo al texto'). Escapa
+    '&', '<' y '>' para que el valor no rompa el mini-parser XML de Paragraph si llegara a
+    contener alguno de esos caracteres (ej. un nombre de sede con '&')."""
+    from reportlab.platypus import Paragraph
+    texto = str(valor) if valor not in (None, '') else '-'
+    texto = texto.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    return Paragraph(texto, estilos['Normal'])
+
+
 @app.route('/tickets/inventario/actas_asignacion/<int:acta_id>/pdf')
 @login_required
 @agente_o_admin_required
@@ -8925,9 +8951,9 @@ def acta_asignacion_pdf(acta_id):
     ]
 
     datos_asignacion = [
-        ['Responsable de asignación', responsable_asignacion],
-        ['Colaborador que recibe', asignado_a],
-        ['Sede / Área', ' — '.join(filter(None, [sede, area])) or '-'],
+        ['Responsable de asignación', _pdf_texto_celda(responsable_asignacion, estilos)],
+        ['Colaborador que recibe', _pdf_texto_celda(asignado_a, estilos)],
+        ['Sede / Área', _pdf_texto_celda(' — '.join(filter(None, [sede, area])) or '-', estilos)],
     ]
     tabla_asignacion = Table(datos_asignacion, colWidths=[5.5 * cm, 10.5 * cm])
     tabla_asignacion.setStyle(TableStyle([
@@ -8949,7 +8975,7 @@ def acta_asignacion_pdf(acta_id):
 
     descripcion_equipo = f"{tipo_activo or 'Activo'} — {' '.join(filter(None, [marca, modelo])) or 'sin marca/modelo'} — Placa {placa}" + (f" — Serie {numero_serie}" if numero_serie else "") + (f" — Proveedor {proveedor}" if proveedor else "")
     tabla_items = Table(
-        [["Descripción (Equipo, insumo, dispositivo)", "Cantidad"], [descripcion_equipo, "1"]],
+        [["Descripción (Equipo, insumo, dispositivo)", "Cantidad"], [_pdf_texto_celda(descripcion_equipo, estilos), "1"]],
         colWidths=[13 * cm, 3 * cm]
     )
     tabla_items.setStyle(TableStyle([
@@ -9182,6 +9208,15 @@ def crear_activo():
             firma_asignacion_url = None
             firma_asignacion_fecha = None
             fecha_devolucion = fecha_act
+        elif estado == 'Asignado' and not asignado_a:
+            # 🔒 (pedido de Tomás, 06/09/2026) Un activo no puede quedar en estado 'Asignado' sin
+            # un colaborador: si eso pasa, más adelante la Certificación de Devolución de ese
+            # activo falla (la tabla 'inventario_devoluciones' exige un colaborador) con un error
+            # confuso para quien la certifica. Se corrige de raíz: si falta el colaborador, el
+            # activo se guarda como 'Disponible' en su lugar y se explica por qué.
+            estado = 'Disponible'
+            flash("El activo se guardó como 'Disponible' en vez de 'Asignado' porque no se indicó a quién se "
+                  "le asigna (campo 'Asignado a' vacío). Edítalo y completa ese campo para dejarlo asignado.", "error")
         usuario = session.get('username')
         conn, db_type = get_db()
         cursor = conn.cursor()
@@ -9206,6 +9241,7 @@ def crear_activo():
         except Exception as e:
             conn.rollback()
             print(f"Error creando activo: {e}")
+            flash(_mensaje_error_para_agente(e), "error")
         if nuevo_activo_id:
             categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(nuevo_activo_id, request.form, usuario, conn, cursor, db_type)
             if mensaje_acta:
@@ -9286,6 +9322,14 @@ def editar_activo(activo_id):
                 firma_asignacion_url = None
                 firma_asignacion_fecha = None
                 fecha_devolucion = obtener_fecha_actual()
+            elif estado == 'Asignado' and not asignado_a:
+                # 🔒 Mismo saneamiento que en crear_activo (ver comentario ahí) — además, esto
+                # "autocorrige" cualquier activo que ya hubiera quedado en este estado inválido
+                # (ej. por datos de prueba) la próxima vez que alguien lo edite y guarde, aunque
+                # no toque el campo de estado.
+                estado = 'Disponible'
+                flash("El activo se guardó como 'Disponible' en vez de 'Asignado' porque no se indicó a quién "
+                      "se le asigna (campo 'Asignado a' vacío). Edítalo y completa ese campo para dejarlo asignado.", "error")
 
             q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph} WHERE id = {ph}"
             cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, activo_id))
@@ -9294,6 +9338,7 @@ def editar_activo(activo_id):
         except Exception as e:
             conn.rollback()
             print(f"Error editando activo {activo_id}: {e}")
+            flash(_mensaje_error_para_agente(e), "error")
         categoria_acta, mensaje_acta = _registrar_acta_recibido_biomedico(activo_id, request.form, session.get('username'), conn, cursor, db_type)
         if mensaje_acta:
             flash(mensaje_acta, categoria_acta)
@@ -9567,6 +9612,31 @@ def certificacion_devoluciones():
                             busqueda=busqueda, es_soporte=(session.get('rol') in ROLES_CON_ACCESO_OPERATIVO))
 
 
+def _mensaje_error_para_agente(e):
+    """Arma un mensaje de error que, además de avisar que algo falló, muestra el detalle técnico
+    y una sugerencia concreta de cómo corregirlo — pedido de Tomás (06/09/2026): 'que el sistema
+    cada vez que se visualice un error, indique cuál es el error y la posible solución', para que
+    un agente de TI pueda diagnosticar la novedad sin tener que ir a revisar los logs del
+    servidor. Reconoce los tipos de error más comunes de la base de datos en Arkiv (falta un dato
+    obligatorio, un valor único duplicado, o una referencia a un registro que ya no existe) y da
+    una sugerencia específica para cada uno; para cualquier otro tipo de error, muestra el detalle
+    técnico crudo con una sugerencia genérica de contactar a soporte con ese detalle."""
+    detalle = str(e)
+    texto_error = detalle.lower()
+    if 'not null' in texto_error or 'null value in column' in texto_error:
+        pista = ("Falta un dato obligatorio en el registro de origen (por ejemplo, un activo "
+                  "'Asignado' sin colaborador definido). Revisa y completa ese dato antes de reintentar.")
+    elif 'unique' in texto_error or 'duplicate key' in texto_error or 'unique constraint' in texto_error:
+        pista = ("Ya existe un registro con ese mismo valor único (ej. una placa, cédula o usuario "
+                  "duplicado). Verifica que no se esté repitiendo un dato que debe ser único.")
+    elif 'foreign key' in texto_error:
+        pista = ("El registro hace referencia a otro elemento (ej. un activo o usuario) que no "
+                  "existe o fue eliminado. Verifica que ese elemento relacionado siga existiendo.")
+    else:
+        pista = "Si el problema persiste, comparte este detalle técnico con el equipo de TI/soporte."
+    return f"No se pudo completar la operación — detalle técnico: {detalle}. Sugerencia: {pista}"
+
+
 @app.route('/inventario/<int:activo_id>/confirmar_devolucion', methods=['POST'])
 @login_required
 @certificacion_devolucion_required
@@ -9590,6 +9660,17 @@ def confirmar_devolucion_activo(activo_id):
             flash("El activo indicado no existe o fue eliminado.", "error")
         elif row[2] != 'Asignado':
             flash("Este activo ya no figura como asignado; no hay una devolución pendiente que certificar.", "error")
+        elif not (row[1] or '').strip():
+            # 🔎 Causa real de "No se pudo registrar la certificación de devolución" cuando el
+            # colaborador aparece como "Sin asignar" (pedido de Tomás, 06/09/2026): la tabla
+            # 'inventario_devoluciones' exige un colaborador (NOT NULL), así que un activo que
+            # quedó en estado 'Asignado' sin que se le definiera a quién, no se puede certificar
+            # tal cual — antes esto reventaba en un error genérico de base de datos; ahora se
+            # explica la causa exacta y cómo corregirla, sin intentar el INSERT primero.
+            flash("Este activo figura como 'Asignado' pero no tiene un colaborador registrado (aparece como "
+                  "'Sin asignar'), así que no se puede certificar su devolución. Ve a Inventario, edita este "
+                  "activo y define quién lo tiene asignado (o cambia su estado a 'Disponible' si en realidad "
+                  "no está asignado a nadie) y vuelve a intentar.", "error")
         else:
             nombre_activo, colaborador, _, es_biomedico = row
             fecha_act = obtener_fecha_actual()
@@ -9637,7 +9718,7 @@ def confirmar_devolucion_activo(activo_id):
     except Exception as e:
         conn.rollback()
         print(f"Error certificando devolución del activo {activo_id}: {e}")
-        flash("No se pudo registrar la certificación de devolución.", "error")
+        flash(_mensaje_error_para_agente(e), "error")
     conn.close()
     return redirect(url_for('certificacion_devoluciones'))
 
@@ -9702,9 +9783,9 @@ def acta_devolucion_pdf(devolucion_id):
     ]
 
     datos_devolucion = [
-        ['Responsable de devolución', responsable_devolucion],
-        ['Colaborador que entrega', colaborador],
-        ['Familiar/cuidador responsable', nombre_familiar or '-'],
+        ['Responsable de devolución', _pdf_texto_celda(responsable_devolucion, estilos)],
+        ['Colaborador que entrega', _pdf_texto_celda(colaborador, estilos)],
+        ['Familiar/cuidador responsable', _pdf_texto_celda(nombre_familiar or '-', estilos)],
     ]
     tabla_devolucion = Table(datos_devolucion, colWidths=[5.5 * cm, 10.5 * cm])
     tabla_devolucion.setStyle(TableStyle([
@@ -9726,7 +9807,7 @@ def acta_devolucion_pdf(devolucion_id):
 
     descripcion_equipo = f"{tipo_activo or 'Activo'} — {' '.join(filter(None, [marca, modelo])) or 'sin marca/modelo'} — Placa {placa}" + (f" — Serie {numero_serie}" if numero_serie else "") + (f" — {sede}" if sede else "") + (f" / {area}" if area else "")
     tabla_items = Table(
-        [["Descripción (Equipo, insumo, dispositivo)", "Cantidad"], [descripcion_equipo, "1"]],
+        [["Descripción (Equipo, insumo, dispositivo)", "Cantidad"], [_pdf_texto_celda(descripcion_equipo, estilos), "1"]],
         colWidths=[13 * cm, 3 * cm]
     )
     tabla_items.setStyle(TableStyle([
