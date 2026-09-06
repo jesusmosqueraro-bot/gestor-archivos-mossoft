@@ -29,10 +29,6 @@
     var _widgetEnviando = false;
     // 🟢🔴 Filtro por estado (pedido por Tomás): 'todos' | 'en_linea' | 'desconectado'.
     var _widgetFiltroEstado = 'todos';
-    // 🟢 Foto del sondeo anterior para el pop-up "fulano se conectó" — 'null' = todavía no hay
-    // foto anterior (se resetea también al cerrar el panel, ver cerrarChatFlotante), a propósito
-    // para no avisar de golpe que "todo el equipo se conectó" en el primer sondeo.
-    var _widgetEstadoEnLineaPrevio = null;
     // 📎 Mismo adjunto pendiente que chat.js (ver ese archivo) — un archivo elegido con el clip
     // o pegado desde el portapapeles, listo para viajar junto con el próximo mensaje.
     var _widgetAdjuntoSeleccionado = null;
@@ -355,36 +351,12 @@
         _widgetEnviarPreferencia(contacto, 'anclado', activo);
     }
 
-    // 🟢 Pop-up "fulano se conectó" (pedido por Tomás) — mismo criterio que chat.js: compara el
-    // 'en_linea' de este sondeo contra el anterior y avisa por cada transición false→true, para
-    // CUALQUIER contacto. El contenedor se crea solo (no depende de ningún partial de plantilla),
-    // para que funcione en cualquier página donde viva el widget.
-    function _widgetContenedorPopupsConexion() {
-        var cont = document.getElementById('widget-contenedor-popups-conexion');
-        if (!cont) {
-            cont = document.createElement('div');
-            cont.id = 'widget-contenedor-popups-conexion';
-            cont.style.cssText = 'position:fixed;top:80px;right:16px;z-index:60;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none;';
-            document.body.appendChild(cont);
-        }
-        return cont;
-    }
-
-    function _widgetMostrarPopupConexion(nombre) {
-        var cont = _widgetContenedorPopupsConexion();
-        var aviso = document.createElement('div');
-        aviso.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:8px;background:#1e293b;border:1px solid rgba(16,185,129,.3);color:#fff;font-size:12px;font-weight:600;padding:10px 14px;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,.35);opacity:0;transform:translateY(-6px);transition:opacity .2s ease, transform .2s ease;font-family:inherit;';
-        aviso.innerHTML = '<span style="width:8px;height:8px;border-radius:999px;background:#34d399;flex-shrink:0;"></span><span>' + _escapeHtmlWidget(nombre) + ' se conectó</span>';
-        cont.appendChild(aviso);
-        requestAnimationFrame(function () {
-            aviso.style.opacity = '1';
-            aviso.style.transform = 'translateY(0)';
-        });
-        setTimeout(function () {
-            aviso.style.opacity = '0';
-            setTimeout(function () { if (aviso.parentNode) aviso.parentNode.removeChild(aviso); }, 250);
-        }, 4500);
-    }
+    // 🟢 Pop-up "fulano se conectó" (pedido por Tomás): antes esto se detectaba acá comparando el
+    // 'en_linea' de un sondeo contra el anterior — pero eso solo corría mientras este panel
+    // flotante estaba ABIERTO, así que casi nunca se veía (reportado por Tomás: "no esta saliendo
+    // el pop-up cuando se conecta un usuario, no se visualiza"). Ahora lo dispara el servidor por
+    // Socket.IO apenas alguien reconecta (ver _registrar_actividad_usuario en app.py) y lo
+    // muestra tiempo_real.js en CUALQUIER página, tenga o no este panel abierto.
 
     function _widgetCargarContactos() {
         fetch('/chat/contactos')
@@ -393,19 +365,6 @@
                 _widgetContactos = data.contactos || [];
                 _widgetCanalNoLeidos = data.canal_no_leidos || 0;
                 _widgetPintarLista();
-
-                // 🟢 Pop-up de conexión: ver comentario en _widgetEstadoEnLineaPrevio arriba.
-                var estadoAhora = {};
-                _widgetContactos.forEach(function (c) { estadoAhora[c.usuario] = !!c.en_linea; });
-                if (_widgetEstadoEnLineaPrevio) {
-                    Object.keys(estadoAhora).forEach(function (usuario) {
-                        if (estadoAhora[usuario] && _widgetEstadoEnLineaPrevio[usuario] === false) {
-                            var c = _widgetContactoPorUsuario(usuario);
-                            _widgetMostrarPopupConexion(c ? c.nombre : usuario);
-                        }
-                    });
-                }
-                _widgetEstadoEnLineaPrevio = estadoAhora;
             })
             .catch(function () { /* silencioso: igual que chat.js, un fallo de red no debe interrumpir nada */ });
     }
@@ -624,9 +583,6 @@
         _widgetAbierto = false;
         if (_widgetIntervaloContactos) { clearInterval(_widgetIntervaloContactos); _widgetIntervaloContactos = null; }
         if (_widgetIntervaloMensajes) { clearInterval(_widgetIntervaloMensajes); _widgetIntervaloMensajes = null; }
-        // 🟢 Se resetea la foto de en línea/desconectado: si el panel estuvo cerrado un rato,
-        // comparar contra un estado viejo daría avisos de conexión falsos al reabrir.
-        _widgetEstadoEnLineaPrevio = null;
     }
 
     // 🌐 Expuestas globalmente: las llama el botón (chat_flotante.html) y tiempo_real.js.

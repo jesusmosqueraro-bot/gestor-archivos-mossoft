@@ -428,29 +428,13 @@ function alternarAncladoChat(boton, contacto) {
     _enviarPreferenciaChat(contacto, 'anclado', activo);
 }
 
-// 🟢 Pop-up "fulano se conectó" (pedido por Tomás): se dispara comparando, en cada sondeo de
-// /chat/contactos, el 'en_linea' de ahora contra el de la vuelta anterior. 'null' significa
-// "todavía no hay una foto anterior" (justo después de cargar la página) — a propósito no se
-// avisa nada en esa primera vuelta, o parecería que TODO el equipo se acaba de conectar.
-var _estadoEnLineaPrevioChat = null;
-
-function _mostrarPopupConexionChat(nombre) {
-    var contenedor = document.getElementById('contenedor-popups-conexion-chat');
-    if (!contenedor) return;
-    var aviso = document.createElement('div');
-    aviso.className = 'pointer-events-auto flex items-center gap-2 bg-slate-800 border border-emerald-500/30 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl shadow-lg shadow-slate-950/40';
-    aviso.style.cssText = 'opacity:0; transform:translateY(-6px); transition: opacity .2s ease, transform .2s ease;';
-    aviso.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></span><span>' + _escapeHtmlChat(nombre) + ' se conectó</span>';
-    contenedor.appendChild(aviso);
-    requestAnimationFrame(function () {
-        aviso.style.opacity = '1';
-        aviso.style.transform = 'translateY(0)';
-    });
-    setTimeout(function () {
-        aviso.style.opacity = '0';
-        setTimeout(function () { if (aviso.parentNode) aviso.parentNode.removeChild(aviso); }, 250);
-    }, 4500);
-}
+// 🟢 Pop-up "fulano se conectó" (pedido por Tomás): antes se disparaba desde acá comparando,
+// en cada sondeo de /chat/contactos, el 'en_linea' de ahora contra el de la vuelta anterior —
+// pero eso solo detectaba la conexión mientras esta página (/chat) estaba abierta. Reportado
+// por Tomás: "no esta saliendo el pop-up cuando se conecta un usuario, no se visualiza". Ahora
+// el aviso lo dispara el servidor por Socket.IO apenas alguien reconecta (ver
+// _registrar_actividad_usuario en app.py) y lo muestra tiempo_real.js en CUALQUIER página, así
+// que ya no hace falta esta comparación aquí.
 
 function cargarContactosChat() {
     fetch('/chat/contactos')
@@ -467,9 +451,7 @@ function cargarContactosChat() {
                 }
             }
 
-            var estadoEnLineaAhora = {};
             (data.contactos || []).forEach(function (c) {
-                estadoEnLineaAhora[c.usuario] = !!c.en_linea;
                 var el = document.querySelector('.item-contacto-chat[data-usuario="' + c.usuario + '"]');
                 if (!el) return;
                 var previsualizacion = el.querySelector('.previsualizacion-contacto-chat');
@@ -510,19 +492,6 @@ function cargarContactosChat() {
 
             _reordenarContactosChatPorAnclado();
             filtrarContactosChat();
-
-            // 🟢 Pop-up de conexión: compara contra la foto del sondeo anterior (ver comentario
-            // en _estadoEnLineaPrevioChat) y avisa por cada contacto que pasó de desconectado a
-            // en línea — para CUALQUIER contacto, no solo favoritos/anclados (pedido por Tomás).
-            if (_estadoEnLineaPrevioChat) {
-                Object.keys(estadoEnLineaAhora).forEach(function (usuario) {
-                    if (estadoEnLineaAhora[usuario] && _estadoEnLineaPrevioChat[usuario] === false) {
-                        var elContacto = document.querySelector('.item-contacto-chat[data-usuario="' + usuario + '"]');
-                        _mostrarPopupConexionChat(elContacto ? elContacto.getAttribute('data-nombre') : usuario);
-                    }
-                });
-            }
-            _estadoEnLineaPrevioChat = estadoEnLineaAhora;
         })
         .catch(function () { /* silencioso */ });
 }

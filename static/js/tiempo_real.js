@@ -41,6 +41,18 @@
         if (typeof _widgetRefrescarCanal === 'function') _widgetRefrescarCanal();
     });
 
+    // 🟢 Pop-up "fulano se conectó" (pedido por Tomás) — ver el comentario junto a
+    // _registrar_actividad_usuario() en app.py: antes esto solo se detectaba comparando el
+    // 'en_linea' de un sondeo del chat contra el anterior, y ese sondeo solo corría con /chat o
+    // el panel flotante abiertos, así que casi nunca se llegaba a ver. Ahora el servidor emite
+    // este evento apenas detecta que alguien reconectó, y se avisa en CUALQUIER página con
+    // campanita (no hace falta tener el chat abierto).
+    socket.on('usuario_conectado', function (datos) {
+        var propioUsuario = wrapperNotif.getAttribute('data-usuario-actual') || '';
+        if (!datos || datos.usuario === propioUsuario) return; // no avisarle a quien se acaba de conectar de sí mismo
+        _mostrarPopupConexionTiempoReal(datos.nombre || datos.usuario);
+    });
+
     socket.on('chat_directo_mensaje', function (datos) {
         if (typeof cargarNotificaciones === 'function') cargarNotificaciones();
         if (typeof _chatActual !== 'undefined' && _chatActual.tipo === 'directo' &&
@@ -95,5 +107,35 @@
         estilo.id = 'tiemporeal-toast-style';
         estilo.textContent = '@keyframes tiemporeal-toast-in { from { opacity:0; transform:translateY(8px);} to {opacity:1; transform:translateY(0);} }';
         document.head.appendChild(estilo);
+    }
+
+    // 🟢 Mismo look que ya usaban chat.js/chat_widget.js para "fulano se conectó" (burbuja verde
+    // arriba a la derecha), pero como contenedor propio e independiente de página — así funciona
+    // en cualquier plantilla con campanita, no solo /chat o con el widget flotante abierto.
+    function _contenedorPopupsConexionTiempoReal() {
+        var cont = document.getElementById('tiemporeal-contenedor-popups-conexion');
+        if (!cont) {
+            cont = document.createElement('div');
+            cont.id = 'tiemporeal-contenedor-popups-conexion';
+            cont.style.cssText = 'position:fixed;top:80px;right:16px;z-index:9998;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none;';
+            document.body.appendChild(cont);
+        }
+        return cont;
+    }
+
+    function _mostrarPopupConexionTiempoReal(nombre) {
+        var cont = _contenedorPopupsConexionTiempoReal();
+        var aviso = document.createElement('div');
+        aviso.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:8px;background:#1e293b;border:1px solid rgba(16,185,129,.3);color:#fff;font-size:12px;font-weight:600;padding:10px 14px;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,.35);opacity:0;transform:translateY(-6px);transition:opacity .2s ease, transform .2s ease;font-family:inherit;';
+        aviso.innerHTML = '<span style="width:8px;height:8px;border-radius:999px;background:#34d399;flex-shrink:0;"></span><span>' + _escapeHtmlToastTiempoReal(nombre) + ' se conectó</span>';
+        cont.appendChild(aviso);
+        requestAnimationFrame(function () {
+            aviso.style.opacity = '1';
+            aviso.style.transform = 'translateY(0)';
+        });
+        setTimeout(function () {
+            aviso.style.opacity = '0';
+            setTimeout(function () { if (aviso.parentNode) aviso.parentNode.removeChild(aviso); }, 250);
+        }, 4500);
     }
 })();
