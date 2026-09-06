@@ -475,6 +475,12 @@
                         <div class="flex-1 min-w-0">
                             <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
                             {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5 whitespace-pre-line">{{ t.descripcion }}</p>{% endif %}
+                            {# 💬 Respuesta/avance de quien tiene la tarea asignada (pedido por Tomás) —
+                               DISTINTA de 'descripcion' (las notas de quien creó la tarea): se muestra
+                               siempre visible, sin tener que abrir el lápiz de editar. #}
+                            {% if t.respuesta %}
+                            <p class="text-[11px] text-sky-300/90 mt-1 whitespace-pre-line bg-sky-500/5 border border-sky-500/20 rounded-lg px-2 py-1"><i class="fa-solid fa-reply mr-1"></i>{{ t.respuesta }}</p>
+                            {% endif %}
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
                                 {% if t.responsable_nombre %}<span><i class="fa-solid fa-user mr-1"></i>{{ t.responsable_nombre }}</span>{% endif %}
                                 {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
@@ -516,6 +522,14 @@
                         <div class="sm:col-span-2">
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas / descripción</label>
                             <textarea name="descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">{{ t.descripcion or '' }}</textarea>
+                        </div>
+                        {# 💬 Respuesta/avance (pedido por Tomás): campo aparte de 'Notas / descripción'
+                           — acá es donde quien tiene la tarea asignada cuenta qué hizo o en qué va,
+                           sin pisar el contexto original de quien creó la tarea. Al guardar una
+                           respuesta nueva se le avisa a quien creó la tarea (ver editar_tarea_ticket). #}
+                        <div class="sm:col-span-2">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Respuesta / avance del responsable</label>
+                            <textarea name="respuesta" rows="2" placeholder="Ej: Ya se contactó al proveedor, quedamos en que..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">{{ t.respuesta or '' }}</textarea>
                         </div>
                         <div>
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Responsable</label>
