@@ -77,6 +77,17 @@
                                class="w-full pl-8 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
                     </div>
                 </div>
+                <!-- 🟢🔴 Filtro por estado (pedido por Tomás): En línea / Desconectados / Todos —
+                     no golpea al servidor, filtra en el momento sobre 'data-en-linea' (ver
+                     filtrarPorEstadoChat() en chat.js). -->
+                <div class="px-3 py-2 border-b border-slate-800/60 flex items-center gap-1.5">
+                    <button type="button" class="btn-filtro-estado-chat flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-colors bg-sky-600 text-white"
+                            data-estado="todos" onclick="filtrarPorEstadoChat('todos')">Todos</button>
+                    <button type="button" class="btn-filtro-estado-chat flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-colors bg-slate-800 text-slate-400"
+                            data-estado="en_linea" onclick="filtrarPorEstadoChat('en_linea')">En línea</button>
+                    <button type="button" class="btn-filtro-estado-chat flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-colors bg-slate-800 text-slate-400"
+                            data-estado="desconectado" onclick="filtrarPorEstadoChat('desconectado')">Desc.</button>
+                </div>
                 <button type="button" id="item-canal-general" onclick="abrirCanalGeneral()"
                         class="text-left px-4 py-3 flex items-center gap-3 border-b border-slate-800/60 hover:bg-slate-800/60 transition-colors bg-sky-500/10">
                     <div class="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/25 flex items-center justify-center text-sm flex-shrink-0">
@@ -90,24 +101,47 @@
                 </button>
                 <div id="lista-contactos-chat" class="flex-1 overflow-y-auto divide-y divide-slate-800/50">
                     {% for c in contactos %}
-                    <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})' data-usuario="{{ c.usuario }}" data-nombre="{{ c.nombre }}"
-                            class="item-contacto-chat text-left w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-800/60 transition-colors">
-                        <div class="relative flex-shrink-0">
-                            <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold">
-                                {{ c.nombre[:1] | upper }}
+                    <div class="item-contacto-chat flex items-stretch hover:bg-slate-800/60 transition-colors"
+                         data-usuario="{{ c.usuario }}" data-nombre="{{ c.nombre }}"
+                         data-en-linea="{{ 'true' if c.en_linea else 'false' }}"
+                         data-favorito="{{ 'true' if c.favorito else 'false' }}"
+                         data-anclado="{{ 'true' if c.anclado else 'false' }}">
+                        <button type="button" onclick='abrirDirecto({{ c.usuario | tojson }}, {{ c.nombre | tojson }})'
+                                class="text-left flex-1 min-w-0 px-4 py-3 flex items-center gap-3">
+                            <div class="relative flex-shrink-0">
+                                <div class="w-9 h-9 rounded-xl bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-xs font-bold">
+                                    {{ c.nombre[:1] | upper }}
+                                </div>
+                                <!-- 🟢🔴 En línea/desconectado (pedido por Tomás): basado en actividad
+                                     reciente, no en una conexión de socket — ver _esta_en_linea en
+                                     app.py. Se refresca sola cada POLL_CONTACTOS_MS junto con el resto
+                                     de la barra de contactos (ver cargarContactosChat en chat.js). -->
+                                <span class="dot-en-linea-contacto-chat absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 {{ 'bg-emerald-400' if c.en_linea else 'bg-rose-500' }}" title="{{ 'En línea' if c.en_linea else 'Desconectado' }}"></span>
                             </div>
-                            <!-- 🟢🔴 En línea/desconectado (pedido por Tomás): basado en actividad
-                                 reciente, no en una conexión de socket — ver _esta_en_linea en
-                                 app.py. Se refresca sola cada POLL_CONTACTOS_MS junto con el resto
-                                 de la barra de contactos (ver cargarContactosChat en chat.js). -->
-                            <span class="dot-en-linea-contacto-chat absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 {{ 'bg-emerald-400' if c.en_linea else 'bg-rose-500' }}" title="{{ 'En línea' if c.en_linea else 'Desconectado' }}"></span>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-semibold text-white truncate flex items-center gap-1.5">
+                                    <span class="truncate">{{ c.nombre }}</span>
+                                    <i class="icono-anclado-inline-chat fa-solid fa-thumbtack text-[9px] text-sky-400 flex-shrink-0 {{ '' if c.anclado else 'hidden' }}"></i>
+                                </div>
+                                <div class="previsualizacion-contacto-chat text-[11px] text-slate-500 truncate">Sin mensajes todavía</div>
+                            </div>
+                            <span class="badge-contacto-chat hidden bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">0</span>
+                        </button>
+                        <!-- ⭐📌 Favorito/Anclar (pedido por Tomás): preferencia personal de quien la
+                             marca — ver alternarFavoritoChat()/alternarAncladoChat() en chat.js. -->
+                        <div class="flex flex-col items-center justify-center gap-1 px-2 flex-shrink-0">
+                            <button type="button" class="btn-favorito-chat w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-700/60 transition-colors {{ 'text-amber-400' if c.favorito else 'text-slate-600' }}"
+                                    onclick="alternarFavoritoChat(this, '{{ c.usuario }}')"
+                                    title="{{ 'Quitar de favoritos' if c.favorito else 'Marcar como favorito' }}">
+                                <i class="{{ 'fa-solid' if c.favorito else 'fa-regular' }} fa-star text-[11px]"></i>
+                            </button>
+                            <button type="button" class="btn-anclado-chat w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-700/60 transition-colors {{ 'text-sky-400' if c.anclado else 'text-slate-600' }}"
+                                    onclick="alternarAncladoChat(this, '{{ c.usuario }}')"
+                                    title="{{ 'Desanclar' if c.anclado else 'Anclar arriba' }}">
+                                <i class="fa-solid fa-thumbtack text-[11px]"></i>
+                            </button>
                         </div>
-                        <div class="min-w-0 flex-1">
-                            <div class="text-sm font-semibold text-white truncate">{{ c.nombre }}</div>
-                            <div class="previsualizacion-contacto-chat text-[11px] text-slate-500 truncate">Sin mensajes todavía</div>
-                        </div>
-                        <span class="badge-contacto-chat hidden bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">0</span>
-                    </button>
+                    </div>
                     {% else %}
                     <p class="text-slate-500 text-center text-[11px] py-6 px-4">No hay más admin/agente activos para chatear.</p>
                     {% endfor %}
@@ -163,6 +197,11 @@
             </div>
         </div>
     </main>
+
+    <!-- 🟢 Pop-up "fulano se conectó" (pedido por Tomás) — ver _mostrarPopupConexionChat() en
+         chat.js. Esquina superior derecha para no chocar con los toasts de notificaciones
+         (tiempo_real.js, abajo a la izquierda) ni con el botón de tema (abajo a la derecha). -->
+    <div id="contenedor-popups-conexion-chat" class="fixed top-20 right-4 z-[60] flex flex-col gap-2 items-end pointer-events-none"></div>
 
     <!-- 🌗 Botón flotante para alternar tema claro/oscuro. -->
     <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
