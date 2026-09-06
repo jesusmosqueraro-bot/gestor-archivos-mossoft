@@ -97,27 +97,29 @@
                                 <span class="text-[10px] text-slate-500">{{ t.ticket_titulo }}</span>
                             </div>
                             <p class="text-xs text-slate-200 {% if t.estado in ('completada', 'cancelada') %}line-through text-slate-500{% endif %}">{{ t.asunto }}</p>
-                            {% if t.descripcion %}<p class="text-[11px] text-slate-500 mt-0.5 whitespace-pre-line">{{ t.descripcion }}</p>{% endif %}
-                            {# 💬 Respuesta/avance (pedido por Tomás): el cuadro para escribirla se
-                               HABILITA solo mientras la tarea está "En progreso" — ver comentario
-                               equivalente en ticket_detalle.html. #}
-                            {% if t.estado == 'en_progreso' %}
-                            <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/editar" class="mt-1.5 flex items-start gap-1.5">
+                            {# 💬 Historial de la tarea (pedido por Tomás: debe comportarse como el
+                               módulo de Seguimiento del ticket) — ver comentario equivalente en
+                               ticket_detalle.html y agregar_seguimiento_tarea_ticket() en app.py. #}
+                            {% if t.seguimientos %}
+                            <div class="space-y-1.5 mt-1.5">
+                                {% for s in t.seguimientos %}
+                                <div class="bg-slate-950/40 border border-slate-800 rounded-lg px-2 py-1.5">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="text-[10px] font-bold text-slate-300"><i class="fa-regular fa-circle-user mr-1 text-sky-400"></i>{{ s.autor_nombre }}</span>
+                                        <span class="text-[9px] text-slate-500 font-mono">{{ s.fecha }}</span>
+                                    </div>
+                                    <p class="text-[11px] text-slate-300 mt-0.5 whitespace-pre-line">{{ s.mensaje }}</p>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            <form method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/seguimiento" class="mt-1.5 flex items-start gap-1.5">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <input type="hidden" name="origen" value="mis_tareas"/>
                                 <input type="hidden" name="ver_todas" value="{{ '1' if ver_todas else '' }}"/>
-                                <input type="hidden" name="asunto" value="{{ t.asunto }}"/>
-                                <input type="hidden" name="descripcion" value="{{ t.descripcion or '' }}"/>
-                                <input type="hidden" name="responsable" value="{{ t.responsable or '' }}"/>
-                                <input type="hidden" name="fecha_limite" value="{{ t.fecha_limite or '' }}"/>
-                                <textarea name="respuesta" rows="1" placeholder="Escribe tu respuesta o avance de esta tarea..." class="flex-1 min-w-0 bg-slate-900 border border-sky-500/40 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y">{{ t.respuesta or '' }}</textarea>
-                                <button type="submit" title="Guardar respuesta" class="text-sky-400 hover:text-sky-300 text-xs px-2 py-1 flex-shrink-0"><i class="fa-solid fa-paper-plane"></i></button>
+                                <textarea name="mensaje" rows="1" placeholder="Escribe una nota o avance de esta tarea..." class="flex-1 min-w-0 bg-slate-900 border border-sky-500/40 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y"></textarea>
+                                <button type="submit" title="Agregar nota" class="text-sky-400 hover:text-sky-300 text-xs px-2 py-1 flex-shrink-0"><i class="fa-solid fa-paper-plane"></i></button>
                             </form>
-                            {% elif t.respuesta %}
-                            <p class="text-[11px] text-sky-300/90 mt-1 whitespace-pre-line bg-sky-500/5 border border-sky-500/20 rounded-lg px-2 py-1"><i class="fa-solid fa-reply mr-1"></i>{{ t.respuesta }}</p>
-                            {% elif t.estado == 'pendiente' %}
-                            <p class="text-[10px] text-slate-600 italic mt-1"><i class="fa-solid fa-lock mr-1"></i>Marca la tarea como "En progreso" para poder responder.</p>
-                            {% endif %}
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500">
                                 {% if t.fecha_limite %}<span class="{% if t.vencida %}text-rose-400 font-bold{% endif %}"><i class="fa-solid fa-calendar mr-1"></i>{{ t.fecha_limite }}{% if t.vencida %} (vencida){% endif %}</span>{% endif %}
                                 <span><i class="fa-solid fa-flag mr-1"></i>Ticket: {{ t.ticket_estado }}</span>
@@ -138,10 +140,11 @@
                         </form>
                         <button type="button" onclick="document.getElementById('form-editar-tarea-{{ t.id }}').classList.toggle('hidden')" title="Editar tarea / notas" class="text-slate-600 hover:text-sky-400 text-xs px-1 mt-0.5"><i class="fa-solid fa-pen"></i></button>
                     </div>
-                    {# ✏️ Editar asunto/notas/responsable/fecha límite (pedido por Tomás) — oculto por
+                    {# ✏️ Editar asunto/responsable/fecha límite (pedido por Tomás) — oculto por
                        defecto, se abre con el lápiz de arriba. No toca el estado de la tarea, y vuelve
                        a Mis Tareas (no al detalle del ticket) al guardar — ver editar_tarea_ticket en
-                       app.py y sus campos ocultos origen/ver_todas. #}
+                       app.py y sus campos ocultos origen/ver_todas. Las notas/avances de la tarea ya
+                       no viven acá — ver su historial de Seguimiento arriba, en la tarjeta. #}
                     <form id="form-editar-tarea-{{ t.id }}" method="POST" action="/tickets/{{ t.ticket_id }}/tareas/{{ t.id }}/editar"
                           class="hidden mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-950/40 border border-slate-700/50 rounded-xl p-3">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -150,16 +153,6 @@
                         <div class="sm:col-span-2">
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asunto *</label>
                             <input type="text" name="asunto" required maxlength="200" value="{{ t.asunto }}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"/>
-                        </div>
-                        <div class="sm:col-span-2">
-                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas / descripción</label>
-                            <textarea name="descripcion" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">{{ t.descripcion or '' }}</textarea>
-                        </div>
-                        {# 💬 Respuesta/avance (pedido por Tomás): distinto de 'Notas / descripción' —
-                           acá quien tiene la tarea asignada cuenta qué hizo o en qué va. #}
-                        <div class="sm:col-span-2">
-                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Respuesta / avance del responsable</label>
-                            <textarea name="respuesta" rows="2" placeholder="Ej: Ya se contactó al proveedor, quedamos en que..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500">{{ t.respuesta or '' }}</textarea>
                         </div>
                         <div>
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Responsable</label>
