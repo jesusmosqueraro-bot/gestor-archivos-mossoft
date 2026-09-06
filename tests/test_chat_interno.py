@@ -404,7 +404,10 @@ def test_mensaje_de_canal_solo_con_adjunto_se_envia_sin_texto(client, app, crear
 
     r = client.post('/chat/canal/enviar', data={
         'mensaje': '',
-        'adjunto': (io.BytesIO(b'contenido falso de imagen'), 'foto.png'),
+        # 🔒 Contenido con la firma real de un PNG (ver _firma_archivo_coincide en app.py): desde
+        # el hallazgo de seguridad del 06/09/2026, archivo_permitido ya no confía solo en la
+        # extensión del nombre, así que un .png de prueba necesita bytes de PNG de verdad.
+        'adjunto': (io.BytesIO(b'\x89PNG\r\n\x1a\ncontenido falso de imagen'), 'foto.png'),
     }, content_type='multipart/form-data')
 
     assert r.status_code == 200
@@ -428,7 +431,8 @@ def test_mensaje_directo_con_texto_y_adjunto_no_imagen(client, app, crear_usuari
 
     r = client.post(f'/chat/directo/{agente1}/enviar', data={
         'mensaje': 'Te comparto el informe',
-        'adjunto': (io.BytesIO(b'contenido falso de pdf'), 'informe.pdf'),
+        # 🔒 Firma real de PDF (ver comentario equivalente más arriba, sobre foto.png).
+        'adjunto': (io.BytesIO(b'%PDF-contenido falso de pdf'), 'informe.pdf'),
     }, content_type='multipart/form-data')
 
     assert r.status_code == 200
@@ -470,6 +474,131 @@ def test_adjunto_con_extension_no_permitida_es_rechazado(client, app, crear_usua
     assert data['mensajes'] == []
 
 
+def test_marcar_y_desmarcar_favorito_es_personal_de_quien_lo_marca(client, app, crear_usuario):
+    """Pedido por Tomás: la estrella (⭐) de favorito es una preferencia PERSONAL — si admin1
+    marca a un contacto como favorito, admin2 no debe verlo marcado."""
+    admin1 = crear_usuario(usuario='admin_chat27', rol='admin')
+    admin2 = crear_usuario(usuario='admin_chat27b', rol='admin')
+    agente1 = crear_usuario(usuario='agente_chat27', rol='agente', nombre='Agente Favorito')
+
+    _sesion_como(client, app, admin1, 'admin')
+    r = client.post('/chat/contactos/preferencia', data={'contacto': agente1, 'tipo': 'favorito', 'valor': '1'})
+    assert r.status_code == 200
+    assert r.get_json()['success'] is True
+
+    contacto_admin1 = next(c for c in client.get('/chat/contactos').get_json()['contactos'] if c['usuario'] == agente1)
+    assert contacto_admin1['favorito'] is True
+    assert contacto_admin1['anclado'] is False
+
+    _sesion_como(client, app, admin2, 'admin')
+    contacto_admin2 = next(c for c in client.get('/chat/contactos').get_json()['contactos'] if c['usuario'] == agente1)
+    assert contacto_admin2['favorito'] is False  # admin2 nunca lo marcó
+
+    # Desmarcar
+    _sesion_como(client, app, admin1, 'admin')
+    r = client.post('/chat/contactos/preferencia', data={'contacto': agente1, 'tipo': 'favorito', 'valor': '0'})
+    assert r.status_code == 200
+    contacto_tras_desmarcar = next(c for c in client.get('/chat/contactos').get_json()['contactos'] if c['usuario'] == agente1)
+    assert contacto_tras_desmarcar['favorito'] is False
+
+
+def test_anclar_un_contacto_lo_sube_siempre_arriba_de_la_lista(client, app, crear_usuario):
+    """Pedido por Tomás: un contacto anclado (📌) queda siempre arriba, incluso por encima de
+    quien tiene una conversación más reciente."""
+    admin1 = crear_usuario(usuario='admin_chat28', rol='admin')
+    zulema = crear_usuario(usuario='agente_zzz_chat28', rol='agente', nombre='Zulema Último')
+    andres = crear_usuario(usuario='agente_aaa_chat28', rol='agente', nombre='Andrés Anclado')
+
+    _sesion_como(client, app, admin1, 'admin')
+    # Zulema sube al tope por mensaje reciente (mismo comportamiento de siempre).
+    client.post(f'/chat/directo/{zulema}/enviar', data={'mensaje': 'hola Zulema'})
+    orden_antes = [c['usuario'] for c in client.get('/chat/contactos').get_json()['contactos']]
+    assert orden_antes[0] == zulema
+
+    # Anclar a Andrés debe ponerlo por ENCIMA de Zulema, a pesar de no tener mensajes.
+    client.post('/chat/contactos/preferencia', data={'contacto': andres, 'tipo': 'anclado', 'valor': '1'})
+    orden_despues = [c['usuario'] for c in client.get('/chat/contactos').get_json()['contactos']]
+    assert orden_despues[0] == andres
+
+    # También se refleja anclado=True en la respuesta.
+    contacto_andres = next(c for c in client.get('/chat/contactos').get_json()['contactos'] if c['usuario'] == andres)
+    assert contacto_andres['anclado'] is True
+
+
+def test_preferencia_rechaza_tipo_invalido_y_contacto_invalido(client, app, crear_usuario):
+    admin1 = crear_usuario(usuario='admin_chat29', rol='admin')
+    agente1 = crear_usuario(usuario='agente_chat29', rol='agente')
+    estandar1 = crear_usuario(usuario='estandar_chat29', rol='estandar')
+    _sesion_como(client, app, admin1, 'admin')
+
+    r = client.post('/chat/contactos/preferencia', data={'contacto': agente1, 'tipo': 'no_existe', 'valor': '1'})
+    assert r.status_code == 400
+    assert r.get_json()['success'] is False
+
+    # Un usuario estándar no es un contacto operativo válido para marcar preferencia.
+    r = client.post('/chat/contactos/preferencia', data={'contacto': estandar1, 'tipo': 'favorito', 'valor': '1'})
+    assert r.status_code == 400
+    assert r.get_json()['success'] is False
+
+
+def test_pagina_de_chat_incluye_filtro_de_estado_y_botones_de_favorito_anclado(client, app, crear_usuario):
+    """Pedido por Tomás: filtro Todos/En línea/Desconectados, y botones de estrella (favorito)
+    y pin (anclado) en cada contacto de la página completa /chat."""
+    admin1 = crear_usuario(usuario='admin_chat30', rol='admin')
+    crear_usuario(usuario='agente_chat30', rol='agente', nombre='Carla Filtro')
+    _sesion_como(client, app, admin1, 'admin')
+
+    html = client.get('/chat').get_data(as_text=True)
+
+    assert 'filtrarPorEstadoChat' in html
+    assert 'data-estado="en_linea"' in html
+    assert 'data-estado="desconectado"' in html
+    assert 'btn-favorito-chat' in html
+    assert 'btn-anclado-chat' in html
+    assert 'data-favorito="false"' in html
+    assert 'data-anclado="false"' in html
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pedido por Tomás: que el ícono del Chat Interno muestre la foto de perfil real de cada
+# contacto (la misma que ya se administra en /perfil) en vez de solo su inicial, cuando esa
+# persona subió una.
+# ────────────────────────────────────────────────────────────────────────────
+
+def _fijar_foto_perfil(app, usuario, url):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = "UPDATE usuarios SET foto_perfil = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET foto_perfil = ? WHERE usuario = ?"
+    cur.execute(q, (url, usuario))
+    conn.commit()
+    conn.close()
+
+
+def test_contactos_incluye_la_foto_de_perfil_de_quien_subio_una(client, app, crear_usuario):
+    admin1 = crear_usuario(usuario='admin_foto1', rol='admin', nombre='Admin Con Foto')
+    con_foto = crear_usuario(usuario='agente_foto1', rol='agente', nombre='Agente Con Foto')
+    sin_foto = crear_usuario(usuario='agente_foto2', rol='agente', nombre='Agente Sin Foto')
+    _fijar_foto_perfil(app, con_foto, 'https://res.cloudinary.com/demo/image/upload/perfil.png')
+    _sesion_como(client, app, admin1, 'admin')
+
+    data = client.get('/chat/contactos').get_json()
+    por_usuario = {c['usuario']: c for c in data['contactos']}
+
+    assert por_usuario[con_foto]['foto_perfil'] == 'https://res.cloudinary.com/demo/image/upload/perfil.png'
+    assert por_usuario[sin_foto]['foto_perfil'] is None
+
+
+def test_pagina_de_chat_pinta_la_imagen_de_quien_tiene_foto_de_perfil(client, app, crear_usuario):
+    admin1 = crear_usuario(usuario='admin_foto2', rol='admin', nombre='Admin Con Foto Dos')
+    con_foto = crear_usuario(usuario='agente_foto3', rol='agente', nombre='Agente Con Foto Tres')
+    _fijar_foto_perfil(app, con_foto, 'https://res.cloudinary.com/demo/image/upload/perfil2.png')
+    _sesion_como(client, app, admin1, 'admin')
+
+    html = client.get('/chat').get_data(as_text=True)
+
+    assert 'https://res.cloudinary.com/demo/image/upload/perfil2.png' in html
+
+
 def test_adjunto_demasiado_grande_es_rechazado(client, app, crear_usuario, monkeypatch):
     """El tope real es 25 MB — se baja a unos pocos bytes con monkeypatch para no tener que
     generar un archivo enorme solo para la prueba."""
@@ -480,7 +609,11 @@ def test_adjunto_demasiado_grande_es_rechazado(client, app, crear_usuario, monke
 
     r = client.post('/chat/canal/enviar', data={
         'mensaje': '',
-        'adjunto': (io.BytesIO(b'esto pesa mas de 5 bytes'), 'foto.png'),
+        # 🔒 Firma real de PNG (ver comentario equivalente más arriba): el chequeo de contenido
+        # corre ANTES que el de tamaño (ver _subir_adjunto_chat en app.py), así que sin esta
+        # firma la prueba fallaría por "tipo de archivo no permitido" antes de llegar siquiera
+        # a probar el límite de tamaño que es lo que esta prueba quiere verificar.
+        'adjunto': (io.BytesIO(b'\x89PNG\r\n\x1a\nesto pesa mas de 5 bytes'), 'foto.png'),
     }, content_type='multipart/form-data')
 
     assert r.status_code == 400
