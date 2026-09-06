@@ -317,3 +317,63 @@ def test_pendientes_de_devolucion_incluye_bandera_es_biomedico(admin_session, ap
     _crear_activo(app, nombre='Bomba Infusion 3', asignado_a='Paciente Z', es_biomedico=True)
     texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
     assert 'nombre_familiar' in texto  # la sección de familiar/cuidador aparece para ese pendiente
+
+
+def test_confirmar_devolucion_de_activo_asignado_sin_colaborador_explica_el_error(admin_session, app):
+    """Causa real reportada por Tomás (06/09/2026): un activo puede quedar en estado 'Asignado'
+    sin un colaborador definido (aparece como 'Sin asignar' en la lista de pendientes) — por
+    ejemplo, un activo de prueba creado directamente en la base. Antes, al intentar certificar su
+    devolución, esto reventaba en un error genérico de base de datos ('No se pudo registrar la
+    certificación de devolución') porque 'inventario_devoluciones.colaborador' es NOT NULL. Ahora
+    se detecta ANTES de intentar el INSERT y se explica la causa exacta y cómo corregirla, sin
+    dejar ningún rastro a medias en 'inventario_devoluciones' ni cambiar el estado del activo."""
+    activo_id = _crear_activo(app, nombre='Portatil Sin Colaborador', asignado_a=None)
+
+    r = admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion',
+                            data={'observaciones': 'intento de certificación'}, follow_redirects=True)
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert "no tiene un colaborador registrado" in texto
+    assert "edita este activo" in texto.lower()
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado FROM activos_inventario WHERE id = ?", (activo_id,))
+    assert cur.fetchone()[0] == 'Asignado'  # no cambió: no se intentó certificar nada
+    cur.execute("SELECT COUNT(*) FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    assert cur.fetchone()[0] == 0  # no quedó ningún registro a medias
+    conn.close()
+
+
+def test_acta_devolucion_pdf_con_descripcion_larga_no_se_desborda(admin_session, app):
+    """Antes, la descripción del ítem en el PDF (equipo/marca/modelo/placa/serie/sede/área) se
+    dibujaba como texto plano y podía desbordarse fuera de los bordes de su celda cuando era
+    larga (pedido de Tomás, 06/09/2026: 'corregir los saltos, que se ajuste el campo al texto').
+    Ahora se envuelve en un Paragraph que ajusta el texto dentro del ancho de la columna — esta
+    prueba usa una sede/área/marca/modelo deliberadamente largos y solo verifica que el PDF se
+    genere sin reventar (el ajuste de línea en sí no es verificable desde el contenido binario)."""
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, es_biomedico, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+         if db_type == 'postgres' else
+         "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, es_biomedico, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    cur.execute(q, ('15098', 'Portátil', 'LENOVO Expertbook de la línea corporativa completa',
+                     'Modelo con nombre comercial extremadamente largo para forzar el desborde',
+                     'PRUEBA DE PDF CON SERIE MUY LARGA PARA VERIFICAR EL AJUSTE', 'Asignado',
+                     'Administrador Master (admin)', 'NUEVO NARANJAL', 'SEDE ADMINISTRATIVA PRINCIPAL',
+                     False, '2026-09-06 09:00:00', 'admin'))
+    activo_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'generar_acta': 'on'})
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id = cur.fetchone()[0]
+    conn.close()
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+
+    assert r.status_code == 200
+    assert r.data[:4] == b'%PDF'

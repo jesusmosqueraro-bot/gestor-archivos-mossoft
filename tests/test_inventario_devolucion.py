@@ -250,3 +250,67 @@ def test_inventario_muestra_candado_en_vez_de_editar_para_agente_en_fila_bloquea
     texto = client.get('/tickets/inventario').get_data(as_text=True)
 
     assert 'bloqueado en' in texto.lower() or "solo un administrador puede desbloquearlo" in texto.lower()
+
+
+# 🔒 'Asignado' sin colaborador (pedido de Tomás, 06/09/2026): reportó un error al certificar la
+# devolución de un activo que en Inventario figuraba 'Asignado' pero con "Asignado a" vacío — la
+# causa real es que la tabla 'inventario_devoluciones' exige un colaborador (NOT NULL), así que
+# esa combinación nunca debió poder guardarse. Estas pruebas verifican que ya no se puede crear
+# (test_certificacion_devoluciones.py tiene la prueba de cómo se explica el error si, aun así,
+# quedara un activo en ese estado por datos viejos).
+
+def test_crear_activo_asignado_sin_colaborador_se_guarda_disponible(admin_session, app):
+    r = admin_session.post('/tickets/inventario/nuevo', data={
+        'nombre': '30015', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': ''
+    }, follow_redirects=True)
+
+    assert r.status_code == 200
+    assert 'se guardó como' in r.get_data(as_text=True).lower() and 'disponible' in r.get_data(as_text=True).lower()
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado, asignado_a FROM activos_inventario WHERE nombre = ?", ('30015',))
+    estado, asignado_a = cur.fetchone()
+    conn.close()
+    assert estado == 'Disponible'
+    assert not asignado_a
+
+
+def test_editar_activo_a_asignado_sin_colaborador_se_autocorrige_a_disponible(admin_session, app):
+    """Un activo que ya hubiera quedado 'Asignado' sin colaborador (ej. datos de prueba de antes
+    de este arreglo) se autocorrige la próxima vez que alguien lo edite y guarde, aunque no toque
+    el campo de estado."""
+    activo_id = _crear_activo_directo(app, nombre='30016', estado='Asignado', asignado_a=None)
+
+    r = admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
+        'nombre': '30016', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': ''
+    }, follow_redirects=True)
+
+    assert r.status_code == 200
+    assert 'se guardó como' in r.get_data(as_text=True).lower() and 'disponible' in r.get_data(as_text=True).lower()
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado, asignado_a FROM activos_inventario WHERE id = ?", (activo_id,))
+    estado, asignado_a = cur.fetchone()
+    conn.close()
+    assert estado == 'Disponible'
+    assert not asignado_a
+
+
+def test_carga_masiva_asignado_sin_colaborador_se_guarda_disponible(admin_session, app):
+    buffer = _libro_xlsx([
+        ['30017', 'Portátil', 'Dell', 'Latitude', 'SN-17', 'Asignado', '', '', '', '', '', '', '', ''],
+    ])
+
+    r = admin_session.post('/tickets/inventario/importar_xlsx', data={
+        'archivo': (buffer, 'inventario.xlsx')
+    }, content_type='multipart/form-data', follow_redirects=True)
+
+    assert r.status_code == 200
+    assert 'se guardaron como' in r.get_data(as_text=True).lower() and 'disponible' in r.get_data(as_text=True).lower()
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado, asignado_a FROM activos_inventario WHERE nombre = ?", ('30017',))
+    estado, asignado_a = cur.fetchone()
+    conn.close()
+    assert estado == 'Disponible'
+    assert not asignado_a
