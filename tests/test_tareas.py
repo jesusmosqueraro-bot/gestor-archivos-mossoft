@@ -499,6 +499,23 @@ def test_guardar_respuesta_desde_el_cuadro_rapido_no_borra_los_demas_campos(admi
     assert fila[3] == 'Ya se cambió el tóner.'
 
 
+def test_guardar_respuesta_desde_el_cuadro_rapido_confirma_con_un_mensaje(admin_session, app):
+    """Reportado por Tomás con video: al presionar 'enviar' en el cuadro de respuesta rápida no
+    pasaba nada visible — el texto se guardaba, pero como el mismo cuadro se vuelve a llenar con
+    ese mismo valor al recargar, en pantalla parecía que 'no se publicaba'. Debe confirmarse con
+    un mensaje, igual que el resto de acciones de la app (p. ej. cambiar el estado de la tarea)."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea con respuesta", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/estado', data={'estado': 'en_progreso'})
+
+    r = admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Tarea con respuesta', 'respuesta': 'Ya revisé el switch y sigue sin señal.'
+    }, follow_redirects=True)
+
+    assert 'respuesta guardada' in r.get_data(as_text=True).lower()
+
+
 def test_indicadores_muestra_top_agentes_por_tareas_completadas(admin_session, app):
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
     _crear_tarea(admin_session, ticket_id, asunto="Tarea completada por admin", responsable='admin')
