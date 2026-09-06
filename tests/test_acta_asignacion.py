@@ -163,3 +163,50 @@ def test_actas_asignacion_requiere_rol_operativo(sesion_usuario, app):
     activo_id = _crear_activo_directo(app, nombre='70018')
     r = sesion_usuario.get(f'/tickets/inventario/{activo_id}/actas_asignacion')
     assert r.status_code in (302, 403)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# FIRMA DE QUIEN ASIGNA (pedido de Tomás, 06/09/2026): se auto-resuelve del perfil de quien
+# genera el acta — igual de automática que la firma de quien recibe — sin ningún widget nuevo.
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_acta_de_asignacion_incluye_la_firma_de_quien_la_genera_si_la_tiene_guardada(admin_session, app):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET firma = ? WHERE usuario = ?",
+                ('https://res.cloudinary.com/demo/image/upload/firma_admin.png', 'admin'))
+    conn.commit()
+    conn.close()
+
+    admin_session.post('/tickets/inventario/nuevo', data={
+        'nombre': '70019', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Nuevo Usuario',
+        'generar_acta_asignacion': 'on',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM activos_inventario WHERE nombre = ?", ('70019',))
+    activo_id = cur.fetchone()[0]
+    cur.execute("SELECT firma_asigna_url FROM actas_asignacion WHERE activo_id = ?", (activo_id,))
+    firma_asigna_url = cur.fetchone()[0]
+    conn.close()
+    assert firma_asigna_url == 'https://res.cloudinary.com/demo/image/upload/firma_admin.png'
+
+
+def test_acta_de_asignacion_sin_firma_guardada_de_quien_genera_no_falla(admin_session, app):
+    """Si quien genera el acta nunca guardó una firma en su perfil, el acta queda igual
+    registrada (firma_asigna_url en NULL) — no bloquea nada."""
+    r = admin_session.post('/tickets/inventario/nuevo', data={
+        'nombre': '70020', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Otro Usuario',
+        'generar_acta_asignacion': 'on',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM activos_inventario WHERE nombre = ?", ('70020',))
+    activo_id = cur.fetchone()[0]
+    cur.execute("SELECT firma_asigna_url FROM actas_asignacion WHERE activo_id = ?", (activo_id,))
+    firma_asigna_url = cur.fetchone()[0]
+    conn.close()
+    assert firma_asigna_url is None

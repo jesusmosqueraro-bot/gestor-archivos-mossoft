@@ -1,15 +1,20 @@
 """Pruebas de la certificación de devolución de activos: antes de bloquear/liquidar la
 cuenta de un colaborador en Gestión de Usuarios, Gestión Humana o TI deben certificar que
 ya devolvió el PC u otro activo que tenía asignado en el Inventario."""
+import cloudinary.uploader
 
 
-def _crear_activo(app, nombre='Laptop de Prueba', estado='Asignado', asignado_a='Juan Pérez', tipo_activo='Portátil'):
+def _mock_cloudinary_upload(monkeypatch, url='https://res.cloudinary.com/demo/image/upload/firma_familiar.png'):
+    monkeypatch.setattr(cloudinary.uploader, 'upload', lambda *a, **k: {'secure_url': url})
+
+
+def _crear_activo(app, nombre='Laptop de Prueba', estado='Asignado', asignado_a='Juan Pérez', tipo_activo='Portátil', es_biomedico=False):
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    q = ("INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+    q = ("INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, es_biomedico, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
          if db_type == 'postgres' else
-         "INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?)")
-    cur.execute(q, (nombre, tipo_activo, estado, asignado_a, '2026-09-01 09:00:00', 'admin'))
+         "INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, es_biomedico, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    cur.execute(q, (nombre, tipo_activo, estado, asignado_a, es_biomedico, '2026-09-01 09:00:00', 'admin'))
     activo_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
     conn.commit()
     conn.close()
@@ -218,3 +223,97 @@ def test_devolucion_requiere_rol_valido_para_descargar_acta(sesion_usuario, app)
 
     r = sesion_usuario.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
     assert r.status_code in (302, 403)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# FIRMAS AUTO-RESUELTAS del acta de devolución (pedido de Tomás, 06/09/2026): "quien entrega"
+# (el colaborador) y "quien certifica" (el operador logueado) se toman solas de sus perfiles, sin
+# ningún widget nuevo; la firma de familiar/cuidador SÍ se captura en el momento, pero solo
+# cuenta para activos biomédicos.
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_devolucion_incluye_firma_de_quien_entrega_y_quien_certifica_si_las_tienen_guardadas(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(nombre='Rita Solano', rol='estandar')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET firma = ? WHERE usuario = ?",
+                ('https://res.cloudinary.com/demo/image/upload/firma_colaborador.png', colaborador))
+    cur.execute("UPDATE usuarios SET firma = ? WHERE usuario = ?",
+                ('https://res.cloudinary.com/demo/image/upload/firma_admin.png', 'admin'))
+    conn.commit()
+    conn.close()
+    activo_id = _crear_activo(app, nombre='Laptop Rita', asignado_a=f'Rita Solano ({colaborador})')
+
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'generar_acta': 'on'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT firma_entrega_url, firma_certifica_url FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    firma_entrega_url, firma_certifica_url = cur.fetchone()
+    conn.close()
+    assert firma_entrega_url == 'https://res.cloudinary.com/demo/image/upload/firma_colaborador.png'
+    assert firma_certifica_url == 'https://res.cloudinary.com/demo/image/upload/firma_admin.png'
+
+
+FIRMA_DATAURL_VALIDA = ('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4'
+                         '2mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
+
+
+def test_devolucion_biomedico_con_familiar_guarda_su_nombre_y_firma(admin_session, app, monkeypatch):
+    _mock_cloudinary_upload(monkeypatch)
+    activo_id = _crear_activo(app, nombre='Bomba Infusion 1', asignado_a='Paciente X', es_biomedico=True)
+
+    r = admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={
+        'generar_acta': 'on', 'nombre_familiar': 'Carlos Vega', 'firma_familiar_dataurl': FIRMA_DATAURL_VALIDA,
+    }, follow_redirects=True)
+    assert r.status_code == 200
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT nombre_familiar, firma_familiar_url FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    nombre_familiar, firma_familiar_url = cur.fetchone()
+    conn.close()
+    assert nombre_familiar == 'Carlos Vega'
+    assert firma_familiar_url  # se subió (mock de Cloudinary por defecto en las pruebas del entorno)
+
+
+def test_devolucion_no_biomedico_ignora_los_datos_de_familiar_aunque_lleguen(admin_session, app):
+    """Un activo de TI (no biomédico) no tiene sección de familiar/cuidador en la pantalla — si de
+    todas formas llegaran esos campos (formulario manipulado), se ignoran."""
+    activo_id = _crear_activo(app, nombre='Laptop TI Familiar', asignado_a='Usuario TI', es_biomedico=False)
+
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={
+        'generar_acta': 'on', 'nombre_familiar': 'No debería guardarse', 'firma_familiar_dataurl': FIRMA_DATAURL_VALIDA,
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT nombre_familiar, firma_familiar_url FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    nombre_familiar, firma_familiar_url = cur.fetchone()
+    conn.close()
+    assert nombre_familiar is None
+    assert firma_familiar_url is None
+
+
+def test_acta_devolucion_pdf_biomedico_con_firma_familiar_se_genera(admin_session, app, monkeypatch):
+    _mock_cloudinary_upload(monkeypatch)
+    activo_id = _crear_activo(app, nombre='Bomba Infusion 2', asignado_a='Paciente Y', es_biomedico=True)
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={
+        'generar_acta': 'on', 'nombre_familiar': 'Ana Ríos', 'firma_familiar_dataurl': FIRMA_DATAURL_VALIDA,
+    })
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id = cur.fetchone()[0]
+    conn.close()
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] == 'application/pdf'
+    assert r.data[:4] == b'%PDF'
+
+
+def test_pendientes_de_devolucion_incluye_bandera_es_biomedico(admin_session, app):
+    _crear_activo(app, nombre='Bomba Infusion 3', asignado_a='Paciente Z', es_biomedico=True)
+    texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
+    assert 'nombre_familiar' in texto  # la sección de familiar/cuidador aparece para ese pendiente
