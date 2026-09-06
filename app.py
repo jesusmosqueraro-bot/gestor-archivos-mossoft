@@ -3877,7 +3877,17 @@ def _registrar_actividad_usuario():
     before_request en cada petición autenticada, pero de verdad escribe en la base de datos
     como mucho una vez cada ACTIVIDAD_HEARTBEAT_SEGUNDOS (el resto de las veces, la propia
     sesión ya sabe que se registró hace poco y no hace nada). Nunca lanza: si falla, el
-    indicador de en línea simplemente queda desactualizado, no debe tumbar la petición real."""
+    indicador de en línea simplemente queda desactualizado, no debe tumbar la petición real.
+
+    🟢 Pop-up "fulano se conectó" (pedido por Tomás): antes esto solo lo detectaba
+    cargarContactosChat()/_widgetCargarContactos() comparando el 'en_linea' de un sondeo contra
+    el anterior — pero ese sondeo SOLO corre mientras la persona tiene abierta la página /chat o
+    el panel flotante, así que en la práctica casi nunca se veía (reportado por Tomás: "no esta
+    saliendo el pop-up cuando se conecta un usuario, no se visualiza"). Ahora la transición
+    desconectado→conectado se detecta aquí, UNA sola vez por reconexión real (no en cada
+    heartbeat de quien ya estaba activo), y se avisa por Socket.IO a la sala compartida
+    'chat_canal_general' — igual que hace crear_notificacion() para el resto de pop-ups — así que
+    llega en vivo a CUALQUIER página abierta, tenga o no el chat abierto (ver tiempo_real.js)."""
     usuario = session.get('username')
     if not usuario:
         return
@@ -3889,9 +3899,22 @@ def _registrar_actividad_usuario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        q_sel = "SELECT ultima_actividad, nombre, rol FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT ultima_actividad, nombre, rol FROM usuarios WHERE usuario = ?"
+        cursor.execute(q_sel, (usuario,))
+        fila_previa = cursor.fetchone()
+        estaba_en_linea = _esta_en_linea(fila_previa[0]) if fila_previa else False
+        nombre = ((fila_previa[1] if fila_previa else None) or usuario)
+        rol = fila_previa[2] if fila_previa else None
+
         q = "UPDATE usuarios SET ultima_actividad = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET ultima_actividad = ? WHERE usuario = ?"
         cursor.execute(q, (obtener_fecha_actual(), usuario))
         conn.commit()
+
+        # 🔔 Solo interesa a admin/agente (son quienes aparecen en el Chat Interno como
+        # contactos — ver ROLES_CON_ACCESO_OPERATIVO); una cuenta 'estandar' reconectándose no
+        # dispara este aviso.
+        if not estaba_en_linea and rol in ROLES_CON_ACCESO_OPERATIVO:
+            _emitir_evento_tiempo_real('usuario_conectado', {'usuario': usuario, 'nombre': nombre}, room='chat_canal_general')
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error registrando actividad de '{usuario}': {e}")
@@ -5623,10 +5646,16 @@ def editar_tarea_ticket(ticket_id, tarea_id):
     descripcion = (request.form.get('descripcion') or '').strip() or None
     responsable = (request.form.get('responsable') or '').strip() or None
     fecha_limite = (request.form.get('fecha_limite') or '').strip() or None
+    # 🔁 Mismo criterio que cambiar_estado_tarea_ticket(): si la edición se disparó desde "Mis
+    # Tareas", se vuelve ahí en vez de mandar al agente al detalle del ticket.
+    origen = request.form.get('origen', '')
+    ver_todas = request.form.get('ver_todas', '')
+    destino = url_for('mis_tareas', todas='1') if origen == 'mis_tareas' and ver_todas == '1' else \
+              url_for('mis_tareas') if origen == 'mis_tareas' else url_for('ver_ticket', ticket_id=ticket_id)
 
     if not asunto:
         flash("El asunto de la tarea no puede quedar vacío.", "error")
-        return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+        return redirect(destino)
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -5636,7 +5665,7 @@ def editar_tarea_ticket(ticket_id, tarea_id):
         fila_tarea = cursor.fetchone()
         if not fila_tarea:
             conn.close()
-            return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+            return redirect(destino)
         asunto_old, responsable_old = fila_tarea
 
         q_upd = ("UPDATE tickets_tareas SET asunto = %s, descripcion = %s, responsable = %s, fecha_limite = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
@@ -5656,7 +5685,7 @@ def editar_tarea_ticket(ticket_id, tarea_id):
         conn.rollback()
         print(f"⚠️ Error editando la tarea {tarea_id} (ticket {ticket_id}): {e}")
     conn.close()
-    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+    return redirect(destino)
 
 
 @app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/estado', methods=['POST'])
@@ -5763,6 +5792,13 @@ def mis_tareas():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
+
+    # 👤 Para poder reasignar una tarea (editar_tarea_ticket) desde acá mismo, sin tener que
+    # entrar al ticket — mismo listado y criterio que usa ver_ticket().
+    q_ag = "SELECT usuario, nombre FROM usuarios WHERE rol IN ('admin', 'agente') AND COALESCE(estado, 'activo') = 'activo' ORDER BY usuario ASC"
+    cursor.execute(q_ag)
+    agentes = [{'usuario': a[0], 'nombre': a[1] or a[0]} for a in cursor.fetchall()]
+
     ph = '%s' if db_type == 'postgres' else '?'
     filtro_estado = "" if ver_todas else "AND tt.estado NOT IN ('completada', 'cancelada')"
     q = (
@@ -5785,6 +5821,10 @@ def mis_tareas():
         estado = estado or 'pendiente'
         tareas.append({
             'id': tarea_id, 'ticket_id': ticket_id, 'asunto': asunto, 'descripcion': descripcion,
+            # 👤 Todas las tareas de esta cola ya están filtradas por responsable = usuario (ver el
+            # WHERE de arriba), así que el formulario de edición siempre parte con esa persona
+            # preseleccionada en "Responsable" — igual que ticket_detalle.html hace con t.responsable.
+            'responsable': usuario,
             'estado': estado, 'fecha_limite': fecha_limite, 'fecha_completada': fecha_completada,
             'ticket_titulo': ticket_titulo, 'ticket_estado': ticket_estado,
             'ticket_codigo': _codigo_ticket(ticket_tipo or 'Incidente', ticket_id, ticket_fecha_creacion),
@@ -5794,7 +5834,7 @@ def mis_tareas():
             'estados_disponibles': _estados_disponibles_tarea(estado),
         })
 
-    return render_template('mis_tareas.html', es_soporte=True, tareas=tareas, ver_todas=ver_todas)
+    return render_template('mis_tareas.html', es_soporte=True, tareas=tareas, ver_todas=ver_todas, agentes=agentes)
 
 
 @app.route('/tickets/<int:ticket_id>/duplicar_datos')
