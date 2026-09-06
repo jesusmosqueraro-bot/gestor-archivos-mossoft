@@ -304,6 +304,87 @@ def test_editar_tarea_notifica_al_nuevo_responsable(admin_session, app, crear_us
     assert any('Tarea sin asignar' in m for (m,) in filas)
 
 
+def _sesion_como(app, usuario, rol):
+    """Cliente de pruebas nuevo, con sesión ya iniciada como 'usuario' — para probar acciones
+    que dependen de QUIÉN las hace (ver test_editar_tarea_notifica_a_quien_creo_la_tarea_al_responder),
+    a diferencia de admin_session que siempre es la cuenta 'admin'."""
+    client = app.app.test_client()
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['username'] = usuario
+        sess['rol'] = rol
+        sess['instance_id'] = app.SERVER_INSTANCE_ID
+        sess['debe_cambiar_password'] = False
+        sess['debe_activar_2fa'] = False
+    return client
+
+
+def test_editar_tarea_guarda_la_respuesta_del_responsable(admin_session, app, crear_usuario):
+    """'respuesta' es DISTINTA de 'descripcion' (pedido por Tomás): acá es donde quien tiene la
+    tarea asignada cuenta qué hizo o en qué va, sin pisar las notas originales de quien creó la
+    tarea."""
+    agente = crear_usuario(rol='agente', nombre='Agente Que Responde')
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Revisar con el proveedor", responsable=agente)
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    cliente_agente = _sesion_como(app, agente, 'agente')
+    r = cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Revisar con el proveedor', 'descripcion': 'Nota original de quien la creó',
+        'respuesta': 'Ya hablé con el proveedor, envían la pieza el viernes.'
+    })
+    assert r.status_code == 302
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT descripcion, respuesta FROM tickets_tareas WHERE id = ?", (tarea_id,))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 'Nota original de quien la creó'
+    assert fila[1] == 'Ya hablé con el proveedor, envían la pieza el viernes.'
+
+
+def test_editar_tarea_notifica_a_quien_creo_la_tarea_al_responder(admin_session, app, crear_usuario):
+    """Cuando el responsable deja una respuesta/avance nuevo, se le avisa a quien creó la tarea
+    (si es alguien distinto) — para que no tenga que estar revisando el ticket a ver si ya
+    contestaron."""
+    agente = crear_usuario(rol='agente', nombre='Agente Que Responde')
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Confirmar con el usuario", responsable=agente)
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    cliente_agente = _sesion_como(app, agente, 'agente')
+    cliente_agente.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Confirmar con el usuario', 'respuesta': 'Confirmado, el usuario ya puede acceder.'
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mensaje FROM notificaciones WHERE usuario = 'admin' AND tipo = 'tarea'")
+    filas = cur.fetchall()
+    conn.close()
+    assert any('Confirmar con el usuario' in m for (m,) in filas)
+
+
+def test_editar_tarea_no_notifica_si_quien_responde_creo_la_tarea(admin_session, app):
+    """Si la misma persona que creó la tarea es quien deja la respuesta (p. ej. una nota para sí
+    misma), no debe autonotificarse."""
+    ticket_id = _crear_ticket_directo(app, estado='Abierto')
+    _crear_tarea(admin_session, ticket_id, asunto="Tarea de admin para sí mismo", responsable='admin')
+    tarea_id = _id_tarea_creada(app, ticket_id)
+
+    admin_session.post(f'/tickets/{ticket_id}/tareas/{tarea_id}/editar', data={
+        'asunto': 'Tarea de admin para sí mismo', 'respuesta': 'Ya quedó resuelto.'
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mensaje FROM notificaciones WHERE usuario = 'admin' AND tipo = 'tarea'")
+    filas = cur.fetchall()
+    conn.close()
+    assert not any('Tarea de admin para sí mismo' in m and 'respondió' in m for (m,) in filas)
+
+
 def test_editar_tarea_completada_no_cambia_su_estado(admin_session, app):
     """Se puede corregir una nota en una tarea ya terminada sin que eso la reabra."""
     ticket_id = _crear_ticket_directo(app, estado='Abierto')
