@@ -1032,7 +1032,12 @@ def init_db():
                 # actividad reciente en la app como heurística — ver _registrar_actividad_usuario/
                 # _esta_en_linea. Se actualiza como mucho una vez cada ACTIVIDAD_HEARTBEAT_SEGUNDOS
                 # por usuario (ver el before_request), así que el costo extra es mínimo.
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultima_actividad VARCHAR(20);"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultima_actividad VARCHAR(20);",
+                # 👁️ Visibilidad del Comunicado (pedido por Tomás, igual que 'visibilidad' en
+                # Instructivos): 'todos' (cualquier usuario logueado lo ve) o 'admin' (solo
+                # Admin/Agente) — ver ver_comunicados()/crear_comunicado()/editar_comunicado().
+                # También decide a quién le llega el pop-up de "nuevo comunicado publicado".
+                "ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS visibilidad VARCHAR(20) DEFAULT 'todos';"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1273,7 +1278,10 @@ def init_db():
                 except Exception:
                     pass
             for col_comunicado_sql in [
-                "ALTER TABLE comunicados ADD COLUMN recordatorio_enviado_fecha TEXT;"
+                "ALTER TABLE comunicados ADD COLUMN recordatorio_enviado_fecha TEXT;",
+                # 👁️ Visibilidad del Comunicado (pedido por Tomás, igual que 'visibilidad' en
+                # Instructivos): 'todos' o 'admin'. Ver comentario equivalente en la rama de Postgres.
+                "ALTER TABLE comunicados ADD COLUMN visibilidad TEXT DEFAULT 'todos';"
             ]:
                 try:
                     cursor.execute(col_comunicado_sql)
@@ -2741,7 +2749,7 @@ def ver_comunicados():
     estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
     
     try:
-        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
+        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
         cursor.execute(query, (estado_filtro,))
         rows = cursor.fetchall()
     except Exception as e:
@@ -2754,9 +2762,16 @@ def ver_comunicados():
     # sesión crudo (p. ej. 'analistati' en vez de 'Ana Lisboa T.').
     nombres_usuarios = _mapa_nombres_usuarios()
 
+    # 👁️ Quien no es Admin/Agente no debe ni enterarse de que existen los comunicados marcados
+    # como 'admin' (pedido por Tomás, misma idea que 'visibilidad' en Instructivos) — se
+    # calcula antes de armar la lista para poder filtrarlos de una vez.
+    es_soporte = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
+
     comunicados = []
     for r in rows:
-        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor = r
+        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor, visibilidad = r
+        if (visibilidad or 'todos') == 'admin' and not es_soporte:
+            continue
         texto_full = f"{titulo} {contenido} {autor}".lower()
         if not q_busqueda or q_busqueda in texto_full:
             comunicados.append({
@@ -2768,7 +2783,8 @@ def ver_comunicados():
                 'imagen_url': img_url,
                 'estado': estado,
                 'fecha': fecha,
-                'autor': _nombre_para_mostrar(autor, nombres_usuarios)
+                'autor': _nombre_para_mostrar(autor, nombres_usuarios),
+                'visibilidad': visibilidad or 'todos'
             })
 
     # 👁️ Ver el muro de Comunicados marca como "leídos" todos los que están activos (no los
@@ -2780,7 +2796,6 @@ def ver_comunicados():
 
     # 👁️ Para soporte/admin, se muestra cuántos usuarios (de los activos) ya leyeron cada
     # comunicado — útil para políticas de lectura obligatoria.
-    es_soporte = session.get('rol') in ROLES_CON_ACCESO_OPERATIVO
     if es_soporte:
         # 📢 Recordatorio automático de lectura pendiente — ver _revisar_recordatorios_lectura().
         _revisar_recordatorios_lectura()
@@ -2807,13 +2822,19 @@ def crear_comunicado():
     # is of type integer" si se le pasa un entero. psycopg2 adapta True/False
     # correctamente a boolean, y sqlite3 los guarda igual de bien como 0/1.
     fijado = (request.form.get('fijado') == 'on')
+    # 👁️ Visibilidad del Comunicado (pedido por Tomás, misma idea que 'visibilidad' en
+    # Instructivos): 'todos' (cualquier usuario logueado) o 'admin' (solo Admin/Agente).
+    # Cualquier otro valor recibido se descarta a favor de 'todos'.
+    visibilidad = (request.form.get('visibilidad') or 'todos').strip()
+    if visibilidad not in ('todos', 'admin'):
+        visibilidad = 'todos'
     imagen = request.files.get('imagen')
-    
+
     imagen_url = ""
     if imagen and archivo_permitido(imagen.filename):
         try:
             upload_result = cloudinary.uploader.upload(
-                imagen, 
+                imagen,
                 resource_type="image",
                 use_filename=True,
                 unique_filename=True
@@ -2829,14 +2850,26 @@ def crear_comunicado():
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?)"
-            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor))
+            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
+            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor, visibilidad))
             conn.commit()
-            registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}]")
+            registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}] (visibilidad: {'solo Admin/Agente' if visibilidad == 'admin' else 'todos los usuarios'})")
         except Exception as e:
             conn.rollback()
             print(f"Error creando comunicado: {e}")
+            conn.close()
+            return redirect(url_for('ver_comunicados'))
         conn.close()
+
+        # 📢 Pop-up de campanita (pedido por Tomás) a quienes pueden ver este comunicado según
+        # su visibilidad recién elegida, sin autonotificar a quien lo publicó.
+        destinatarios = _usuarios_para_notificar_por_visibilidad(visibilidad, excluir=autor)
+        crear_notificacion_para_varios(
+            destinatarios,
+            f"📢 Nuevo comunicado: '{titulo}'",
+            url=url_for('ver_comunicados'),
+            tipo='comunicado'
+        )
 
     return redirect(url_for('ver_comunicados'))
 
@@ -2864,6 +2897,10 @@ def editar_comunicado(com_id):
         contenido = _sanitizar_html_enriquecido(request.form.get('contenido', '').strip())
         nivel = request.form.get('nivel', 'info').strip()
         fijado = (request.form.get('fijado') == 'on')
+        # 👁️ Visibilidad: mismo criterio de validación que en crear_comunicado()/editar_galeria().
+        visibilidad = (request.form.get('visibilidad') or 'todos').strip()
+        if visibilidad not in ('todos', 'admin'):
+            visibilidad = 'todos'
         imagen = request.files.get('imagen')
 
         if not titulo or not contenido or _html_esta_vacio(contenido):
@@ -2884,8 +2921,8 @@ def editar_comunicado(com_id):
             except Exception as e:
                 print(f"Error subiendo nueva imagen de comunicado {com_id}: {e}")
 
-        q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ? WHERE id = ?"
-        cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, com_id))
+        q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s, visibilidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ?, visibilidad = ? WHERE id = ?"
+        cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, visibilidad, com_id))
         conn.commit()
         registrar_log(session.get('username'), "Edición de Comunicado", f"Comunicado '{titulo}' (ID {com_id}) actualizado")
     except Exception as e:
@@ -3706,6 +3743,31 @@ def crear_notificacion_para_varios(usuarios, mensaje, url='', tipo='ticket'):
     de soporte), sin duplicar destinatarios."""
     for u in set(u for u in (usuarios or []) if u):
         crear_notificacion(u, mensaje, url=url, tipo=tipo)
+
+
+def _usuarios_para_notificar_por_visibilidad(visibilidad, excluir=None):
+    """Pedido por Tomás: pop-up de campanita cuando se publica un Comunicado o un Instructivo,
+    dirigido según la MISMA clasificación de visibilidad que ya decide quién lo ve ('todos' =
+    cualquier cuenta activa, 'admin' = solo Admin/Agente — ver ROLES_CON_ACCESO_OPERATIVO).
+    'excluir' saca a quien publicó, para que no se autonotifique."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        if visibilidad == 'admin':
+            placeholders = ', '.join(['%s' if db_type == 'postgres' else '?'] * len(ROLES_CON_ACCESO_OPERATIVO))
+            cursor.execute(
+                f"SELECT usuario FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' AND rol IN ({placeholders})",
+                ROLES_CON_ACCESO_OPERATIVO
+            )
+        else:
+            cursor.execute("SELECT usuario FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo'")
+        usuarios = [r[0] for r in cursor.fetchall() if r[0] != excluir]
+        conn.close()
+        return usuarios
+    except Exception as e:
+        conn.close()
+        print(f"⚠️ Error listando destinatarios (visibilidad={visibilidad}) de un pop-up de publicación: {e}")
+        return []
 
 
 # 💬 CHAT INTERNO (pedido por Tomás): "Canal General" para todo el equipo operativo (admin +
@@ -10928,6 +10990,19 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
             f"primer inicio de sesión.",
             tipo='bienvenida'
         )
+
+        # 🆕 Pop-up de campanita (pedido por Tomás) a los demás admin/agente avisando de la
+        # cuenta nueva — ni a quien la creó (ya lo sabe) ni a la cuenta recién creada (ya
+        # recibió su propio mensaje de bienvenida arriba).
+        destinatarios_nuevo_usuario = [
+            u['usuario'] for u in _usuarios_operativos_activos(excluir=creador) if u['usuario'] != nuevo_user
+        ]
+        crear_notificacion_para_varios(
+            destinatarios_nuevo_usuario,
+            f"🆕 Se creó la cuenta de {nombre_completo} ({nuevo_user}) — rol {nuevo_rol}.",
+            url=url_for('gestion_usuarios'),
+            tipo='usuario_nuevo'
+        )
         return None, nuevo_user, nombre_completo, firma_url
     except Exception as e:
         conn.rollback()
@@ -13116,6 +13191,16 @@ def subir_archivo():
             conn.commit()
             conn.close()
             registrar_log(session['username'], "Creación de Instructivo", f"Instructivo '{titulo}' [{categoria} / {tipo}] (visibilidad: {'solo Admin/Agente' if visibilidad == 'admin' else 'todos los usuarios'})")
+
+            # 📢 Pop-up de campanita (pedido por Tomás) a quienes pueden ver este instructivo según
+            # su visibilidad, sin autonotificar a quien lo publicó.
+            destinatarios = _usuarios_para_notificar_por_visibilidad(visibilidad, excluir=session['username'])
+            crear_notificacion_para_varios(
+                destinatarios,
+                f"📘 Nuevo instructivo publicado: '{titulo}'",
+                url=url_for('index'),
+                tipo='instructivo'
+            )
         except Exception as e:
             print(f"⚠️ Error guardando el instructivo '{titulo}' en la base de datos: {e}")
 
