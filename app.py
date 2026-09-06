@@ -684,6 +684,16 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas (
                 id SERIAL PRIMARY KEY, ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE, asunto VARCHAR(200) NOT NULL, descripcion TEXT, responsable VARCHAR(100), estado VARCHAR(20) DEFAULT 'pendiente', fecha_limite VARCHAR(20), creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, fecha_completada VARCHAR(100), respuesta TEXT
             )''')
+            # 💬 Historial de una tarea (pedido por Tomás: 'descripcion' y 'respuesta' de arriba
+            # eran cada uno un solo campo que se sobrescribía — ahora deben comportarse como el
+            # módulo de Seguimiento de un ticket, una lista de entradas con autor y fecha que se
+            # van agregando sin borrar las anteriores). Las columnas 'descripcion'/'respuesta' de
+            # tickets_tareas quedan sin usarse en el flujo nuevo (se conservan solo por los datos
+            # ya guardados ahí antes de este cambio — ver la migración de backfill más abajo en
+            # init_db). Ver agregar_seguimiento_tarea_ticket() en app.py.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas_seguimientos (
+                id SERIAL PRIMARY KEY, tarea_id INTEGER REFERENCES tickets_tareas(id) ON DELETE CASCADE, autor VARCHAR(100) NOT NULL, mensaje TEXT NOT NULL, fecha VARCHAR(100) NOT NULL
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo VARCHAR(255) NOT NULL, vistas INTEGER DEFAULT 0, creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, estado VARCHAR(20) DEFAULT 'activo'
             )''')
@@ -1094,6 +1104,10 @@ def init_db():
             # ✅ Tareas asociadas a un ticket. Ver comentario equivalente en la rama de Postgres.
             cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER, asunto TEXT NOT NULL, descripcion TEXT, responsable TEXT, estado TEXT DEFAULT 'pendiente', fecha_limite TEXT, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, fecha_completada TEXT, respuesta TEXT, FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+            )''')
+            # 💬 Historial de una tarea. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tickets_tareas_seguimientos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tarea_id INTEGER, autor TEXT NOT NULL, mensaje TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(tarea_id) REFERENCES tickets_tareas(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS conocimiento_articulos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT, url_documento TEXT NOT NULL, nombre_archivo TEXT NOT NULL, vistas INTEGER DEFAULT 0, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, estado TEXT DEFAULT 'activo'
@@ -1648,6 +1662,28 @@ def init_db():
                 print(f"🔑 Usuario admin creado. Contraseña inicial generada (cámbiala tras iniciar sesión): {pass_inicial}")
             query_admin = "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol) VALUES (?, ?, ?, ?)"
             cursor.execute(query_admin, ('admin', generate_password_hash(pass_inicial), 'notificacionesarkiv@gmail.com', 'admin'))
+
+        # 💬 Migración de una sola vez: lo que ya estuviera guardado en las columnas
+        # 'descripcion'/'respuesta' de tickets_tareas (de antes de que existiera su historial de
+        # Seguimiento — ver tickets_tareas_seguimientos más arriba) se traslada ahí, como las
+        # primeras entradas de esa tarea, para no perder nada de lo que ya se había escrito.
+        # Es idempotente: una tarea que ya tiene entradas en su historial (ya migrada antes, o
+        # creada con el flujo nuevo) se salta — por eso puede correr en cada arranque sin
+        # duplicar nada.
+        cursor.execute("SELECT id, descripcion, responsable, creado_por, fecha_creacion, fecha_completada, respuesta FROM tickets_tareas")
+        tareas_para_migrar = cursor.fetchall()
+        q_tiene_historial = "SELECT 1 FROM tickets_tareas_seguimientos WHERE tarea_id = %s LIMIT 1" if db_type == 'postgres' else "SELECT 1 FROM tickets_tareas_seguimientos WHERE tarea_id = ? LIMIT 1"
+        q_ins_hist = "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (?, ?, ?, ?)"
+        for tarea_id_mig, descripcion_mig, responsable_mig, creado_por_mig, fecha_creacion_mig, fecha_completada_mig, respuesta_mig in tareas_para_migrar:
+            if not descripcion_mig and not respuesta_mig:
+                continue
+            cursor.execute(q_tiene_historial, (tarea_id_mig,))
+            if cursor.fetchone():
+                continue
+            if descripcion_mig:
+                cursor.execute(q_ins_hist, (tarea_id_mig, creado_por_mig, descripcion_mig, fecha_creacion_mig))
+            if respuesta_mig:
+                cursor.execute(q_ins_hist, (tarea_id_mig, responsable_mig or creado_por_mig, respuesta_mig, fecha_completada_mig or fecha_creacion_mig))
 
         conn.commit()
         conn.close()
@@ -5553,18 +5589,38 @@ def ver_ticket(ticket_id):
     # tienen sentido para el equipo operativo, igual que los comentarios internos.
     tareas = []
     if es_soporte:
-        q_tareas = "SELECT id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada, respuesta FROM tickets_tareas WHERE ticket_id = %s ORDER BY (estado = 'completada') ASC, id ASC" if db_type == 'postgres' else "SELECT id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada, respuesta FROM tickets_tareas WHERE ticket_id = ? ORDER BY (estado = 'completada') ASC, id ASC"
+        q_tareas = "SELECT id, asunto, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada FROM tickets_tareas WHERE ticket_id = %s ORDER BY (estado = 'completada') ASC, id ASC" if db_type == 'postgres' else "SELECT id, asunto, responsable, estado, fecha_limite, creado_por, fecha_creacion, fecha_completada FROM tickets_tareas WHERE ticket_id = ? ORDER BY (estado = 'completada') ASC, id ASC"
         cursor.execute(q_tareas, (ticket_id,))
+        filas_tareas = cursor.fetchall()
         nombres_agentes = {a['usuario']: a['nombre'] for a in agentes}
-        for t in cursor.fetchall():
-            responsable_usuario = t[3]
-            estado_tarea = t[4] or 'pendiente'
+
+        # 💬 Historial de Seguimiento de cada tarea (pedido por Tomás: ver
+        # tickets_tareas_seguimientos/agregar_seguimiento_tarea_ticket en app.py) — se trae en un
+        # solo IN(...) para no hacer una consulta por tarea, igual que ya hace este mismo bloque
+        # con los adjuntos de los comentarios del ticket un poco más arriba.
+        ids_tareas = [t[0] for t in filas_tareas]
+        seguimientos_por_tarea = {}
+        if ids_tareas:
+            ph_tareas = '%s' if db_type == 'postgres' else '?'
+            placeholders_tareas = ','.join([ph_tareas] * len(ids_tareas))
+            q_seg = f"SELECT tarea_id, autor, mensaje, fecha FROM tickets_tareas_seguimientos WHERE tarea_id IN ({placeholders_tareas}) ORDER BY id ASC"
+            cursor.execute(q_seg, tuple(ids_tareas))
+            for tarea_id_s, autor_s, mensaje_s, fecha_s in cursor.fetchall():
+                seguimientos_por_tarea.setdefault(tarea_id_s, []).append({
+                    'autor': autor_s, 'autor_nombre': nombres_agentes.get(autor_s, autor_s),
+                    'mensaje': mensaje_s, 'fecha': fecha_s
+                })
+
+        for t in filas_tareas:
+            responsable_usuario = t[2]
+            estado_tarea = t[3] or 'pendiente'
             tareas.append({
-                'id': t[0], 'asunto': t[1], 'descripcion': t[2], 'responsable': responsable_usuario,
+                'id': t[0], 'asunto': t[1], 'responsable': responsable_usuario,
                 'responsable_nombre': nombres_agentes.get(responsable_usuario, responsable_usuario),
-                'estado': estado_tarea, 'fecha_limite': t[5], 'creado_por': t[6],
-                'fecha_creacion': t[7], 'fecha_completada': t[8], 'respuesta': t[9],
-                'vencida': bool(t[5] and estado_tarea not in ('completada', 'cancelada') and t[5] < datetime.now().strftime('%Y-%m-%d')),
+                'estado': estado_tarea, 'fecha_limite': t[4], 'creado_por': t[5],
+                'fecha_creacion': t[6], 'fecha_completada': t[7],
+                'seguimientos': seguimientos_por_tarea.get(t[0], []),
+                'vencida': bool(t[4] and estado_tarea not in ('completada', 'cancelada') and t[4] < datetime.now().strftime('%Y-%m-%d')),
                 # 🔒 Mismo criterio de bloqueo que el estado del ticket (ver
                 # _estados_disponibles_tarea): el desplegable de abajo solo ofrece las
                 # opciones que de verdad se pueden elegir desde el estado actual.
@@ -5625,9 +5681,22 @@ def crear_tarea_ticket(ticket_id):
         return redirect(url_for('ver_tickets'))
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        q_ins = ("INSERT INTO tickets_tareas (ticket_id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (%s, %s, %s, %s, 'pendiente', %s, %s, %s)") if db_type == 'postgres' else \
-                ("INSERT INTO tickets_tareas (ticket_id, asunto, descripcion, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?)")
-        cursor.execute(q_ins, (ticket_id, asunto, descripcion, responsable, fecha_limite, session['username'], fecha_actual))
+        if db_type == 'postgres':
+            q_ins = "INSERT INTO tickets_tareas (ticket_id, asunto, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (%s, %s, %s, 'pendiente', %s, %s, %s) RETURNING id"
+            cursor.execute(q_ins, (ticket_id, asunto, responsable, fecha_limite, session['username'], fecha_actual))
+            nueva_tarea_id = cursor.fetchone()[0]
+        else:
+            q_ins = "INSERT INTO tickets_tareas (ticket_id, asunto, responsable, estado, fecha_limite, creado_por, fecha_creacion) VALUES (?, ?, ?, 'pendiente', ?, ?, ?)"
+            cursor.execute(q_ins, (ticket_id, asunto, responsable, fecha_limite, session['username'], fecha_actual))
+            nueva_tarea_id = cursor.lastrowid
+
+        # 💬 La nota inicial (si se escribió una al crear la tarea) queda como la primera entrada
+        # de su historial de Seguimiento (pedido por Tomás: ver agregar_seguimiento_tarea_ticket).
+        if descripcion:
+            q_ins_hist = "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else \
+                         "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (?, ?, ?, ?)"
+            cursor.execute(q_ins_hist, (nueva_tarea_id, session['username'], descripcion, fecha_actual))
+
         conn.commit()
         registrar_log(session['username'], "Tarea de Ticket Creada", f"Ticket #{ticket_id}: tarea '{asunto}'" + (f" asignada a {responsable}" if responsable else ""))
         # 🔔 Si se le asignó a otra persona (no a quien la crea), se le avisa con una
@@ -5649,20 +5718,17 @@ def crear_tarea_ticket(ticket_id):
 @login_required
 @agente_o_admin_required
 def editar_tarea_ticket(ticket_id, tarea_id):
-    """Edita el asunto, la descripción/notas, el responsable, la fecha límite y la respuesta de
-    una tarea ya creada (pedido por Tomás: hasta ahora solo se podía completar esa información
-    al crearla, sin forma de corregirla o agregar notas después). No toca el estado —eso sigue
-    siendo exclusivo de cambiar_estado_tarea_ticket()— así que se puede editar una tarea
-    completada o cancelada (por ejemplo, para dejar una nota de cierre) sin reabrirla.
+    """Edita el asunto, el responsable y la fecha límite de una tarea ya creada (pedido por
+    Tomás: hasta ahora solo se podía completar esa información al crearla, sin forma de
+    corregirla después). No toca el estado —eso sigue siendo exclusivo de
+    cambiar_estado_tarea_ticket()— así que se puede editar una tarea completada o cancelada
+    (por ejemplo, para corregir a quién quedó asignada) sin reabrirla.
 
-    💬 'respuesta' es DISTINTA de 'descripcion' (pedido por Tomás): 'descripcion' son las notas
-    de quien CREA la tarea (el contexto/instrucción de qué hay que hacer); 'respuesta' es donde
-    quien tiene la tarea asignada cuenta qué hizo o en qué va — así que al guardar una respuesta
-    nueva se le avisa a quien creó la tarea (si es alguien distinto), igual que ya se avisa a un
-    responsable recién asignado."""
+    💬 Las notas/avances de la tarea (antes 'descripcion' y 'respuesta', dos campos que se
+    sobrescribían) ya NO se editan acá — pedido por Tomás: deben comportarse como el módulo de
+    Seguimiento de un ticket, una lista de entradas con autor y fecha que se van agregando sin
+    borrar las anteriores. Ver agregar_seguimiento_tarea_ticket()."""
     asunto = (request.form.get('asunto') or '').strip()
-    descripcion = (request.form.get('descripcion') or '').strip() or None
-    respuesta = (request.form.get('respuesta') or '').strip() or None
     responsable = (request.form.get('responsable') or '').strip() or None
     fecha_limite = (request.form.get('fecha_limite') or '').strip() or None
     # 🔁 Mismo criterio que cambiar_estado_tarea_ticket(): si la edición se disparó desde "Mis
@@ -5679,17 +5745,17 @@ def editar_tarea_ticket(ticket_id, tarea_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT asunto, responsable, creado_por, respuesta FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, responsable, creado_por, respuesta FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
+        q_sel = "SELECT asunto, responsable FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, responsable FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
         cursor.execute(q_sel, (tarea_id, ticket_id))
         fila_tarea = cursor.fetchone()
         if not fila_tarea:
             conn.close()
             return redirect(destino)
-        asunto_old, responsable_old, creado_por, respuesta_old = fila_tarea
+        asunto_old, responsable_old = fila_tarea
 
-        q_upd = ("UPDATE tickets_tareas SET asunto = %s, descripcion = %s, responsable = %s, fecha_limite = %s, respuesta = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
-                ("UPDATE tickets_tareas SET asunto = ?, descripcion = ?, responsable = ?, fecha_limite = ?, respuesta = ? WHERE id = ? AND ticket_id = ?")
-        cursor.execute(q_upd, (asunto, descripcion, responsable, fecha_limite, respuesta, tarea_id, ticket_id))
+        q_upd = ("UPDATE tickets_tareas SET asunto = %s, responsable = %s, fecha_limite = %s WHERE id = %s AND ticket_id = %s") if db_type == 'postgres' else \
+                ("UPDATE tickets_tareas SET asunto = ?, responsable = ?, fecha_limite = ? WHERE id = ? AND ticket_id = ?")
+        cursor.execute(q_upd, (asunto, responsable, fecha_limite, tarea_id, ticket_id))
         conn.commit()
         registrar_log(session['username'], "Tarea de Ticket Editada", f"Ticket #{ticket_id}: tarea '{asunto_old}' actualizada" + (f" (ahora '{asunto}')" if asunto != asunto_old else ""))
         # 🔔 Si la edición reasignó la tarea a otra persona (antes no tenía responsable, o tenía
@@ -5700,28 +5766,77 @@ def editar_tarea_ticket(ticket_id, tarea_id):
                 f"Te asignaron la tarea \"{asunto}\" en el ticket #{ticket_id}.",
                 url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
             )
-        # 🔔 Si se dejó una respuesta/avance nuevo (distinto al que ya había), se le avisa a quien
-        # creó la tarea — para que no tenga que estar revisando el ticket a ver si ya contestaron.
-        if respuesta and respuesta != respuesta_old and creado_por and creado_por != session['username']:
-            crear_notificacion(
-                creado_por,
-                f"{session['username']} respondió la tarea \"{asunto}\" en el ticket #{ticket_id}.",
-                url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
-            )
-        # 💬 Aviso visible de que se guardó (pedido por Tomás: el cuadro de respuesta rápida no daba
-        # ninguna confirmación al presionar "enviar" — el texto se guardaba en la base de datos, pero
-        # como el mismo cuadro se vuelve a llenar con ese mismo texto al recargar, en pantalla parecía
-        # que "no se publicaba" nada. Ahora se confirma igual que cualquier otra acción de la app.
-        if respuesta and respuesta != respuesta_old:
-            flash("Respuesta guardada correctamente.", "success")
-        elif respuesta_old and not respuesta:
-            flash("Se eliminó la respuesta de la tarea.", "success")
-        else:
-            flash("Tarea actualizada correctamente.", "success")
+        flash("Tarea actualizada correctamente.", "success")
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error editando la tarea {tarea_id} (ticket {ticket_id}): {e}")
         flash("No se pudo guardar los cambios de la tarea. Intenta de nuevo.", "error")
+    conn.close()
+    return redirect(destino)
+
+
+@app.route('/tickets/<int:ticket_id>/tareas/<int:tarea_id>/seguimiento', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def agregar_seguimiento_tarea_ticket(ticket_id, tarea_id):
+    """Agrega una entrada al historial de una tarea (pedido por Tomás, con video: el cuadro de
+    'Notas/descripción' y 'Respuesta' de una tarea debe comportarse como el módulo de
+    Seguimiento de un ticket — una lista de entradas con autor y fecha que se van agregando, en
+    vez de un solo campo que se sobrescribe sin dejar rastro de lo anterior. Tanto quien creó la
+    tarea como quien la tiene asignada pueden agregar una nota, en cualquier estado — igual que
+    el Seguimiento de un ticket no depende de su estado."""
+    mensaje = (request.form.get('mensaje') or '').strip()
+    # 🔁 Mismo criterio que editar_tarea_ticket()/cambiar_estado_tarea_ticket(): si se disparó
+    # desde "Mis Tareas", se vuelve ahí en vez de mandar al agente al detalle del ticket.
+    origen = request.form.get('origen', '')
+    ver_todas = request.form.get('ver_todas', '')
+    destino = url_for('mis_tareas', todas='1') if origen == 'mis_tareas' and ver_todas == '1' else \
+              url_for('mis_tareas') if origen == 'mis_tareas' else url_for('ver_ticket', ticket_id=ticket_id)
+
+    if not mensaje:
+        return redirect(destino)
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT asunto, responsable, creado_por FROM tickets_tareas WHERE id = %s AND ticket_id = %s" if db_type == 'postgres' else "SELECT asunto, responsable, creado_por FROM tickets_tareas WHERE id = ? AND ticket_id = ?"
+        cursor.execute(q_sel, (tarea_id, ticket_id))
+        fila_tarea = cursor.fetchone()
+        if not fila_tarea:
+            conn.close()
+            return redirect(destino)
+        asunto, responsable, creado_por = fila_tarea
+        usuario = session['username']
+        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        q_ins = "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else \
+                "INSERT INTO tickets_tareas_seguimientos (tarea_id, autor, mensaje, fecha) VALUES (?, ?, ?, ?)"
+        cursor.execute(q_ins, (tarea_id, usuario, mensaje, fecha_actual))
+        conn.commit()
+        registrar_log(usuario, "Nota en Tarea de Ticket", f"Ticket #{ticket_id}: nueva nota en la tarea '{asunto}'")
+
+        # 🔔 Se avisa a "la otra persona" de la tarea (a quien no escribió esta nota) — nunca a
+        # uno mismo. Si ambos roles son la misma persona distinta de quien escribe, solo se avisa
+        # una vez.
+        ya_notificado = set()
+        if responsable and responsable != usuario:
+            crear_notificacion(
+                responsable,
+                f"{usuario} agregó una nota a la tarea \"{asunto}\" que tienes asignada (ticket #{ticket_id}).",
+                url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
+            )
+            ya_notificado.add(responsable)
+        if creado_por and creado_por != usuario and creado_por not in ya_notificado:
+            crear_notificacion(
+                creado_por,
+                f"{usuario} agregó una nota a la tarea \"{asunto}\" en el ticket #{ticket_id}.",
+                url=url_for('ver_ticket', ticket_id=ticket_id), tipo='tarea'
+            )
+        flash("Nota agregada a la tarea.", "success")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error agregando nota a la tarea {tarea_id} (ticket {ticket_id}): {e}")
+        flash("No se pudo guardar la nota. Intenta de nuevo.", "error")
     conn.close()
     return redirect(destino)
 
@@ -5840,8 +5955,8 @@ def mis_tareas():
     ph = '%s' if db_type == 'postgres' else '?'
     filtro_estado = "" if ver_todas else "AND tt.estado NOT IN ('completada', 'cancelada')"
     q = (
-        f"SELECT tt.id, tt.ticket_id, tt.asunto, tt.descripcion, tt.estado, tt.fecha_limite, "
-        f"tt.fecha_completada, t.titulo, t.tipo, t.estado, t.fecha_creacion, tt.respuesta "
+        f"SELECT tt.id, tt.ticket_id, tt.asunto, tt.estado, tt.fecha_limite, "
+        f"tt.fecha_completada, t.titulo, t.tipo, t.estado, t.fecha_creacion, tt.creado_por "
         f"FROM tickets_tareas tt JOIN tickets t ON t.id = tt.ticket_id "
         f"WHERE tt.responsable = {ph} AND COALESCE(t.eliminado, 0) = 0 {filtro_estado} "
         f"ORDER BY (tt.estado IN ('completada', 'cancelada')) ASC, "
@@ -5849,17 +5964,33 @@ def mis_tareas():
     )
     cursor.execute(q, (usuario,))
     filas = cursor.fetchall()
+
+    # 💬 Historial de Seguimiento de cada tarea (pedido por Tomás: ver
+    # tickets_tareas_seguimientos/agregar_seguimiento_tarea_ticket en app.py) — un solo IN(...)
+    # para no hacer una consulta por tarea.
+    ids_tareas = [f[0] for f in filas]
+    seguimientos_por_tarea = {}
+    if ids_tareas:
+        nombres_agentes = {a['usuario']: a['nombre'] for a in agentes}
+        placeholders_tareas = ','.join([ph] * len(ids_tareas))
+        q_seg = f"SELECT tarea_id, autor, mensaje, fecha FROM tickets_tareas_seguimientos WHERE tarea_id IN ({placeholders_tareas}) ORDER BY id ASC"
+        cursor.execute(q_seg, tuple(ids_tareas))
+        for tarea_id_s, autor_s, mensaje_s, fecha_s in cursor.fetchall():
+            seguimientos_por_tarea.setdefault(tarea_id_s, []).append({
+                'autor': autor_s, 'autor_nombre': nombres_agentes.get(autor_s, autor_s),
+                'mensaje': mensaje_s, 'fecha': fecha_s
+            })
     conn.close()
 
     hoy = datetime.now().strftime('%Y-%m-%d')
     tareas = []
     for f in filas:
-        (tarea_id, ticket_id, asunto, descripcion, estado, fecha_limite, fecha_completada,
-         ticket_titulo, ticket_tipo, ticket_estado, ticket_fecha_creacion, respuesta) = f
+        (tarea_id, ticket_id, asunto, estado, fecha_limite, fecha_completada,
+         ticket_titulo, ticket_tipo, ticket_estado, ticket_fecha_creacion, creado_por) = f
         estado = estado or 'pendiente'
         tareas.append({
-            'id': tarea_id, 'ticket_id': ticket_id, 'asunto': asunto, 'descripcion': descripcion,
-            'respuesta': respuesta,
+            'id': tarea_id, 'ticket_id': ticket_id, 'asunto': asunto, 'creado_por': creado_por,
+            'seguimientos': seguimientos_por_tarea.get(tarea_id, []),
             # 👤 Todas las tareas de esta cola ya están filtradas por responsable = usuario (ver el
             # WHERE de arriba), así que el formulario de edición siempre parte con esa persona
             # preseleccionada en "Responsable" — igual que ticket_detalle.html hace con t.responsable.
