@@ -10027,7 +10027,16 @@ def recuperar_clave():
 
         if user:
             usuario_nombre = user[0]
-            codigo_verificacion = str(random.randint(100000, 999999))
+            # 🔒 Hallazgo de auditoría de seguridad (06/09/2026): este código de 6 dígitos
+            # decide quién puede poner una contraseña nueva en la cuenta, así que su
+            # generación debe ser criptográficamente segura. `random.randint` usa Mersenne
+            # Twister (predecible si se conocen suficientes salidas previas) — no pensado
+            # para nada de seguridad. `secrets.randbelow` sí usa la fuente de aleatoriedad
+            # seguro del sistema operativo, igual que ya se usa en el resto del archivo
+            # (secrets.token_hex/token_urlsafe). El límite de 5 intentos y la expiración a
+            # los 10 minutos (ver abajo) ya acotaban el riesgo práctico, pero no hay razón
+            # para no cerrar también este punto.
+            codigo_verificacion = str(secrets.randbelow(900000) + 100000)
 
             session['reset_email'] = email_ingresado
             session['reset_user'] = usuario_nombre
