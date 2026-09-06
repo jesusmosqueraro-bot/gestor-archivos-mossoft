@@ -27,6 +27,12 @@
     var _widgetContactos = [];
     var _widgetCanalNoLeidos = 0;
     var _widgetEnviando = false;
+    // 🟢🔴 Filtro por estado (pedido por Tomás): 'todos' | 'en_linea' | 'desconectado'.
+    var _widgetFiltroEstado = 'todos';
+    // 🟢 Foto del sondeo anterior para el pop-up "fulano se conectó" — 'null' = todavía no hay
+    // foto anterior (se resetea también al cerrar el panel, ver cerrarChatFlotante), a propósito
+    // para no avisar de golpe que "todo el equipo se conectó" en el primer sondeo.
+    var _widgetEstadoEnLineaPrevio = null;
     // 📎 Mismo adjunto pendiente que chat.js (ver ese archivo) — un archivo elegido con el clip
     // o pegado desde el portapapeles, listo para viajar junto con el próximo mensaje.
     var _widgetAdjuntoSeleccionado = null;
@@ -124,6 +130,12 @@
                             'class="w-full pl-8 pr-3 py-1.5 bg-slate-800/70 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">' +
                     '</div>' +
                 '</div>' +
+                // 🟢🔴 Filtro por estado (pedido por Tomás) — ver _widgetFiltrarPorEstado.
+                '<div class="px-3 py-2 border-b border-slate-800/70 flex-shrink-0 flex items-center gap-1.5">' +
+                    '<button type="button" class="widget-btn-filtro-estado flex-1 px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-colors bg-sky-600 text-white" data-estado="todos">Todos</button>' +
+                    '<button type="button" class="widget-btn-filtro-estado flex-1 px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-colors bg-slate-800 text-slate-400" data-estado="en_linea">En línea</button>' +
+                    '<button type="button" class="widget-btn-filtro-estado flex-1 px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wide transition-colors bg-slate-800 text-slate-400" data-estado="desconectado">Desc.</button>' +
+                '</div>' +
                 '<div id="widget-lista-conversaciones" class="flex-1 overflow-y-auto divide-y divide-slate-800/50">' +
                     '<p class="text-slate-500 text-center text-[11px] py-6 px-4">Cargando...</p>' +
                 '</div>' +
@@ -163,12 +175,23 @@
         // onclick individuales con datos interpolados — así nunca hay riesgo de romper el HTML
         // con un nombre que traiga comillas o similar (ver _escapeAtributoWidget arriba).
         document.getElementById('widget-lista-conversaciones').addEventListener('click', function (e) {
+            // ⭐📌 Estos dos se revisan PRIMERO y con 'return' — si no, el clic seguiría
+            // "cayendo" hasta .widget-item-contacto y abriría la conversación además de marcar
+            // el favorito/anclado.
+            var btnFav = e.target.closest('.widget-btn-favorito');
+            if (btnFav) { _widgetAlternarFavorito(btnFav); return; }
+            var btnPin = e.target.closest('.widget-btn-anclado');
+            if (btnPin) { _widgetAlternarAnclado(btnPin); return; }
             var itemCanal = e.target.closest('#widget-item-canal-general');
             if (itemCanal) { _widgetAbrirCanalGeneral(); return; }
             var itemContacto = e.target.closest('.widget-item-contacto');
             if (itemContacto) {
                 _widgetAbrirDirecto(itemContacto.getAttribute('data-usuario'), itemContacto.getAttribute('data-nombre'));
             }
+        });
+
+        document.querySelectorAll('.widget-btn-filtro-estado').forEach(function (btn) {
+            btn.addEventListener('click', function () { _widgetFiltrarPorEstado(btn.getAttribute('data-estado')); });
         });
 
         document.getElementById('widget-buscar-contactos').addEventListener('input', _widgetPintarLista);
@@ -191,6 +214,25 @@
         });
     }
 
+    function _widgetFiltrarPorEstado(estado) {
+        _widgetFiltroEstado = estado;
+        document.querySelectorAll('.widget-btn-filtro-estado').forEach(function (btn) {
+            var activo = btn.getAttribute('data-estado') === estado;
+            btn.classList.toggle('bg-sky-600', activo);
+            btn.classList.toggle('text-white', activo);
+            btn.classList.toggle('bg-slate-800', !activo);
+            btn.classList.toggle('text-slate-400', !activo);
+        });
+        _widgetPintarLista();
+    }
+
+    function _widgetContactoPorUsuario(usuario) {
+        for (var i = 0; i < _widgetContactos.length; i++) {
+            if (_widgetContactos[i].usuario === usuario) return _widgetContactos[i];
+        }
+        return null;
+    }
+
     function _widgetPintarLista() {
         var cont = document.getElementById('widget-lista-conversaciones');
         if (!cont) return;
@@ -208,11 +250,22 @@
                 '</button>';
         }
 
+        // 📌 Anclados siempre arriba (sort estable: copia el array para no reordenar
+        // _widgetContactos de verdad — el orden "real" ya lo manda el servidor ordenado).
+        var contactosOrdenados = _widgetContactos.slice().sort(function (a, b) {
+            var ap = !!a.anclado, bp = !!b.anclado;
+            if (ap === bp) return 0;
+            return ap ? -1 : 1;
+        });
+
         var algunContacto = false;
-        _widgetContactos.forEach(function (c) {
+        contactosOrdenados.forEach(function (c) {
             var usuarioNorm = _normalizarBusquedaWidget(c.usuario);
             var nombreNorm = _normalizarBusquedaWidget(c.nombre);
             if (consulta && usuarioNorm.indexOf(consulta) === -1 && nombreNorm.indexOf(consulta) === -1) return;
+            // 🟢🔴 Filtro por estado (pedido por Tomás): se combina con el buscador de texto.
+            if (_widgetFiltroEstado === 'en_linea' && !c.en_linea) return;
+            if (_widgetFiltroEstado === 'desconectado' && c.en_linea) return;
             algunContacto = true;
             var activo = _widgetChatActual.tipo === 'directo' && _widgetChatActual.usuario === c.usuario;
             var noLeidos = activo ? 0 : (c.no_leidos || 0);
@@ -221,23 +274,111 @@
             // como este panel reconstruye toda la lista desde _widgetContactos en cada refresco
             // (ver _widgetCargarContactos, cada POLL_CONTACTOS_WIDGET_MS), basta con pintar el
             // punto según 'c.en_linea' de la respuesta más reciente, sin lógica aparte.
-            html += '<button type="button" class="widget-item-contacto w-full text-left px-3 py-2.5 flex items-center gap-2.5 hover:bg-slate-800/60 transition-colors ' + (activo ? 'bg-sky-500/10' : '') + '" ' +
-                'data-usuario="' + _escapeAtributoWidget(c.usuario) + '" data-nombre="' + _escapeAtributoWidget(c.nombre) + '">' +
-                '<div class="relative flex-shrink-0">' +
-                    '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold">' + _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase()) + '</div>' +
-                    '<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ' + (c.en_linea ? 'bg-emerald-400' : 'bg-rose-500') + '" title="' + (c.en_linea ? 'En línea' : 'Desconectado') + '"></span>' +
+            // ⭐📌 Favorito/anclado (pedido por Tomás): preferencia personal — ver
+            // _widgetAlternarFavorito/_widgetAlternarAnclado. El <button> de abrir la
+            // conversación y los botones de favorito/anclado van SEPARADOS (un <button> no
+            // puede contener otro <button> válidamente) dentro de un mismo contenedor.
+            html += '<div class="widget-item-contacto flex items-stretch hover:bg-slate-800/60 transition-colors ' + (activo ? 'bg-sky-500/10' : '') + '" ' +
+                'data-usuario="' + _escapeAtributoWidget(c.usuario) + '" data-nombre="' + _escapeAtributoWidget(c.nombre) + '" ' +
+                'data-en-linea="' + (c.en_linea ? 'true' : 'false') + '" data-favorito="' + (c.favorito ? 'true' : 'false') + '" data-anclado="' + (c.anclado ? 'true' : 'false') + '">' +
+                '<button type="button" class="flex-1 min-w-0 text-left px-3 py-2.5 flex items-center gap-2.5">' +
+                    '<div class="relative flex-shrink-0">' +
+                        '<div class="w-8 h-8 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-700 flex items-center justify-center text-[10px] font-bold">' + _escapeHtmlWidget((c.nombre || '?').slice(0, 1).toUpperCase()) + '</div>' +
+                        '<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ' + (c.en_linea ? 'bg-emerald-400' : 'bg-rose-500') + '" title="' + (c.en_linea ? 'En línea' : 'Desconectado') + '"></span>' +
+                    '</div>' +
+                    '<div class="min-w-0 flex-1">' +
+                        '<div class="text-xs font-semibold text-white truncate flex items-center gap-1">' +
+                            '<span class="truncate">' + _escapeHtmlWidget(c.nombre) + '</span>' +
+                            (c.anclado ? '<i class="fa-solid fa-thumbtack text-[8px] text-sky-400 flex-shrink-0"></i>' : '') +
+                        '</div>' +
+                        '<div class="text-[10px] text-slate-500 truncate">' + _escapeHtmlWidget(previa) + '</div>' +
+                    '</div>' +
+                    (noLeidos > 0 ? '<span class="bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">' + (noLeidos > 99 ? '99+' : noLeidos) + '</span>' : '') +
+                '</button>' +
+                '<div class="flex flex-col items-center justify-center gap-1 px-1.5 flex-shrink-0">' +
+                    '<button type="button" class="widget-btn-favorito w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700/60 transition-colors ' + (c.favorito ? 'text-amber-400' : 'text-slate-600') + '" title="' + (c.favorito ? 'Quitar de favoritos' : 'Marcar como favorito') + '">' +
+                        '<i class="' + (c.favorito ? 'fa-solid' : 'fa-regular') + ' fa-star text-[10px]"></i>' +
+                    '</button>' +
+                    '<button type="button" class="widget-btn-anclado w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700/60 transition-colors ' + (c.anclado ? 'text-sky-400' : 'text-slate-600') + '" title="' + (c.anclado ? 'Desanclar' : 'Anclar arriba') + '">' +
+                        '<i class="fa-solid fa-thumbtack text-[10px]"></i>' +
+                    '</button>' +
                 '</div>' +
-                '<div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate">' + _escapeHtmlWidget(c.nombre) + '</div><div class="text-[10px] text-slate-500 truncate">' + _escapeHtmlWidget(previa) + '</div></div>' +
-                (noLeidos > 0 ? '<span class="bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">' + (noLeidos > 99 ? '99+' : noLeidos) + '</span>' : '') +
-                '</button>';
+                '</div>';
         });
 
-        if (!coincideCanal && !algunContacto) {
-            html = '<p class="text-slate-500 text-center text-[11px] py-6 px-4">Sin resultados para tu búsqueda.</p>';
+        if (!algunContacto && (consulta || _widgetFiltroEstado !== 'todos')) {
+            html += '<p class="text-slate-500 text-center text-[11px] py-6 px-4">Sin resultados para tu búsqueda.</p>';
         } else if (!_widgetContactos.length && !consulta) {
             html += '<p class="text-slate-500 text-center text-[11px] py-6 px-4">No hay más admin/agente activos para chatear.</p>';
         }
         cont.innerHTML = html;
+    }
+
+    // ⭐📌 Guarda la preferencia en el servidor — misma ruta que usa chat.js
+    // (/chat/contactos/preferencia), preferencia PERSONAL de quien la marca.
+    function _widgetEnviarPreferencia(contacto, tipo, valor) {
+        var datos = new FormData();
+        datos.append('contacto', contacto);
+        datos.append('tipo', tipo);
+        datos.append('valor', valor ? '1' : '0');
+        fetch('/chat/contactos/preferencia', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': _csrfTokenWidget() },
+            body: datos
+        }).catch(function () { /* silencioso: si falla, el próximo sondeo corrige el estado visual */ });
+    }
+
+    function _widgetAlternarFavorito(boton) {
+        var item = boton.closest('.widget-item-contacto');
+        if (!item) return;
+        var contacto = item.getAttribute('data-usuario');
+        var activo = item.getAttribute('data-favorito') !== 'true';
+        var c = _widgetContactoPorUsuario(contacto);
+        if (c) c.favorito = activo;
+        _widgetPintarLista();
+        _widgetEnviarPreferencia(contacto, 'favorito', activo);
+    }
+
+    function _widgetAlternarAnclado(boton) {
+        var item = boton.closest('.widget-item-contacto');
+        if (!item) return;
+        var contacto = item.getAttribute('data-usuario');
+        var activo = item.getAttribute('data-anclado') !== 'true';
+        var c = _widgetContactoPorUsuario(contacto);
+        if (c) c.anclado = activo;
+        _widgetPintarLista();
+        _widgetEnviarPreferencia(contacto, 'anclado', activo);
+    }
+
+    // 🟢 Pop-up "fulano se conectó" (pedido por Tomás) — mismo criterio que chat.js: compara el
+    // 'en_linea' de este sondeo contra el anterior y avisa por cada transición false→true, para
+    // CUALQUIER contacto. El contenedor se crea solo (no depende de ningún partial de plantilla),
+    // para que funcione en cualquier página donde viva el widget.
+    function _widgetContenedorPopupsConexion() {
+        var cont = document.getElementById('widget-contenedor-popups-conexion');
+        if (!cont) {
+            cont = document.createElement('div');
+            cont.id = 'widget-contenedor-popups-conexion';
+            cont.style.cssText = 'position:fixed;top:80px;right:16px;z-index:60;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none;';
+            document.body.appendChild(cont);
+        }
+        return cont;
+    }
+
+    function _widgetMostrarPopupConexion(nombre) {
+        var cont = _widgetContenedorPopupsConexion();
+        var aviso = document.createElement('div');
+        aviso.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:8px;background:#1e293b;border:1px solid rgba(16,185,129,.3);color:#fff;font-size:12px;font-weight:600;padding:10px 14px;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,.35);opacity:0;transform:translateY(-6px);transition:opacity .2s ease, transform .2s ease;font-family:inherit;';
+        aviso.innerHTML = '<span style="width:8px;height:8px;border-radius:999px;background:#34d399;flex-shrink:0;"></span><span>' + _escapeHtmlWidget(nombre) + ' se conectó</span>';
+        cont.appendChild(aviso);
+        requestAnimationFrame(function () {
+            aviso.style.opacity = '1';
+            aviso.style.transform = 'translateY(0)';
+        });
+        setTimeout(function () {
+            aviso.style.opacity = '0';
+            setTimeout(function () { if (aviso.parentNode) aviso.parentNode.removeChild(aviso); }, 250);
+        }, 4500);
     }
 
     function _widgetCargarContactos() {
@@ -247,6 +388,19 @@
                 _widgetContactos = data.contactos || [];
                 _widgetCanalNoLeidos = data.canal_no_leidos || 0;
                 _widgetPintarLista();
+
+                // 🟢 Pop-up de conexión: ver comentario en _widgetEstadoEnLineaPrevio arriba.
+                var estadoAhora = {};
+                _widgetContactos.forEach(function (c) { estadoAhora[c.usuario] = !!c.en_linea; });
+                if (_widgetEstadoEnLineaPrevio) {
+                    Object.keys(estadoAhora).forEach(function (usuario) {
+                        if (estadoAhora[usuario] && _widgetEstadoEnLineaPrevio[usuario] === false) {
+                            var c = _widgetContactoPorUsuario(usuario);
+                            _widgetMostrarPopupConexion(c ? c.nombre : usuario);
+                        }
+                    });
+                }
+                _widgetEstadoEnLineaPrevio = estadoAhora;
             })
             .catch(function () { /* silencioso: igual que chat.js, un fallo de red no debe interrumpir nada */ });
     }
@@ -458,6 +612,9 @@
         _widgetAbierto = false;
         if (_widgetIntervaloContactos) { clearInterval(_widgetIntervaloContactos); _widgetIntervaloContactos = null; }
         if (_widgetIntervaloMensajes) { clearInterval(_widgetIntervaloMensajes); _widgetIntervaloMensajes = null; }
+        // 🟢 Se resetea la foto de en línea/desconectado: si el panel estuvo cerrado un rato,
+        // comparar contra un estado viejo daría avisos de conexión falsos al reabrir.
+        _widgetEstadoEnLineaPrevio = null;
     }
 
     // 🌐 Expuestas globalmente: las llama el botón (chat_flotante.html) y tiempo_real.js.

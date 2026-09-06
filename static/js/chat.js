@@ -306,12 +306,30 @@ function _normalizarBusquedaChat(texto) {
     return (texto || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// 🟢🔴 Filtro por estado (pedido por Tomás): 'todos' | 'en_linea' | 'desconectado'. Se combina
+// con el buscador de texto (ambos criterios deben cumplirse) — ver filtrarContactosChat().
+var _filtroEstadoChatActual = 'todos';
+
+function filtrarPorEstadoChat(estado) {
+    _filtroEstadoChatActual = estado;
+    document.querySelectorAll('.btn-filtro-estado-chat').forEach(function (btn) {
+        var activo = btn.getAttribute('data-estado') === estado;
+        btn.classList.toggle('bg-sky-600', activo);
+        btn.classList.toggle('text-white', activo);
+        btn.classList.toggle('bg-slate-800', !activo);
+        btn.classList.toggle('text-slate-400', !activo);
+    });
+    filtrarContactosChat();
+}
+
 function filtrarContactosChat() {
     var input = document.getElementById('buscar-chat-contactos');
     var consulta = _normalizarBusquedaChat(input ? input.value : '').trim();
 
     var itemCanal = document.getElementById('item-canal-general');
     if (itemCanal) {
+        // El Canal General no es una persona (no tiene estado en línea/desconectado), así que
+        // solo se filtra por el buscador de texto, nunca por el filtro de estado.
         var coincideCanal = !consulta || _normalizarBusquedaChat('Canal General').indexOf(consulta) !== -1;
         itemCanal.classList.toggle('hidden', !coincideCanal);
     }
@@ -320,13 +338,111 @@ function filtrarContactosChat() {
     document.querySelectorAll('.item-contacto-chat').forEach(function (el) {
         var usuario = _normalizarBusquedaChat(el.getAttribute('data-usuario'));
         var nombre = _normalizarBusquedaChat(el.getAttribute('data-nombre'));
-        var coincide = !consulta || usuario.indexOf(consulta) !== -1 || nombre.indexOf(consulta) !== -1;
+        var coincideTexto = !consulta || usuario.indexOf(consulta) !== -1 || nombre.indexOf(consulta) !== -1;
+        var enLinea = el.getAttribute('data-en-linea') === 'true';
+        var coincideEstado = _filtroEstadoChatActual === 'todos' ||
+            (_filtroEstadoChatActual === 'en_linea' && enLinea) ||
+            (_filtroEstadoChatActual === 'desconectado' && !enLinea);
+        var coincide = coincideTexto && coincideEstado;
         el.classList.toggle('hidden', !coincide);
         if (coincide) algunoVisible = true;
     });
 
+    var hayFiltroActivo = !!consulta || _filtroEstadoChatActual !== 'todos';
     var sinResultados = document.getElementById('mensaje-sin-resultados-chat');
-    if (sinResultados) sinResultados.classList.toggle('hidden', !consulta || algunoVisible);
+    if (sinResultados) sinResultados.classList.toggle('hidden', !hayFiltroActivo || algunoVisible);
+}
+
+// 📌 Deja los contactos anclados siempre arriba de todo (sort estable: no altera el orden
+// relativo entre anclados entre sí, ni entre el resto de contactos entre sí).
+function _reordenarContactosChatPorAnclado() {
+    var contenedor = document.getElementById('lista-contactos-chat');
+    if (!contenedor) return;
+    var items = Array.prototype.slice.call(contenedor.querySelectorAll('.item-contacto-chat'));
+    items.sort(function (a, b) {
+        var ap = a.getAttribute('data-anclado') === 'true';
+        var bp = b.getAttribute('data-anclado') === 'true';
+        if (ap === bp) return 0;
+        return ap ? -1 : 1;
+    });
+    items.forEach(function (el) { contenedor.appendChild(el); });
+}
+
+function _pintarBotonFavoritoChat(boton, activo) {
+    var icono = boton.querySelector('i');
+    if (icono) {
+        icono.classList.toggle('fa-solid', activo);
+        icono.classList.toggle('fa-regular', !activo);
+    }
+    boton.classList.toggle('text-amber-400', activo);
+    boton.classList.toggle('text-slate-600', !activo);
+    boton.title = activo ? 'Quitar de favoritos' : 'Marcar como favorito';
+}
+
+function _pintarBotonAncladoChat(boton, activo) {
+    boton.classList.toggle('text-sky-400', activo);
+    boton.classList.toggle('text-slate-600', !activo);
+    boton.title = activo ? 'Desanclar' : 'Anclar arriba';
+}
+
+function _enviarPreferenciaChat(contacto, tipo, valor) {
+    var datos = new FormData();
+    datos.append('contacto', contacto);
+    datos.append('tipo', tipo);
+    datos.append('valor', valor ? '1' : '0');
+    fetch('/chat/contactos/preferencia', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': _csrfTokenChat() },
+        body: datos
+    }).catch(function () { /* silencioso: si falla, el próximo poll corrige el estado visual */ });
+}
+
+// ⭐ Favorito (pedido por Tomás): preferencia personal, no reordena la lista — solo marca.
+function alternarFavoritoChat(boton, contacto) {
+    var item = boton.closest('.item-contacto-chat');
+    var activo = !(item && item.getAttribute('data-favorito') === 'true');
+    if (item) item.setAttribute('data-favorito', activo ? 'true' : 'false');
+    _pintarBotonFavoritoChat(boton, activo);
+    _enviarPreferenciaChat(contacto, 'favorito', activo);
+}
+
+// 📌 Anclado (pedido por Tomás): preferencia personal, y SÍ reordena — el contacto anclado
+// sube de inmediato al tope de la lista, sin esperar al próximo sondeo.
+function alternarAncladoChat(boton, contacto) {
+    var item = boton.closest('.item-contacto-chat');
+    var activo = !(item && item.getAttribute('data-anclado') === 'true');
+    if (item) {
+        item.setAttribute('data-anclado', activo ? 'true' : 'false');
+        var iconoInline = item.querySelector('.icono-anclado-inline-chat');
+        if (iconoInline) iconoInline.classList.toggle('hidden', !activo);
+    }
+    _pintarBotonAncladoChat(boton, activo);
+    _reordenarContactosChatPorAnclado();
+    _enviarPreferenciaChat(contacto, 'anclado', activo);
+}
+
+// 🟢 Pop-up "fulano se conectó" (pedido por Tomás): se dispara comparando, en cada sondeo de
+// /chat/contactos, el 'en_linea' de ahora contra el de la vuelta anterior. 'null' significa
+// "todavía no hay una foto anterior" (justo después de cargar la página) — a propósito no se
+// avisa nada en esa primera vuelta, o parecería que TODO el equipo se acaba de conectar.
+var _estadoEnLineaPrevioChat = null;
+
+function _mostrarPopupConexionChat(nombre) {
+    var contenedor = document.getElementById('contenedor-popups-conexion-chat');
+    if (!contenedor) return;
+    var aviso = document.createElement('div');
+    aviso.className = 'pointer-events-auto flex items-center gap-2 bg-slate-800 border border-emerald-500/30 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl shadow-lg shadow-slate-950/40';
+    aviso.style.cssText = 'opacity:0; transform:translateY(-6px); transition: opacity .2s ease, transform .2s ease;';
+    aviso.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></span><span>' + _escapeHtmlChat(nombre) + ' se conectó</span>';
+    contenedor.appendChild(aviso);
+    requestAnimationFrame(function () {
+        aviso.style.opacity = '1';
+        aviso.style.transform = 'translateY(0)';
+    });
+    setTimeout(function () {
+        aviso.style.opacity = '0';
+        setTimeout(function () { if (aviso.parentNode) aviso.parentNode.removeChild(aviso); }, 250);
+    }, 4500);
 }
 
 function cargarContactosChat() {
@@ -344,7 +460,9 @@ function cargarContactosChat() {
                 }
             }
 
+            var estadoEnLineaAhora = {};
             (data.contactos || []).forEach(function (c) {
+                estadoEnLineaAhora[c.usuario] = !!c.en_linea;
                 var el = document.querySelector('.item-contacto-chat[data-usuario="' + c.usuario + '"]');
                 if (!el) return;
                 var previsualizacion = el.querySelector('.previsualizacion-contacto-chat');
@@ -370,7 +488,34 @@ function cargarContactosChat() {
                     dot.classList.toggle('bg-rose-500', !c.en_linea);
                     dot.title = c.en_linea ? 'En línea' : 'Desconectado';
                 }
+                el.setAttribute('data-en-linea', c.en_linea ? 'true' : 'false');
+                // ⭐📌 Favorito/anclado: igual que el resto de esta lista, el servidor manda el
+                // valor más reciente de las preferencias personales de quien tiene sesión.
+                el.setAttribute('data-favorito', c.favorito ? 'true' : 'false');
+                el.setAttribute('data-anclado', c.anclado ? 'true' : 'false');
+                var btnFav = el.querySelector('.btn-favorito-chat');
+                if (btnFav) _pintarBotonFavoritoChat(btnFav, !!c.favorito);
+                var btnPin = el.querySelector('.btn-anclado-chat');
+                if (btnPin) _pintarBotonAncladoChat(btnPin, !!c.anclado);
+                var iconoInline = el.querySelector('.icono-anclado-inline-chat');
+                if (iconoInline) iconoInline.classList.toggle('hidden', !c.anclado);
             });
+
+            _reordenarContactosChatPorAnclado();
+            filtrarContactosChat();
+
+            // 🟢 Pop-up de conexión: compara contra la foto del sondeo anterior (ver comentario
+            // en _estadoEnLineaPrevioChat) y avisa por cada contacto que pasó de desconectado a
+            // en línea — para CUALQUIER contacto, no solo favoritos/anclados (pedido por Tomás).
+            if (_estadoEnLineaPrevioChat) {
+                Object.keys(estadoEnLineaAhora).forEach(function (usuario) {
+                    if (estadoEnLineaAhora[usuario] && _estadoEnLineaPrevioChat[usuario] === false) {
+                        var elContacto = document.querySelector('.item-contacto-chat[data-usuario="' + usuario + '"]');
+                        _mostrarPopupConexionChat(elContacto ? elContacto.getAttribute('data-nombre') : usuario);
+                    }
+                });
+            }
+            _estadoEnLineaPrevioChat = estadoEnLineaAhora;
         })
         .catch(function () { /* silencioso */ });
 }
