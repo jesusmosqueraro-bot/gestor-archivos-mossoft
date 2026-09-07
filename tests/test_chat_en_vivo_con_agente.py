@@ -90,6 +90,76 @@ def test_respuesta_de_un_agente_aparece_en_la_transcripcion_del_asistente(client
     assert any('Agente de Soporte' in m['mensaje'] and 'Ya estoy revisando tu caso' in m['mensaje'] for m in mensajes)
 
 
+# 🐛 Hallazgo reportado por Tomás (07/09/2026, con capturas): un comentario del agente con un
+# adjunto (por ejemplo una firma/foto) se veía en Mesa de Ayuda (ticket_detalle.html) pero no en
+# la ventana del Asistente de Chat del colaborador — solo aparecía el texto de relleno "(adjuntó
+# archivo(s) sin comentario)", sin la imagen, porque _bot_transcripcion_ticket() descartaba los
+# adjuntos al convertir el comentario a texto plano.
+
+def test_adjunto_de_un_comentario_del_agente_aparece_en_la_transcripcion_del_asistente(client, app, crear_usuario):
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _escalar(client)
+    ticket_id, _estado = _obtener_ticket_escalado(app, usuario)
+
+    agente = crear_usuario(rol='agente', nombre='Agente de Soporte')
+    _asignar_ticket(app, ticket_id, agente)
+    _iniciar_sesion(client, app, agente, 'agente')
+    # El adjunto real (Cloudinary) no se puede simular fácil vía upload en las pruebas, así que —
+    # igual que _crear_entrada_personal en test_boveda_personal.py — se inserta directo en
+    # tickets_adjuntos tras crear el comentario mediante la ruta real.
+    client.post(f'/tickets/{ticket_id}/comentar', data={'mensaje': 'Te comparto mi firma para el formato.'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id DESC LIMIT 1", (ticket_id,))
+    com_id = cur.fetchone()[0]
+    cur.execute(
+        "INSERT INTO tickets_adjuntos (ticket_id, comentario_id, url, nombre_original, subido_por, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+        (ticket_id, com_id, 'https://res.cloudinary.com/demo/firma.png', 'firma.png', agente, '2026-09-07 07:43:48'),
+    )
+    conn.commit()
+    conn.close()
+
+    _iniciar_sesion(client, app, usuario, 'estandar')
+    r = client.get('/chat/bot/estado')
+
+    mensajes = r.get_json()['mensajes']
+    con_adjunto = next((m for m in mensajes if m.get('adjuntos')), None)
+    assert con_adjunto is not None, "Ningún mensaje trajo la lista de adjuntos."
+    assert con_adjunto['adjuntos'] == [{
+        'url': 'https://res.cloudinary.com/demo/firma.png', 'nombre_original': 'firma.png', 'es_imagen': True,
+    }]
+
+
+def test_adjunto_no_imagen_de_un_comentario_se_marca_como_tal(client, app, crear_usuario):
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _escalar(client)
+    ticket_id, _estado = _obtener_ticket_escalado(app, usuario)
+
+    agente = crear_usuario(rol='agente', nombre='Agente de Soporte')
+    _asignar_ticket(app, ticket_id, agente)
+    _iniciar_sesion(client, app, agente, 'agente')
+    client.post(f'/tickets/{ticket_id}/comentar', data={'mensaje': 'Aquí tienes el manual solicitado.'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id DESC LIMIT 1", (ticket_id,))
+    com_id = cur.fetchone()[0]
+    cur.execute(
+        "INSERT INTO tickets_adjuntos (ticket_id, comentario_id, url, nombre_original, subido_por, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+        (ticket_id, com_id, 'https://res.cloudinary.com/demo/manual.pdf', 'manual.pdf', agente, '2026-09-07 07:43:48'),
+    )
+    conn.commit()
+    conn.close()
+
+    _iniciar_sesion(client, app, usuario, 'estandar')
+    mensajes = client.get('/chat/bot/estado').get_json()['mensajes']
+
+    con_adjunto = next((m for m in mensajes if m.get('adjuntos')), None)
+    assert con_adjunto is not None
+    assert con_adjunto['adjuntos'][0]['es_imagen'] is False
+
+
 def test_elegir_hablar_con_agente_de_nuevo_reusa_el_mismo_ticket(client, app, crear_usuario):
     usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
     _escalar(client)
