@@ -74,9 +74,16 @@
                         <h3 class="font-bold text-white text-sm truncate" title="{{ item.servicio }}">{{ item.servicio }}</h3>
                         {% if not item.es_nota %}<p class="text-[11px] text-slate-400 truncate">{{ item.usuario }}</p>{% endif %}
                     </div>
-                    <span class="shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg {% if item.es_nota %}bg-amber-500/10 text-amber-400{% else %}bg-emerald-500/10 text-emerald-400{% endif %}">
-                        {{ 'Nota segura' if item.es_nota else 'Credencial' }}
-                    </span>
+                    <div class="shrink-0 flex items-center gap-1.5">
+                        {% if item.url %}
+                            <a href="{{ item.url }}" target="_blank" rel="noopener" title="Ir al sitio" class="p-1.5 bg-slate-700/50 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg text-xs transition-all">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        {% endif %}
+                        <span class="text-[10px] font-bold px-2 py-1 rounded-lg {% if item.es_nota %}bg-amber-500/10 text-amber-400{% else %}bg-emerald-500/10 text-emerald-400{% endif %}">
+                            {{ 'Nota segura' if item.es_nota else 'Credencial' }}
+                        </span>
+                    </div>
                 </div>
 
                 {% if item.es_nota %}
@@ -99,7 +106,8 @@
                 </div>
                 {% endif %}
 
-                <div class="flex items-center justify-end gap-2 mt-auto pt-2 border-t border-slate-700/50">
+                <div class="flex items-center justify-end gap-3 mt-auto pt-2 border-t border-slate-700/50 flex-wrap">
+                    <button data-id="{{ item.id }}" data-titulo="{{ item.servicio }}" onclick="abrirHistorial(this.dataset.id, this.dataset.titulo)" class="text-[11px] font-bold text-slate-400 hover:text-blue-400 flex items-center gap-1"><i class="fa-solid fa-clock-rotate-left"></i> Historial</button>
                     <button onclick='abrirModalEditar({{ item | tojson }})' class="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1"><i class="fa-solid fa-pen"></i> Editar</button>
                     <form method="POST" action="{{ url_for('mi_boveda_eliminar', cred_id=item.id) }}" onsubmit="return confirm('¿Eliminar esta entrada de tu bóveda personal?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -137,7 +145,7 @@
                 <textarea id="campo-nota" name="contenido_seguro" placeholder="Contenido de la nota segura" class="hidden w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="3"></textarea>
                 <textarea name="notas" placeholder="Notas adicionales (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="2"></textarea>
                 <input name="etiquetas" placeholder="Etiquetas separadas por coma (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
-                <input type="hidden" name="url" value="">
+                <input name="url" type="url" placeholder="URL del sitio (opcional, ej. https://correo.ejemplo.com)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
                 <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-2.5 rounded-xl">Guardar</button>
             </form>
         </div>
@@ -151,6 +159,17 @@
                 <button onclick="document.getElementById('modal-nota').classList.add('hidden')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
             <p id="nota-contenido" class="text-sm text-slate-300 whitespace-pre-wrap"></p>
+        </div>
+    </div>
+
+    <!-- MODAL HISTORIAL (contraseñas o contenido de notas anteriores) -->
+    <div id="modal-historial" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Historial — <span id="historial-titulo"></span></h3>
+                <button onclick="cerrarHistorial()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div id="historial-lista" class="space-y-2 text-xs"></div>
         </div>
     </div>
 
@@ -175,6 +194,7 @@
             form.usuario.value = item.usuario || '';
             form.notas.value = item.notas || '';
             form.etiquetas.value = (item.etiquetas || []).join(', ');
+            form.url.value = item.url || '';
             form.tipo_item.value = item.tipo_item || 'credencial';
             cambiarTipo(item.tipo_item || 'credencial');
             document.getElementById('modal-form').classList.remove('hidden');
@@ -226,6 +246,68 @@
             if (!data) return;
             document.getElementById('nota-contenido').textContent = data.contenido;
             document.getElementById('modal-nota').classList.remove('hidden');
+        }
+
+        // Escapado para contenido de TEXTO (innerText/innerHTML de un nodo, no atributos).
+        function escaparHtml(texto) {
+            const div = document.createElement('div');
+            div.innerText = texto == null ? '' : String(texto);
+            return div.innerHTML;
+        }
+
+        // 📜 Historial de versiones anteriores (contraseñas o contenido de notas seguras) — la
+        // lista (fechas/quién) no revela ningún valor; cada entrada se descifra solo si se pide
+        // explícitamente, con su propio registro de auditoría (ver mi_boveda_historial_revelar
+        // en app.py).
+        async function abrirHistorial(credId, titulo) {
+            document.getElementById('historial-titulo').innerText = titulo;
+            const lista = document.getElementById('historial-lista');
+            lista.innerHTML = '<p class="text-slate-500 italic">Cargando…</p>';
+            document.getElementById('modal-historial').classList.remove('hidden');
+            document.getElementById('modal-historial').classList.add('flex');
+            try {
+                const resp = await fetch(`/mi_boveda/${credId}/historial`);
+                if (!resp.ok) throw new Error('No se pudo cargar');
+                const data = await resp.json();
+                const historial = data.historial || [];
+                lista.innerHTML = historial.length
+                    ? historial.map(h => `
+                        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <p class="text-slate-200 font-mono break-all" id="hist-valor-${h.id}">••••••••</p>
+                                <p class="text-[10px] text-slate-500">${escaparHtml(h.fecha_cambio)} · ${escaparHtml(h.cambiado_por)}</p>
+                            </div>
+                            <button onclick="revelarHistorialEntrada(${h.id})" title="Ver" class="shrink-0 p-1.5 text-slate-400 hover:text-emerald-400"><i class="fa-regular fa-eye"></i></button>
+                        </div>`).join('')
+                    : '<p class="text-slate-500 italic">Esta entrada no tiene versiones anteriores registradas.</p>';
+            } catch (e) {
+                lista.innerHTML = '<p class="text-rose-400 italic">No se pudo cargar el historial.</p>';
+            }
+        }
+
+        function cerrarHistorial() {
+            document.getElementById('modal-historial').classList.add('hidden');
+            document.getElementById('modal-historial').classList.remove('flex');
+        }
+
+        const historialRevelado = {};
+        async function revelarHistorialEntrada(historialId) {
+            const p = document.getElementById(`hist-valor-${historialId}`);
+            try {
+                if (historialRevelado[historialId] === undefined) {
+                    const resp = await fetch(`/mi_boveda/historial/${historialId}/revelar`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN},
+                        body: ''
+                    });
+                    if (!resp.ok) throw new Error('No se pudo revelar');
+                    const data = await resp.json();
+                    historialRevelado[historialId] = (data.password !== undefined) ? data.password : data.contenido;
+                }
+                p.innerText = historialRevelado[historialId];
+            } catch (e) {
+                alert('No se pudo obtener esa versión anterior.');
+            }
         }
     </script>
 </body>
