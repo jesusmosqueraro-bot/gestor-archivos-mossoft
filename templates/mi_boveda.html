@@ -145,7 +145,12 @@
                 <textarea id="campo-nota" name="contenido_seguro" placeholder="Contenido de la nota segura" class="hidden w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="3"></textarea>
                 <textarea name="notas" placeholder="Notas adicionales (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="2"></textarea>
                 <input name="etiquetas" placeholder="Etiquetas separadas por coma (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
-                <input name="url" type="url" placeholder="URL del sitio (opcional, ej. https://correo.ejemplo.com)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                <div class="flex items-center gap-2">
+                    <input id="input-url-entrada" name="url" type="url" placeholder="URL del sitio (opcional, ej. https://correo.ejemplo.com)" oninput="actualizarBotonIrAlSitio()" class="flex-1 min-w-0 bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                    <button type="button" id="btn-ir-al-sitio-modal" onclick="irAlSitioDesdeFormulario()" title="Ir al sitio" disabled class="shrink-0 p-2.5 bg-slate-700/50 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl text-xs transition-all">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </button>
+                </div>
                 <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-2.5 rounded-xl">Guardar</button>
             </form>
         </div>
@@ -182,6 +187,7 @@
             form.action = "{{ url_for('mi_boveda_crear') }}";
             document.getElementById('modal-titulo').textContent = 'Nueva entrada';
             cambiarTipo('credencial');
+            actualizarBotonIrAlSitio();
             document.getElementById('modal-form').classList.remove('hidden');
         }
 
@@ -196,6 +202,7 @@
             form.etiquetas.value = (item.etiquetas || []).join(', ');
             form.url.value = item.url || '';
             form.tipo_item.value = item.tipo_item || 'credencial';
+            actualizarBotonIrAlSitio();
             cambiarTipo(item.tipo_item || 'credencial');
             document.getElementById('modal-form').classList.remove('hidden');
         }
@@ -206,6 +213,21 @@
             document.querySelectorAll('input[name="tipo_item"]').forEach(r => { r.checked = (r.value === tipo); });
             document.getElementById('campos-credencial').classList.toggle('hidden', tipo === 'nota_segura');
             document.getElementById('campo-nota').classList.toggle('hidden', tipo !== 'nota_segura');
+        }
+
+        // 🔗 Pedido de Tomás (07/09/2026): el mismo botón "Ir al enlace" que ya existe en la
+        // Bóveda de Accesos institucional (credenciales.html), pero disponible también DENTRO
+        // del modal de crear/editar de Mi Bóveda Personal — no solo en la tarjeta — para poder
+        // abrir el sitio sin cerrar el formulario mientras se edita.
+        function actualizarBotonIrAlSitio() {
+            const url = (document.getElementById('input-url-entrada').value || '').trim();
+            document.getElementById('btn-ir-al-sitio-modal').disabled = !url;
+        }
+
+        function irAlSitioDesdeFormulario() {
+            const url = (document.getElementById('input-url-entrada').value || '').trim();
+            if (!url) return;
+            window.open(url, '_blank', 'noopener');
         }
 
         async function revelar(credId, accion) {
