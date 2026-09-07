@@ -372,6 +372,21 @@
             <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
                 <i class="fa-solid fa-sliders text-orange-400"></i> Gestionar Solicitud
             </h3>
+
+            {# 🙋 Botón "Tomar caso" — pedido por Tomás (07/09/2026): acción de un solo clic para
+               quedarse con un ticket sin asignar, sin tener que pasar por el desplegable
+               "Asignar a" de abajo. Ver tomar_ticket() en app.py (incluida la protección contra
+               que dos agentes lo tomen a la vez). Solo tiene sentido mientras está "Sin
+               asignar" y el caso sigue abierto. #}
+            {% if not ticket.asignado_a and ticket.estado != 'Cerrado' %}
+            <form method="POST" action="/tickets/{{ ticket.id }}/tomar" class="mb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-hand"></i> Tomar este caso
+                </button>
+            </form>
+            {% endif %}
+
             <form method="POST" action="/tickets/{{ ticket.id }}/actualizar" class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs items-end">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div>
