@@ -5,6 +5,13 @@ tabla 'credenciales' con visibilidad='personal' (ver _puede_ver_credencial_item 
 _puede_gestionar_credencial_item en app.py), así que estas pruebas también cubren que un
 usuario no pueda ver ni gestionar la entrada personal de otro, y que un admin sí conserve
 acceso de auditoría."""
+import re
+
+
+def _extraer_csrf_token(html):
+    m = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert m, "La página no trae csrf_token en un input oculto — no se puede simular el envío real."
+    return m.group(1)
 
 
 def _crear_entrada_personal(app, propietario, servicio='Correo Personal', usuario='yo@correo.com', password='ClaveInicial1'):
@@ -263,3 +270,83 @@ def test_admin_ve_entradas_personales_en_boveda_institucional(admin_session, app
     r = admin_session.get('/credenciales')
 
     assert b'Auditable Por Admin' in r.data
+
+
+# 🐛 Hallazgo reportado por el usuario 'prueba_neon' (video adjunto): "No se guardan las
+# credenciales aquí" — al llenar "Nueva entrada" y darle Guardar, la página volvía a Mi Bóveda
+# Personal sin ningún aviso de error y la lista seguía vacía. Causa real: mi_boveda.html tiene
+# protección CSRF real activa en producción (CSRFProtect, ver app.py), pero su formulario de
+# crear/editar y su formulario de eliminar NO llevaban el input oculto csrf_token, y su fetch()
+# de /revelar tampoco mandaba el encabezado X-CSRFToken (compárese con credenciales.html, que sí
+# lo hace en los tres casos). _manejar_csrf_invalido (app.py) responde a un token inválido o
+# ausente con un simple redirect a la página anterior — sin flash, sin error visible — así que el
+# guardado se descartaba en silencio exactamente como describió el usuario. El mismo hueco existía
+# en admin_boveda_personal.html (la ventana de auditoría del Admin Master, recién construida).
+# Estas pruebas quedaron INVISIBLES para el resto de la suite porque conftest.py fija
+# WTF_CSRF_ENABLED=False para todas las pruebas normales (necesario para no tener que simular el
+# token en cada prueba existente) — por eso aquí se reactiva la protección real a propósito, para
+# reproducir el fallo tal cual ocurrió y confirmar que las plantillas corregidas ya lo soportan.
+
+def test_guardar_nueva_entrada_funciona_con_proteccion_csrf_real(sesion_usuario, app, monkeypatch):
+    monkeypatch.setitem(app.app.config, 'WTF_CSRF_ENABLED', True)
+    html = sesion_usuario.get('/mi_boveda').get_data(as_text=True)
+    token = _extraer_csrf_token(html)
+
+    r = sesion_usuario.post('/mi_boveda/crear', data={
+        'tipo_item': 'credencial', 'servicio': 'Cuenta Con CSRF Real',
+        'usuario': 'csrf_user', 'password': 'ClaveCsrfReal1',
+        'csrf_token': token,
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM credenciales WHERE titulo = ?", ('Cuenta Con CSRF Real',))
+    assert cur.fetchone()[0] == 1
+    conn.close()
+
+
+def test_guardar_nueva_entrada_sin_token_se_descarta_en_silencio_reproduce_el_bug(sesion_usuario, app, monkeypatch):
+    """Reproduce el reporte de 'prueba_neon' tal cual: sin el token (como pasaba antes de este
+    arreglo, porque el formulario no lo llevaba), nada se guarda y la respuesta es un redirect
+    normal — no un error visible."""
+    monkeypatch.setitem(app.app.config, 'WTF_CSRF_ENABLED', True)
+
+    r = sesion_usuario.post('/mi_boveda/crear', data={
+        'tipo_item': 'credencial', 'servicio': 'Cuenta Sin Token',
+        'usuario': 'x', 'password': 'y',
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM credenciales WHERE titulo = ?", ('Cuenta Sin Token',))
+    assert cur.fetchone()[0] == 0
+    conn.close()
+
+
+def test_revelar_funciona_con_encabezado_x_csrftoken_y_proteccion_real(sesion_usuario, app, monkeypatch):
+    monkeypatch.setitem(app.app.config, 'WTF_CSRF_ENABLED', True)
+    with sesion_usuario.session_transaction() as sess:
+        propietario = sess['username']
+    reg_id = _crear_entrada_personal(app, propietario, password='ClaveRevelada1')
+
+    html = sesion_usuario.get('/mi_boveda').get_data(as_text=True)
+    token = _extraer_csrf_token(html)
+
+    r = sesion_usuario.post(f'/mi_boveda/{reg_id}/revelar', data={'accion': 'ver'},
+                             headers={'X-CSRFToken': token})
+
+    assert r.status_code == 200
+    assert r.get_json()['password'] == 'ClaveRevelada1'
+
+
+def test_revelar_sin_encabezado_csrf_falla_con_proteccion_real(sesion_usuario, app, monkeypatch):
+    monkeypatch.setitem(app.app.config, 'WTF_CSRF_ENABLED', True)
+    with sesion_usuario.session_transaction() as sess:
+        propietario = sess['username']
+    reg_id = _crear_entrada_personal(app, propietario)
+
+    r = sesion_usuario.post(f'/mi_boveda/{reg_id}/revelar', data={'accion': 'ver'})
+
+    assert r.status_code != 200
