@@ -7271,6 +7271,79 @@ def actualizar_ticket(ticket_id):
     return redirect(url_for('ver_ticket', ticket_id=ticket_id))
 
 
+@app.route('/tickets/<int:ticket_id>/tomar', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def tomar_ticket(ticket_id):
+    """Botón "Tomar caso" — pedido por Tomás (07/09/2026): "que el primer agente que la vea
+    [la notificación], se asigne el caso automáticamente". Se descartó auto-asignar solo con
+    que el pop-up se muestre en pantalla (nadie tuvo que hacer nada a propósito) o con abrir el
+    detalle del ticket (mirar un caso para evaluarlo no debería significar quedárselo); este
+    botón exige una acción explícita, y solo aparece en el panel "Gestionar Solicitud" mientras
+    el ticket sigue "Sin asignar" — ver ticket_detalle.html.
+
+    🏁 Carrera entre agentes: si dos agentes hacen clic casi al mismo tiempo, el UPDATE de abajo
+    con 'WHERE (asignado_a IS NULL OR asignado_a = '')' en la misma sentencia hace que solo UNO
+    de los dos encuentre la fila todavía sin dueño (el motor de base de datos serializa los
+    UPDATE sobre la misma fila) — el que pierde la carrera recibe un aviso de quién se lo ganó
+    en vez de sobrescribirlo en silencio."""
+    usuario = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_sel = "SELECT estado, asignado_a, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, asignado_a, creado_por, titulo, tipo, fecha_creacion FROM tickets WHERE id = ?"
+        cursor.execute(q_sel, (ticket_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return redirect(url_for('ver_tickets'))
+
+        estado_ticket, asignado_actual, creado_por, titulo_ticket, tipo_ticket, fecha_creacion_ticket = row
+
+        if estado_ticket == 'Cerrado':
+            conn.close()
+            flash("Este caso ya está cerrado, no se puede tomar.", "error")
+            return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+        fecha_act = obtener_fecha_actual()
+        q_upd = ("UPDATE tickets SET asignado_a = %s, fecha_actualizacion = %s WHERE id = %s AND (asignado_a IS NULL OR asignado_a = '')" if db_type == 'postgres'
+                 else "UPDATE tickets SET asignado_a = ?, fecha_actualizacion = ? WHERE id = ? AND (asignado_a IS NULL OR asignado_a = '')")
+        cursor.execute(q_upd, (usuario, fecha_act, ticket_id))
+        tomado = cursor.rowcount == 1
+
+        if tomado:
+            codigo = _codigo_ticket(tipo_ticket or 'Incidente', ticket_id, fecha_creacion_ticket)
+            q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'sistema', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'sistema', ?)"
+            cursor.execute(q_ins, (ticket_id, usuario, f"{usuario} tomó este caso.", fecha_act))
+            conn.commit()
+
+            registrar_log(usuario, "Ticket tomado", f"Ticket #{ticket_id} ({codigo}) tomado por '{usuario}'")
+            flash(f"Tomaste el caso {codigo}. Ya aparece asignado a ti.", "exito")
+
+            # Avisa al resto del equipo de soporte (menos a quien lo tomó) que el caso ya tiene
+            # dueño, para que no lo sigan viendo como disponible tras el aviso inicial de "nuevo
+            # ticket sin asignar" (ver _equipo_soporte_activo/crear_notificacion_para_varios).
+            otros = [m['usuario'] for m in _equipo_soporte_activo() if m['usuario'] != usuario]
+            if otros:
+                crear_notificacion_para_varios(otros, f"{usuario} tomó la solicitud {codigo}", url=url_for('ver_ticket', ticket_id=ticket_id))
+
+            # Avisa también al solicitante de que ya hay alguien atendiendo su caso.
+            if creado_por and creado_por != usuario:
+                crear_notificacion(creado_por, f"{usuario} está atendiendo tu solicitud {codigo}", url=url_for('ver_ticket', ticket_id=ticket_id))
+        else:
+            conn.rollback()
+            info_otro = _info_usuario(asignado_actual) if asignado_actual else None
+            nombre_otro = (info_otro or {}).get('nombre') or asignado_actual or 'otro agente'
+            flash(f"Este caso ya fue tomado por {nombre_otro} justo antes.", "error")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error tomando ticket {ticket_id}: {e}")
+        flash("No se pudo tomar el caso. Intenta de nuevo.", "error")
+
+    conn.close()
+    return redirect(url_for('ver_ticket', ticket_id=ticket_id))
+
+
 @app.route('/tickets/<int:ticket_id>/eliminar', methods=['POST'])
 @login_required
 @superadmin_required
