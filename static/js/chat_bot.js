@@ -20,6 +20,32 @@ function _escaparHtmlBot(texto) {
     return div.innerHTML;
 }
 
+// Escapado para un valor puesto directamente en un atributo HTML (ej. alt="...").
+function _escaparAtributoBot(texto) {
+    return (texto == null ? '' : String(texto))
+        .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// 🖼️ Pedido de Tomás (07/09/2026): los comentarios del ticket escalado (ver
+// _bot_transcripcion_ticket en app.py) ahora traen también su lista de adjuntos — antes solo
+// llegaba el texto de relleno "(adjuntó archivo(s) sin comentario)" y la imagen (p. ej. una
+// firma) nunca se veía aquí, aunque sí se veía en Mesa de Ayuda. Mismo criterio imagen/archivo
+// que ya usa ticket_detalle.html.
+function _renderAdjuntosBot(adjuntos) {
+    if (!adjuntos || !adjuntos.length) return '';
+    return `<div class="flex flex-wrap gap-2 mt-2">${adjuntos.map(a => {
+        if (a.es_imagen) {
+            return `<a href="${_escaparAtributoBot(a.url)}" target="_blank" rel="noopener" class="block">
+                <img src="${_escaparAtributoBot(a.url)}" alt="${_escaparAtributoBot(a.nombre_original)}" class="h-20 w-20 object-cover rounded-xl border border-slate-700">
+            </a>`;
+        }
+        return `<a href="${_escaparAtributoBot(a.url)}" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-950/40 border border-slate-700 rounded-xl px-3 py-2 text-[11px] transition-all">
+            <i class="fa-solid fa-file-lines"></i>
+            <span class="max-w-[10rem] truncate">${_escaparHtmlBot(a.nombre_original)}</span>
+        </a>`;
+    }).join('')}</div>`;
+}
+
 function _pintarMensajesBot(mensajes) {
     const cont = document.getElementById('lista-mensajes-bot');
     if (!cont) return;
@@ -33,6 +59,7 @@ function _pintarMensajesBot(mensajes) {
         return `<div class="flex ${esBot ? 'justify-start' : 'justify-end'}">
             <div class="max-w-[85%] sm:max-w-[70%] px-4 py-2.5 rounded-2xl text-sm burbuja-bot ${esBot ? 'bg-slate-800 text-slate-100 rounded-bl-sm' : 'bg-sky-600 text-white rounded-br-sm'}">
                 ${_escaparHtmlBot(m.mensaje)}
+                ${_renderAdjuntosBot(m.adjuntos)}
             </div>
         </div>`;
     }).join('');
