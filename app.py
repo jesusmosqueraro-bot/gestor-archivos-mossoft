@@ -5048,25 +5048,48 @@ def _bot_transcripcion_ticket(ticket_id, creado_por):
     """Los comentarios NO internos de un ticket, en el mismo formato que _bot_transcripcion()
     (autor 'usuario'/'bot', mensaje en texto plano) para que se puedan mezclar sin distinción en
     la ventana del Asistente — ver _bot_transcripcion_con_ticket(). Quien comentó al solicitante
-    se etiqueta con su nombre real, para que quede claro que ya es una persona y no el menú."""
+    se etiqueta con su nombre real, para que quede claro que ya es una persona y no el menú.
+
+    🖼️ Pedido de Tomás (07/09/2026): "no se puede visualizar la imagen en el chat de la
+    colaboradora" — un comentario con un adjunto (por ejemplo la firma/foto que sube el agente
+    desde Mesa de Ayuda) se veía aquí solo como el texto de relleno "(adjuntó archivo(s) sin
+    comentario)", sin la imagen, porque esta función descartaba los adjuntos del comentario al
+    convertirlo a texto plano. Ahora cada mensaje trae también su lista de 'adjuntos' (mismo
+    campo url/nombre_original/es_imagen que ya usa ticket_detalle.html), para que chat_bot.js
+    pueda pintar la miniatura igual que en Mesa de Ayuda."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = %s AND tipo != 'interno' ORDER BY id ASC" if db_type == 'postgres' else "SELECT autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = ? AND tipo != 'interno' ORDER BY id ASC"
+        q = "SELECT id, autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = %s AND tipo != 'interno' ORDER BY id ASC" if db_type == 'postgres' else "SELECT id, autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = ? AND tipo != 'interno' ORDER BY id ASC"
         cursor.execute(q, (ticket_id,))
         filas = cursor.fetchall()
+
+        adjuntos_por_com = {}
+        ids_com = [f[0] for f in filas]
+        if ids_com:
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            placeholders = ','.join([placeholder] * len(ids_com))
+            q_adj = f"SELECT comentario_id, url, nombre_original FROM tickets_adjuntos WHERE comentario_id IN ({placeholders}) ORDER BY id ASC"
+            cursor.execute(q_adj, tuple(ids_com))
+            for com_id, url, nombre in cursor.fetchall():
+                adjuntos_por_com.setdefault(com_id, []).append(
+                    {'url': url, 'nombre_original': nombre, 'es_imagen': _es_adjunto_imagen(nombre)}
+                )
         conn.close()
     except Exception as e:
         print(f"⚠️ Error leyendo comentarios del ticket {ticket_id} para el asistente: {e}")
         return []
     mensajes = []
-    for autor, mensaje_html, fecha in filas:
+    for com_id, autor, mensaje_html, fecha in filas:
         es_usuario = autor == creado_por
         texto_plano = _html_a_texto_plano(mensaje_html)
         if not es_usuario:
             info_autor = _info_usuario(autor) or {}
             texto_plano = f"{info_autor.get('nombre') or autor}: {texto_plano}"
-        mensajes.append({'id': f"tc{len(mensajes)}", 'autor': 'usuario' if es_usuario else 'bot', 'mensaje': texto_plano, 'opciones': None, 'fecha': fecha})
+        mensajes.append({
+            'id': f"tc{len(mensajes)}", 'autor': 'usuario' if es_usuario else 'bot', 'mensaje': texto_plano,
+            'opciones': None, 'fecha': fecha, 'adjuntos': adjuntos_por_com.get(com_id, []),
+        })
     return mensajes
 
 
