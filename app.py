@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response, jsonify, stream_with_context, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.exceptions import RequestEntityTooLarge
 
 # 🪵 Bajo gunicorn, stdout/stderr NO son una terminal (TTY), así que Python los deja en modo
 # "block buffering": los print() se acumulan en un buffer interno y solo salen cuando ese
@@ -224,6 +225,19 @@ else:
     @app.context_processor
     def _inyectar_csrf_token_placeholder():
         return dict(csrf_token=lambda: '')
+
+
+# 🖼️ Red de seguridad para el 413 "Request Entity Too Large": la causa real que reportó Tomás
+# (07/09/2026) era pegar una imagen directamente en el editor de texto enriquecido de un
+# comentario de ticket — ya bloqueado en el propio editor (ver editor-enriquecido.js). Este
+# manejador queda como respaldo para cualquier otro caso (un archivo adjunto que de verdad supere
+# MAX_CONTENT_LENGTH, por ejemplo) para que la persona vea un aviso claro en español en vez de la
+# página de error en inglés de Werkzeug — mismo patrón que _manejar_csrf_invalido de arriba.
+@app.errorhandler(RequestEntityTooLarge)
+def _manejar_archivo_demasiado_grande(e):
+    print(f"⚠️ Petición demasiado grande (413): {getattr(e, 'description', e)}")
+    flash("Lo que intentaste enviar es demasiado pesado. Si es una imagen pegada en el texto, quítala y adjúntala como archivo; si es un archivo adjunto, prueba con uno más liviano.", "error")
+    return redirect(request.referrer or url_for('index'))
 
 # 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
 # que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
@@ -5093,11 +5107,59 @@ def _bot_transcripcion_ticket(ticket_id, creado_por):
     return mensajes
 
 
+def _bot_ticket_activo_con_respuesta_staff(usuario):
+    """Entre los tickets ABIERTOS creados por 'usuario' (por cualquier vía: el propio Asistente
+    o el formulario normal de Mesa de Ayuda), busca el más reciente que ya tenga al menos un
+    comentario de alguien más (un agente o admin que 'tomó' el caso y le respondió) — devuelve
+    su ticket_id, o None si ninguno califica.
+
+    🧑‍💼 Pedido de Tomás (07/09/2026): "la intencion es que cualquier agente o admin, que tome
+    un ticket, pueda interactuar con el usuario desde el asistente de chat" — antes, la
+    conversación en vivo (ver estado 'esperando_agente' y _bot_transcripcion_con_ticket) solo se
+    activaba si la persona elegía primero 'Hablar con un agente humano'; un ticket creado con
+    'Crear una solicitud de soporte' (o directo desde Mesa de Ayuda) nunca entraba ahí aunque un
+    agente ya le hubiera respondido. Esta función es lo que permite que _bot_transcripcion_con_ticket
+    'enganche' esa conversación automáticamente la próxima vez que la persona consulte el
+    Asistente, sin que tenga que pedir hablar con un agente explícitamente."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = ("SELECT t.id FROM tickets t WHERE t.creado_por = %s AND t.estado != 'Cerrado' "
+             "AND COALESCE(t.eliminado, 0) = 0 AND EXISTS ("
+             "SELECT 1 FROM tickets_comentarios c WHERE c.ticket_id = t.id AND c.autor != %s AND c.tipo != 'interno'"
+             ") ORDER BY t.fecha_actualizacion DESC, t.id DESC LIMIT 1" if db_type == 'postgres'
+             else "SELECT t.id FROM tickets t WHERE t.creado_por = ? AND t.estado != 'Cerrado' "
+             "AND COALESCE(t.eliminado, 0) = 0 AND EXISTS ("
+             "SELECT 1 FROM tickets_comentarios c WHERE c.ticket_id = t.id AND c.autor != ? AND c.tipo != 'interno'"
+             ") ORDER BY t.fecha_actualizacion DESC, t.id DESC LIMIT 1")
+        cursor.execute(q, (usuario, usuario))
+        fila = cursor.fetchone()
+        conn.close()
+        return fila[0] if fila else None
+    except Exception as e:
+        print(f"⚠️ Error buscando ticket con respuesta de soporte para '{usuario}': {e}")
+        return None
+
+
 def _bot_transcripcion_con_ticket(usuario):
     """Lo que de verdad se pinta en la pantalla del Asistente: la transcripción normal
     (chat_bot_mensajes) y, si la sesión está 'esperando_agente', la conversación del ticket
-    escalado pegada a continuación — ver el módulo completo más arriba."""
+    escalado pegada a continuación — ver el módulo completo más arriba.
+
+    Si la persona está en el menú (o su charla anterior se cerró por inactividad) y alguno de
+    sus tickets abiertos ya tiene una respuesta de soporte pendiente de ver, la sesión pasa sola
+    a 'esperando_agente' para ese ticket — ver _bot_ticket_activo_con_respuesta_staff — con un
+    aviso de que ya puede seguir la conversación aquí mismo, igual que si hubiera elegido
+    'Hablar con un agente humano'."""
     sesion = _bot_obtener_o_crear_sesion(usuario)
+    if sesion['estado'] == 'menu':
+        ticket_id_staff = _bot_ticket_activo_con_respuesta_staff(usuario)
+        if ticket_id_staff:
+            info_staff = _bot_ticket_info(ticket_id_staff)
+            _bot_fijar_estado(usuario, 'esperando_agente', {'ticket_id': ticket_id_staff})
+            codigo_staff = info_staff['codigo'] if info_staff else 'tu caso'
+            _bot_agregar_mensaje(usuario, 'bot', f"Un agente respondió tu solicitud {codigo_staff}. Sigamos la conversación aquí mismo: escribe lo que necesites, o 'volver' para ir al menú (tu caso seguirá abierto igual).")
+            sesion = _bot_obtener_o_crear_sesion(usuario)
     mensajes = _bot_transcripcion(usuario)
     if sesion['estado'] == 'esperando_agente':
         ticket_id = (sesion['contexto'] or {}).get('ticket_id')
