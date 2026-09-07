@@ -4705,12 +4705,24 @@ def chat_permiso_estandar():
 # transcripción que ve en pantalla). Ver chat_pagina() para cómo se llega aquí, y
 # chat_permiso_estandar() para el interruptor general que un admin puede apagar en cualquier
 # momento.
+#
+# 🧑‍💼 Excepción: "Hablar con un agente humano" (estado 'esperando_agente', ver
+# escalar_descripcion más abajo). Ahí la conversación deja de ser el árbol de menú y pasa a
+# reflejar, en tiempo real, el hilo de comentarios del propio ticket que se creó al escalar
+# (tickets_comentarios / comentar_ticket()) — es la MISMA conversación que ve el agente en
+# Mesa de Ayuda, no un canal aparte. Mientras se espera a la persona no aplican los
+# recordatorios de inactividad (ver _bot_evaluar_inactividad) y la charla termina sola en
+# cuanto el ticket pasa a 'Cerrado' (ver _bot_revisar_cierre_por_ticket).
 BOT_MINUTOS_INACTIVIDAD = 2
 BOT_MAX_RECORDATORIOS = 3
 BOT_MENSAJE_RECORDATORIO = 'Por favor, ingrese la información solicitada.'
 BOT_MENSAJE_CIERRE = ("Entendemos que quizás se encuentre ocupado por lo que no ha podido responder. Por ahora, "
                       "cerraremos esta conversación, pero recuerda que siempre puedes escribirme de nuevo para "
                       "empezar una nueva. Si aún necesitas ayuda no dudes en escribir nuevamente.")
+BOT_MENSAJE_TICKET_CERRADO_PLANTILLA = (
+    "Tu solicitud {codigo} fue cerrada, así que esta conversación con soporte terminó aquí. "
+    "Si necesitas algo más, aquí tienes el menú principal:"
+)
 BOT_OPCIONES_MENU = [
     'Crear una solicitud de soporte',
     'Consultar mis solicitudes',
@@ -4915,7 +4927,7 @@ def _bot_crear_ticket(usuario, categoria, titulo, descripcion_texto, prioridad='
         conn.rollback()
         conn.close()
         print(f"⚠️ Error creando ticket desde el asistente para '{usuario}': {e}")
-        return None
+        return None, None
     conn.close()
 
     codigo = _codigo_ticket('Incidente', nuevo_id, fecha_act)
@@ -4936,7 +4948,138 @@ def _bot_crear_ticket(usuario, categoria, titulo, descripcion_texto, prioridad='
     if correo_creador:
         cuerpo_creador = f"Hola,\n\nRecibimos tu solicitud de soporte {codigo} ('{titulo}') a través del Asistente de Chat.\n\n---\nEquipo de Soporte TI - Arkiv"
         threading.Thread(target=enviar_correo_ticket, args=(correo_creador, f"[Arkiv] Recibimos tu solicitud {codigo}", cuerpo_creador)).start()
-    return codigo
+    return codigo, nuevo_id
+
+
+def _bot_ticket_escalado_abierto(usuario):
+    """¿'usuario' ya tiene una escalación ('Hablar con un agente humano') abierta? Devuelve su
+    ticket_id, o None. Evita que elegir esa opción dos veces cree un ticket duplicado — en vez
+    de eso, retomamos la conversación del que ya existe (ver estado 'esperando_agente')."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = ("SELECT id FROM tickets WHERE creado_por = %s AND titulo = 'Escalado desde el Asistente de Chat' "
+             "AND estado != 'Cerrado' AND COALESCE(eliminado, 0) = 0 ORDER BY id DESC LIMIT 1" if db_type == 'postgres'
+             else "SELECT id FROM tickets WHERE creado_por = ? AND titulo = 'Escalado desde el Asistente de Chat' "
+             "AND estado != 'Cerrado' AND COALESCE(eliminado, 0) = 0 ORDER BY id DESC LIMIT 1")
+        cursor.execute(q, (usuario,))
+        fila = cursor.fetchone()
+        conn.close()
+        return fila[0] if fila else None
+    except Exception as e:
+        print(f"⚠️ Error buscando escalación abierta de '{usuario}': {e}")
+        return None
+
+
+def _bot_ticket_info(ticket_id):
+    """Trae lo mínimo necesario del ticket que respalda una conversación 'esperando_agente':
+    estado (para saber si ya se cerró), código legible, quién lo creó (para distinguir en la
+    transcripción quién es 'usuario' y quién es el agente) y a quién está asignado (para avisarle
+    cuando el solicitante escribe algo nuevo). None si ya no existe."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT estado, tipo, fecha_creacion, creado_por, asignado_a FROM tickets WHERE id = %s" if db_type == 'postgres' else "SELECT estado, tipo, fecha_creacion, creado_por, asignado_a FROM tickets WHERE id = ?"
+        cursor.execute(q, (ticket_id,))
+        fila = cursor.fetchone()
+        conn.close()
+        if not fila:
+            return None
+        estado, tipo, fecha_creacion, creado_por, asignado_a = fila
+        return {'estado': estado, 'codigo': _codigo_ticket(tipo or 'Incidente', ticket_id, fecha_creacion), 'creado_por': creado_por, 'asignado_a': asignado_a}
+    except Exception as e:
+        print(f"⚠️ Error consultando ticket {ticket_id} para el asistente: {e}")
+        return None
+
+
+def _bot_comentar_ticket(usuario, ticket_id, texto):
+    """Publica lo que escribió 'usuario' en el asistente como un comentario real del ticket
+    (tickets_comentarios) — la MISMA conversación que ve el agente en Mesa de Ayuda, con el
+    mismo aviso de campanita que dispara comentar_ticket() cuando quien comenta es el propio
+    solicitante. Devuelve False (y no comenta nada) si el ticket ya no admite comentarios
+    (cerrado o eliminado), para que quien llama sepa que debe terminar la conversación."""
+    info = _bot_ticket_info(ticket_id)
+    if not info or info['estado'] == 'Cerrado':
+        return False
+    try:
+        from markupsafe import escape
+        mensaje_html = _sanitizar_html_enriquecido(f"<p>{escape(texto)}</p>")
+        fecha_act = obtener_fecha_actual()
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_ins = "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (%s, %s, %s, 'comentario', %s)" if db_type == 'postgres' else "INSERT INTO tickets_comentarios (ticket_id, autor, mensaje, tipo, fecha) VALUES (?, ?, ?, 'comentario', ?)"
+        cursor.execute(q_ins, (ticket_id, usuario, mensaje_html, fecha_act))
+        q_upd = "UPDATE tickets SET fecha_actualizacion = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE tickets SET fecha_actualizacion = ? WHERE id = ?"
+        cursor.execute(q_upd, (fecha_act, ticket_id))
+        conn.commit()
+        conn.close()
+        registrar_log(usuario, "Comentario en Ticket", f"Comentario agregado al ticket #{ticket_id} (vía Asistente de Chat)")
+
+        url_ticket = url_for('ver_ticket', ticket_id=ticket_id)
+        if info['asignado_a']:
+            crear_notificacion(info['asignado_a'], f"{usuario} respondió la solicitud {info['codigo']} (vía Asistente de Chat)", url=url_ticket)
+        else:
+            crear_notificacion_para_varios([m['usuario'] for m in _equipo_soporte_activo()], f"{usuario} respondió la solicitud {info['codigo']} (vía Asistente de Chat)", url=url_ticket)
+        return True
+    except Exception as e:
+        print(f"⚠️ Error comentando el ticket {ticket_id} desde el asistente para '{usuario}': {e}")
+        return False
+
+
+def _bot_transcripcion_ticket(ticket_id, creado_por):
+    """Los comentarios NO internos de un ticket, en el mismo formato que _bot_transcripcion()
+    (autor 'usuario'/'bot', mensaje en texto plano) para que se puedan mezclar sin distinción en
+    la ventana del Asistente — ver _bot_transcripcion_con_ticket(). Quien comentó al solicitante
+    se etiqueta con su nombre real, para que quede claro que ya es una persona y no el menú."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = %s AND tipo != 'interno' ORDER BY id ASC" if db_type == 'postgres' else "SELECT autor, mensaje, fecha FROM tickets_comentarios WHERE ticket_id = ? AND tipo != 'interno' ORDER BY id ASC"
+        cursor.execute(q, (ticket_id,))
+        filas = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error leyendo comentarios del ticket {ticket_id} para el asistente: {e}")
+        return []
+    mensajes = []
+    for autor, mensaje_html, fecha in filas:
+        es_usuario = autor == creado_por
+        texto_plano = _html_a_texto_plano(mensaje_html)
+        if not es_usuario:
+            info_autor = _info_usuario(autor) or {}
+            texto_plano = f"{info_autor.get('nombre') or autor}: {texto_plano}"
+        mensajes.append({'id': f"tc{len(mensajes)}", 'autor': 'usuario' if es_usuario else 'bot', 'mensaje': texto_plano, 'opciones': None, 'fecha': fecha})
+    return mensajes
+
+
+def _bot_transcripcion_con_ticket(usuario):
+    """Lo que de verdad se pinta en la pantalla del Asistente: la transcripción normal
+    (chat_bot_mensajes) y, si la sesión está 'esperando_agente', la conversación del ticket
+    escalado pegada a continuación — ver el módulo completo más arriba."""
+    sesion = _bot_obtener_o_crear_sesion(usuario)
+    mensajes = _bot_transcripcion(usuario)
+    if sesion['estado'] == 'esperando_agente':
+        ticket_id = (sesion['contexto'] or {}).get('ticket_id')
+        info = _bot_ticket_info(ticket_id) if ticket_id else None
+        if info:
+            mensajes = mensajes + _bot_transcripcion_ticket(ticket_id, info['creado_por'])
+    return mensajes
+
+
+def _bot_revisar_cierre_por_ticket(usuario, sesion):
+    """Si 'usuario' está 'esperando_agente' y su ticket ya se cerró (o ya no existe), termina la
+    conversación con un mensaje propio (distinto al de inactividad) y lo regresa al menú. Se
+    llama en cada sondeo mientras se espera a un agente — ver _bot_evaluar_inactividad."""
+    ticket_id = (sesion['contexto'] or {}).get('ticket_id')
+    info = _bot_ticket_info(ticket_id) if ticket_id else None
+    if info and info['estado'] != 'Cerrado':
+        return False
+    codigo = info['codigo'] if info else 'anterior'
+    _bot_agregar_mensaje(usuario, 'bot', BOT_MENSAJE_TICKET_CERRADO_PLANTILLA.format(codigo=codigo))
+    _bot_fijar_estado(usuario, 'menu', {})
+    mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+    _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+    return True
 
 
 def _bot_procesar_entrada(usuario, texto_entrada):
@@ -4948,6 +5091,30 @@ def _bot_procesar_entrada(usuario, texto_entrada):
     if not texto:
         return
     sesion = _bot_obtener_o_crear_sesion(usuario)
+
+    # 🧑‍💼 Esperando a un agente humano (ver estado 'escalar_descripcion' más abajo): esta charla
+    # ya no vive en chat_bot_mensajes sino en el hilo de comentarios del propio ticket escalado
+    # (ver _bot_comentar_ticket) — es la MISMA conversación que ve el agente en Mesa de Ayuda, así
+    # que lo que escriba aquí NUNCA se guarda también como mensaje de chat_bot_mensajes (se
+    # duplicaría al mezclar ambas fuentes en _bot_transcripcion_con_ticket). 'volver' sigue
+    # siendo la única palabra especial: regresa al menú sin comentar nada — el ticket queda
+    # abierto igual, y volver a elegir "Hablar con un agente humano" retoma esta misma
+    # conversación (ver _bot_ticket_escalado_abierto).
+    if sesion['estado'] == 'esperando_agente':
+        if texto.lower() == 'volver':
+            _bot_fijar_estado(usuario, 'menu', {})
+            mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+            _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+            return
+        ticket_id = (sesion['contexto'] or {}).get('ticket_id')
+        if not ticket_id or not _bot_comentar_ticket(usuario, ticket_id, texto):
+            # Si no se pudo comentar, primero se revisa si es porque el ticket ya se cerró (caso
+            # normal, ver _bot_revisar_cierre_por_ticket) — si seguía abierto, fue un error
+            # inesperado y no debe dejarse a la persona sin ninguna respuesta.
+            if not _bot_revisar_cierre_por_ticket(usuario, sesion):
+                _bot_agregar_mensaje(usuario, 'bot', "No pude enviar tu mensaje por un error interno. Intenta de nuevo en un momento.")
+        return
+
     _bot_agregar_mensaje(usuario, 'usuario', texto)
 
     # 🔙 "volver" regresa al menú principal desde cualquier punto de la conversación.
@@ -4985,8 +5152,15 @@ def _bot_procesar_entrada(usuario, texto_entrada):
                 mensaje = f"¿Sobre qué tema necesitas ayuda?\n\n{_bot_numerar(titulos)}\n\nEscribe 'volver' para regresar al menú anterior."
                 _bot_agregar_mensaje(usuario, 'bot', mensaje, titulos)
         elif idx == 3:
-            _bot_fijar_estado(usuario, 'escalar_descripcion', {})
-            _bot_agregar_mensaje(usuario, 'bot', "Cuéntame brevemente qué necesitas y un agente humano revisará tu caso cuanto antes. Escribe 'volver' para cancelar.")
+            ticket_abierto_id = _bot_ticket_escalado_abierto(usuario)
+            if ticket_abierto_id:
+                info_abierto = _bot_ticket_info(ticket_abierto_id)
+                _bot_fijar_estado(usuario, 'esperando_agente', {'ticket_id': ticket_abierto_id})
+                codigo_abierto = info_abierto['codigo'] if info_abierto else 'anterior'
+                _bot_agregar_mensaje(usuario, 'bot', f"Ya tienes una conversación abierta con soporte para tu caso {codigo_abierto}. Sigamos aquí mismo: escribe lo que necesites, o 'volver' para ir al menú (tu caso seguirá abierto de todas formas).")
+            else:
+                _bot_fijar_estado(usuario, 'escalar_descripcion', {})
+                _bot_agregar_mensaje(usuario, 'bot', "Cuéntame brevemente qué necesitas y un agente humano revisará tu caso cuanto antes. Escribe 'volver' para cancelar.")
         else:
             mensaje, opciones = _bot_texto_menu_principal(saludo=False)
             _bot_agregar_mensaje(usuario, 'bot', "No reconocí esa opción. " + mensaje, opciones)
@@ -5010,7 +5184,7 @@ def _bot_procesar_entrada(usuario, texto_entrada):
         return
 
     if estado == 'crear_ticket_descripcion':
-        codigo = _bot_crear_ticket(usuario, contexto.get('categoria', 'Otro'), contexto.get('titulo'), texto, prioridad='Media')
+        codigo, _ticket_id = _bot_crear_ticket(usuario, contexto.get('categoria', 'Otro'), contexto.get('titulo'), texto, prioridad='Media')
         _bot_fijar_estado(usuario, 'menu', {})
         if codigo:
             _bot_agregar_mensaje(usuario, 'bot', f"Listo, tu solicitud {codigo} quedó registrada. Un agente la atenderá pronto.")
@@ -5021,14 +5195,18 @@ def _bot_procesar_entrada(usuario, texto_entrada):
         return
 
     if estado == 'escalar_descripcion':
-        codigo = _bot_crear_ticket(usuario, 'Otro', 'Escalado desde el Asistente de Chat', texto, prioridad='Alta')
-        _bot_fijar_estado(usuario, 'menu', {})
+        codigo, ticket_id = _bot_crear_ticket(usuario, 'Otro', 'Escalado desde el Asistente de Chat', texto, prioridad='Alta')
         if codigo:
-            _bot_agregar_mensaje(usuario, 'bot', f"Entendido. Registré tu caso como {codigo} con prioridad alta para que un agente humano lo revise cuanto antes.")
+            # 🧑‍💼 A partir de aquí la conversación pasa a reflejar el hilo de comentarios del
+            # ticket recién creado (ver estado 'esperando_agente' y _bot_comentar_ticket) — no
+            # vuelve al menú todavía, para no darle la impresión de que ya terminó.
+            _bot_fijar_estado(usuario, 'esperando_agente', {'ticket_id': ticket_id})
+            _bot_agregar_mensaje(usuario, 'bot', f"Entendido. Registré tu caso como {codigo} con prioridad alta. Un agente humano lo revisará pronto y podrás seguir la conversación aquí mismo — no hace falta que hagas nada más por ahora. Escribe 'volver' si quieres ir al menú mientras tanto (tu caso sigue abierto igual).")
         else:
+            _bot_fijar_estado(usuario, 'menu', {})
             _bot_agregar_mensaje(usuario, 'bot', "No pude escalar tu caso por un error interno. Intenta de nuevo en un momento, o créalo directamente desde Mesa de Ayuda.")
-        mensaje, opciones = _bot_texto_menu_principal(saludo=False)
-        _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+            mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+            _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
         return
 
     if estado == 'faq_lista':
@@ -5062,6 +5240,12 @@ def _bot_evaluar_inactividad(usuario):
     sesion = _bot_obtener_o_crear_sesion(usuario)
     if sesion['cerrada']:
         return
+    if sesion['estado'] == 'esperando_agente':
+        # 🧑‍💼 Esperando a un agente humano: no aplican los recordatorios de inactividad del
+        # menú (una persona puede tardar bastante más de un par de minutos en responder) — lo
+        # único que se revisa aquí es si su ticket ya se cerró, para terminar la conversación.
+        _bot_revisar_cierre_por_ticket(usuario, sesion)
+        return
     ultima = _parsear_fecha_ticket(sesion['fecha_ultima_actividad']) or datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
     ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
     minutos_inactivo = (ahora - ultima).total_seconds() / 60
@@ -5084,7 +5268,7 @@ def chat_bot_estado():
         return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
     usuario_actual = session.get('username')
     _bot_evaluar_inactividad(usuario_actual)
-    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
+    return jsonify({'mensajes': _bot_transcripcion_con_ticket(usuario_actual)})
 
 
 @app.route('/chat/bot/enviar', methods=['POST'])
@@ -5099,7 +5283,7 @@ def chat_bot_enviar():
         return jsonify({'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
     usuario_actual = session.get('username')
     _bot_procesar_entrada(usuario_actual, texto)
-    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
+    return jsonify({'mensajes': _bot_transcripcion_con_ticket(usuario_actual)})
 
 
 @app.route('/chat/bot/reiniciar', methods=['POST'])
@@ -5111,7 +5295,7 @@ def chat_bot_reiniciar():
     _bot_fijar_estado(usuario_actual, 'menu', {})
     mensaje, opciones = _bot_texto_menu_principal(saludo=True)
     _bot_agregar_mensaje(usuario_actual, 'bot', mensaje, opciones)
-    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
+    return jsonify({'mensajes': _bot_transcripcion_con_ticket(usuario_actual)})
 
 
 # 📅 VENCIMIENTO DE DOCUMENTOS (institucionales en 'galerias' y por empleado en
@@ -11929,10 +12113,75 @@ def mi_boveda_revelar(cred_id):
     if visibilidad != 'personal' or not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
         return jsonify({'error': 'no autorizado'}), 403
 
-    registrar_log(session.get('username'), "Consulta en Mi Bóveda", f"Se consultó la entrada personal '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+    # 🕵️ Si quien revela es el propio dueño, es una consulta normal de su bóveda; si es un
+    # admin viendo la entrada de OTRA persona, se etiqueta distinto en el log — así el registro
+    # de auditoría deja claro cuándo alguien más entró a mirar una contraseña ajena.
+    es_propietario = session.get('username') == propietario
+    etiqueta_log = "Consulta en Mi Bóveda" if es_propietario else "Auditoría de Bóveda Personal"
+    detalle_log = (f"Se consultó la entrada personal '{titulo}' (ID {cred_id})" if es_propietario
+                   else f"Consultó/reveló la entrada personal '{titulo}' (ID {cred_id}) de la bóveda de '{propietario}'")
+    registrar_log(session.get('username'), etiqueta_log, detalle_log, credencial_id=cred_id)
     if (tipo_item or 'credencial') == 'nota_segura':
         return jsonify({'contenido': desencriptar_texto(contenido_cifrado, cred_id) if contenido_cifrado else ''})
     return jsonify({'password': desencriptar_texto(pass_enc, cred_id)})
+
+
+# 🕵️ AUDITORÍA DE BÓVEDA PERSONAL (solo el super-admin literal 'admin') -------------------
+# Pedido por Tomás: una ventana donde el "Admin Master" pueda escribir el usuario de cualquier
+# persona y consultar/revelar lo que tenga guardado en SU Bóveda Personal, para casos de
+# prioridad (por ejemplo, offboarding urgente o una investigación de seguridad) sin tener que
+# rastrearlo a simple vista dentro de la Bóveda de Accesos institucional (donde los ítems
+# personales de todos aparecen mezclados con los del equipo). A propósito es de SOLO LECTURA
+# (ver/revelar, nada de crear/editar/eliminar) y más restringido que el resto de la Bóveda Fase
+# 3: no basta con rol 'admin' — se exige la cuenta LITERAL 'admin' (@superadmin_required, el
+# mismo candado del Gestor de Base de Datos y los Respaldos), porque este panel puede exponer la
+# contraseña personal de cualquier persona de la organización. El propio reveal reutiliza
+# /mi_boveda/<id>/revelar de arriba (ya admite auditoría de cualquier cuenta 'admin' — y por lo
+# tanto también de la cuenta 'admin' literal).
+@app.route('/admin/boveda_personal')
+@login_required
+@superadmin_required
+def admin_boveda_personal():
+    usuario_buscado = (request.args.get('usuario') or '').strip()
+    return render_template('admin_boveda_personal.html', usuario_buscado=usuario_buscado)
+
+
+@app.route('/admin/boveda_personal/<usuario>/items')
+@login_required
+@superadmin_required
+def admin_boveda_personal_items(usuario):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_u = "SELECT nombre FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT nombre FROM usuarios WHERE usuario = ?"
+    cursor.execute(q_u, (usuario,))
+    fila_u = cursor.fetchone()
+    if not fila_u:
+        conn.close()
+        return jsonify({'error': f"No existe ninguna cuenta con el usuario '{usuario}'."}), 404
+    nombre = fila_u[0] or usuario
+
+    try:
+        q = ("SELECT id, titulo, url_acceso, usuario_acceso, notas, fecha_creacion, etiquetas, tipo_item, campos_personalizados "
+             "FROM credenciales WHERE propietario = %s AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC"
+             if db_type == 'postgres' else
+             "SELECT id, titulo, url_acceso, usuario_acceso, notas, fecha_creacion, etiquetas, tipo_item, campos_personalizados "
+             "FROM credenciales WHERE propietario = ? AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC")
+        cursor.execute(q, (usuario,))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando la bóveda personal de '{usuario}' para auditoría: {e}")
+        rows = []
+    conn.close()
+
+    items = [{
+        'id': r[0], 'servicio': r[1], 'url': r[2] or '', 'usuario': r[3], 'notas': r[4] or '',
+        'fecha': r[5], 'etiquetas': _lista_etiquetas(r[6]), 'tipo_item': r[7] or 'credencial',
+        'es_nota': (r[7] or 'credencial') == 'nota_segura', 'tiene_campos': bool(r[8]),
+    } for r in rows]
+
+    registrar_log(session.get('username'), "Auditoría de Bóveda Personal",
+                  f"Consultó la lista de la bóveda personal de '{usuario}' ({len(items)} entrada(s))")
+    return jsonify({'usuario': usuario, 'nombre': nombre, 'items': items})
 
 
 @app.route('/credenciales/<int:cred_id>/compartidos')
