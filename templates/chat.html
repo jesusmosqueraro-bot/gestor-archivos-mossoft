@@ -49,6 +49,21 @@
                 </div>
             </div>
             <div class="flex items-center gap-2">
+                {% if rol == 'admin' %}
+                <!-- 🔐 Interruptor general (pedido por Tomás): habilita/deshabilita, para TODAS
+                     las cuentas 'estandar' a la vez, el acceso al Asistente de Chat guiado por
+                     menú (ver chat_permiso_estandar() en app.py). No afecta este Chat Interno,
+                     que sigue siendo exclusivo de admin/agente. -->
+                <form method="POST" action="{{ url_for('chat_permiso_estandar') }}" title="Asistente de Chat para usuarios estándar">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="habilitar" value="{{ '0' if chat_estandar_habilitado else '1' }}">
+                    <button type="submit" class="px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border {% if chat_estandar_habilitado %}bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20{% else %}bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700{% endif %}">
+                        <i class="fa-solid {{ 'fa-robot' if chat_estandar_habilitado else 'fa-robot' }}"></i>
+                        <span class="hidden md:inline">Asistente para estándar: {{ 'activo' if chat_estandar_habilitado else 'inactivo' }}</span>
+                        <span class="md:hidden">Asistente: {{ 'ON' if chat_estandar_habilitado else 'OFF' }}</span>
+                    </button>
+                </form>
+                {% endif %}
                 {% include 'partials/perfil_boton.html' %}
                 {% include 'partials/campanita.html' %}
             </div>

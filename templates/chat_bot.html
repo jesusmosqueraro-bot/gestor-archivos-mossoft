@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARKIV - Asistente de Chat</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
+        #lista-mensajes-bot::-webkit-scrollbar { width: 6px; }
+        #lista-mensajes-bot::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3); border-radius: 999px; }
+        .burbuja-bot { white-space: pre-wrap; }
+    </style>
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+</head>
+<body class="pagina-acento-sky min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-sky-500 selection:text-white">
+
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-y-3">
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                    <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                        <svg class="w-5 h-5" viewBox="0 0 100 100">
+                            <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                            <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                            <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                            <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                            <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                            <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                            <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                        </svg>
+                    </div>
+                </a>
+                <a href="{{ url_for('bienvenida') }}" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span class="hidden sm:inline">Volver</span>
+                </a>
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-sm">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <h1 class="text-base font-bold text-white whitespace-nowrap">Asistente de Chat</h1>
+                </div>
+            </div>
+            {% if habilitado %}
+            <button type="button" onclick="reiniciarConversacionBot()" title="Empezar una conversación nueva"
+                    class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span class="hidden sm:inline">Reiniciar conversación</span>
+            </button>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% if not habilitado %}
+        <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-10 text-center">
+            <i class="fa-solid fa-robot text-4xl text-slate-600 mb-4"></i>
+            <h2 class="text-lg font-bold text-white mb-2">El Asistente de Chat no está disponible</h2>
+            <p class="text-sm text-slate-400 max-w-md mx-auto">Un administrador debe habilitar esta función para los usuarios estándar. Mientras tanto, puedes crear una solicitud de soporte o consultar la Base de Conocimiento desde el menú principal.</p>
+            <a href="{{ url_for('bienvenida') }}" class="inline-flex items-center gap-2 mt-6 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all">
+                <i class="fa-solid fa-arrow-left"></i> Volver al inicio
+            </a>
+        </div>
+        {% else %}
+        <div id="wrapper-chat-bot" data-csrf-token="{{ csrf_token() }}"
+             class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden flex flex-col" style="height: calc(100vh - 140px); min-height: 480px;">
+
+            <div id="lista-mensajes-bot" class="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3">
+                <p class="text-slate-500 text-center text-[11px] py-6">Cargando...</p>
+            </div>
+
+            <div id="opciones-rapidas-bot" class="hidden px-4 sm:px-5 pb-2 flex flex-wrap gap-2"></div>
+
+            <div id="error-chat-bot" class="hidden px-5 py-2 text-[11px] text-rose-400 bg-rose-500/10 border-t border-rose-500/20"></div>
+
+            <form id="form-enviar-bot" onsubmit="return enviarMensajeBot(event)" class="border-t border-slate-800/80 p-3">
+                <div class="flex items-end gap-2">
+                    <textarea id="input-mensaje-bot" rows="1" maxlength="2000" placeholder="Escribe tu respuesta, o el número de una opción... (escribe 'volver' para regresar al menú)"
+                              class="flex-1 resize-none px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                              onkeydown="return _teclaMensajeBot(event)"></textarea>
+                    <button type="submit" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all flex-shrink-0">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+                <p class="text-[10px] text-slate-600 mt-2">Este es un asistente automático — no es una conversación con una persona. Si necesitas ayuda humana, elige "Hablar con un agente humano" en el menú.</p>
+            </form>
+        </div>
+        {% endif %}
+    </main>
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    {% if habilitado %}
+    <script src="/static/js/chat_bot.js"></script>
+    {% endif %}
+</body>
+</html>

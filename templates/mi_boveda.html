@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Mi Bóveda Personal</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+</head>
+<body class="pagina-acento-emerald bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-emerald-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif whitespace-nowrap">
+                <i class="fa-solid fa-user-lock text-emerald-400"></i> Mi Bóveda Personal
+            </h1>
+        </div>
+        <button onclick="abrirModalCrear()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-plus"></i> Nueva entrada
+        </button>
+    </nav>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- MENSAJES -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 text-xs text-slate-400 flex items-start gap-3">
+            <i class="fa-solid fa-shield-halved text-emerald-400 mt-0.5"></i>
+            <p>Esta bóveda es <strong class="text-slate-200">personal y privada</strong>: solo tú puedes ver o gestionar lo que guardes aquí — es distinta de la Bóveda de Accesos institucional del equipo de soporte. Cada clave se guarda cifrada y solo se revela a pedido tuyo, dejando registro de auditoría.</p>
+        </div>
+
+        {% if not items %}
+        <div class="text-center py-20 text-slate-500">
+            <i class="fa-solid fa-key text-4xl mb-4 opacity-40"></i>
+            <p class="text-sm">Todavía no has guardado ninguna contraseña o nota personal aquí.</p>
+        </div>
+        {% else %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for item in items %}
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col gap-3 hover:border-emerald-500/40 transition-all">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h3 class="font-bold text-white text-sm truncate" title="{{ item.servicio }}">{{ item.servicio }}</h3>
+                        {% if not item.es_nota %}<p class="text-[11px] text-slate-400 truncate">{{ item.usuario }}</p>{% endif %}
+                    </div>
+                    <span class="shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg {% if item.es_nota %}bg-amber-500/10 text-amber-400{% else %}bg-emerald-500/10 text-emerald-400{% endif %}">
+                        {{ 'Nota segura' if item.es_nota else 'Credencial' }}
+                    </span>
+                </div>
+
+                {% if item.es_nota %}
+                <button onclick="verNota({{ item.id }})" class="text-xs bg-slate-900/60 hover:bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-center gap-2 text-slate-300">
+                    <i class="fa-regular fa-eye"></i> Ver contenido
+                </button>
+                {% else %}
+                <div class="flex items-center gap-2">
+                    <input type="password" value="••••••••••" readonly id="pass-{{ item.id }}" class="flex-1 bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-300">
+                    <button onclick="toggleClave({{ item.id }})" title="Ver clave" class="p-2 text-slate-400 hover:text-emerald-400"><i class="fa-regular fa-eye" id="icon-{{ item.id }}"></i></button>
+                    <button onclick="copiarClave({{ item.id }})" title="Copiar" class="p-2 text-slate-400 hover:text-emerald-400"><i class="fa-regular fa-copy"></i></button>
+                </div>
+                {% endif %}
+
+                {% if item.notas %}<p class="text-[11px] text-slate-500 line-clamp-2">{{ item.notas }}</p>{% endif %}
+
+                {% if item.etiquetas %}
+                <div class="flex flex-wrap gap-1">
+                    {% for et in item.etiquetas %}<span class="text-[10px] bg-slate-700/60 text-slate-300 px-2 py-0.5 rounded-full">{{ et }}</span>{% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="flex items-center justify-end gap-2 mt-auto pt-2 border-t border-slate-700/50">
+                    <button onclick='abrirModalEditar({{ item | tojson }})' class="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1"><i class="fa-solid fa-pen"></i> Editar</button>
+                    <form method="POST" action="{{ url_for('mi_boveda_eliminar', cred_id=item.id) }}" onsubmit="return confirm('¿Eliminar esta entrada de tu bóveda personal?');">
+                        <button type="submit" class="text-[11px] font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1"><i class="fa-solid fa-trash"></i> Eliminar</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </main>
+
+    <!-- MODAL CREAR/EDITAR -->
+    <div id="modal-form" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h2 id="modal-titulo" class="text-lg font-bold text-white">Nueva entrada</h2>
+                <button onclick="cerrarModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <form id="form-entrada" method="POST" action="{{ url_for('mi_boveda_crear') }}" class="space-y-3">
+                <div class="flex gap-2 text-xs">
+                    <label class="flex-1 flex items-center justify-center gap-2 bg-slate-900/60 border border-slate-700 rounded-xl py-2 cursor-pointer has-[:checked]:border-emerald-500 has-[:checked]:text-emerald-400">
+                        <input type="radio" name="tipo_item" value="credencial" checked onchange="cambiarTipo(this.value)" class="accent-emerald-500"> Credencial
+                    </label>
+                    <label class="flex-1 flex items-center justify-center gap-2 bg-slate-900/60 border border-slate-700 rounded-xl py-2 cursor-pointer has-[:checked]:border-amber-500 has-[:checked]:text-amber-400">
+                        <input type="radio" name="tipo_item" value="nota_segura" onchange="cambiarTipo(this.value)" class="accent-amber-500"> Nota segura
+                    </label>
+                </div>
+                <input required name="servicio" placeholder="Nombre / servicio (ej. Correo personal)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                <div id="campos-credencial" class="space-y-3">
+                    <input name="usuario" placeholder="Usuario / correo de acceso" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                    <input name="password" type="text" placeholder="Contraseña (déjalo vacío para no cambiarla al editar)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                </div>
+                <textarea id="campo-nota" name="contenido_seguro" placeholder="Contenido de la nota segura" class="hidden w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="3"></textarea>
+                <textarea name="notas" placeholder="Notas adicionales (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm" rows="2"></textarea>
+                <input name="etiquetas" placeholder="Etiquetas separadas por coma (opcional)" class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+                <input type="hidden" name="url" value="">
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-2.5 rounded-xl">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL VER NOTA -->
+    <div id="modal-nota" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-md w-full">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold text-white">Nota segura</h2>
+                <button onclick="document.getElementById('modal-nota').classList.add('hidden')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <p id="nota-contenido" class="text-sm text-slate-300 whitespace-pre-wrap"></p>
+        </div>
+    </div>
+
+    <script>
+        function abrirModalCrear() {
+            const form = document.getElementById('form-entrada');
+            form.reset();
+            form.action = "{{ url_for('mi_boveda_crear') }}";
+            document.getElementById('modal-titulo').textContent = 'Nueva entrada';
+            cambiarTipo('credencial');
+            document.getElementById('modal-form').classList.remove('hidden');
+        }
+
+        function abrirModalEditar(item) {
+            const form = document.getElementById('form-entrada');
+            form.reset();
+            form.action = `/mi_boveda/editar/${item.id}`;
+            document.getElementById('modal-titulo').textContent = 'Editar entrada';
+            form.servicio.value = item.servicio || '';
+            form.usuario.value = item.usuario || '';
+            form.notas.value = item.notas || '';
+            form.etiquetas.value = (item.etiquetas || []).join(', ');
+            form.tipo_item.value = item.tipo_item || 'credencial';
+            cambiarTipo(item.tipo_item || 'credencial');
+            document.getElementById('modal-form').classList.remove('hidden');
+        }
+
+        function cerrarModal() { document.getElementById('modal-form').classList.add('hidden'); }
+
+        function cambiarTipo(tipo) {
+            document.querySelectorAll('input[name="tipo_item"]').forEach(r => { r.checked = (r.value === tipo); });
+            document.getElementById('campos-credencial').classList.toggle('hidden', tipo === 'nota_segura');
+            document.getElementById('campo-nota').classList.toggle('hidden', tipo !== 'nota_segura');
+        }
+
+        async function revelar(credId, accion) {
+            const resp = await fetch(`/mi_boveda/${credId}/revelar`, {
+                method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: `accion=${accion}`
+            });
+            if (!resp.ok) { alert('No se pudo revelar esta entrada.'); return null; }
+            return resp.json();
+        }
+
+        async function toggleClave(credId) {
+            const input = document.getElementById(`pass-${credId}`);
+            const icon = document.getElementById(`icon-${credId}`);
+            if (input.type === 'password') {
+                const data = await revelar(credId, 'ver');
+                if (!data) return;
+                input.value = data.password;
+                input.type = 'text';
+                icon.className = 'fa-regular fa-eye-slash';
+            } else {
+                input.type = 'password';
+                input.value = '••••••••••';
+                icon.className = 'fa-regular fa-eye';
+            }
+        }
+
+        async function copiarClave(credId) {
+            const data = await revelar(credId, 'copiar');
+            if (!data) return;
+            await navigator.clipboard.writeText(data.password);
+            alert('Contraseña copiada al portapapeles.');
+        }
+
+        async function verNota(credId) {
+            const data = await revelar(credId, 'ver');
+            if (!data) return;
+            document.getElementById('nota-contenido').textContent = data.contenido;
+            document.getElementById('modal-nota').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

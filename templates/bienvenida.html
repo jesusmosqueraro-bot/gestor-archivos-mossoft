@@ -186,7 +186,37 @@
                     <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
+            {% elif rol == 'estandar' and chat_estandar_habilitado %}
+            <!-- 3.3 Asistente de Chat (usuarios estándar, solo si un admin lo habilitó) -->
+            <a href="{{ url_for('chat_pagina') }}" class="group card-acento-sky bg-slate-900/80 border border-slate-800 hover:border-sky-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-sky-400 transition-colors">Asistente de Chat</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Crea o consulta tus solicitudes, resuelve dudas frecuentes o pide hablar con un agente, por un menú guiado.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-sky-400">
+                    <span>Abrir asistente</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
             {% endif %}
+
+            <!-- 3.4 Mi Bóveda Personal (todos los roles) -->
+            <a href="{{ url_for('mi_boveda') }}" class="group card-acento-emerald bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-user-lock"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">Mi Bóveda Personal</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Guarda tus propias contraseñas y notas personales, cifradas y privadas — aparte de las institucionales.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                    <span>Abrir mi bóveda</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
 
             {% if rol in ['admin', 'agente', 'gestion_humana'] %}
             <!-- 3.5 Certificación de Devolución de Activos (Admin/Agente/Gestión Humana) -->
