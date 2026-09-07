@@ -247,6 +247,110 @@ def test_mensaje_a_ticket_ya_cerrado_termina_la_conversacion_en_vez_de_comentar(
     conn.close()
 
 
+# 🐛 Hallazgo/pedido reportado por Tomás (07/09/2026, con videos): un ticket creado con "Crear
+# una solicitud de soporte" (sin pasar por "Hablar con un agente humano") nunca entraba a
+# 'esperando_agente', así que aunque un agente (probado con una cuenta 'agente' cualquiera, no
+# solo el admin literal) le respondiera desde Mesa de Ayuda, esa respuesta nunca aparecía en el
+# Asistente de Chat de la colaboradora — se quedaba viendo el menú de siempre. La intención de
+# Tomás es que "cualquier agente o admin que tome un ticket pueda interactuar con el usuario
+# desde el asistente de chat" en ambos sentidos, sin necesidad de haber escalado antes.
+
+def _crear_ticket_via_opcion_1(client, titulo, descripcion="Descripción de prueba."):
+    client.get('/chat/bot/estado')
+    client.post('/chat/bot/enviar', data={'mensaje': '1'})
+    client.post('/chat/bot/enviar', data={'mensaje': 'Otro'})
+    client.post('/chat/bot/enviar', data={'mensaje': titulo})
+    return client.post('/chat/bot/enviar', data={'mensaje': descripcion})
+
+
+def _obtener_ticket_por_titulo(app, usuario, titulo):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, estado FROM tickets WHERE creado_por = ? AND titulo = ?", (usuario, titulo))
+    fila = cur.fetchone()
+    conn.close()
+    return fila
+
+
+def test_respuesta_de_un_agente_en_ticket_no_escalado_aparece_solo_en_el_asistente(client, app, crear_usuario):
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _crear_ticket_via_opcion_1(client, "Impresora sin tóner")
+    ticket_id, _estado = _obtener_ticket_por_titulo(app, usuario, "Impresora sin tóner")
+
+    # Un agente (cuenta cualquiera con rol 'agente', no el admin literal) responde desde Mesa de
+    # Ayuda — el ticket nunca se "tomó" (asignó) explícitamente ni se escaló desde el Asistente.
+    agente = crear_usuario(rol='agente', nombre='Otro Agente')
+    _iniciar_sesion(client, app, agente, 'agente')
+    client.post(f'/tickets/{ticket_id}/comentar', data={'mensaje': '<p>Ya te llevo un repuesto.</p>'})
+
+    _iniciar_sesion(client, app, usuario, 'estandar')
+    r = client.get('/chat/bot/estado')
+
+    mensajes = r.get_json()['mensajes']
+    assert any('Otro Agente' in m['mensaje'] and 'Ya te llevo un repuesto' in m['mensaje'] for m in mensajes)
+    # El aviso de que ya hay respuesta debe quedar como parte de la transcripción.
+    assert any('respondió tu solicitud' in m['mensaje'] for m in mensajes)
+
+
+def test_respuesta_del_usuario_en_ticket_no_escalado_tambien_se_guarda_como_comentario_real(client, app, crear_usuario):
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _crear_ticket_via_opcion_1(client, "Teclado no responde")
+    ticket_id, _estado = _obtener_ticket_por_titulo(app, usuario, "Teclado no responde")
+
+    agente = crear_usuario(rol='agente', nombre='Agente Uno')
+    _iniciar_sesion(client, app, agente, 'agente')
+    client.post(f'/tickets/{ticket_id}/comentar', data={'mensaje': '<p>¿Ya probaste con otro cable?</p>'})
+    _iniciar_sesion(client, app, usuario, 'estandar')
+    client.get('/chat/bot/estado')  # dispara el "enganche" automático a esperando_agente
+
+    r = client.post('/chat/bot/enviar', data={'mensaje': 'Sí, y sigue sin funcionar.'})
+
+    assert r.status_code == 200
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT autor, mensaje FROM tickets_comentarios WHERE ticket_id = ? ORDER BY id DESC LIMIT 1", (ticket_id,))
+    autor, mensaje_html = cur.fetchone()
+    conn.close()
+    assert autor == usuario
+    assert 'sigue sin funcionar' in mensaje_html
+
+
+def test_ticket_sin_respuesta_de_staff_no_activa_solo_el_modo_agente(client, app, crear_usuario):
+    """Sin que ningún agente/admin haya comentado todavía, quedarse en el menú no debe
+    'enganchar' ningún ticket — el Asistente debe seguir comportándose como un menú normal."""
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _crear_ticket_via_opcion_1(client, "Mouse no conecta")
+
+    r = client.post('/chat/bot/enviar', data={'mensaje': '9'})  # opción inválida del menú
+
+    assert 'No reconocí esa opción' in r.get_json()['mensajes'][-1]['mensaje']
+    ticket_id, _estado = _obtener_ticket_por_titulo(app, usuario, "Mouse no conecta")
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM tickets_comentarios WHERE ticket_id = ?", (ticket_id,))
+    assert cur.fetchone()[0] == 0
+    conn.close()
+
+
+def test_ticket_creado_directo_en_mesa_de_ayuda_tambien_se_engancha_si_un_agente_responde(client, app, crear_usuario):
+    """No hace falta que el ticket se haya creado desde el Asistente: cualquier ticket abierto
+    del usuario que reciba una respuesta de soporte debe poder seguirse desde aquí."""
+    from tests.test_tickets import _crear_ticket
+
+    usuario = _preparar_estandar_con_asistente_habilitado(client, app, crear_usuario)
+    _crear_ticket(client, titulo="Ticket creado desde Mesa de Ayuda")
+    ticket_id, _estado = _obtener_ticket_por_titulo(app, usuario, "Ticket creado desde Mesa de Ayuda")
+
+    agente = crear_usuario(rol='agente', nombre='Agente Dos')
+    _iniciar_sesion(client, app, agente, 'agente')
+    client.post(f'/tickets/{ticket_id}/comentar', data={'mensaje': '<p>Quedó asignado a mí.</p>'})
+
+    _iniciar_sesion(client, app, usuario, 'estandar')
+    mensajes = client.get('/chat/bot/estado').get_json()['mensajes']
+
+    assert any('Agente Dos' in m['mensaje'] and 'Quedó asignado a mí' in m['mensaje'] for m in mensajes)
+
+
 def test_elegir_hablar_con_agente_tras_cierre_crea_una_nueva_escalacion(client, app, crear_usuario):
     """Una vez el ticket anterior se cerró, ya no cuenta como 'abierto' — volver a elegir la
     opción de escalar debe crear un caso nuevo en vez de intentar reabrir el cerrado."""
