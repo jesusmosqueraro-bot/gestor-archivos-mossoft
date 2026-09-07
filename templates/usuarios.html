@@ -223,6 +223,15 @@
                                     </button>
                                     {% endif %}
 
+                                    {% if session.get('username') == 'admin' %}
+                                    {# 🕵️ Auditoría de Bóveda Personal (pedido por Tomás): exclusivo del super-admin literal
+                                       'admin', no de cualquier cuenta con rol 'admin' — ver admin_boveda_personal() y el
+                                       candado @superadmin_required. #}
+                                    <a href="{{ url_for('admin_boveda_personal', usuario=u[1]) }}" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Auditoría de Bóveda Personal">
+                                        <i class="fa-solid fa-user-shield"></i>
+                                    </a>
+                                    {% endif %}
+
                                     {% if u[1] != 'admin' and u[1] != session.get('username') and not es_cuenta_protegida %}
                                     <form method="POST" action="{{ url_for('toggle_estado_usuario', usuario_id=u[0]) }}" onsubmit="return confirm('{% if u[4] == 'inactivo' %}¿Desbloquear al usuario {{ u[1] }}?{% else %}¿Bloquear al usuario {{ u[1] }}? No podrá iniciar sesión mientras esté bloqueado.{% endif %}')">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>

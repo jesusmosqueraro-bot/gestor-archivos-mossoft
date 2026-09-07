@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Auditoría de Bóveda Personal</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+</head>
+<body class="pagina-acento-rose bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-rose-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif whitespace-nowrap">
+                <i class="fa-solid fa-user-shield text-rose-400"></i> Auditoría de Bóveda Personal
+            </h1>
+        </div>
+    </nav>
+
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div class="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-xs text-rose-200 flex items-start gap-3">
+            <i class="fa-solid fa-triangle-exclamation text-rose-400 mt-0.5"></i>
+            <p>Panel exclusivo del <strong>super-admin</strong>, para casos de prioridad (por ejemplo, offboarding urgente o una investigación de seguridad). Es de <strong>solo consulta</strong>: no permite crear, editar ni eliminar entradas de la bóveda de otra persona. Cada consulta o revelación queda registrada en el log de auditoría con tu usuario.</p>
+        </div>
+
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
+            <label class="text-xs font-bold text-slate-300 mb-2 block">Buscar usuario</label>
+            <div class="relative">
+                <input type="text" id="input-buscar-usuario" autocomplete="off" placeholder="Escribe un nombre, usuario o cédula..."
+                       class="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-rose-500"
+                       oninput="buscarUsuarios(this.value)">
+                <div id="lista-sugerencias" class="hidden absolute z-20 mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-xl max-h-64 overflow-y-auto"></div>
+            </div>
+        </div>
+
+        <div id="contenedor-resultado" class="hidden space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-base font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-user-lock text-rose-400"></i>
+                    <span id="titulo-usuario-seleccionado"></span>
+                </h2>
+            </div>
+            <div id="lista-items-usuario" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+        </div>
+
+        <div id="mensaje-vacio" class="text-center py-16 text-slate-500">
+            <i class="fa-solid fa-magnifying-glass text-4xl mb-4 opacity-40"></i>
+            <p class="text-sm">Busca a alguien arriba para ver su Bóveda Personal.</p>
+        </div>
+        <div id="mensaje-error" class="hidden bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-xs text-rose-300"></div>
+    </main>
+
+    <!-- MODAL VER NOTA -->
+    <div id="modal-nota" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-md w-full">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold text-white">Nota segura</h2>
+                <button onclick="document.getElementById('modal-nota').classList.add('hidden')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <p id="nota-contenido" class="text-sm text-slate-300 whitespace-pre-wrap"></p>
+        </div>
+    </div>
+
+    <script>
+        let _timeoutBusqueda = null;
+
+        function buscarUsuarios(q) {
+            clearTimeout(_timeoutBusqueda);
+            const cont = document.getElementById('lista-sugerencias');
+            if ((q || '').trim().length < 2) { cont.classList.add('hidden'); cont.innerHTML = ''; return; }
+            _timeoutBusqueda = setTimeout(async () => {
+                const resp = await fetch(`/usuarios/buscar?q=${encodeURIComponent(q)}`);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (!data.resultados.length) {
+                    cont.innerHTML = '<p class="text-xs text-slate-500 px-4 py-3">Sin resultados.</p>';
+                    cont.classList.remove('hidden');
+                    return;
+                }
+                cont.innerHTML = data.resultados.map(u => `
+                    <button type="button" onclick='seleccionarUsuario(${JSON.stringify(u.usuario)}, ${JSON.stringify(u.nombre)})'
+                            class="w-full text-left px-4 py-2.5 hover:bg-slate-700/60 border-b border-slate-700/40 last:border-0">
+                        <div class="text-sm font-semibold text-white">${u.nombre}</div>
+                        <div class="text-[11px] text-slate-500">${u.usuario}${u.cedula ? ' · ' + u.cedula : ''}</div>
+                    </button>
+                `).join('');
+                cont.classList.remove('hidden');
+            }, 250);
+        }
+
+        function seleccionarUsuario(usuario, nombre) {
+            document.getElementById('input-buscar-usuario').value = `${nombre} (${usuario})`;
+            document.getElementById('lista-sugerencias').classList.add('hidden');
+            cargarBovedaDe(usuario);
+        }
+
+        async function cargarBovedaDe(usuario) {
+            document.getElementById('mensaje-error').classList.add('hidden');
+            document.getElementById('mensaje-vacio').classList.add('hidden');
+            document.getElementById('contenedor-resultado').classList.add('hidden');
+
+            const resp = await fetch(`/admin/boveda_personal/${encodeURIComponent(usuario)}/items`);
+            const data = await resp.json();
+            if (!resp.ok) {
+                const el = document.getElementById('mensaje-error');
+                el.textContent = data.error || 'No se pudo cargar la bóveda de este usuario.';
+                el.classList.remove('hidden');
+                return;
+            }
+
+            document.getElementById('titulo-usuario-seleccionado').textContent = `Bóveda Personal de ${data.nombre} (${data.usuario})`;
+            const cont = document.getElementById('lista-items-usuario');
+            if (!data.items.length) {
+                cont.innerHTML = '<p class="text-sm text-slate-500 col-span-2 py-6 text-center">Esta persona no ha guardado ninguna contraseña o nota personal.</p>';
+            } else {
+                cont.innerHTML = data.items.map(item => `
+                    <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col gap-3">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <h3 class="font-bold text-white text-sm truncate" title="${item.servicio}">${item.servicio}</h3>
+                                ${!item.es_nota ? `<p class="text-[11px] text-slate-400 truncate">${item.usuario || ''}</p>` : ''}
+                            </div>
+                            <span class="shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg ${item.es_nota ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'}">
+                                ${item.es_nota ? 'Nota segura' : 'Credencial'}
+                            </span>
+                        </div>
+                        ${item.es_nota
+                            ? `<button onclick="verNota(${item.id})" class="text-xs bg-slate-900/60 hover:bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-center gap-2 text-slate-300">
+                                   <i class="fa-regular fa-eye"></i> Ver contenido
+                               </button>`
+                            : `<div class="flex items-center gap-2">
+                                   <input type="password" value="••••••••••" readonly id="pass-${item.id}" class="flex-1 bg-slate-900/60 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-300">
+                                   <button onclick="toggleClave(${item.id})" title="Ver clave" class="p-2 text-slate-400 hover:text-rose-400"><i class="fa-regular fa-eye" id="icon-${item.id}"></i></button>
+                                   <button onclick="copiarClave(${item.id})" title="Copiar" class="p-2 text-slate-400 hover:text-rose-400"><i class="fa-regular fa-copy"></i></button>
+                               </div>`}
+                        ${item.notas ? `<p class="text-[11px] text-slate-500">${item.notas}</p>` : ''}
+                    </div>
+                `).join('');
+            }
+            document.getElementById('contenedor-resultado').classList.remove('hidden');
+        }
+
+        async function revelar(credId, accion) {
+            const resp = await fetch(`/mi_boveda/${credId}/revelar`, {
+                method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: `accion=${accion}`
+            });
+            if (!resp.ok) { alert('No se pudo revelar esta entrada.'); return null; }
+            return resp.json();
+        }
+
+        async function toggleClave(credId) {
+            const input = document.getElementById(`pass-${credId}`);
+            const icon = document.getElementById(`icon-${credId}`);
+            if (input.type === 'password') {
+                const data = await revelar(credId, 'ver');
+                if (!data) return;
+                input.value = data.password;
+                input.type = 'text';
+                icon.className = 'fa-regular fa-eye-slash';
+            } else {
+                input.type = 'password';
+                input.value = '••••••••••';
+                icon.className = 'fa-regular fa-eye';
+            }
+        }
+
+        async function copiarClave(credId) {
+            const data = await revelar(credId, 'copiar');
+            if (!data) return;
+            await navigator.clipboard.writeText(data.password);
+            alert('Contraseña copiada al portapapeles.');
+        }
+
+        async function verNota(credId) {
+            const data = await revelar(credId, 'ver');
+            if (!data) return;
+            document.getElementById('nota-contenido').textContent = data.contenido;
+            document.getElementById('modal-nota').classList.remove('hidden');
+        }
+
+        {% if usuario_buscado %}
+        cargarBovedaDe({{ usuario_buscado | tojson }});
+        document.getElementById('input-buscar-usuario').value = {{ usuario_buscado | tojson }};
+        {% endif %}
+    </script>
+</body>
+</html>
