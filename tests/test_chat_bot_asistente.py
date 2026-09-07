@@ -240,11 +240,15 @@ def test_escalar_a_agente_humano_crea_ticket_de_prioridad_alta(client, app, crea
     client.post('/chat/bot/enviar', data={'mensaje': '4'})
     r = client.post('/chat/bot/enviar', data={'mensaje': 'El sistema no me deja entrar, es urgente.'})
 
-    assert 'prioridad alta' in r.get_json()['mensajes'][-2]['mensaje']
+    # Ya no vuelve al menú de inmediato: se queda "esperando_agente" — la conversación sigue
+    # ahí mismo en vez de darse por terminada (ver test_chat_en_vivo_con_agente.py).
+    assert 'prioridad alta' in r.get_json()['mensajes'][-1]['mensaje']
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    cur.execute("SELECT prioridad FROM tickets WHERE titulo = 'Escalado desde el Asistente de Chat'")
-    assert cur.fetchone()[0] == 'Alta'
+    cur.execute("SELECT prioridad, estado FROM tickets WHERE titulo = 'Escalado desde el Asistente de Chat'")
+    prioridad, estado = cur.fetchone()
+    assert prioridad == 'Alta'
+    assert estado == 'Abierto'
     conn.close()
 
 
