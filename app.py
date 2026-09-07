@@ -853,6 +853,33 @@ def init_db():
                 favorito BOOLEAN NOT NULL DEFAULT FALSE, anclado BOOLEAN NOT NULL DEFAULT FALSE,
                 PRIMARY KEY (usuario_dueno, contacto)
             )''')
+            # ⚙️ Configuración general de la app (interruptores tipo llave/valor administrados
+            # por un admin) — a diferencia de la config de respaldos (que vive en un archivo
+            # JSON en el disco persistente, no siempre montado), esto vive en la base de datos
+            # para que un interruptor como "chat_estandar_habilitado" nunca dependa de que el
+            # disco de Render esté disponible. Ver _config_app_valor/_guardar_config_app.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS configuracion_app (
+                clave VARCHAR(100) PRIMARY KEY, valor TEXT
+            )''')
+            # 🤖 Asistente de Chat guiado por menú para usuarios estándar (pedido por Tomás,
+            # inspirado en el bot de WhatsApp de Satena): a diferencia del Chat Interno libre de
+            # admin/agente (chat_mensajes), un usuario estándar no conversa con otra persona —
+            # avanza por un árbol de opciones que este backend controla. Una fila por usuario
+            # (la conversación "activa" de esa persona); reiniciar_conversacion_bot la reemplaza
+            # por una fila nueva en 'menu'. Ver _bot_procesar_entrada/_bot_evaluar_inactividad.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_bot_sesiones (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) UNIQUE NOT NULL, estado VARCHAR(40) NOT NULL DEFAULT 'menu',
+                contexto TEXT, fecha_inicio VARCHAR(100) NOT NULL, fecha_ultima_actividad VARCHAR(100) NOT NULL,
+                recordatorios_enviados INTEGER DEFAULT 0, cerrada BOOLEAN DEFAULT FALSE
+            )''')
+            # 💬 Transcripción del asistente (lo que ve la persona en su pantalla): un mensaje
+            # por fila, 'autor' es 'bot' o 'usuario'. 'opciones' guarda en JSON las opciones de
+            # menú que acompañaron a un mensaje del bot (para poder repintar los botones de
+            # respuesta rápida si la página se recarga a mitad de la conversación).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_bot_mensajes (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, autor VARCHAR(10) NOT NULL,
+                mensaje TEXT NOT NULL, opciones TEXT, fecha VARCHAR(100) NOT NULL
+            )''')
             conn.commit()
 
             for col_query in [
@@ -1246,6 +1273,21 @@ def init_db():
                 usuario_dueno TEXT NOT NULL, contacto TEXT NOT NULL,
                 favorito INTEGER NOT NULL DEFAULT 0, anclado INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (usuario_dueno, contacto)
+            )''')
+            # ⚙️ Configuración general de la app. Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS configuracion_app (
+                clave TEXT PRIMARY KEY, valor TEXT
+            )''')
+            # 🤖 Asistente de Chat guiado por menú (usuarios estándar). Ver comentario
+            # equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_bot_sesiones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, estado TEXT NOT NULL DEFAULT 'menu',
+                contexto TEXT, fecha_inicio TEXT NOT NULL, fecha_ultima_actividad TEXT NOT NULL,
+                recordatorios_enviados INTEGER DEFAULT 0, cerrada INTEGER DEFAULT 0
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS chat_bot_mensajes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, autor TEXT NOT NULL,
+                mensaje TEXT NOT NULL, opciones TEXT, fecha TEXT NOT NULL
             )''')
 
             for col_sql in ["categoria", "tipo", "tags", "vistas", "descargas", "estado"]:
@@ -2479,6 +2521,57 @@ def _guardar_config_respaldo_automatico(config):
     except Exception as e:
         print(f"⚠️ No se pudo guardar la configuración de respaldo automático: {e}")
         return False
+
+
+# ⚙️ Interruptores generales de la app (tabla configuracion_app) — a propósito en base de
+# datos y no en un archivo (como el de arriba), para que un interruptor de permisos como
+# CLAVE_CHAT_ESTANDAR nunca dependa de que el disco persistente de Render esté montado.
+CLAVE_CHAT_ESTANDAR = 'chat_estandar_habilitado'
+
+
+def _config_app_valor(clave, default=None):
+    """Lee un valor de configuración general guardado en configuracion_app. Devuelve 'default'
+    si la clave no existe todavía o si algo falla (nunca debe tumbar la página que lo llama)."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT valor FROM configuracion_app WHERE clave = %s" if db_type == 'postgres' else "SELECT valor FROM configuracion_app WHERE clave = ?"
+        cursor.execute(q, (clave,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception as e:
+        print(f"⚠️ Error leyendo configuración '{clave}': {e}")
+        return default
+
+
+def _guardar_config_app(clave, valor):
+    """Guarda (crea o reemplaza) un valor de configuración general. Devuelve True/False."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        if db_type == 'postgres':
+            q = "INSERT INTO configuracion_app (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor"
+            cursor.execute(q, (clave, valor))
+        else:
+            cursor.execute("SELECT 1 FROM configuracion_app WHERE clave = ?", (clave,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE configuracion_app SET valor = ? WHERE clave = ?", (valor, clave))
+            else:
+                cursor.execute("INSERT INTO configuracion_app (clave, valor) VALUES (?, ?)", (clave, valor))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Error guardando configuración '{clave}': {e}")
+        return False
+
+
+def _chat_estandar_habilitado():
+    """True si un admin habilitó el asistente de Chat (por menú, ver módulo del bot más abajo)
+    para las cuentas con rol 'estandar'. Apagado por defecto: hasta que un admin lo prenda a
+    propósito desde /chat, ningún usuario estándar ve el Chat en su Bienvenida."""
+    return _config_app_valor(CLAVE_CHAT_ESTANDAR, '0') == '1'
 
 
 def _ultimo_respaldo_automatico_ts():
@@ -4313,17 +4406,31 @@ def _chat_marcar_canal_visto(usuario):
 
 @app.route('/chat')
 @login_required
-@agente_o_admin_required
 def chat_pagina():
+    rol_actual = session.get('rol')
     usuario_actual = session.get('username')
+
+    # 🤖 Usuario 'estandar': NUNCA entra al Chat Interno libre de arriba (contactos, canal,
+    # directos siguen exclusivos de admin/agente) — en su lugar ve el Asistente guiado por
+    # menú (ver módulo del bot más abajo), y solo si un admin lo habilitó a propósito para
+    # todo el rol (interruptor CLAVE_CHAT_ESTANDAR) — ver chat_permiso_estandar().
+    if rol_actual not in ROLES_CON_ACCESO_OPERATIVO:
+        if rol_actual != 'estandar':
+            return redirect(url_for('bienvenida'))
+        habilitado = _chat_estandar_habilitado()
+        if habilitado:
+            _bot_obtener_o_crear_sesion(usuario_actual)
+        return render_template('chat_bot.html', username=usuario_actual, habilitado=habilitado)
+
     contactos = _usuarios_operativos_activos(excluir=usuario_actual)
     _aplicar_preferencias_chat(contactos, usuario_actual)
     # 📌 Anclados siempre arriba de todo (sort estable: no cambia el orden alfabético entre
     # ellos ni entre el resto — ver _usuarios_operativos_activos).
     contactos.sort(key=lambda c: c['anclado'], reverse=True)
-    return render_template('chat.html', username=usuario_actual, rol=session.get('rol'),
+    return render_template('chat.html', username=usuario_actual, rol=rol_actual,
                             contactos=contactos,
-                            con=(request.args.get('con') or '').strip())
+                            con=(request.args.get('con') or '').strip(),
+                            chat_estandar_habilitado=_chat_estandar_habilitado())
 
 
 @app.route('/chat/contactos/preferencia', methods=['POST'])
@@ -4569,6 +4676,442 @@ def chat_directo_enviar(usuario):
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario}")
     _emitir_evento_tiempo_real('chat_directo_mensaje', payload_directo, room=f"usuario_{usuario_actual}")
     return jsonify({'success': True})
+
+
+@app.route('/chat/permiso_estandar', methods=['POST'])
+@login_required
+@admin_required
+def chat_permiso_estandar():
+    """Interruptor general (pedido por Tomás): un admin prende/apaga, para TODAS las cuentas
+    'estandar' a la vez, el acceso al Asistente de Chat guiado por menú. No es por usuario —
+    es de fábrica una sola llave que aplica al rol completo (ver _chat_estandar_habilitado /
+    CLAVE_CHAT_ESTANDAR)."""
+    habilitar = (request.form.get('habilitar', '').strip() == '1')
+    if _guardar_config_app(CLAVE_CHAT_ESTANDAR, '1' if habilitar else '0'):
+        registrar_log(session.get('username'), "Configuración de Chat",
+                      f"Se {'habilitó' if habilitar else 'deshabilitó'} el Asistente de Chat para los usuarios estándar.")
+        flash(f"El Asistente de Chat quedó {'habilitado' if habilitar else 'deshabilitado'} para los usuarios estándar.", 'exito')
+    else:
+        flash('No se pudo guardar el cambio. Intenta de nuevo.', 'error')
+    return redirect(url_for('chat_pagina'))
+
+
+# 🤖 ASISTENTE DE CHAT GUIADO POR MENÚ (usuarios estándar) --------------------------------
+# Pedido por Tomás (con referencia al bot de WhatsApp de un ejemplo externo): a diferencia del
+# Chat Interno libre de arriba (persona a persona, exclusivo de admin/agente), un usuario
+# 'estandar' no conversa con otra persona real — avanza por un árbol de opciones fijo que este
+# backend controla, con recordatorios y cierre automático si deja de responder. Todo vive en
+# chat_bot_sesiones (una fila = la conversación activa de una persona) y chat_bot_mensajes (la
+# transcripción que ve en pantalla). Ver chat_pagina() para cómo se llega aquí, y
+# chat_permiso_estandar() para el interruptor general que un admin puede apagar en cualquier
+# momento.
+BOT_MINUTOS_INACTIVIDAD = 2
+BOT_MAX_RECORDATORIOS = 3
+BOT_MENSAJE_RECORDATORIO = 'Por favor, ingrese la información solicitada.'
+BOT_MENSAJE_CIERRE = ("Entendemos que quizás se encuentre ocupado por lo que no ha podido responder. Por ahora, "
+                      "cerraremos esta conversación, pero recuerda que siempre puedes escribirme de nuevo para "
+                      "empezar una nueva. Si aún necesitas ayuda no dudes en escribir nuevamente.")
+BOT_OPCIONES_MENU = [
+    'Crear una solicitud de soporte',
+    'Consultar mis solicitudes',
+    'Preguntas frecuentes',
+    'Hablar con un agente humano',
+]
+
+
+def _bot_numerar(lista):
+    return "\n".join(f"{i + 1}. {texto}" for i, texto in enumerate(lista))
+
+
+def _bot_texto_menu_principal(saludo=True):
+    encabezado = "¡Hola! Soy el Asistente de Arkiv. " if saludo else ""
+    mensaje = (
+        f"{encabezado}Selecciona una de las siguientes opciones:\n\n{_bot_numerar(BOT_OPCIONES_MENU)}\n\n"
+        "Nota: si deseas regresar al menú anterior escribe la palabra 'volver'."
+    )
+    return mensaje, list(BOT_OPCIONES_MENU)
+
+
+def _bot_normalizar_eleccion(texto, opciones):
+    """Empareja lo que escribió/tocó la persona (un número, o el texto de la opción) contra la
+    lista de opciones vigente. Devuelve el índice (0-based) o None si no reconoce nada."""
+    t = (texto or '').strip().lower()
+    if not t or not opciones:
+        return None
+    if t.isdigit():
+        n = int(t)
+        if 1 <= n <= len(opciones):
+            return n - 1
+        return None
+    for i, op in enumerate(opciones):
+        if (op or '').strip().lower() == t:
+            return i
+    for i, op in enumerate(opciones):
+        if t in (op or '').strip().lower():
+            return i
+    return None
+
+
+def _bot_obtener_o_crear_sesion(usuario):
+    """Trae la conversación activa de 'usuario' (la crea, con el saludo inicial, si es la
+    primera vez que entra o si nunca se ha guardado ninguna)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = "SELECT estado, contexto, fecha_ultima_actividad, recordatorios_enviados, cerrada FROM chat_bot_sesiones WHERE usuario = %s" if db_type == 'postgres' else "SELECT estado, contexto, fecha_ultima_actividad, recordatorios_enviados, cerrada FROM chat_bot_sesiones WHERE usuario = ?"
+    cursor.execute(q, (usuario,))
+    row = cursor.fetchone()
+    if row:
+        conn.close()
+        try:
+            contexto = json.loads(row[1]) if row[1] else {}
+        except Exception:
+            contexto = {}
+        return {'estado': row[0], 'contexto': contexto, 'fecha_ultima_actividad': row[2],
+                'recordatorios_enviados': row[3] or 0, 'cerrada': bool(row[4])}
+
+    fecha_act = obtener_fecha_actual()
+    q_ins = "INSERT INTO chat_bot_sesiones (usuario, estado, contexto, fecha_inicio, fecha_ultima_actividad) VALUES (%s, 'menu', '{}', %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_bot_sesiones (usuario, estado, contexto, fecha_inicio, fecha_ultima_actividad) VALUES (?, 'menu', '{}', ?, ?)"
+    cursor.execute(q_ins, (usuario, fecha_act, fecha_act))
+    conn.commit()
+    conn.close()
+    mensaje, opciones = _bot_texto_menu_principal(saludo=True)
+    _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+    return {'estado': 'menu', 'contexto': {}, 'fecha_ultima_actividad': fecha_act, 'recordatorios_enviados': 0, 'cerrada': False}
+
+
+def _bot_fijar_estado(usuario, estado, contexto=None):
+    """Avanza la conversación a 'estado' y reinicia el reloj de inactividad/recordatorios —
+    tanto si quien avanzó fue la persona (respondió algo) como el propio bot (acaba de hacer
+    una pregunta nueva): en ambos casos el conteo de inactividad debe empezar de cero otra vez."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    fecha_act = obtener_fecha_actual()
+    contexto_json = json.dumps(contexto or {}, ensure_ascii=False)
+    q = ("UPDATE chat_bot_sesiones SET estado = %s, contexto = %s, fecha_ultima_actividad = %s, recordatorios_enviados = 0, cerrada = FALSE WHERE usuario = %s" if db_type == 'postgres'
+         else "UPDATE chat_bot_sesiones SET estado = ?, contexto = ?, fecha_ultima_actividad = ?, recordatorios_enviados = 0, cerrada = 0 WHERE usuario = ?")
+    cursor.execute(q, (estado, contexto_json, fecha_act, usuario))
+    conn.commit()
+    conn.close()
+
+
+def _bot_tocar_actividad(usuario, incrementar_recordatorio=False):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    fecha_act = obtener_fecha_actual()
+    if incrementar_recordatorio:
+        q = "UPDATE chat_bot_sesiones SET fecha_ultima_actividad = %s, recordatorios_enviados = COALESCE(recordatorios_enviados, 0) + 1 WHERE usuario = %s" if db_type == 'postgres' else "UPDATE chat_bot_sesiones SET fecha_ultima_actividad = ?, recordatorios_enviados = COALESCE(recordatorios_enviados, 0) + 1 WHERE usuario = ?"
+    else:
+        q = "UPDATE chat_bot_sesiones SET fecha_ultima_actividad = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE chat_bot_sesiones SET fecha_ultima_actividad = ? WHERE usuario = ?"
+    cursor.execute(q, (fecha_act, usuario))
+    conn.commit()
+    conn.close()
+
+
+def _bot_marcar_cerrada(usuario):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = "UPDATE chat_bot_sesiones SET cerrada = TRUE WHERE usuario = %s" if db_type == 'postgres' else "UPDATE chat_bot_sesiones SET cerrada = 1 WHERE usuario = ?"
+    cursor.execute(q, (usuario,))
+    conn.commit()
+    conn.close()
+
+
+def _bot_agregar_mensaje(usuario, autor, mensaje, opciones=None):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    opciones_json = json.dumps(opciones, ensure_ascii=False) if opciones else None
+    q = "INSERT INTO chat_bot_mensajes (usuario, autor, mensaje, opciones, fecha) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO chat_bot_mensajes (usuario, autor, mensaje, opciones, fecha) VALUES (?, ?, ?, ?, ?)"
+    cursor.execute(q, (usuario, autor, mensaje, opciones_json, obtener_fecha_actual()))
+    conn.commit()
+    conn.close()
+
+
+def _bot_transcripcion(usuario, limite=100):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = ("SELECT id, autor, mensaje, opciones, fecha FROM (SELECT id, autor, mensaje, opciones, fecha FROM chat_bot_mensajes WHERE usuario = %s ORDER BY id DESC LIMIT %s) t ORDER BY id ASC" if db_type == 'postgres'
+         else "SELECT id, autor, mensaje, opciones, fecha FROM (SELECT id, autor, mensaje, opciones, fecha FROM chat_bot_mensajes WHERE usuario = ? ORDER BY id DESC LIMIT ?) t ORDER BY id ASC")
+    cursor.execute(q, (usuario, limite))
+    filas = cursor.fetchall()
+    conn.close()
+    mensajes = []
+    for mid, autor, mensaje, opciones_json, fecha in filas:
+        try:
+            opciones = json.loads(opciones_json) if opciones_json else None
+        except Exception:
+            opciones = None
+        mensajes.append({'id': mid, 'autor': autor, 'mensaje': mensaje, 'opciones': opciones, 'fecha': fecha})
+    return mensajes
+
+
+def _bot_texto_mis_tickets(usuario):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT id, titulo, tipo, estado, fecha_creacion FROM tickets WHERE creado_por = %s AND COALESCE(eliminado, 0) = 0 ORDER BY id DESC LIMIT 5" if db_type == 'postgres' else "SELECT id, titulo, tipo, estado, fecha_creacion FROM tickets WHERE creado_por = ? AND COALESCE(eliminado, 0) = 0 ORDER BY id DESC LIMIT 5"
+        cursor.execute(q, (usuario,))
+        filas = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando tickets del asistente para '{usuario}': {e}")
+        filas = []
+    if not filas:
+        return "Todavía no tienes solicitudes registradas. Elige 'Crear una solicitud de soporte' en el menú para crear la primera."
+    lineas = [f"{_codigo_ticket(tipo, id_, fecha)} — {titulo} ({estado})" for id_, titulo, tipo, estado, fecha in filas]
+    return "Tus últimas solicitudes:\n\n" + "\n".join(lineas)
+
+
+def _bot_articulos_faq(limite=8):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT id, titulo, descripcion FROM conocimiento_articulos WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC LIMIT %s" if db_type == 'postgres' else "SELECT id, titulo, descripcion FROM conocimiento_articulos WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY id DESC LIMIT ?"
+        cursor.execute(q, (limite,))
+        filas = cursor.fetchall()
+        conn.close()
+        return [{'id': r[0], 'titulo': r[1], 'descripcion': r[2] or ''} for r in filas]
+    except Exception as e:
+        print(f"⚠️ Error listando artículos de conocimiento para el asistente: {e}")
+        return []
+
+
+def _bot_crear_ticket(usuario, categoria, titulo, descripcion_texto, prioridad='Media'):
+    """Versión simplificada (sin adjuntos/activo relacionado/solicitante en nombre de otro,
+    nada de eso aplica desde el asistente) de la creación de tickets de crear_ticket(), para
+    que una solicitud armada por el Asistente de Chat tenga el mismo SLA, auto-asignación y
+    notificaciones que una creada por el formulario normal de Mesa de Ayuda."""
+    nombres_categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+    if categoria not in nombres_categorias:
+        categoria = 'Otro' if 'Otro' in nombres_categorias else nombres_categorias[0]
+    descripcion = _sanitizar_html_enriquecido((descripcion_texto or '').strip()[:4000]) or '(sin descripción adicional)'
+    titulo = (titulo or 'Solicitud desde el Asistente de Chat').strip()[:200]
+    fecha_act = obtener_fecha_actual()
+
+    horas_sla = SLA_HORAS_POR_PRIORIDAD.get(prioridad, SLA_HORAS_POR_PRIORIDAD['Media'])
+    sla_respuesta_limite = _calcular_limite_sla(fecha_act, horas_sla['respuesta'])
+    sla_resolucion_limite = _calcular_limite_sla(fecha_act, horas_sla['resolucion'])
+
+    asignado_auto = None
+    for cfg in _config_ticket_lista('categoria'):
+        if cfg['nombre'] == categoria and cfg.get('responsable'):
+            asignado_auto = cfg['responsable']
+            break
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        if db_type == 'postgres':
+            q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (%s, %s, 'Incidente', %s, %s, 'Abierto', %s, %s, %s, %s, %s, %s, 0) RETURNING id"
+            cursor.execute(q_ins, (titulo, descripcion, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
+            nuevo_id = cursor.fetchone()[0]
+        else:
+            q_ins = "INSERT INTO tickets (titulo, descripcion, tipo, categoria, prioridad, estado, creado_por, asignado_a, fecha_creacion, fecha_actualizacion, sla_respuesta_limite, sla_resolucion_limite, sla_modificaciones) VALUES (?, ?, 'Incidente', ?, ?, 'Abierto', ?, ?, ?, ?, ?, ?, 0)"
+            cursor.execute(q_ins, (titulo, descripcion, categoria, prioridad, usuario, asignado_auto, fecha_act, fecha_act, sla_respuesta_limite, sla_resolucion_limite))
+            nuevo_id = cursor.lastrowid
+        conn.commit()
+        registrar_log(usuario, "Solicitud de Soporte Creada",
+                      f"Nuevo ticket desde el Asistente de Chat: '{titulo}' [{categoria}/{prioridad}]" + (f" — auto-asignado a {asignado_auto}" if asignado_auto else ""))
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error creando ticket desde el asistente para '{usuario}': {e}")
+        return None
+    conn.close()
+
+    codigo = _codigo_ticket('Incidente', nuevo_id, fecha_act)
+    url_ticket = url_for('ver_ticket', ticket_id=nuevo_id)
+    cuerpo_soporte = f"Se creó una nueva solicitud {codigo} ('{titulo}') desde el Asistente de Chat — {categoria} / prioridad {prioridad}.\nCreada por: {usuario}.\n\n---\nArkiv"
+    if asignado_auto:
+        crear_notificacion(asignado_auto, f"Nueva solicitud {codigo} asignada a ti (desde el Asistente de Chat): '{titulo}'", url=url_ticket)
+        correo_asignado = _correo_de_usuario(asignado_auto)
+        if correo_asignado:
+            threading.Thread(target=enviar_correo_ticket, args=(correo_asignado, f"[Arkiv] Nueva solicitud {codigo}", cuerpo_soporte)).start()
+    else:
+        equipo = _equipo_soporte_activo()
+        crear_notificacion_para_varios([m['usuario'] for m in equipo], f"Nueva solicitud {codigo} (desde el Asistente de Chat): '{titulo}'", url=url_ticket)
+        for miembro in equipo:
+            if miembro['correo']:
+                threading.Thread(target=enviar_correo_ticket, args=(miembro['correo'], f"[Arkiv] Nueva solicitud {codigo}", cuerpo_soporte)).start()
+    correo_creador = _correo_de_usuario(usuario)
+    if correo_creador:
+        cuerpo_creador = f"Hola,\n\nRecibimos tu solicitud de soporte {codigo} ('{titulo}') a través del Asistente de Chat.\n\n---\nEquipo de Soporte TI - Arkiv"
+        threading.Thread(target=enviar_correo_ticket, args=(correo_creador, f"[Arkiv] Recibimos tu solicitud {codigo}", cuerpo_creador)).start()
+    return codigo
+
+
+def _bot_procesar_entrada(usuario, texto_entrada):
+    """El árbol de conversación completo. Guarda el mensaje de la persona, decide la
+    respuesta según en qué paso estaba, la guarda también, y deja la sesión lista para el
+    siguiente turno. No devuelve nada — quien llama vuelve a leer la transcripción con
+    _bot_transcripcion()."""
+    texto = (texto_entrada or '').strip()
+    if not texto:
+        return
+    sesion = _bot_obtener_o_crear_sesion(usuario)
+    _bot_agregar_mensaje(usuario, 'usuario', texto)
+
+    # 🔙 "volver" regresa al menú principal desde cualquier punto de la conversación.
+    if texto.lower() == 'volver' and sesion['estado'] not in ('menu', 'cerrada'):
+        _bot_fijar_estado(usuario, 'menu', {})
+        mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+        _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+        return
+
+    estado = sesion['estado']
+    contexto = sesion['contexto'] or {}
+
+    if estado in ('menu', 'cerrada'):
+        idx = _bot_normalizar_eleccion(texto, BOT_OPCIONES_MENU)
+        if idx == 0:
+            categorias = [c['nombre'] for c in _config_ticket_lista('categoria')] or CATEGORIAS_TICKET
+            _bot_fijar_estado(usuario, 'crear_ticket_categoria', {'categorias': categorias})
+            mensaje = f"¿Sobre qué categoría es tu solicitud?\n\n{_bot_numerar(categorias)}\n\nEscribe 'volver' para regresar al menú anterior."
+            _bot_agregar_mensaje(usuario, 'bot', mensaje, categorias)
+        elif idx == 1:
+            _bot_agregar_mensaje(usuario, 'bot', _bot_texto_mis_tickets(usuario))
+            _bot_fijar_estado(usuario, 'menu', {})
+            mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+            _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+        elif idx == 2:
+            articulos = _bot_articulos_faq()
+            if not articulos:
+                _bot_agregar_mensaje(usuario, 'bot', 'Por ahora no hay artículos publicados en la Base de Conocimiento.')
+                _bot_fijar_estado(usuario, 'menu', {})
+                mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+                _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+            else:
+                titulos = [a['titulo'] for a in articulos]
+                _bot_fijar_estado(usuario, 'faq_lista', {'articulos': articulos})
+                mensaje = f"¿Sobre qué tema necesitas ayuda?\n\n{_bot_numerar(titulos)}\n\nEscribe 'volver' para regresar al menú anterior."
+                _bot_agregar_mensaje(usuario, 'bot', mensaje, titulos)
+        elif idx == 3:
+            _bot_fijar_estado(usuario, 'escalar_descripcion', {})
+            _bot_agregar_mensaje(usuario, 'bot', "Cuéntame brevemente qué necesitas y un agente humano revisará tu caso cuanto antes. Escribe 'volver' para cancelar.")
+        else:
+            mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+            _bot_agregar_mensaje(usuario, 'bot', "No reconocí esa opción. " + mensaje, opciones)
+        return
+
+    if estado == 'crear_ticket_categoria':
+        categorias = contexto.get('categorias', [])
+        idx = _bot_normalizar_eleccion(texto, categorias)
+        if idx is None:
+            _bot_agregar_mensaje(usuario, 'bot', "No reconocí esa categoría. Elige un número de la lista, o escribe 'volver'.", categorias)
+            return
+        contexto['categoria'] = categorias[idx]
+        _bot_fijar_estado(usuario, 'crear_ticket_titulo', contexto)
+        _bot_agregar_mensaje(usuario, 'bot', "Cuéntame en pocas palabras el título de tu solicitud.")
+        return
+
+    if estado == 'crear_ticket_titulo':
+        contexto['titulo'] = texto[:200]
+        _bot_fijar_estado(usuario, 'crear_ticket_descripcion', contexto)
+        _bot_agregar_mensaje(usuario, 'bot', "Ahora descríbeme con un poco más de detalle qué necesitas.")
+        return
+
+    if estado == 'crear_ticket_descripcion':
+        codigo = _bot_crear_ticket(usuario, contexto.get('categoria', 'Otro'), contexto.get('titulo'), texto, prioridad='Media')
+        _bot_fijar_estado(usuario, 'menu', {})
+        if codigo:
+            _bot_agregar_mensaje(usuario, 'bot', f"Listo, tu solicitud {codigo} quedó registrada. Un agente la atenderá pronto.")
+        else:
+            _bot_agregar_mensaje(usuario, 'bot', "No pude registrar tu solicitud por un error interno. Intenta de nuevo en un momento, o créala directamente desde Mesa de Ayuda.")
+        mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+        _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+        return
+
+    if estado == 'escalar_descripcion':
+        codigo = _bot_crear_ticket(usuario, 'Otro', 'Escalado desde el Asistente de Chat', texto, prioridad='Alta')
+        _bot_fijar_estado(usuario, 'menu', {})
+        if codigo:
+            _bot_agregar_mensaje(usuario, 'bot', f"Entendido. Registré tu caso como {codigo} con prioridad alta para que un agente humano lo revise cuanto antes.")
+        else:
+            _bot_agregar_mensaje(usuario, 'bot', "No pude escalar tu caso por un error interno. Intenta de nuevo en un momento, o créalo directamente desde Mesa de Ayuda.")
+        mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+        _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+        return
+
+    if estado == 'faq_lista':
+        articulos = contexto.get('articulos', [])
+        titulos = [a['titulo'] for a in articulos]
+        idx = _bot_normalizar_eleccion(texto, titulos)
+        if idx is None:
+            _bot_agregar_mensaje(usuario, 'bot', "No reconocí esa opción. Elige un número de la lista, o escribe 'volver'.", titulos)
+            return
+        articulo = articulos[idx]
+        respuesta = f"{articulo['titulo']}\n\n{articulo.get('descripcion') or 'No hay una descripción adicional para este artículo.'}"
+        _bot_agregar_mensaje(usuario, 'bot', respuesta)
+        _bot_fijar_estado(usuario, 'menu', {})
+        mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+        _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+        return
+
+    # Estado desconocido (no debería pasar nunca) — no deja a la persona sin salida.
+    _bot_fijar_estado(usuario, 'menu', {})
+    mensaje, opciones = _bot_texto_menu_principal(saludo=False)
+    _bot_agregar_mensaje(usuario, 'bot', mensaje, opciones)
+
+
+def _bot_evaluar_inactividad(usuario):
+    """Se llama en cada sondeo de la pantalla del Asistente (mientras la persona la tenga
+    abierta): si lleva BOT_MINUTOS_INACTIVIDAD minutos sin responder, empuja un recordatorio;
+    al llegar a BOT_MAX_RECORDATORIOS sin respuesta, cierra la conversación con un mensaje de
+    despedida — el mismo patrón del bot de WhatsApp que sirvió de referencia. No hay un
+    temporizador de fondo aparte: si la persona cierra la pestaña, el recordatorio/cierre
+    simplemente espera a que alguien vuelva a consultar el estado."""
+    sesion = _bot_obtener_o_crear_sesion(usuario)
+    if sesion['cerrada']:
+        return
+    ultima = _parsear_fecha_ticket(sesion['fecha_ultima_actividad']) or datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    ahora = datetime.now(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
+    minutos_inactivo = (ahora - ultima).total_seconds() / 60
+    if minutos_inactivo < BOT_MINUTOS_INACTIVIDAD:
+        return
+
+    if (sesion['recordatorios_enviados'] or 0) >= BOT_MAX_RECORDATORIOS:
+        _bot_agregar_mensaje(usuario, 'bot', BOT_MENSAJE_CIERRE)
+        _bot_marcar_cerrada(usuario)
+        return
+
+    _bot_agregar_mensaje(usuario, 'bot', BOT_MENSAJE_RECORDATORIO)
+    _bot_tocar_actividad(usuario, incrementar_recordatorio=True)
+
+
+@app.route('/chat/bot/estado')
+@login_required
+def chat_bot_estado():
+    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+        return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
+    usuario_actual = session.get('username')
+    _bot_evaluar_inactividad(usuario_actual)
+    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
+
+
+@app.route('/chat/bot/enviar', methods=['POST'])
+@login_required
+def chat_bot_enviar():
+    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+        return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
+    texto = (request.form.get('mensaje') or '').strip()
+    if not texto:
+        return jsonify({'error': 'Escribe algo antes de enviar.'}), 400
+    if len(texto) > 2000:
+        return jsonify({'error': 'El mensaje es demasiado largo (máximo 2000 caracteres).'}), 400
+    usuario_actual = session.get('username')
+    _bot_procesar_entrada(usuario_actual, texto)
+    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
+
+
+@app.route('/chat/bot/reiniciar', methods=['POST'])
+@login_required
+def chat_bot_reiniciar():
+    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+        return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
+    usuario_actual = session.get('username')
+    _bot_fijar_estado(usuario_actual, 'menu', {})
+    mensaje, opciones = _bot_texto_menu_principal(saludo=True)
+    _bot_agregar_mensaje(usuario_actual, 'bot', mensaje, opciones)
+    return jsonify({'mensajes': _bot_transcripcion(usuario_actual)})
 
 
 # 📅 VENCIMIENTO DE DOCUMENTOS (institucionales en 'galerias' y por empleado en
@@ -11220,6 +11763,178 @@ def eliminar_credencial(cred_id):
     return redirect(url_for('ver_credenciales'))
 
 
+# 🔐 MI BÓVEDA PERSONAL — pedido por Tomás: además de la Bóveda de Accesos institucional
+# (arriba, exclusiva de admin/agente), CUALQUIER usuario (incluyendo 'estandar', que no puede
+# entrar a /credenciales en absoluto) puede guardar sus propias contraseñas personales. No es
+# una tabla nueva: reutiliza la MISMA tabla 'credenciales' con visibilidad='personal' y
+# propietario=quien la creó — ese mecanismo (_puede_ver_credencial_item/
+# _puede_gestionar_credencial_item, "Bóveda Fase 3") ya existía para admin/agente y ya permite
+# que un 'admin' la vea/gestione con fines de auditoría; esta vista nueva solo la hace
+# alcanzable para cualquier rol, mostrando ÚNICAMENTE los ítems personales de quien entra (o de
+# quien administra, si un admin necesita ayudar a alguien puntualmente). Nunca expone ítems
+# 'equipo' (los institucionales) por esta vía.
+@app.route('/mi_boveda')
+@login_required
+def mi_boveda():
+    username_actual = session.get('username')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT id, titulo, url_acceso, usuario_acceso, notas, fecha_creacion, etiquetas, tipo_item, campos_personalizados FROM credenciales WHERE propietario = %s AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC" if db_type == 'postgres' else "SELECT id, titulo, url_acceso, usuario_acceso, notas, fecha_creacion, etiquetas, tipo_item, campos_personalizados FROM credenciales WHERE propietario = ? AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado' ORDER BY titulo ASC"
+        cursor.execute(q, (username_actual,))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando Mi Bóveda de '{username_actual}': {e}")
+        rows = []
+    conn.close()
+
+    items = [{
+        'id': r[0], 'servicio': r[1], 'url': r[2] or '', 'usuario': r[3], 'notas': r[4] or '',
+        'fecha': r[5], 'etiquetas': _lista_etiquetas(r[6]), 'tipo_item': r[7] or 'credencial',
+        'es_nota': (r[7] or 'credencial') == 'nota_segura', 'tiene_campos': bool(r[8]),
+    } for r in rows]
+
+    return render_template('mi_boveda.html', items=items)
+
+
+@app.route('/mi_boveda/crear', methods=['POST'])
+@login_required
+def mi_boveda_crear():
+    servicio = request.form.get('servicio', '').strip()
+    url = request.form.get('url', '').strip()
+    usuario = request.form.get('usuario', '').strip()
+    password = request.form.get('password', '').strip()
+    notas = request.form.get('notas', '').strip()
+    etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
+
+    tipo_item = request.form.get('tipo_item', 'credencial').strip()
+    if tipo_item not in ('credencial', 'nota_segura'):
+        tipo_item = 'credencial'
+    es_nota = tipo_item == 'nota_segura'
+    contenido_seguro = request.form.get('contenido_seguro', '').strip()
+
+    usuario_final = usuario or ('—' if es_nota else '')
+    password_final = '' if es_nota else password
+
+    if not (servicio and (es_nota or (usuario_final and password_final))):
+        flash('Completa los campos obligatorios para guardar la entrada.', 'error')
+        return redirect(url_for('mi_boveda'))
+
+    try:
+        pass_cifrada = encriptar_texto(password_final)
+        contenido_cifrado = encriptar_texto(contenido_seguro)
+        fecha_act = obtener_fecha_actual()
+        propietario = session.get('username')
+
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q_ins = (
+            "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, etiquetas, tipo_item, contenido_seguro, propietario, visibilidad) "
+            "VALUES (%s, %s, %s, %s, 'Personal', %s, %s, 'activo', %s, %s, %s, %s, 'personal')"
+        ) if db_type == 'postgres' else (
+            "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, etiquetas, tipo_item, contenido_seguro, propietario, visibilidad) "
+            "VALUES (?, ?, ?, ?, 'Personal', ?, ?, 'activo', ?, ?, ?, ?, 'personal')"
+        )
+        cursor.execute(q_ins, (servicio, url, usuario_final, pass_cifrada, notas, fecha_act, etiquetas, tipo_item, contenido_cifrado, propietario))
+        conn.commit()
+        conn.close()
+        registrar_log(propietario, "Guardado en Mi Bóveda", f"Se guardó la entrada personal '{servicio}'")
+    except Exception as e:
+        print(f"⚠️ Error guardando entrada personal '{servicio}' de '{session.get('username')}': {e}")
+        flash('No se pudo guardar la entrada. Intenta de nuevo.', 'error')
+
+    return redirect(url_for('mi_boveda'))
+
+
+@app.route('/mi_boveda/editar/<int:cred_id>', methods=['POST'])
+@login_required
+def mi_boveda_editar(cred_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_check = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_check, (cred_id,))
+    fila = cursor.fetchone()
+    if not fila or fila[1] != 'personal' or not _puede_gestionar_credencial_item(fila[0], fila[1], session.get('username'), session.get('rol')):
+        conn.close()
+        return jsonify({'error': 'no autorizado'}), 403
+
+    servicio = request.form.get('servicio', '').strip()
+    url = request.form.get('url', '').strip()
+    usuario = request.form.get('usuario', '').strip()
+    password = request.form.get('password', '').strip()
+    notas = request.form.get('notas', '').strip()
+    etiquetas = _normalizar_etiquetas(request.form.get('etiquetas', ''))
+    tipo_item = request.form.get('tipo_item', 'credencial').strip()
+    if tipo_item not in ('credencial', 'nota_segura'):
+        tipo_item = 'credencial'
+    es_nota = tipo_item == 'nota_segura'
+    contenido_cifrado = encriptar_texto(request.form.get('contenido_seguro', '').strip())
+    if es_nota and not usuario:
+        usuario = '—'
+
+    try:
+        if password:
+            pass_cifrada = encriptar_texto('' if es_nota else password)
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, notas=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, notas=?, etiquetas=?, tipo_item=?, contenido_seguro=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, pass_cifrada, notas, etiquetas, tipo_item, contenido_cifrado, cred_id))
+        else:
+            q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, notas=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, notas=?, etiquetas=?, tipo_item=?, contenido_seguro=? WHERE id=?"
+            cursor.execute(q_upd, (servicio, url, usuario, notas, etiquetas, tipo_item, contenido_cifrado, cred_id))
+        conn.commit()
+        registrar_log(session['username'], "Edición en Mi Bóveda", f"Se actualizó la entrada personal ID '{cred_id}'")
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error editando entrada personal {cred_id}: {e}")
+    conn.close()
+    return redirect(url_for('mi_boveda'))
+
+
+@app.route('/mi_boveda/eliminar/<int:cred_id>', methods=['POST'])
+@login_required
+def mi_boveda_eliminar(cred_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_check = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+    cursor.execute(q_check, (cred_id,))
+    fila = cursor.fetchone()
+    if not fila or fila[1] != 'personal' or not _puede_gestionar_credencial_item(fila[0], fila[1], session.get('username'), session.get('rol')):
+        conn.close()
+        return jsonify({'error': 'no autorizado'}), 403
+
+    q_upd = "UPDATE credenciales SET estado = 'eliminado' WHERE id = %s" if db_type == 'postgres' else "UPDATE credenciales SET estado = 'eliminado' WHERE id = ?"
+    cursor.execute(q_upd, (cred_id,))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Eliminación en Mi Bóveda", f"Se eliminó la entrada personal ID '{cred_id}'")
+    return redirect(url_for('mi_boveda'))
+
+
+@app.route('/mi_boveda/<int:cred_id>/revelar', methods=['POST'])
+@login_required
+def mi_boveda_revelar(cred_id):
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, password_cifrada, tipo_item, contenido_seguro, propietario, visibilidad FROM credenciales WHERE id = ?"
+        cursor.execute(q, (cred_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando entrada personal {cred_id} para revelar: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    if not row:
+        return jsonify({'error': 'no encontrada'}), 404
+    titulo, pass_enc, tipo_item, contenido_cifrado, propietario, visibilidad = row
+    if visibilidad != 'personal' or not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
+        return jsonify({'error': 'no autorizado'}), 403
+
+    registrar_log(session.get('username'), "Consulta en Mi Bóveda", f"Se consultó la entrada personal '{titulo}' (ID {cred_id})", credencial_id=cred_id)
+    if (tipo_item or 'credencial') == 'nota_segura':
+        return jsonify({'contenido': desencriptar_texto(contenido_cifrado, cred_id) if contenido_cifrado else ''})
+    return jsonify({'password': desencriptar_texto(pass_enc, cred_id)})
+
+
 @app.route('/credenciales/<int:cred_id>/compartidos')
 @login_required
 @agente_o_admin_required
@@ -14043,7 +14758,7 @@ def bienvenida():
     if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
         chat_no_leidos = _chat_directos_no_leidos_total(session.get('username')) + _chat_canal_no_leidos(session.get('username'))
 
-    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado, chat_no_leidos=chat_no_leidos)
+    return render_template('bienvenida.html', username=session.get('username'), rol=session.get('rol'), comunicado_fijado=comunicado_fijado, chat_no_leidos=chat_no_leidos, chat_estandar_habilitado=_chat_estandar_habilitado())
 
 @app.route('/gestor')
 @login_required
