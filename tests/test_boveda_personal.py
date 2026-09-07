@@ -350,3 +350,206 @@ def test_revelar_sin_encabezado_csrf_falla_con_proteccion_real(sesion_usuario, a
     r = sesion_usuario.post(f'/mi_boveda/{reg_id}/revelar', data={'accion': 'ver'})
 
     assert r.status_code != 200
+
+
+# 🔗📜 Pedido de Tomás (07/09/2026, junto con dos capturas de Mi Bóveda Personal): "que aquí el
+# usuario también pueda pegar la URL o enlace del sitio en el que se valida o usa la credencial,
+# adicional, que se habilite la opcion de ir al sitio como en la boveda general y que exista un
+# control de versiones o historial con fecha y hora de los cambios de contraseñas o notas". Estas
+# pruebas cubren el campo url_acceso (ya usado por la Bóveda institucional, ver credenciales.html
+# 'Ir al enlace') y el nuevo control de versiones de Mi Bóveda Personal
+# (mi_boveda_historial/mi_boveda_historial_revelar).
+
+def test_guardar_entrada_con_url_la_deja_disponible_para_ir_al_sitio(sesion_usuario, app):
+    sesion_usuario.post('/mi_boveda/crear', data={
+        'tipo_item': 'credencial', 'servicio': 'Correo Con Enlace',
+        'usuario': 'yo123', 'password': 'ClaveConEnlace1',
+        'url': 'https://correo.ejemplo.com/login',
+    }, follow_redirects=False)
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT url_acceso FROM credenciales WHERE titulo = ?", ('Correo Con Enlace',))
+    url_guardada = cur.fetchone()[0]
+    conn.close()
+    assert url_guardada == 'https://correo.ejemplo.com/login'
+
+    r = sesion_usuario.get('/mi_boveda')
+    assert b'https://correo.ejemplo.com/login' in r.data
+
+
+def test_editar_entrada_puede_agregarle_una_url(sesion_usuario, app):
+    with sesion_usuario.session_transaction() as sess:
+        propietario = sess['username']
+    reg_id = _crear_entrada_personal(app, propietario, servicio='Sin Enlace Todavia')
+
+    sesion_usuario.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'credencial', 'servicio': 'Sin Enlace Todavia', 'usuario': 'yo@correo.com',
+        'password': '', 'url': 'https://portal.ejemplo.com',
+    }, follow_redirects=False)
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT url_acceso FROM credenciales WHERE id = ?", (reg_id,))
+    assert cur.fetchone()[0] == 'https://portal.ejemplo.com'
+    conn.close()
+
+
+def test_editar_credencial_cambiando_password_crea_version_en_el_historial(sesion_usuario, app):
+    with sesion_usuario.session_transaction() as sess:
+        propietario = sess['username']
+    reg_id = _crear_entrada_personal(app, propietario, servicio='Con Historial', password='ClaveVieja1')
+
+    sesion_usuario.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'credencial', 'servicio': 'Con Historial', 'usuario': 'yo@correo.com',
+        'password': 'ClaveNueva2',
+    }, follow_redirects=False)
+
+    r = sesion_usuario.get(f'/mi_boveda/{reg_id}/historial')
+    assert r.status_code == 200
+    historial = r.get_json()['historial']
+    assert len(historial) == 1
+    assert historial[0]['cambiado_por'] == propietario
+
+    r2 = sesion_usuario.post(f'/mi_boveda/historial/{historial[0]["id"]}/revelar')
+    assert r2.status_code == 200
+    assert r2.get_json()['password'] == 'ClaveVieja1'
+
+    # La clave ACTUAL (no la del historial) debe ser la nueva.
+    r3 = sesion_usuario.post(f'/mi_boveda/{reg_id}/revelar', data={'accion': 'ver'})
+    assert r3.get_json()['password'] == 'ClaveNueva2'
+
+
+def test_editar_credencial_sin_llenar_password_no_crea_version(sesion_usuario, app):
+    """Misma convención que editar_credencial: dejar el campo contraseña vacío significa 'no
+    cambiarla', así que no debe generar una entrada de historial."""
+    with sesion_usuario.session_transaction() as sess:
+        propietario = sess['username']
+    reg_id = _crear_entrada_personal(app, propietario, servicio='Password Sin Tocar')
+
+    sesion_usuario.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'credencial', 'servicio': 'Password Sin Tocar (renombrada)',
+        'usuario': 'yo@correo.com', 'password': '',
+    }, follow_redirects=False)
+
+    r = sesion_usuario.get(f'/mi_boveda/{reg_id}/historial')
+    assert r.get_json()['historial'] == []
+
+
+def test_editar_nota_segura_con_contenido_distinto_crea_version_en_el_historial(sesion_usuario, app):
+    sesion_usuario.post('/mi_boveda/crear', data={
+        'tipo_item': 'nota_segura', 'servicio': 'Nota Con Historial',
+        'contenido_seguro': 'Contenido original',
+    }, follow_redirects=False)
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM credenciales WHERE titulo = ?", ('Nota Con Historial',))
+    reg_id = cur.fetchone()[0]
+    conn.close()
+
+    sesion_usuario.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'nota_segura', 'servicio': 'Nota Con Historial',
+        'contenido_seguro': 'Contenido actualizado',
+    }, follow_redirects=False)
+
+    r = sesion_usuario.get(f'/mi_boveda/{reg_id}/historial')
+    historial = r.get_json()['historial']
+    assert len(historial) == 1
+
+    r2 = sesion_usuario.post(f'/mi_boveda/historial/{historial[0]["id"]}/revelar')
+    assert r2.get_json()['contenido'] == 'Contenido original'
+
+
+def test_editar_nota_segura_reenviando_el_mismo_contenido_no_crea_version(sesion_usuario, app):
+    """A diferencia de una credencial (que tiene el convenio 'vacío = no cambiar'), una nota
+    segura siempre reenvía su contenido en el formulario — por eso el versionado compara el
+    texto descifrado, no solo si el campo llegó con algo."""
+    sesion_usuario.post('/mi_boveda/crear', data={
+        'tipo_item': 'nota_segura', 'servicio': 'Nota Sin Cambios',
+        'contenido_seguro': 'Mismo contenido de siempre',
+    }, follow_redirects=False)
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM credenciales WHERE titulo = ?", ('Nota Sin Cambios',))
+    reg_id = cur.fetchone()[0]
+    conn.close()
+
+    sesion_usuario.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'nota_segura', 'servicio': 'Nota Sin Cambios',
+        'contenido_seguro': 'Mismo contenido de siempre',
+    }, follow_redirects=False)
+
+    r = sesion_usuario.get(f'/mi_boveda/{reg_id}/historial')
+    assert r.get_json()['historial'] == []
+
+
+def test_historial_de_entrada_de_otro_usuario_no_autorizado(client, app, crear_usuario):
+    usuario_a = crear_usuario(rol='estandar')
+    usuario_b = crear_usuario(rol='estandar')
+    reg_id = _crear_entrada_personal(app, usuario_a, password='ClaveDeA1')
+
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['username'] = usuario_b
+        sess['rol'] = 'estandar'
+        sess['instance_id'] = app.SERVER_INSTANCE_ID
+        sess['debe_cambiar_password'] = False
+        sess['debe_activar_2fa'] = False
+
+    r = client.get(f'/mi_boveda/{reg_id}/historial')
+    assert r.status_code == 403
+
+
+def test_revelar_historial_de_entrada_de_otro_usuario_no_autorizado(client, app, crear_usuario):
+    usuario_a = crear_usuario(rol='estandar')
+    usuario_b = crear_usuario(rol='estandar')
+    reg_id = _crear_entrada_personal(app, usuario_a, password='ClaveVieja1')
+
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['username'] = usuario_a
+        sess['rol'] = 'estandar'
+        sess['instance_id'] = app.SERVER_INSTANCE_ID
+        sess['debe_cambiar_password'] = False
+        sess['debe_activar_2fa'] = False
+    client.post(f'/mi_boveda/editar/{reg_id}', data={
+        'tipo_item': 'credencial', 'servicio': 'Cualquiera', 'usuario': 'x', 'password': 'ClaveNueva2',
+    })
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM credenciales_historial WHERE credencial_id = ?", (reg_id,))
+    historial_id = cur.fetchone()[0]
+    conn.close()
+
+    with client.session_transaction() as sess:
+        sess['username'] = usuario_b
+
+    r = client.post(f'/mi_boveda/historial/{historial_id}/revelar')
+    assert r.status_code == 403
+
+
+def test_admin_puede_consultar_y_revelar_historial_de_otro_usuario(admin_session, app, crear_usuario):
+    """Consistente con el resto de Mi Bóveda Personal: un 'admin' conserva acceso de auditoría,
+    también sobre el historial de versiones."""
+    usuario_a = crear_usuario(rol='estandar')
+    reg_id = _crear_entrada_personal(app, usuario_a, password='ClaveAuditableVieja1')
+
+    # Inserta la versión directo en la BD (simulando un cambio de contraseña anterior de A):
+    # admin_session no es el propietario, así que editar por esa vía daría 403 -lo correcto-.
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO credenciales_historial (credencial_id, password_cifrada, fecha_cambio, cambiado_por) VALUES (?, ?, ?, ?)",
+        (reg_id, app.encriptar_texto('ClaveAuditableVieja1'), '2026-01-02 10:00:00', usuario_a),
+    )
+    conn.commit()
+    conn.close()
+
+    r = admin_session.get(f'/mi_boveda/{reg_id}/historial')
+    assert r.status_code == 200
+    historial = r.get_json()['historial']
+    assert len(historial) == 1
+
+    r2 = admin_session.post(f'/mi_boveda/historial/{historial[0]["id"]}/revelar')
+    assert r2.status_code == 200
+    assert r2.get_json()['password'] == 'ClaveAuditableVieja1'
