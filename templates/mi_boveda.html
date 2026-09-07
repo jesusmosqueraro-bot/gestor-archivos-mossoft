@@ -102,6 +102,7 @@
                 <div class="flex items-center justify-end gap-2 mt-auto pt-2 border-t border-slate-700/50">
                     <button onclick='abrirModalEditar({{ item | tojson }})' class="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1"><i class="fa-solid fa-pen"></i> Editar</button>
                     <form method="POST" action="{{ url_for('mi_boveda_eliminar', cred_id=item.id) }}" onsubmit="return confirm('¿Eliminar esta entrada de tu bóveda personal?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="text-[11px] font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1"><i class="fa-solid fa-trash"></i> Eliminar</button>
                     </form>
                 </div>
@@ -119,6 +120,7 @@
                 <button onclick="cerrarModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
             <form id="form-entrada" method="POST" action="{{ url_for('mi_boveda_crear') }}" class="space-y-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="flex gap-2 text-xs">
                     <label class="flex-1 flex items-center justify-center gap-2 bg-slate-900/60 border border-slate-700 rounded-xl py-2 cursor-pointer has-[:checked]:border-emerald-500 has-[:checked]:text-emerald-400">
                         <input type="radio" name="tipo_item" value="credencial" checked onchange="cambiarTipo(this.value)" class="accent-emerald-500"> Credencial
@@ -153,6 +155,8 @@
     </div>
 
     <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
+
         function abrirModalCrear() {
             const form = document.getElementById('form-entrada');
             form.reset();
@@ -186,7 +190,9 @@
 
         async function revelar(credId, accion) {
             const resp = await fetch(`/mi_boveda/${credId}/revelar`, {
-                method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: `accion=${accion}`
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN},
+                body: `accion=${accion}`
             });
             if (!resp.ok) { alert('No se pudo revelar esta entrada.'); return null; }
             return resp.json();

@@ -86,6 +86,7 @@
     </div>
 
     <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
         let _timeoutBusqueda = null;
 
         function buscarUsuarios(q) {
@@ -166,7 +167,9 @@
 
         async function revelar(credId, accion) {
             const resp = await fetch(`/mi_boveda/${credId}/revelar`, {
-                method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: `accion=${accion}`
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN},
+                body: `accion=${accion}`
             });
             if (!resp.ok) { alert('No se pudo revelar esta entrada.'); return null; }
             return resp.json();
