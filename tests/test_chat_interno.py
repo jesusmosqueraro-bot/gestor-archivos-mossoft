@@ -19,8 +19,21 @@ def _sesion_como(client, app, usuario, rol):
 
 
 def test_estandar_no_puede_entrar_al_chat(client, app, crear_usuario):
+    """Un 'estandar' nunca ve el Chat Interno libre de arriba (nada de contactos ni Canal
+    General): a lo sumo, si un admin lo habilitó a propósito, ve el Asistente de Chat guiado por
+    menú aparte (ver test_chat_bot_asistente.py) — apagado por defecto, como aquí."""
     usuario = crear_usuario(rol='estandar')
     _sesion_como(client, app, usuario, 'estandar')
+
+    r = client.get('/chat')
+
+    assert r.status_code == 200
+    assert 'Canal General' not in r.get_data(as_text=True)
+
+
+def test_gestion_humana_no_puede_entrar_al_chat(client, app, crear_usuario):
+    usuario = crear_usuario(rol='gestion_humana')
+    _sesion_como(client, app, usuario, 'gestion_humana')
 
     r = client.get('/chat')
 
