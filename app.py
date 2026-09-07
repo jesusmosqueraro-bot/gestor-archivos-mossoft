@@ -3133,6 +3133,7 @@ def crear_comunicado():
     imagen = request.files.get('imagen')
 
     imagen_url = ""
+    error_imagen = None
     if imagen and archivo_permitido(imagen.filename, imagen):
         try:
             upload_result = cloudinary.uploader.upload(
@@ -3144,6 +3145,11 @@ def crear_comunicado():
             imagen_url = upload_result.get('secure_url', '')
         except Exception as e:
             print(f"Error subiendo imagen de comunicado: {e}")
+            error_imagen = _mensaje_error_para_agente(e)
+    elif imagen and imagen.filename:
+        error_imagen = (f"El archivo '{imagen.filename}' no se adjuntó: su formato no está "
+                         f"permitido o su contenido no coincide con su extensión (posible archivo "
+                         f"renombrado o corrupto). Usa una imagen real (JPG, PNG, GIF o WEBP).")
 
     if titulo and contenido and not _html_esta_vacio(contenido):
         fecha_act = obtener_fecha_actual()
@@ -3156,10 +3162,13 @@ def crear_comunicado():
             cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor, visibilidad))
             conn.commit()
             registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}] (visibilidad: {'solo Admin/Agente' if visibilidad == 'admin' else 'todos los usuarios'})")
+            if error_imagen:
+                flash(f"El comunicado se publicó, pero sin la imagen adjunta: {error_imagen}", "error")
         except Exception as e:
             conn.rollback()
             print(f"Error creando comunicado: {e}")
             conn.close()
+            flash(_mensaje_error_para_agente(e), "error")
             return redirect(url_for('ver_comunicados'))
         conn.close()
 
@@ -3211,6 +3220,7 @@ def editar_comunicado(com_id):
 
         # Si se adjunta una nueva imagen válida, se reemplaza; si no, se conserva la actual.
         imagen_url = imagen_url_actual
+        error_imagen = None
         if imagen and imagen.filename and archivo_permitido(imagen.filename, imagen):
             try:
                 upload_result = cloudinary.uploader.upload(
@@ -3222,14 +3232,22 @@ def editar_comunicado(com_id):
                 imagen_url = upload_result.get('secure_url', imagen_url_actual)
             except Exception as e:
                 print(f"Error subiendo nueva imagen de comunicado {com_id}: {e}")
+                error_imagen = _mensaje_error_para_agente(e)
+        elif imagen and imagen.filename:
+            error_imagen = (f"El archivo '{imagen.filename}' no se adjuntó: su formato no está "
+                             f"permitido o su contenido no coincide con su extensión (posible "
+                             f"archivo renombrado o corrupto). Se conservó la imagen anterior.")
 
         q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s, visibilidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ?, visibilidad = ? WHERE id = ?"
         cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, visibilidad, com_id))
         conn.commit()
         registrar_log(session.get('username'), "Edición de Comunicado", f"Comunicado '{titulo}' (ID {com_id}) actualizado")
+        if error_imagen:
+            flash(f"El comunicado se actualizó, pero la nueva imagen no se guardó: {error_imagen}", "error")
     except Exception as e:
         conn.rollback()
         print(f"Error editando comunicado {com_id}: {e}")
+        flash(_mensaje_error_para_agente(e), "error")
 
     conn.close()
     return redirect(url_for('ver_comunicados'))
@@ -3338,7 +3356,7 @@ def subir_fondo_login():
     except Exception as e:
         conn.rollback()
         print(f"Error guardando el fondo de login: {e}")
-        flash("El archivo se subió, pero no se pudo guardar el registro. Intenta de nuevo.", "error")
+        flash(f"El archivo se subió, pero no se pudo guardar el registro. {_mensaje_error_para_agente(e)}", "error")
     conn.close()
     return redirect(url_for('ver_fondo_login'))
 
@@ -4150,7 +4168,7 @@ def _subir_adjunto_chat(file):
         # esto desde los Logs de Render la próxima vez que falle.
         print(f"⚠️ Error subiendo adjunto de chat '{file.filename}': [{type(e).__name__}] {e}")
         traceback.print_exc()
-        return None, None, 'No se pudo subir el archivo. Intenta de nuevo.'
+        return None, None, _mensaje_error_para_agente(e)
 
 
 def _es_adjunto_imagen(nombre_original):
@@ -5567,7 +5585,7 @@ def _subir_fondo_login(file):
         return tipo, upload_result['secure_url'], upload_result.get('public_id'), None
     except Exception as e:
         print(f"⚠️ Error subiendo archivo de fondo de login '{file.filename}': {e}")
-        return None, None, None, 'No se pudo subir el archivo a Cloudinary. Intenta de nuevo.'
+        return None, None, None, _mensaje_error_para_agente(e)
 
 
 def _marcar_comunicado_leido(comunicado_id, usuario):
@@ -10344,10 +10362,14 @@ def _mensaje_error_para_agente(e):
     y una sugerencia concreta de cómo corregirlo — pedido de Tomás (06/09/2026): 'que el sistema
     cada vez que se visualice un error, indique cuál es el error y la posible solución', para que
     un agente de TI pueda diagnosticar la novedad sin tener que ir a revisar los logs del
-    servidor. Reconoce los tipos de error más comunes de la base de datos en Arkiv (falta un dato
-    obligatorio, un valor único duplicado, o una referencia a un registro que ya no existe) y da
-    una sugerencia específica para cada uno; para cualquier otro tipo de error, muestra el detalle
-    técnico crudo con una sugerencia genérica de contactar a soporte con ese detalle."""
+    servidor. Nació cubriendo solo Inventario/Usuarios; el 07/09/2026 Tomás pidió extenderlo de
+    forma TRANSVERSAL al resto de los formularios del aplicativo (comunicados, chat, tickets,
+    perfil, credenciales, Mi Bóveda, documentos de empleado, fondo de login...), así que además
+    de los errores de base de datos ya cubiertos, también reconoce fallas típicas de lectura de
+    archivos (Excel corrupto/protegido) y de subida a Cloudinary (tiempo de espera agotado, sin
+    conexión, credenciales mal configuradas). Para cualquier otro tipo de error, muestra el
+    detalle técnico crudo con una sugerencia genérica de contactar a soporte con ese detalle —
+    así ningún caso se queda sin al menos una pista básica."""
     detalle = str(e)
     texto_error = detalle.lower()
     if 'not null' in texto_error or 'null value in column' in texto_error:
@@ -10359,6 +10381,39 @@ def _mensaje_error_para_agente(e):
     elif 'foreign key' in texto_error:
         pista = ("El registro hace referencia a otro elemento (ej. un activo o usuario) que no "
                   "existe o fue eliminado. Verifica que ese elemento relacionado siga existiendo.")
+    elif 'check constraint' in texto_error or 'violates check' in texto_error:
+        pista = ("Uno de los valores no cumple una regla del sistema (por ejemplo, un estado o "
+                  "categoría que no está permitida para ese campo). Revisa las opciones válidas "
+                  "de ese campo y vuelve a intentar.")
+    elif ('value too long' in texto_error or 'string data, right truncation' in texto_error
+          or 'right truncation' in texto_error or 'data too long' in texto_error):
+        pista = ("Uno de los textos escritos es más largo de lo que ese campo admite. Acórtalo y "
+                  "vuelve a intentar.")
+    elif 'invalid input syntax' in texto_error or 'invalid literal for int' in texto_error:
+        pista = ("Uno de los valores no tiene el formato esperado por ese campo (por ejemplo, "
+                  "texto en un campo numérico o una fecha con formato inválido). Revisa los datos "
+                  "escritos y vuelve a intentar.")
+    elif ('bad zip file' in texto_error or 'not a zip file' in texto_error
+          or 'file is not a zip file' in texto_error or 'no worksheet' in texto_error
+          or 'unsupported format' in texto_error or 'package not found' in texto_error):
+        pista = ("El archivo parece estar dañado, no ser un .xlsx válido, o estar protegido con "
+                  "contraseña. Ábrelo en Excel, guárdalo de nuevo como .xlsx sin protección y "
+                  "vuelve a intentar la carga.")
+    elif ('timed out' in texto_error or 'timeout' in texto_error or 'read timed out' in texto_error):
+        pista = ("La conexión con el servicio de almacenamiento de archivos (Cloudinary) tardó "
+                  "demasiado o se cortó a mitad de camino — normalmente por una conexión lenta o "
+                  "un archivo muy pesado. Intenta de nuevo con una conexión más estable o un "
+                  "archivo más liviano.")
+    elif ('connection' in texto_error or 'getaddrinfo' in texto_error
+          or 'name or service not known' in texto_error or 'network' in texto_error):
+        pista = ("No se pudo establecer conexión con un servicio externo (por ejemplo, Cloudinary "
+                  "o la base de datos). Puede ser una caída temporal de red; espera un momento y "
+                  "vuelve a intentar, y si persiste avísale a TI.")
+    elif ('unauthorized' in texto_error or 'invalid signature' in texto_error
+          or 'must supply api_key' in texto_error or 'api_secret' in texto_error):
+        pista = ("El servicio externo (Cloudinary) rechazó las credenciales configuradas — esto "
+                  "no lo soluciona quien está usando el formulario. Repórtalo a TI para revisar la "
+                  "configuración de esas credenciales en el servidor.")
     else:
         pista = "Si el problema persiste, comparte este detalle técnico con el equipo de TI/soporte."
     return f"No se pudo completar la operación — detalle técnico: {detalle}. Sugerencia: {pista}"
@@ -11969,6 +12024,9 @@ def mi_boveda():
         rows = cursor.fetchall()
     except Exception as e:
         print(f"⚠️ Error listando Mi Bóveda de '{username_actual}': {e}")
+        # ⚠️ Importante distinguir esto de "no tienes nada guardado": si la consulta falla, se
+        # avisa explícitamente — de lo contrario alguien podría pensar que perdió sus entradas.
+        flash(_mensaje_error_para_agente(e), "error")
         rows = []
     conn.close()
 
@@ -12025,7 +12083,7 @@ def mi_boveda_crear():
         registrar_log(propietario, "Guardado en Mi Bóveda", f"Se guardó la entrada personal '{servicio}'")
     except Exception as e:
         print(f"⚠️ Error guardando entrada personal '{servicio}' de '{session.get('username')}': {e}")
-        flash('No se pudo guardar la entrada. Intenta de nuevo.', 'error')
+        flash(_mensaje_error_para_agente(e), 'error')
 
     return redirect(url_for('mi_boveda'))
 
@@ -12052,11 +12110,38 @@ def mi_boveda_editar(cred_id):
     if tipo_item not in ('credencial', 'nota_segura'):
         tipo_item = 'credencial'
     es_nota = tipo_item == 'nota_segura'
-    contenido_cifrado = encriptar_texto(request.form.get('contenido_seguro', '').strip())
+    contenido_seguro = request.form.get('contenido_seguro', '').strip()
+    contenido_cifrado = encriptar_texto(contenido_seguro)
     if es_nota and not usuario:
         usuario = '—'
 
     try:
+        # 📜 Historial de cambios (pedido por Tomás, 07/09/2026): antes de sobrescribir, guarda
+        # el valor anterior con fecha/hora y quién lo cambió — reutiliza credenciales_historial,
+        # la misma tabla de la Bóveda institucional (ver editar_credencial/historial_credencial),
+        # pero aquí se extiende para cubrir TAMBIÉN el contenido de una nota segura, no solo la
+        # contraseña de una credencial. Una credencial se versiona cuando el campo "Contraseña"
+        # llega con un valor (la misma convención de "vacío = no cambiarla" que ya usa
+        # editar_credencial); una nota segura se versiona solo si su contenido de verdad cambió
+        # (no hay campo separado para "no tocar" en una nota, así que hay que comparar el texto
+        # descifrado — comparar el cifrado no sirve, cada cifrada da un resultado distinto aunque
+        # el texto sea igual).
+        q_old = "SELECT password_cifrada, contenido_seguro, COALESCE(tipo_item, 'credencial') FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT password_cifrada, contenido_seguro, COALESCE(tipo_item, 'credencial') FROM credenciales WHERE id = ?"
+        cursor.execute(q_old, (cred_id,))
+        fila_vieja = cursor.fetchone()
+        pass_cifrada_vieja, contenido_cifrado_viejo, tipo_item_viejo = fila_vieja if fila_vieja else (None, None, 'credencial')
+
+        valor_anterior_a_versionar = None
+        if password and not es_nota and tipo_item_viejo == 'credencial' and pass_cifrada_vieja:
+            valor_anterior_a_versionar = pass_cifrada_vieja
+        elif es_nota and tipo_item_viejo == 'nota_segura' and contenido_cifrado_viejo:
+            if desencriptar_texto(contenido_cifrado_viejo, cred_id) != contenido_seguro:
+                valor_anterior_a_versionar = contenido_cifrado_viejo
+
+        if valor_anterior_a_versionar:
+            q_hist = "INSERT INTO credenciales_historial (credencial_id, password_cifrada, fecha_cambio, cambiado_por) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO credenciales_historial (credencial_id, password_cifrada, fecha_cambio, cambiado_por) VALUES (?, ?, ?, ?)"
+            cursor.execute(q_hist, (cred_id, valor_anterior_a_versionar, obtener_fecha_actual(), session.get('username')))
+
         if password:
             pass_cifrada = encriptar_texto('' if es_nota else password)
             q_upd = "UPDATE credenciales SET titulo=%s, url_acceso=%s, usuario_acceso=%s, password_cifrada=%s, notas=%s, etiquetas=%s, tipo_item=%s, contenido_seguro=%s WHERE id=%s" if db_type == 'postgres' else "UPDATE credenciales SET titulo=?, url_acceso=?, usuario_acceso=?, password_cifrada=?, notas=?, etiquetas=?, tipo_item=?, contenido_seguro=? WHERE id=?"
@@ -12069,8 +12154,77 @@ def mi_boveda_editar(cred_id):
     except Exception as e:
         conn.rollback()
         print(f"⚠️ Error editando entrada personal {cred_id}: {e}")
+        flash(_mensaje_error_para_agente(e), "error")
     conn.close()
     return redirect(url_for('mi_boveda'))
+
+
+@app.route('/mi_boveda/<int:cred_id>/historial')
+@login_required
+def mi_boveda_historial(cred_id):
+    """Lista (sin descifrar ningún valor) las versiones anteriores de una entrada de Mi Bóveda
+    Personal — pedido por Tomás (07/09/2026): 'que exista un control de versiones o historial
+    con fecha y hora de los cambios de contraseñas o notas'. Mismo mecanismo que ya existía para
+    la Bóveda institucional (ver historial_credencial), pero accesible para el propio dueño del
+    ítem personal (o un admin en auditoría) en vez de exigir rol agente/admin."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q_cred = "SELECT propietario, visibilidad FROM credenciales WHERE id = %s" if db_type == 'postgres' else "SELECT propietario, visibilidad FROM credenciales WHERE id = ?"
+        cursor.execute(q_cred, (cred_id,))
+        fila_cred = cursor.fetchone()
+        if not fila_cred:
+            conn.close()
+            return jsonify({'error': 'no encontrada'}), 404
+        propietario, visibilidad = fila_cred
+        if visibilidad != 'personal' or not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
+            conn.close()
+            return jsonify({'error': 'no autorizado'}), 403
+
+        q = "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = %s ORDER BY id DESC" if db_type == 'postgres' else "SELECT id, fecha_cambio, cambiado_por FROM credenciales_historial WHERE credencial_id = ? ORDER BY id DESC"
+        cursor.execute(q, (cred_id,))
+        filas = cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Error listando historial de entrada personal {cred_id}: {e}")
+        filas = []
+    conn.close()
+    return jsonify({'historial': [{'id': h_id, 'fecha_cambio': fecha, 'cambiado_por': quien or '—'} for h_id, fecha, quien in filas]})
+
+
+@app.route('/mi_boveda/historial/<int:historial_id>/revelar', methods=['POST'])
+@login_required
+def mi_boveda_historial_revelar(historial_id):
+    """Descifra puntualmente UNA versión anterior (contraseña o contenido de nota) del historial
+    de Mi Bóveda Personal, dejando el mismo rastro de auditoría que mi_boveda_revelar."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = ("SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo, c.tipo_item, c.propietario, c.visibilidad "
+             "FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = %s") if db_type == 'postgres' else \
+            ("SELECT h.credencial_id, h.password_cifrada, h.fecha_cambio, c.titulo, c.tipo_item, c.propietario, c.visibilidad "
+             "FROM credenciales_historial h JOIN credenciales c ON c.id = h.credencial_id WHERE h.id = ?")
+        cursor.execute(q, (historial_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error consultando historial de entrada personal {historial_id}: {e}")
+        return jsonify({'error': 'error interno'}), 500
+
+    if not row:
+        return jsonify({'error': 'no encontrado'}), 404
+    credencial_id, valor_cifrado, fecha_cambio, titulo, tipo_item, propietario, visibilidad = row
+    if visibilidad != 'personal' or not _puede_ver_credencial_item(propietario, visibilidad, session.get('username'), session.get('rol')):
+        return jsonify({'error': 'no autorizado'}), 403
+
+    es_propietario = session.get('username') == propietario
+    etiqueta_log = "Consulta en Mi Bóveda" if es_propietario else "Auditoría de Bóveda Personal"
+    detalle_log = (f"Consultó una versión anterior (del {fecha_cambio}) de la entrada personal '{titulo}' (ID {credencial_id})" if es_propietario
+                   else f"Consultó una versión anterior (del {fecha_cambio}) de la entrada personal '{titulo}' (ID {credencial_id}) de la bóveda de '{propietario}'")
+    registrar_log(session.get('username'), etiqueta_log, detalle_log, credencial_id=credencial_id)
+    valor_real = desencriptar_texto(valor_cifrado, credencial_id)
+    if (tipo_item or 'credencial') == 'nota_segura':
+        return jsonify({'contenido': valor_real})
+    return jsonify({'password': valor_real})
 
 
 @app.route('/mi_boveda/eliminar/<int:cred_id>', methods=['POST'])
