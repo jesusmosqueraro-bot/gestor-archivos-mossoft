@@ -110,10 +110,14 @@
                         {% if p.numero_serie %}<p class="text-[10px] text-slate-500 mt-0.5">Serie: {{ p.numero_serie }}</p>{% endif %}
                         {% if p.sede %}<p class="text-[10px] text-slate-500">Sede: {{ p.sede }}</p>{% endif %}
                     </div>
-                    <form method="POST" action="{{ url_for('confirmar_devolucion_activo', activo_id=p.id) }}" onsubmit="return confirm('¿Confirmar que {{ p.asignado_a or "este colaborador" }} ya devolvió {{ p.nombre }}? El activo volverá a estar disponible en el Inventario.')" class="flex flex-col gap-2 flex-shrink-0 sm:min-w-[260px]">
+                    <form method="POST" action="{{ url_for('confirmar_devolucion_activo', activo_id=p.id) }}" onsubmit="return confirm('¿Confirmar que {{ p.asignado_a or "este colaborador" }} ya devolvió {{ p.nombre }}? El activo volverá a estar disponible en el Inventario.')" class="flex flex-col gap-2 flex-shrink-0 w-full sm:w-[380px]">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                        <div class="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <input type="text" name="observaciones" placeholder="Observaciones (opcional)" class="w-full sm:w-40 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-teal-500">
+                        {# 📝 Pedido de Tomás: el campo de observaciones era un <input> de una sola
+                           línea y muy angosto (w-40) — apenas alcanzaba para un par de palabras.
+                           Ahora es un <textarea> a todo el ancho del formulario, con varias líneas
+                           visibles y que se puede estirar (resize-y) para descripciones largas. #}
+                        <textarea name="observaciones" rows="2" placeholder="Observaciones (opcional)" class="w-full px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-teal-500 resize-y"></textarea>
+                        <div class="flex items-center justify-between gap-2">
                             <label class="flex items-center gap-1.5 text-[11px] text-slate-400 font-semibold whitespace-nowrap cursor-pointer">
                                 <input type="checkbox" name="generar_acta" class="rounded border-slate-600 bg-slate-900 text-teal-500 focus:ring-teal-500">
                                 Generar acta (PDF)
