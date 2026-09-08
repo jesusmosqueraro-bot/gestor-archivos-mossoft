@@ -13765,11 +13765,16 @@ def buscar_usuario_por_cedula():
 @agente_o_admin_required
 def buscar_usuarios():
     """Coincidencia PARCIAL por nombre, usuario o cédula (a diferencia de buscar_usuario_por_cedula,
-    que exige la cédula completa) — usado por el campo "Colaborador" de Altas de Credenciales para
-    sugerir cuentas ya registradas en Gestión de Usuarios mientras se escribe, sin obligar a que la
-    persona ya tenga cuenta (si no aparece en las sugerencias, el campo sigue aceptando texto libre).
+    que exige la cédula completa) — usado por el campo "Colaborador" de Altas de Credenciales, la
+    Bóveda Personal del super-admin, y el autocompletar genérico de /static/js/autocompletar_
+    persona.js (pedido de Tomás, 08/09/2026: que buscar por cédula "empiece a buscar y mostrar los
+    similares" mientras se escribe, igual en todos los campos que lo permitan) para sugerir cuentas
+    ya registradas en Gestión de Usuarios mientras se escribe, sin obligar a que la persona ya
+    tenga cuenta (si no aparece en las sugerencias, el campo sigue aceptando texto libre).
     Restringido a agente/admin, igual que buscar_usuario_por_cedula (hallazgo QA H-03: no debe poder
-    consultarlo cualquier cuenta Estándar)."""
+    consultarlo cualquier cuenta Estándar). Incluye 'firma' (URL de Cloudinary, o None) para que
+    quien la use pueda avisar que se reutilizará como constancia sin pedir que la persona firme
+    de nuevo — igual que ya hacía buscar_usuario_por_cedula."""
     q = (request.args.get('q') or '').strip().lower()
     if len(q) < 2:
         return jsonify({'resultados': []})
@@ -13778,7 +13783,7 @@ def buscar_usuarios():
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT usuario, nombre, cedula FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC"
+            "SELECT usuario, nombre, cedula, firma FROM usuarios WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC"
         )
         filas = cursor.fetchall()
     except Exception as e:
@@ -13787,9 +13792,9 @@ def buscar_usuarios():
     conn.close()
 
     resultados = []
-    for u_usuario, u_nombre, u_cedula in filas:
+    for u_usuario, u_nombre, u_cedula, u_firma in filas:
         if q in f"{u_nombre or ''} {u_usuario} {u_cedula or ''}".lower():
-            resultados.append({'usuario': u_usuario, 'nombre': u_nombre or u_usuario, 'cedula': u_cedula or ''})
+            resultados.append({'usuario': u_usuario, 'nombre': u_nombre or u_usuario, 'cedula': u_cedula or '', 'firma': u_firma})
             if len(resultados) >= 10:
                 break
     return jsonify({'resultados': resultados})
