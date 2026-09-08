@@ -9990,6 +9990,38 @@ def _pdf_tabla_encabezado_acta(acta_id, fecha_texto):
     return tabla
 
 
+_RUTA_LOGO_PREVENTIVA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'img', 'logo_preventiva.png')
+
+
+def _pdf_encabezado_con_logo(titulo_texto, estilos):
+    """Encabezado tipo membrete para las actas (asignación/devolución): el logo de Preventiva
+    Salud IPS a la izquierda y el título del acta a la derecha — imitando el papel membretado de
+    la institución (pedido de Tomás, 08/09/2026: 'darle una estructura más profesional'). Si el
+    archivo del logo no está disponible por algún motivo (no llegó a desplegarse, ruta movida),
+    se omite en silencio y el PDF sigue generándose solo con el título — nunca debe tumbar la
+    descarga ni el envío por correo del acta."""
+    from reportlab.platypus import Table, TableStyle, Paragraph, Image
+    from reportlab.lib.units import cm
+    celda_titulo = Paragraph(titulo_texto, estilos['Title'])
+    logo = None
+    if os.path.exists(_RUTA_LOGO_PREVENTIVA):
+        try:
+            logo = Image(_RUTA_LOGO_PREVENTIVA, width=3.3 * cm, height=1.43 * cm)
+        except Exception as e:
+            print(f"⚠️ No se pudo incrustar el logo de Preventiva en el PDF del acta: {e}")
+    if logo is None:
+        return celda_titulo
+    tabla = Table([[logo, celda_titulo]], colWidths=[3.7 * cm, 13.3 * cm])
+    tabla.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    return tabla
+
+
 def _pdf_clausula_style(estilos):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_JUSTIFY
@@ -10082,7 +10114,7 @@ def _pdf_bytes_acta_asignacion(campos):
     variante = "de Equipo Biomédico" if es_biomedico else "de Activos de TI"
 
     elementos = [
-        Paragraph(f"FORMATO DE ACTA DE ASIGNACIÓN {variante.upper()}", estilos['Title']),
+        _pdf_encabezado_con_logo(f"FORMATO DE ACTA DE ASIGNACIÓN {variante.upper()}", estilos),
         Spacer(1, 0.4 * cm),
         _pdf_tabla_encabezado_acta(numero_acta, fecha),
         Spacer(1, 0.5 * cm),
@@ -11116,7 +11148,7 @@ def _pdf_bytes_acta_devolucion(campos):
     variante = "de Equipo Biomédico" if es_biomedico else "de Activos de TI"
 
     elementos = [
-        Paragraph(f"FORMATO DE ACTA DE DEVOLUCIÓN {variante.upper()}", estilos['Title']),
+        _pdf_encabezado_con_logo(f"FORMATO DE ACTA DE DEVOLUCIÓN {variante.upper()}", estilos),
         Spacer(1, 0.4 * cm),
         _pdf_tabla_encabezado_acta(numero_acta, fecha),
         Spacer(1, 0.5 * cm),
