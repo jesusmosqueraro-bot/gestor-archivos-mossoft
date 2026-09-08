@@ -51,6 +51,14 @@ def _sin_correos_reales(monkeypatch):
     monkeypatch.setattr(arkiv, 'enviar_correo_bienvenida', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, 'enviar_correo_ticket', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, '_respaldar_copia_externa', lambda *a, **k: None)
+    # 📧 Envío automático del PDF de asignación/devolución al colaborador (pedido de Tomás,
+    # 08/09/2026, ver crear_activo/editar_activo/confirmar_devolucion_activo) — igual que los de
+    # arriba, se dispara en threading.Thread(...) y las pruebas que solo ejercitan esas rutas
+    # (sin ser las de tests/test_correo_pdf_asignacion_devolucion.py, que sí lo mockean puntual y
+    # deliberadamente para probarlo) no deben disparar un hilo real contra la red ni contra
+    # 'correos_log' mientras la prueba SIGUIENTE ya está borrando/recreando la base sqlite.
+    monkeypatch.setattr(arkiv, '_enviar_formulario_asignacion_por_correo', lambda *a, **k: None)
+    monkeypatch.setattr(arkiv, '_enviar_certificado_devolucion_por_correo', lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)

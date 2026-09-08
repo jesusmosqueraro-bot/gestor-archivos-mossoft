@@ -15,6 +15,17 @@ Cubre tres capas:
      mockeando las funciones de envío para no tocar la red ni depender de threading.Thread.
 """
 import base64
+import app as _arkiv_module
+
+# 📌 Referencias a las funciones REALES, capturadas al importar este archivo (antes de que
+# cualquier prueba corra) — el fixture autouse '_sin_correos_reales' (conftest.py) las
+# reemplaza por no-ops en TODAS las pruebas (para que otros archivos de prueba, que solo
+# ejercitan crear_activo/editar_activo/confirmar_devolucion_activo sin querer probar el envío en
+# sí, no disparen hilos reales contra la red). Las pruebas de este archivo que llaman estas
+# funciones DIRECTO (sin pasar por una ruta HTTP) necesitan la versión real, no el no-op — de
+# ahí que se guarde esta referencia estable, ajena a lo que el mock reasigne después.
+_ENVIAR_FORMULARIO_ASIGNACION_REAL = _arkiv_module._enviar_formulario_asignacion_por_correo
+_ENVIAR_CERTIFICADO_DEVOLUCION_REAL = _arkiv_module._enviar_certificado_devolucion_por_correo
 
 
 def _crear_activo_inventario(app, nombre='80001', asignado_a=None, estado='Disponible', es_biomedico=False):
@@ -119,7 +130,7 @@ def test_enviar_pdf_por_correo_error_de_red_registra_estado_error(app, monkeypat
 def test_enviar_formulario_asignacion_sin_correo_resoluble_registra_sin_correo(app):
     activo_id = _crear_activo_inventario(app, nombre='80010', asignado_a='Nombre Escrito A Mano', estado='Asignado')
 
-    app._enviar_formulario_asignacion_por_correo(activo_id, 'Nombre Escrito A Mano', 'admin')
+    _ENVIAR_FORMULARIO_ASIGNACION_REAL(activo_id, 'Nombre Escrito A Mano', 'admin')
 
     conn, db_type = app.get_db()
     cur = conn.cursor()
@@ -140,7 +151,7 @@ def test_enviar_formulario_asignacion_con_correo_resoluble_envia_el_pdf_adjunto(
 
     monkeypatch.setattr(app.requests, 'post', lambda url, json=None, timeout=None: (payloads.append(json), _RespuestaFalsa())[-1])
 
-    app._enviar_formulario_asignacion_por_correo(activo_id, 'Laura Gómez (lgomez)', 'admin')
+    _ENVIAR_FORMULARIO_ASIGNACION_REAL(activo_id, 'Laura Gómez (lgomez)', 'admin')
 
     assert len(payloads) == 1
     assert payloads[0]['para'] == 'lgomez@preventivaips.com.co'
@@ -161,7 +172,7 @@ def test_enviar_certificado_devolucion_sin_correo_resoluble_registra_sin_correo(
     conn.commit()
     conn.close()
 
-    app._enviar_certificado_devolucion_por_correo(devolucion_id)
+    _ENVIAR_CERTIFICADO_DEVOLUCION_REAL(devolucion_id)
 
     conn, db_type = app.get_db()
     cur = conn.cursor()
@@ -194,7 +205,7 @@ def test_enviar_certificado_devolucion_con_correo_resoluble_envia_el_pdf_adjunto
 
     monkeypatch.setattr(app.requests, 'post', lambda url, json=None, timeout=None: (payloads.append(json), _RespuestaFalsa())[-1])
 
-    app._enviar_certificado_devolucion_por_correo(devolucion_id)
+    _ENVIAR_CERTIFICADO_DEVOLUCION_REAL(devolucion_id)
 
     assert len(payloads) == 1
     assert payloads[0]['para'] == 'mduarte@preventivaips.com.co'

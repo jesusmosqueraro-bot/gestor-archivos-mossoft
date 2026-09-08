@@ -313,6 +313,52 @@ def test_acta_devolucion_pdf_biomedico_con_firma_familiar_se_genera(admin_sessio
     assert r.data[:4] == b'%PDF'
 
 
+def test_acta_devolucion_pdf_biomedico_incluye_la_seccion_de_familiar_cuidador(admin_session, app, monkeypatch):
+    """Pedido de Tomás (08/09/2026): la sección de familiar/cuidador solo tiene sentido para
+    equipos biomédicos entregados a domicilio — para esos SÍ debe seguir apareciendo en el PDF."""
+    import pdfplumber
+    import io
+    _mock_cloudinary_upload(monkeypatch)
+    activo_id = _crear_activo(app, nombre='Bomba Infusion 4', asignado_a='Paciente Familiar', es_biomedico=True)
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={
+        'generar_acta': 'on', 'nombre_familiar': 'Rosa Ibarra', 'firma_familiar_dataurl': FIRMA_DATAURL_VALIDA,
+    })
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id = cur.fetchone()[0]
+    conn.close()
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+    with pdfplumber.open(io.BytesIO(r.data)) as pdf:
+        texto = "\n".join(p.extract_text() or '' for p in pdf.pages)
+    assert 'Familiar/cuidador responsable' in texto
+    assert 'Rosa Ibarra' in texto
+    assert 'Firma familiar/cuidador' in texto
+
+
+def test_acta_devolucion_pdf_ti_no_incluye_la_seccion_de_familiar_cuidador(admin_session, app):
+    """El activo NO es biomédico: ya no debe aparecer ni la fila 'Familiar/cuidador responsable'
+    (antes salía vacía, "-") ni el recuadro de firma de familiar/cuidador (antes salía con
+    '(No aplica...)') — puro ruido para un acta de un activo de TI."""
+    import pdfplumber
+    import io
+    activo_id = _crear_activo(app, nombre='Laptop TI PDF', asignado_a='Usuario TI PDF', es_biomedico=False)
+    admin_session.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'generar_acta': 'on'})
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id = cur.fetchone()[0]
+    conn.close()
+
+    r = admin_session.get(f'/inventario/certificacion_devoluciones/{devolucion_id}/acta_pdf')
+    with pdfplumber.open(io.BytesIO(r.data)) as pdf:
+        texto = "\n".join(p.extract_text() or '' for p in pdf.pages)
+    assert 'Familiar/cuidador responsable' not in texto
+    assert 'Firma familiar/cuidador' not in texto
+    assert 'No aplica' not in texto
+
+
 def test_pendientes_de_devolucion_incluye_bandera_es_biomedico(admin_session, app):
     _crear_activo(app, nombre='Bomba Infusion 3', asignado_a='Paciente Z', es_biomedico=True)
     texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
