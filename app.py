@@ -815,7 +815,7 @@ def init_db():
             # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
             # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
-                id SERIAL PRIMARY KEY, colaborador VARCHAR(200) NOT NULL, aplicativo VARCHAR(150) NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion VARCHAR(100), fecha_solicitud VARCHAR(100), analista_gestiona VARCHAR(150), solicitado_por VARCHAR(150), capacitado_por VARCHAR(150), medio_envio VARCHAR(30), estado VARCHAR(20) DEFAULT 'activo', fecha_deshabilitacion VARCHAR(100), deshabilitado_por VARCHAR(150), fecha_registro VARCHAR(100) NOT NULL, registrado_por VARCHAR(150) NOT NULL
+                id SERIAL PRIMARY KEY, colaborador VARCHAR(200) NOT NULL, aplicativo VARCHAR(150) NOT NULL, usuario_aplicativo VARCHAR(150), password_cifrada TEXT NOT NULL, fecha_creacion VARCHAR(100), fecha_solicitud VARCHAR(100), analista_gestiona VARCHAR(150), solicitado_por VARCHAR(150), capacitado_por VARCHAR(150), medio_envio VARCHAR(30), estado VARCHAR(20) DEFAULT 'activo', fecha_deshabilitacion VARCHAR(100), deshabilitado_por VARCHAR(150), fecha_registro VARCHAR(100) NOT NULL, registrado_por VARCHAR(150) NOT NULL
             )''')
             # 🔐 Códigos de respaldo (recuperación) de la verificación en dos pasos (2FA): se
             # generan 10 de un solo uso al activar el 2FA, se guardan SOLO su hash (nunca el
@@ -1149,7 +1149,13 @@ def init_db():
                 # 🎒 Detalle de texto libre de la casilla 'Otro' del checklist de accesorios
                 # (pedido por Tomás, 08/09/2026) — ver ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio.
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS accesorio_otro_detalle TEXT;",
-                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS accesorio_otro_detalle TEXT;"
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS accesorio_otro_detalle TEXT;",
+                # 🆔 Usuario/ID propio de cada aplicativo (pedido por Tomás, 08/09/2026): cada
+                # aplicativo tiene su propia forma de identificar a la persona (cédula en SAMI, un
+                # correo en Correo, un ID numérico en Wolkvox...) — se guarda aparte de la
+                # contraseña compartida, un valor por fila (colaborador, aplicativo). Ver
+                # crear_credencial_colaborador/editar_credencial_colaborador.
+                "ALTER TABLE credenciales_colaboradores ADD COLUMN IF NOT EXISTS usuario_aplicativo VARCHAR(150);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1264,7 +1270,7 @@ def init_db():
             # que se le habilita a una persona (no por colaborador), para poder deshabilitar el
             # acceso a un aplicativo puntual sin afectar los demás que tenga esa misma persona.
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_colaboradores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, colaborador TEXT NOT NULL, aplicativo TEXT NOT NULL, password_cifrada TEXT NOT NULL, fecha_creacion TEXT, fecha_solicitud TEXT, analista_gestiona TEXT, solicitado_por TEXT, capacitado_por TEXT, medio_envio TEXT, estado TEXT DEFAULT 'activo', fecha_deshabilitacion TEXT, deshabilitado_por TEXT, fecha_registro TEXT NOT NULL, registrado_por TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, colaborador TEXT NOT NULL, aplicativo TEXT NOT NULL, usuario_aplicativo TEXT, password_cifrada TEXT NOT NULL, fecha_creacion TEXT, fecha_solicitud TEXT, analista_gestiona TEXT, solicitado_por TEXT, capacitado_por TEXT, medio_envio TEXT, estado TEXT DEFAULT 'activo', fecha_deshabilitacion TEXT, deshabilitado_por TEXT, fecha_registro TEXT NOT NULL, registrado_por TEXT NOT NULL
             )''')
             # 🔐 Códigos de respaldo (recuperación) del 2FA. Ver comentario equivalente en la
             # rama de Postgres.
@@ -1596,6 +1602,13 @@ def init_db():
                     conn.commit()
                 except Exception:
                     pass
+            # 🆔 Usuario/ID propio de cada aplicativo en Altas de Credenciales. Ver comentario
+            # equivalente en la rama de Postgres.
+            try:
+                cursor.execute("ALTER TABLE credenciales_colaboradores ADD COLUMN usuario_aplicativo TEXT;")
+                conn.commit()
+            except Exception:
+                pass
             # 📎 Adjunto multimedia en el Chat Interno. Ver comentario equivalente en la rama de
             # Postgres.
             for col_chat_adjunto_sql in [
@@ -13276,7 +13289,7 @@ def ver_credenciales_colaboradores():
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT id, colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, "
+            "SELECT id, colaborador, aplicativo, usuario_aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, "
             "solicitado_por, capacitado_por, medio_envio, estado, fecha_deshabilitacion, deshabilitado_por "
             "FROM credenciales_colaboradores ORDER BY id DESC"
         )
@@ -13289,7 +13302,7 @@ def ver_credenciales_colaboradores():
     registros = []
     aplicativos_en_uso = set()
     for r in filas:
-        (r_id, colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona,
+        (r_id, colaborador, aplicativo, usuario_aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona,
          solicitado_por, capacitado_por, medio_envio, estado, fecha_deshabilitacion, deshabilitado_por) = r
         aplicativos_en_uso.add(aplicativo)
 
@@ -13297,11 +13310,12 @@ def ver_credenciales_colaboradores():
             continue
         if f_aplicativo and aplicativo != f_aplicativo:
             continue
-        if q_busqueda and q_busqueda not in f"{colaborador} {aplicativo} {solicitado_por or ''}".lower():
+        if q_busqueda and q_busqueda not in f"{colaborador} {aplicativo} {usuario_aplicativo or ''} {solicitado_por or ''}".lower():
             continue
 
         registros.append({
             'id': r_id, 'colaborador': colaborador, 'aplicativo': aplicativo,
+            'usuario_aplicativo': usuario_aplicativo,
             'fecha_creacion': fecha_creacion, 'fecha_solicitud': fecha_solicitud,
             'analista_gestiona': analista_gestiona, 'solicitado_por': solicitado_por,
             'capacitado_por': capacitado_por, 'medio_envio': medio_envio, 'estado': estado,
@@ -13351,7 +13365,15 @@ def crear_credencial_colaborador():
     con los mismos datos compartidos (contraseña, fechas, analista, capacitado por, medio de
     envío) — antes había que repetir todo el formulario un aplicativo a la vez. Sigue guardando
     UN registro por (colaborador, aplicativo) en credenciales_colaboradores (no se cambió ese
-    esquema): esta ruta simplemente inserta varias filas en una sola transacción."""
+    esquema): esta ruta simplemente inserta varias filas en una sola transacción.
+
+    Cada aplicativo tiene su propia forma de identificar a la persona (una cédula en SAMI, un
+    correo en Correo, un ID numérico en Wolkvox...) — a diferencia de la contraseña, que sí se
+    comparte entre todos los aplicativos marcados, el 'usuario' de cada uno es independiente
+    (pedido por Tomás, 08/09/2026). El formulario manda un campo de texto aparte por cada
+    aplicativo del catálogo, nombrado 'usuario_aplicativo__<nombre del aplicativo>' — ver el
+    modal 'Nueva Alta' en credenciales_colaboradores.html. Es opcional: no todos los aplicativos
+    tienen o requieren un usuario propio distinto del nombre del colaborador."""
     colaborador = request.form.get('colaborador', '').strip()
     aplicativos_sel = [a.strip() for a in request.form.getlist('aplicativos') if a.strip()]
     password = request.form.get('password', '').strip()
@@ -13371,16 +13393,17 @@ def crear_credencial_colaborador():
             conn, db_type = get_db()
             cursor = conn.cursor()
             q_ins = (
-                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
+                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, usuario_aplicativo, password_cifrada, fecha_creacion, "
                 "fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio, estado, "
-                "fecha_registro, registrado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)"
+                "fecha_registro, registrado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'activo', %s, %s)"
                 if db_type == 'postgres' else
-                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
+                "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, usuario_aplicativo, password_cifrada, fecha_creacion, "
                 "fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio, estado, "
-                "fecha_registro, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
+                "fecha_registro, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
             )
             for aplicativo in aplicativos_sel:
-                cursor.execute(q_ins, (colaborador, aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
+                usuario_aplicativo = (request.form.get(f'usuario_aplicativo__{aplicativo}', '') or '').strip() or None
+                cursor.execute(q_ins, (colaborador, aplicativo, usuario_aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
                                         analista_gestiona, solicitado_por, capacitado_por, medio_envio,
                                         fecha_act, session.get('username')))
             conn.commit()
@@ -13403,6 +13426,7 @@ def editar_credencial_colaborador(reg_id):
     en la Bóveda de Accesos, para no obligar a reescribir una clave que no cambió."""
     colaborador = request.form.get('colaborador', '').strip()
     aplicativo = request.form.get('aplicativo', '').strip()
+    usuario_aplicativo = request.form.get('usuario_aplicativo', '').strip() or None
     password = request.form.get('password', '').strip()
     fecha_creacion = request.form.get('fecha_creacion', '').strip() or None
     fecha_solicitud = request.form.get('fecha_solicitud', '').strip() or None
@@ -13417,8 +13441,8 @@ def editar_credencial_colaborador(reg_id):
         try:
             conn, db_type = get_db()
             cursor = conn.cursor()
-            campos_comunes = "colaborador = %s, aplicativo = %s, fecha_creacion = %s, fecha_solicitud = %s, analista_gestiona = %s, solicitado_por = %s, capacitado_por = %s, medio_envio = %s"
-            valores_comunes = [colaborador, aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio]
+            campos_comunes = "colaborador = %s, aplicativo = %s, usuario_aplicativo = %s, fecha_creacion = %s, fecha_solicitud = %s, analista_gestiona = %s, solicitado_por = %s, capacitado_por = %s, medio_envio = %s"
+            valores_comunes = [colaborador, aplicativo, usuario_aplicativo, fecha_creacion, fecha_solicitud, analista_gestiona, solicitado_por, capacitado_por, medio_envio]
             if password:
                 q = f"UPDATE credenciales_colaboradores SET {campos_comunes}, password_cifrada = %s WHERE id = %s"
                 valores = valores_comunes + [encriptar_texto(password), reg_id]
