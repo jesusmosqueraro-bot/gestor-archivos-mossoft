@@ -121,10 +121,24 @@
                             <p class="text-[10px] font-bold text-slate-400 uppercase mb-1.5"><i class="fa-solid fa-boxes-packing mr-1 text-teal-400"></i>Accesorios que regresaron</p>
                             <div class="grid grid-cols-2 gap-1.5">
                                 {% for ac in p.accesorios_asignados %}
+                                {% if ac.clave == 'otro' %}
+                                <div class="col-span-2">
+                                    <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                                        <input type="checkbox" name="accesorio_devuelto_otro" id="input-accesorio-devuelto-otro-{{ p.id }}" checked onchange="actualizarDetalleAccesorioDevueltoOtro({{ p.id }})" class="rounded border-slate-600 bg-slate-900 text-teal-500 focus:ring-teal-500">
+                                        Otro{% if p.accesorio_otro_detalle %}: {{ p.accesorio_otro_detalle }}{% endif %}
+                                    </label>
+                                    <!-- 🎒 "Otro" (pedido por Tomás, 08/09/2026): el mismo detalle escrito
+                                         al asignar se reutiliza como valor inicial aquí — obligatorio
+                                         mientras la casilla siga marcada (ver actualizarDetalleAccesorio
+                                         DevueltoOtro() y ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio). -->
+                                    <input type="text" name="accesorio_devuelto_otro_detalle" id="input-accesorio-devuelto-otro-detalle-{{ p.id }}" value="{{ p.accesorio_otro_detalle or '' }}" required maxlength="200" placeholder="Especifica cuál otro accesorio regresó" class="w-full mt-1 px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-[11px] text-white focus:outline-none focus:border-teal-500">
+                                </div>
+                                {% else %}
                                 <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
                                     <input type="checkbox" name="accesorio_devuelto_{{ ac.clave }}" checked class="rounded border-slate-600 bg-slate-900 text-teal-500 focus:ring-teal-500">
                                     {{ ac.etiqueta }}
                                 </label>
+                                {% endif %}
                                 {% endfor %}
                             </div>
                         </div>
@@ -212,7 +226,7 @@
                             <td class="py-2 pr-4 text-slate-400">{{ h.confirmado_por }}</td>
                             <td class="py-2 pr-4 text-slate-400">{{ h.fecha }}</td>
                             <td class="py-2 pr-4 text-slate-500">{{ h.observaciones or '—' }}</td>
-                            <td class="py-2 pr-4 text-slate-500">{% if h.accesorios_devueltos %}{{ h.accesorios_devueltos | map(attribute='etiqueta') | join(', ') }}{% else %}—{% endif %}</td>
+                            <td class="py-2 pr-4 text-slate-500">{{ h.accesorios_devueltos_texto or '—' }}</td>
                             <td class="py-2">
                                 {% if h.acta_generada %}
                                 <a href="{{ url_for('acta_devolucion_pdf', devolucion_id=h.id) }}" target="_blank" class="inline-flex items-center gap-1.5 text-teal-400 hover:text-teal-300 font-semibold whitespace-nowrap">
@@ -258,6 +272,17 @@
         // cada fila que trae la sección, identificado por el id del activo.
         {{ (pendientes | selectattr('es_biomedico') | map(attribute='id') | list) | tojson }}
             .forEach(function (id) { inicializarFirmaDigital('firma-familiar-' + id); });
+
+        // 🎒 "Otro" en Accesorios que regresaron (pedido por Tomás, 08/09/2026): el campo de
+        // texto es obligatorio mientras la casilla "Otro" siga marcada — igual que en el modal
+        // de asignación (ver actualizarDetalleAccesorioOtro en tickets_inventario.html).
+        function actualizarDetalleAccesorioDevueltoOtro(id) {
+            var marcado = document.getElementById('input-accesorio-devuelto-otro-' + id).checked;
+            var input = document.getElementById('input-accesorio-devuelto-otro-detalle-' + id);
+            input.classList.toggle('hidden', !marcado);
+            input.required = marcado;
+            if (!marcado) { input.value = ''; }
+        }
     </script>
 </body>
 </html>

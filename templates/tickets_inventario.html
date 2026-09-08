@@ -626,10 +626,20 @@
                             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                 {% for ac in accesorios_activo %}
                                 <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
-                                    <input type="checkbox" name="accesorio_{{ ac.clave }}" id="input-accesorio-{{ ac.clave }}" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                    <input type="checkbox" name="accesorio_{{ ac.clave }}" id="input-accesorio-{{ ac.clave }}"
+                                        {% if ac.clave == 'otro' %}onchange="actualizarDetalleAccesorioOtro()"{% endif %}
+                                        class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
                                     {{ ac.etiqueta }}
                                 </label>
                                 {% endfor %}
+                            </div>
+                            <!-- 🎒 "Otro" (pedido por Tomás, 08/09/2026): al marcarlo, este campo se
+                                 vuelve visible y OBLIGATORIO — ver actualizarDetalleAccesorioOtro()
+                                 y ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio en app.py. Lo que se
+                                 escriba aquí se reutiliza como valor inicial del campo equivalente
+                                 en el formulario de devolución. -->
+                            <div id="campo-accesorio-otro-detalle" class="hidden mt-2">
+                                <input type="text" name="accesorio_otro_detalle" id="input-accesorio-otro-detalle" maxlength="200" placeholder="Especifica cuál otro accesorio (obligatorio si marcas &quot;Otro&quot;)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                             </div>
                         </div>
 
@@ -909,6 +919,18 @@
             if (firmaArchivo) { firmaArchivo.value = ''; }
         }
 
+        // 🎒 "Otro" en Accesorios entregados (pedido por Tomás, 08/09/2026): muestra/oculta el
+        // campo de texto y lo marca obligatorio solo mientras la casilla "Otro" esté marcada —
+        // ver ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio en app.py.
+        function actualizarDetalleAccesorioOtro() {
+            var marcado = document.getElementById('input-accesorio-otro').checked;
+            var campo = document.getElementById('campo-accesorio-otro-detalle');
+            var input = document.getElementById('input-accesorio-otro-detalle');
+            campo.classList.toggle('hidden', !marcado);
+            input.required = marcado;
+            if (!marcado) { input.value = ''; }
+        }
+
         function abrirModalNuevo() {
             document.getElementById('modal-activo-titulo').textContent = 'Nuevo Activo';
             document.getElementById('form-activo').action = '/tickets/inventario/nuevo';
@@ -937,6 +959,8 @@
             {% for ac in accesorios_activo %}
             document.getElementById('input-accesorio-{{ ac.clave }}').checked = false;
             {% endfor %}
+            document.getElementById('input-accesorio-otro-detalle').value = '';
+            actualizarDetalleAccesorioOtro();
             activoActualIdParaActas = null;
             limpiarFormularioActaRecibido();
             actualizarSeccionActaRecibido();
@@ -975,6 +999,8 @@
             {% for ac in accesorios_activo %}
             document.getElementById('input-accesorio-{{ ac.clave }}').checked = _accesoriosActivo.indexOf('{{ ac.clave }}') !== -1;
             {% endfor %}
+            document.getElementById('input-accesorio-otro-detalle').value = activo.accesorio_otro_detalle || '';
+            actualizarDetalleAccesorioOtro();
             activoActualIdParaActas = activo.id;
             limpiarFormularioActaRecibido();
             actualizarSeccionActaRecibido();
