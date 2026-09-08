@@ -1145,7 +1145,11 @@ def init_db():
                 # certificar la devolución, para confirmar cuáles de esos accesorios regresaron
                 # realmente — ver confirmar_devolucion_activo/inventario_certificacion.html.
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS accesorios_asignados TEXT;",
-                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS accesorios_devueltos TEXT;"
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS accesorios_devueltos TEXT;",
+                # 🎒 Detalle de texto libre de la casilla 'Otro' del checklist de accesorios
+                # (pedido por Tomás, 08/09/2026) — ver ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS accesorio_otro_detalle TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS accesorio_otro_detalle TEXT;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1583,7 +1587,9 @@ def init_db():
             # Postgres.
             for col_accesorios_sql in [
                 "ALTER TABLE activos_inventario ADD COLUMN accesorios_asignados TEXT;",
-                "ALTER TABLE inventario_devoluciones ADD COLUMN accesorios_devueltos TEXT;"
+                "ALTER TABLE inventario_devoluciones ADD COLUMN accesorios_devueltos TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN accesorio_otro_detalle TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN accesorio_otro_detalle TEXT;"
             ]:
                 try:
                     cursor.execute(col_accesorios_sql)
@@ -3645,12 +3651,20 @@ TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor',
 # confirmar_devolucion_activo) para confirmar cuáles de esos accesorios realmente regresaron —
 # ver 'accesorios_asignados' en activos_inventario y 'accesorios_devueltos' en
 # inventario_devoluciones, ambos guardados como texto separado por comas de estas claves.
+# El último ítem, 'otro', es un cajón de sastre para lo que no está en la lista (pedido por
+# Tomás, 08/09/2026): marcarlo obliga a diligenciar un campo de texto aparte (ver
+# ACCESORIO_CLAVE_OTRO/_detalle_otro_accesorio) que también se guarda en su propia columna
+# ('accesorio_otro_detalle' en activos_inventario/inventario_devoluciones) y se integra al
+# formulario de devolución igual que el resto de la lista.
+ACCESORIO_CLAVE_OTRO = 'otro'
 ACCESORIOS_ACTIVO = [
     {'clave': 'cargador', 'etiqueta': 'Cargador / adaptador de corriente'},
     {'clave': 'teclado', 'etiqueta': 'Teclado'},
     {'clave': 'mouse', 'etiqueta': 'Mouse'},
+    {'clave': 'adaptador_red', 'etiqueta': 'Adaptador de red'},
     {'clave': 'maletin', 'etiqueta': 'Maletín o bolso'},
     {'clave': 'guaya', 'etiqueta': 'Guaya de seguridad'},
+    {'clave': ACCESORIO_CLAVE_OTRO, 'etiqueta': 'Otro'},
 ]
 ICONOS_TIPO_ACTIVO = ['desktop', 'laptop', 'print', 'display', 'mobile-screen', 'server', 'network-wired', 'box',
                       'tablet', 'keyboard', 'headphones', 'camera', 'video', 'wifi', 'hard-drive', 'database',
@@ -8975,7 +8989,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -9044,7 +9058,7 @@ def ver_inventario():
         'proveedor': r[10], 'observaciones': r[11], 'fecha_creacion': r[12], 'creado_por': r[13],
         'tipo_costo': r[14], 'costo_compra': _decimal_a_float(r[15]), 'costo_alquiler_mensual': _decimal_a_float(r[16]),
         'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]), 'fecha_devolucion': r[19],
-        'accesorios_asignados': r[20] or '',
+        'accesorios_asignados': r[20] or '', 'accesorio_otro_detalle': r[21] or '',
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -9587,6 +9601,40 @@ def _accesorios_lista_desde_csv(csv_claves):
         return []
     claves = set(csv_claves.split(','))
     return [a for a in ACCESORIOS_ACTIVO if a['clave'] in claves]
+
+
+def _detalle_otro_accesorio(form, prefijo='accesorio_'):
+    """Lee el campo de texto libre de la casilla 'Otro' (ACCESORIO_CLAVE_OTRO) — pedido por
+    Tomás: si esa casilla está marcada, diligenciarlo es obligatorio. Se usa con el mismo
+    'prefijo' que _accesorios_marcados, tanto al asignar como al certificar una devolución.
+    Devuelve (detalle, error): 'error' trae el mensaje a mostrar si se marcó 'Otro' sin texto;
+    en ese caso 'detalle' es None. Si la casilla no está marcada, devuelve (None, None) — no se
+    guarda ningún texto aunque el campo venga con algo escrito (formulario manipulado, casilla
+    desmarcada después de escribir, etc.)."""
+    marcado = form.get(f"{prefijo}{ACCESORIO_CLAVE_OTRO}") in ('on', '1', 'true')
+    if not marcado:
+        return None, None
+    detalle = (form.get(f"{prefijo}{ACCESORIO_CLAVE_OTRO}_detalle") or '').strip()
+    if not detalle:
+        return None, "Marcaste 'Otro' en Accesorios pero no especificaste cuál — completa ese campo o desmarca la casilla."
+    return detalle, None
+
+
+def _etiquetas_accesorios_texto(csv_claves, otro_detalle=None):
+    """Texto legible (para mostrar en tablas/historial, no para checkboxes) de los accesorios
+    guardados en 'accesorios_asignados'/'accesorios_devueltos' — igual que
+    _accesorios_lista_desde_csv pero ya unido en un string, incluyendo el detalle de 'Otro' si
+    se guardó uno (ver ACCESORIO_CLAVE_OTRO)."""
+    items = _accesorios_lista_desde_csv(csv_claves)
+    if not items:
+        return ''
+    etiquetas = []
+    for a in items:
+        if a['clave'] == ACCESORIO_CLAVE_OTRO and otro_detalle:
+            etiquetas.append(f"Otro: {otro_detalle}")
+        else:
+            etiquetas.append(a['etiqueta'])
+    return ', '.join(etiquetas)
 
 
 def _resolver_firma_para_asignacion(asignado_a):
@@ -10150,6 +10198,10 @@ def crear_activo():
     firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
     accesorios_asignados = _accesorios_marcados(request.form)
+    accesorio_otro_detalle, error_otro_accesorio = _detalle_otro_accesorio(request.form)
+    if error_otro_accesorio:
+        flash(error_otro_accesorio, "error")
+        return redirect(url_for('ver_inventario'))
 
     if nombre:
         fecha_act = obtener_fecha_actual()
@@ -10185,10 +10237,10 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                      if db_type == 'postgres' else
-                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados))
+                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle))
             nuevo_activo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
@@ -10240,6 +10292,10 @@ def editar_activo(activo_id):
     firma_asignacion_fecha = obtener_fecha_actual() if firma_asignacion_url else None
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
     accesorios_asignados = _accesorios_marcados(request.form)
+    accesorio_otro_detalle, error_otro_accesorio = _detalle_otro_accesorio(request.form)
+    if error_otro_accesorio:
+        flash(error_otro_accesorio, "error")
+        return redirect(url_for('ver_inventario'))
 
     if nombre:
         conn, db_type = get_db()
@@ -10286,8 +10342,8 @@ def editar_activo(activo_id):
                 flash("El activo se guardó como 'Disponible' en vez de 'Asignado' porque no se indicó a quién "
                       "se le asigna (campo 'Asignado a' vacío). Edítalo y completa ese campo para dejarlo asignado.", "error")
 
-            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph} WHERE id = {ph}"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, activo_id))
+            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph} WHERE id = {ph}"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, activo_id))
             conn.commit()
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
@@ -10540,8 +10596,8 @@ def certificacion_devoluciones():
     cursor = conn.cursor()
     pendientes = []
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
-        for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados in cursor.fetchall():
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
+        for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle in cursor.fetchall():
             if busqueda and busqueda not in f"{asignado_a or ''} {nombre or ''}".lower():
                 continue
             pendientes.append({
@@ -10551,19 +10607,24 @@ def certificacion_devoluciones():
                 # 🎒 Solo los accesorios que quedaron marcados al asignar (no todo el catálogo) —
                 # es lo que se le pide confirmar a quien certifica la devolución. Ver
                 # ACCESORIOS_ACTIVO/_accesorios_lista_desde_csv y confirmar_devolucion_activo.
+                # 'accesorio_otro_detalle' es lo que se escribió en la casilla "Otro" al asignar
+                # (ver ACCESORIO_CLAVE_OTRO) — se muestra y se reutiliza como valor inicial del
+                # campo de texto equivalente en el formulario de devolución.
                 'accesorios_asignados': _accesorios_lista_desde_csv(accesorios_asignados),
+                'accesorio_otro_detalle': accesorio_otro_detalle or '',
             })
     except Exception as e:
         print(f"⚠️ Error consultando pendientes de devolución: {e}")
 
     historial = []
     try:
-        cursor.execute("""SELECT d.id, d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, d.accesorios_devueltos
+        cursor.execute("""SELECT d.id, d.colaborador, a.nombre, a.tipo_activo, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, d.accesorios_devueltos, d.accesorio_otro_detalle
                            FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id
                            ORDER BY d.id DESC LIMIT 200""")
         historial = [{'id': r[0], 'colaborador': r[1], 'nombre_activo': r[2], 'tipo_activo': r[3],
                       'confirmado_por': r[4], 'fecha': r[5], 'observaciones': r[6], 'acta_generada': bool(r[7]),
-                      'accesorios_devueltos': _accesorios_lista_desde_csv(r[8])} for r in cursor.fetchall()]
+                      'accesorios_devueltos': _accesorios_lista_desde_csv(r[8]),
+                      'accesorios_devueltos_texto': _etiquetas_accesorios_texto(r[8], r[9])} for r in cursor.fetchall()]
     except Exception as e:
         print(f"⚠️ Error consultando historial de devoluciones: {e}")
     conn.close()
@@ -10651,6 +10712,10 @@ def confirmar_devolucion_activo(activo_id):
     # formulario de "Pendientes de devolución", con nombres 'accesorio_devuelto_<clave>' — ver
     # ACCESORIOS_ACTIVO/_accesorios_marcados e inventario_certificacion.html.
     accesorios_devueltos = _accesorios_marcados(request.form, prefijo='accesorio_devuelto_')
+    accesorio_otro_detalle_devuelto, error_otro_accesorio = _detalle_otro_accesorio(request.form, prefijo='accesorio_devuelto_')
+    if error_otro_accesorio:
+        flash(error_otro_accesorio, "error")
+        return redirect(url_for('certificacion_devoluciones'))
     conn, db_type = get_db()
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
@@ -10697,16 +10762,16 @@ def confirmar_devolucion_activo(activo_id):
 
             q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                      "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
-                     "accesorios_devueltos) "
-                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                     "accesorios_devueltos, accesorio_otro_detalle) "
+                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                       if db_type == 'postgres' else
                       "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                       "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
-                      "accesorios_devueltos) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                      "accesorios_devueltos, accesorio_otro_detalle) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones, generar_acta,
                                     firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url,
-                                    accesorios_devueltos))
+                                    accesorios_devueltos, accesorio_otro_detalle_devuelto))
             # 🔒 Certificar la devolución ya NO deja el activo 'Disponible' de inmediato (eso
             # permitía que cualquier agente lo reasignara al instante) — pasa a 'Devolución',
             # con la fecha registrada y BLOQUEADO hasta que un administrador lo revise y decida
