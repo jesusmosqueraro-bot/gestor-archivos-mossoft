@@ -5964,6 +5964,47 @@ def _nombre_para_mostrar(username, mapa_nombres):
     return mapa_nombres.get(username, username)
 
 
+def _mapa_cedulas_por_usuario():
+    """Devuelve {usuario: cedula} de TODOS los usuarios — hermano de _mapa_nombres_usuarios(),
+    usado para poder buscar por cédula en los campos de texto libre que identifican a una
+    persona (ej. activos_inventario.asignado_a, inventario_devoluciones.colaborador), que NUNCA
+    guardan la cédula directamente. Ver _texto_busqueda_persona_libre."""
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT usuario, cedula FROM usuarios")
+        mapa = {u[0]: (u[1] or '') for u in cursor.fetchall()}
+        conn.close()
+        return mapa
+    except Exception as e:
+        print(f"⚠️ Error cargando el mapa de cédulas de usuarios: {e}")
+        return {}
+
+
+# 🔎 "Asignado a"/"colaborador" son campos de TEXTO LIBRE (no una relación a 'usuarios' — el
+# colaborador puede no tener cuenta en Arkiv): se escriben a mano, o se llenan solos al elegir
+# una sugerencia del autocompletar/buscar-por-cédula con el formato "Nombre (usuario)". Este
+# patrón reconoce ese formato para poder resolver la cédula de esa persona cuando sí tiene
+# cuenta — ver _texto_busqueda_persona_libre.
+_PATRON_USUARIO_ENTRE_PARENTESIS = re.compile(r'\(([^()]+)\)\s*$')
+
+
+def _texto_busqueda_persona_libre(texto_persona, mapa_cedulas):
+    """A partir de un texto libre que identifica a una persona (ej. 'Manuela Urrea (urrea)', o
+    solo 'Manuela Urrea' si se escribió a mano sin pasar por el buscador), arma el texto contra
+    el que debe compararse una búsqueda para que la encuentre tanto por nombre como por cédula —
+    pedido de Tomás (08/09/2026): 'este tipo de búsqueda debe ser transversal en todos los
+    filtros... siempre debe traer el nombre del usuario, usando un LIKE o algo así'. El nombre ya
+    suele venir incluido tal cual en el texto; la cédula se resuelve por el 'usuario' entre
+    paréntesis al final (si lo hay) contra 'usuarios.cedula' (ver _mapa_cedulas_por_usuario)."""
+    texto_persona = texto_persona or ''
+    cedula = ''
+    match = _PATRON_USUARIO_ENTRE_PARENTESIS.search(texto_persona)
+    if match:
+        cedula = mapa_cedulas.get(match.group(1), '') or ''
+    return f"{texto_persona} {cedula}".strip()
+
+
 # 📞 Código de país por defecto para los números de contacto: la organización opera en
 # Colombia y casi todos los teléfonos se guardan en formato local (10 dígitos, sin +57).
 CODIGO_PAIS_WHATSAPP_DEFAULT = '57'
@@ -6157,8 +6198,13 @@ def ver_tickets():
     # 👤 Nombre completo por usuario (para mostrar "Creado por"/"Asignado a" en la tabla con
     # el nombre real de la persona en lugar de su usuario de inicio de sesión, un alias poco
     # reconocible como 'escobar' o 'tmira').
-    cursor.execute("SELECT usuario, nombre FROM usuarios")
-    nombres_usuarios = {u[0]: (u[1] or u[0]) for u in cursor.fetchall()}
+    cursor.execute("SELECT usuario, nombre, cedula FROM usuarios")
+    filas_usuarios = cursor.fetchall()
+    nombres_usuarios = {u[0]: (u[1] or u[0]) for u in filas_usuarios}
+    # 🪪 Para que "Buscar" también encuentre un ticket por el nombre o la cédula de quien lo
+    # creó/lo tiene asignado, no solo por su usuario de inicio de sesión — pedido de Tomás
+    # (08/09/2026): búsqueda por nombre/cédula/usuario transversal en todo el sistema.
+    cedulas_usuarios = {u[0]: (u[2] or '') for u in filas_usuarios}
 
     # 💻 Activos del inventario (no eliminados) para el selector "Activo relacionado" del
     # formulario de "Nueva Solicitud" — vincular el ticket a un equipo puntual del inventario.
@@ -6168,14 +6214,17 @@ def ver_tickets():
 
     tickets = []
     for r in rows:
-        texto_full = f"{r[1]} {r[2]} {r[7]}".lower()
+        creado_por_nombre = nombres_usuarios.get(r[7], r[7])
+        asignado_a_nombre = nombres_usuarios.get(r[8], r[8]) if r[8] else ''
+        texto_full = (f"{r[1]} {r[2]} {r[7]} {creado_por_nombre} {cedulas_usuarios.get(r[7], '')} "
+                      f"{r[8] or ''} {asignado_a_nombre} {cedulas_usuarios.get(r[8], '') if r[8] else ''}").lower()
         if not q_busqueda or q_busqueda in texto_full:
             tipo_t = r[3] or 'Incidente'
             t = {
                 'id': r[0], 'titulo': r[1], 'descripcion': r[2], 'tipo': tipo_t, 'categoria': r[4],
                 'prioridad': r[5], 'estado': r[6], 'creado_por': r[7], 'asignado_a': r[8],
-                'creado_por_nombre': nombres_usuarios.get(r[7], r[7]),
-                'asignado_a_nombre': nombres_usuarios.get(r[8], r[8]) if r[8] else None,
+                'creado_por_nombre': creado_por_nombre,
+                'asignado_a_nombre': asignado_a_nombre or None,
                 'fecha_creacion': r[9], 'fecha_actualizacion': r[10],
                 'codigo': _codigo_ticket(tipo_t, r[0], r[9]),
                 'sla_resolucion_limite': r[11], 'sla_resolucion_cumplida': r[12],
@@ -8982,6 +9031,11 @@ def ver_inventario():
     q_area = request.args.get('area', '').strip()
     q_proveedor = request.args.get('proveedor', '').strip()
     q_busqueda = request.args.get('q', '').strip().lower()
+    # 🪪 Para que la búsqueda encuentre también por cédula (pedido de Tomás, 08/09/2026: "este
+    # tipo de búsqueda debe ser transversal... siempre debe traer el nombre del usuario"), ya que
+    # 'asignado_a' es texto libre que no guarda la cédula directamente — ver
+    # _texto_busqueda_persona_libre.
+    mapa_cedulas_asignado = _mapa_cedulas_por_usuario()
 
     tipos_activo_catalogo = _catalogo_tipos_activo_activos()
     nombres_tipos_activo = [t['etiqueta'] for t in tipos_activo_catalogo] or TIPOS_ACTIVO
@@ -9090,7 +9144,7 @@ def ver_inventario():
     if q_tipo in nombres_tipos_activo:
         activos_en_contexto = [a for a in activos_en_contexto if a['tipo_activo'] == q_tipo]
     if q_busqueda:
-        activos_en_contexto = [a for a in activos_en_contexto if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+        activos_en_contexto = [a for a in activos_en_contexto if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {_texto_busqueda_persona_libre(a['asignado_a'], mapa_cedulas_asignado)}".lower()]
 
     conteos_estado = {e: 0 for e in ESTADOS_ACTIVO}
     for a in activos_en_contexto:
@@ -9109,7 +9163,7 @@ def ver_inventario():
     if q_sede:
         activos_para_tipo = [a for a in activos_para_tipo if (a['sede'] or '') == q_sede]
     if q_busqueda:
-        activos_para_tipo = [a for a in activos_para_tipo if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+        activos_para_tipo = [a for a in activos_para_tipo if q_busqueda in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {_texto_busqueda_persona_libre(a['asignado_a'], mapa_cedulas_asignado)}".lower()]
     por_tipo_activo = {}
     for a in activos_para_tipo:
         tp = a['tipo_activo'] or 'Otro'
@@ -9193,7 +9247,8 @@ def _consultar_activos_inventario_filtrados(q_estado='', q_tipo='', q_sede='', q
         activos = [a for a in activos if a['estado'] == q_estado]
     q_busqueda_norm = (q_busqueda or '').strip().lower()
     if q_busqueda_norm:
-        activos = [a for a in activos if q_busqueda_norm in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {a['asignado_a'] or ''}".lower()]
+        mapa_cedulas_asignado = _mapa_cedulas_por_usuario()
+        activos = [a for a in activos if q_busqueda_norm in f"{a['nombre']} {a['marca'] or ''} {a['modelo'] or ''} {a['numero_serie'] or ''} {_texto_busqueda_persona_libre(a['asignado_a'], mapa_cedulas_asignado)}".lower()]
     return activos
 
 
@@ -10592,13 +10647,19 @@ def eliminar_adjunto_inventario(adjunto_id):
 @certificacion_devolucion_required
 def certificacion_devoluciones():
     busqueda = (request.args.get('q') or '').strip().lower()
+    # 🪪 'asignado_a'/'colaborador' son texto libre (no siempre corresponden a una cuenta de
+    # Arkiv) — para que la búsqueda encuentre a la persona también por cédula (pedido de Tomás,
+    # 08/09/2026: "este tipo de búsqueda debe ser transversal... siempre debe traer el nombre del
+    # usuario"), se resuelve la cédula del 'usuario' entre paréntesis si lo hay. Ver
+    # _texto_busqueda_persona_libre.
+    mapa_cedulas_asignado = _mapa_cedulas_por_usuario() if busqueda else {}
     conn, db_type = get_db()
     cursor = conn.cursor()
     pendientes = []
     try:
         cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
         for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle in cursor.fetchall():
-            if busqueda and busqueda not in f"{asignado_a or ''} {nombre or ''}".lower():
+            if busqueda and busqueda not in f"{_texto_busqueda_persona_libre(asignado_a, mapa_cedulas_asignado)} {nombre or ''}".lower():
                 continue
             pendientes.append({
                 'id': aid, 'nombre': nombre, 'tipo_activo': tipo_activo, 'marca': marca,
@@ -10625,6 +10686,11 @@ def certificacion_devoluciones():
                       'confirmado_por': r[4], 'fecha': r[5], 'observaciones': r[6], 'acta_generada': bool(r[7]),
                       'accesorios_devueltos': _accesorios_lista_desde_csv(r[8]),
                       'accesorios_devueltos_texto': _etiquetas_accesorios_texto(r[8], r[9])} for r in cursor.fetchall()]
+        # 🔎 El mismo cuadro de búsqueda de arriba ("Buscar por colaborador o activo...") también
+        # debe filtrar este historial — antes solo afectaba a "Pendientes de devolución" y la
+        # tabla de abajo se quedaba mostrando TODO sin importar lo escrito.
+        if busqueda:
+            historial = [h for h in historial if busqueda in f"{_texto_busqueda_persona_libre(h['colaborador'], mapa_cedulas_asignado)} {h['nombre_activo'] or ''}".lower()]
     except Exception as e:
         print(f"⚠️ Error consultando historial de devoluciones: {e}")
     conn.close()
@@ -14171,30 +14237,44 @@ def ver_logs():
     cursor = conn.cursor()
 
     cursor.execute("SELECT DISTINCT usuario FROM logs ORDER BY usuario ASC")
-    lista_usuarios = [u[0] for u in cursor.fetchall() if u[0]]
+    lista_usuarios_valores = [u[0] for u in cursor.fetchall() if u[0]]
+    # 🪪 El desplegable "Filtrar por Usuario" mostraba el usuario de inicio de sesión crudo (ej.
+    # 'urrea') — ahora muestra el nombre real de la persona (mismo patrón que el filtro
+    # "Analista" de Indicadores, ver _opciones_agentes_filtro), sin cambiar el valor que se
+    # manda al filtro (sigue siendo el usuario exacto).
+    nombres_usuarios_logs = _mapa_nombres_usuarios()
+    lista_usuarios = sorted(
+        ({'valor': u, 'etiqueta': _nombre_para_mostrar(u, nombres_usuarios_logs)} for u in lista_usuarios_valores),
+        key=lambda x: (x['etiqueta'] or '').lower()
+    )
 
     cursor.execute("SELECT DISTINCT accion FROM logs ORDER BY accion ASC")
     lista_acciones = [a[0] for a in cursor.fetchall() if a[0]]
 
-    query = "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1"
+    # 🪪 'usuario' aquí SÍ es una cuenta real de Arkiv (a diferencia de 'asignado_a'/'colaborador'
+    # en Inventario, que son texto libre) — se une a 'usuarios' para poder buscar y mostrar el
+    # nombre y la cédula de quien hizo la acción, no solo su usuario de inicio de sesión (pedido
+    # de Tomás, 08/09/2026: búsqueda por nombre/cédula/usuario transversal en todo el sistema).
+    query = ("SELECT logs.usuario, logs.accion, logs.detalles, logs.fecha, u.nombre "
+             "FROM logs LEFT JOIN usuarios u ON u.usuario = logs.usuario WHERE 1=1")
     params = []
 
     if q_usuario:
-        query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+        query += " AND logs.usuario = %s" if db_type == 'postgres' else " AND logs.usuario = ?"
         params.append(q_usuario)
 
     if q_accion:
-        query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+        query += " AND logs.accion = %s" if db_type == 'postgres' else " AND logs.accion = ?"
         params.append(q_accion)
 
     if q_busqueda:
         p_busq = f"%{q_busqueda}%"
         if db_type == 'postgres':
-            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
-            params.extend([p_busq, p_busq])
+            query += " AND (logs.detalles ILIKE %s OR logs.fecha ILIKE %s OR logs.usuario ILIKE %s OR u.nombre ILIKE %s OR u.cedula ILIKE %s)"
+            params.extend([p_busq, p_busq, p_busq, p_busq, p_busq])
         else:
-            query += " AND (detalles LIKE ? OR fecha LIKE ?)"
-            params.extend([p_busq, p_busq])
+            query += " AND (logs.detalles LIKE ? OR logs.fecha LIKE ? OR logs.usuario LIKE ? OR u.nombre LIKE ? OR u.cedula LIKE ?)"
+            params.extend([p_busq, p_busq, p_busq, p_busq, p_busq])
 
     # 📄 Paginación: esta bitácora crece sin límite (una fila por cada acción que registra
     # registrar_log en toda la app) y antes se traía la tabla completa en cada visita — con
@@ -14209,8 +14289,9 @@ def ver_logs():
         pagina_actual = 1
 
     query_conteo = query.replace(
-        "SELECT usuario, accion, detalles, fecha FROM logs WHERE 1=1",
-        "SELECT COUNT(*) FROM logs WHERE 1=1",
+        "SELECT logs.usuario, logs.accion, logs.detalles, logs.fecha, u.nombre "
+        "FROM logs LEFT JOIN usuarios u ON u.usuario = logs.usuario WHERE 1=1",
+        "SELECT COUNT(*) FROM logs LEFT JOIN usuarios u ON u.usuario = logs.usuario WHERE 1=1",
         1
     )
     cursor.execute(query_conteo, tuple(params))
@@ -14219,7 +14300,7 @@ def ver_logs():
     pagina_actual = min(pagina_actual, total_paginas)
     offset = (pagina_actual - 1) * POR_PAGINA_LOGS
 
-    query += " ORDER BY id DESC LIMIT %s OFFSET %s" if db_type == 'postgres' else " ORDER BY id DESC LIMIT ? OFFSET ?"
+    query += " ORDER BY logs.id DESC LIMIT %s OFFSET %s" if db_type == 'postgres' else " ORDER BY logs.id DESC LIMIT ? OFFSET ?"
     cursor.execute(query, tuple(params) + (POR_PAGINA_LOGS, offset))
     lista_logs = cursor.fetchall()
     conn.close()
@@ -14250,27 +14331,31 @@ def exportar_logs_csv():
     conn, db_type = get_db()
     cursor = conn.cursor()
 
-    query = "SELECT fecha, usuario, accion, detalles FROM logs WHERE 1=1"
+    # 🪪 Mismo join y misma búsqueda transversal (nombre/usuario/cédula) que ver_logs() — ver el
+    # comentario allá — para que la exportación encuentre exactamente lo mismo que se ve en
+    # pantalla, y para poder incluir el nombre real de quien hizo cada acción en el CSV.
+    query = ("SELECT logs.fecha, logs.usuario, logs.accion, logs.detalles, u.nombre "
+             "FROM logs LEFT JOIN usuarios u ON u.usuario = logs.usuario WHERE 1=1")
     params = []
 
     if q_usuario:
-        query += " AND usuario = %s" if db_type == 'postgres' else " AND usuario = ?"
+        query += " AND logs.usuario = %s" if db_type == 'postgres' else " AND logs.usuario = ?"
         params.append(q_usuario)
 
     if q_accion:
-        query += " AND accion = %s" if db_type == 'postgres' else " AND accion = ?"
+        query += " AND logs.accion = %s" if db_type == 'postgres' else " AND logs.accion = ?"
         params.append(q_accion)
 
     if q_busqueda:
         p_busq = f"%{q_busqueda}%"
         if db_type == 'postgres':
-            query += " AND (detalles ILIKE %s OR fecha ILIKE %s)"
-            params.extend([p_busq, p_busq])
+            query += " AND (logs.detalles ILIKE %s OR logs.fecha ILIKE %s OR logs.usuario ILIKE %s OR u.nombre ILIKE %s OR u.cedula ILIKE %s)"
+            params.extend([p_busq, p_busq, p_busq, p_busq, p_busq])
         else:
-            query += " AND (detalles LIKE ? OR fecha LIKE ?)"
-            params.extend([p_busq, p_busq])
+            query += " AND (logs.detalles LIKE ? OR logs.fecha LIKE ? OR logs.usuario LIKE ? OR u.nombre LIKE ? OR u.cedula LIKE ?)"
+            params.extend([p_busq, p_busq, p_busq, p_busq, p_busq])
 
-    query += " ORDER BY id DESC"
+    query += " ORDER BY logs.id DESC"
 
     cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
@@ -14278,10 +14363,10 @@ def exportar_logs_csv():
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(['FECHA Y HORA', 'USUARIO', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
+    writer.writerow(['FECHA Y HORA', 'USUARIO', 'NOMBRE', 'ACCIÓN', 'DETALLE DEL CAMBIO'])
 
-    for row in rows:
-        writer.writerow(row)
+    for fecha, usuario_log, accion_log, detalles_log, nombre_log in rows:
+        writer.writerow([fecha, usuario_log, nombre_log or '', accion_log, detalles_log])
 
     csv_bytes = '\ufeff' + output.getvalue()
     
@@ -14981,6 +15066,12 @@ def buscar_global_api():
     # admin/agente — usa su propio set de roles (ROLES_CERTIFICACION_DEVOLUCION) en vez de
     # es_soporte para no ocultársela a Gestión Humana ni mostrársela a quien no debería verla.
     puede_ver_devoluciones = rol in ROLES_CERTIFICACION_DEVOLUCION
+    # 🪪 Para las categorías "Inventario de Activos" y "Certificación de Devoluciones", cuyo
+    # 'asignado_a'/'colaborador' es texto libre sin cédula propia — resuelve la cédula del
+    # 'usuario' entre paréntesis si lo hay, para que buscar por cédula también funcione aquí
+    # (pedido de Tomás, 08/09/2026: búsqueda por nombre/cédula/usuario transversal en todo el
+    # sistema). Ver _texto_busqueda_persona_libre.
+    mapa_cedulas_asignado = _mapa_cedulas_por_usuario()
 
     resultados = []
     conn, db_type = get_db()
@@ -15120,7 +15211,7 @@ def buscar_global_api():
             for (a_id, a_nombre, a_tipo, a_marca, a_modelo, a_serie, a_estado, a_asignado, a_sede, a_area, a_proveedor) in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                texto_busqueda = normalizar(f"{a_nombre} {a_tipo or ''} {a_marca or ''} {a_modelo or ''} {a_serie or ''} {a_estado or ''} {a_asignado or ''} {a_sede or ''} {a_area or ''} {a_proveedor or ''}")
+                texto_busqueda = normalizar(f"{a_nombre} {a_tipo or ''} {a_marca or ''} {a_modelo or ''} {a_serie or ''} {a_estado or ''} {_texto_busqueda_persona_libre(a_asignado, mapa_cedulas_asignado)} {a_sede or ''} {a_area or ''} {a_proveedor or ''}")
                 if q_norm in texto_busqueda:
                     contador += 1
                     subtitulo = ' · '.join([p for p in [a_tipo, a_marca, a_estado] if p])
@@ -15267,15 +15358,17 @@ def buscar_global_api():
         # 'galerias' y quedan cubiertos por la categoría "Gestor de Archivos" de arriba.
         try:
             cursor.execute(
-                "SELECT d.titulo, d.tipo_documento, d.usuario, d.fecha_vencimiento, COALESCE(u.nombre, d.usuario) "
+                "SELECT d.titulo, d.tipo_documento, d.usuario, d.fecha_vencimiento, COALESCE(u.nombre, d.usuario), u.cedula "
                 "FROM documentos_empleado d LEFT JOIN usuarios u ON u.usuario = d.usuario "
                 "WHERE COALESCE(d.estado, 'activo') = 'activo'"
             )
             contador = 0
-            for (dc_titulo, dc_tipo, dc_usuario, dc_fecha_venc, dc_nombre) in cursor.fetchall():
+            for (dc_titulo, dc_tipo, dc_usuario, dc_fecha_venc, dc_nombre, dc_cedula) in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                texto_busqueda = normalizar(f"{dc_titulo} {dc_tipo or ''} {dc_usuario or ''} {dc_nombre or ''}")
+                # 🪪 También por cédula del empleado dueño del documento (pedido de Tomás,
+                # 08/09/2026: búsqueda por nombre/cédula/usuario transversal en todo el sistema).
+                texto_busqueda = normalizar(f"{dc_titulo} {dc_tipo or ''} {dc_usuario or ''} {dc_nombre or ''} {dc_cedula or ''}")
                 if q_norm in texto_busqueda:
                     contador += 1
                     subtitulo = ' · '.join([p for p in [dc_tipo, dc_nombre or dc_usuario, f"Vence {dc_fecha_venc}" if dc_fecha_venc else None] if p])
@@ -15301,7 +15394,7 @@ def buscar_global_api():
             for (dv_colaborador, dv_activo_nombre, dv_tipo, dv_confirmado_por, dv_observaciones) in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
-                texto_busqueda = normalizar(f"{dv_colaborador} {dv_activo_nombre or ''} {dv_tipo or ''} {dv_confirmado_por or ''} {dv_observaciones or ''}")
+                texto_busqueda = normalizar(f"{_texto_busqueda_persona_libre(dv_colaborador, mapa_cedulas_asignado)} {dv_activo_nombre or ''} {dv_tipo or ''} {dv_confirmado_por or ''} {dv_observaciones or ''}")
                 if q_norm in texto_busqueda:
                     contador += 1
                     resultados.append({
