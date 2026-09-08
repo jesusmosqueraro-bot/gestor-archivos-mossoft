@@ -70,7 +70,7 @@
                 <select name="usuario" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <option value="">Todos los Usuarios</option>
                     {% for u in usuarios_opt %}
-                        <option value="{{ u }}" {% if u == q_usuario %}selected{% endif %}>{{ u }}</option>
+                        <option value="{{ u.valor }}" {% if u.valor == q_usuario %}selected{% endif %}>{{ u.etiqueta }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -86,7 +86,7 @@
             </div>
 
             <div>
-                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar en Detalles / Fecha</label>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar por nombre, cédula, usuario, detalle o fecha</label>
                 <div class="relative">
                     <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Escribe y presiona Enter..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
@@ -114,8 +114,11 @@
                             </td>
                             <td class="py-3.5 px-4 font-bold text-white">
                                 <span class="inline-flex items-center gap-1 bg-slate-900/60 border border-slate-700/70 px-2.5 py-1 rounded-lg">
-                                    <i class="fa-solid fa-user text-purple-400"></i> {{ l[0] }}
+                                    <i class="fa-solid fa-user text-purple-400"></i> {{ l[4] or l[0] }}
                                 </span>
+                                {% if l[4] and l[4] != l[0] %}
+                                <div class="text-[10px] text-slate-500 mt-1 font-mono">{{ l[0] }}</div>
+                                {% endif %}
                             </td>
                             <td class="py-3.5 px-4">
                                 <span class="px-2.5 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
