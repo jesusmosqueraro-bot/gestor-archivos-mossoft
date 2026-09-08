@@ -17,6 +17,7 @@ cryptography
 bleach
 tinycss2
 reportlab
+Pillow
 openpyxl
 pyotp==2.10.0
 anthropic

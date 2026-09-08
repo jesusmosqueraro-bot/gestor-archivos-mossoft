@@ -9943,11 +9943,56 @@ def _pdf_fecha_partes(fecha_texto):
         return '', '', (fecha_texto or '-')
 
 
+def _recortar_imagen_firma(datos_imagen):
+    """Recorta el espacio en blanco alrededor del trazo real de una firma capturada en el canvas
+    del formulario de firma digital (pedido de Tomás, 08/09/2026: 'las firmas se ven un poco
+    orientadas hacia la izquierda') — el canvas de firma siempre tiene el mismo tamaño fijo, pero
+    casi nunca el trazo lo llena por completo, así que al incrustar la imagen tal cual (con un
+    ancho/alto fijo en el PDF) el trazo queda pegado a donde haya quedado dibujado dentro del
+    lienzo original en vez de centrado en su celda. Devuelve los bytes de una versión ya
+    recortada (PNG, con un margen pequeño alrededor del trazo) — o los bytes ORIGINALES tal cual
+    si no se detecta ningún trazo (lienzo vacío) o si algo falla al procesar la imagen; nunca debe
+    tumbar la generación del PDF."""
+    try:
+        from PIL import Image as PILImage, ImageOps
+        imagen = PILImage.open(io.BytesIO(datos_imagen))
+        if imagen.mode in ('RGBA', 'LA') or (imagen.mode == 'P' and 'transparency' in imagen.info):
+            # 🖼️ Compón sobre fondo blanco usando el canal alfa como máscara: si el lienzo se
+            # exportó con fondo transparente (en vez de blanco), 'convert(L)' directo podría
+            # tratar esos píxeles como negros y arruinar la detección del trazo.
+            base = imagen.convert('RGBA')
+            fondo = PILImage.new('RGB', base.size, (255, 255, 255))
+            fondo.paste(base, mask=base.split()[-1])
+            imagen_rgb = fondo
+        else:
+            imagen_rgb = imagen.convert('RGB')
+        invertida = ImageOps.invert(imagen_rgb.convert('L'))
+        caja = invertida.getbbox()
+        if not caja:
+            return datos_imagen
+        margen = 14
+        x0, y0, x1, y1 = caja
+        x0 = max(0, x0 - margen)
+        y0 = max(0, y0 - margen)
+        x1 = min(imagen_rgb.width, x1 + margen)
+        y1 = min(imagen_rgb.height, y1 + margen)
+        recortada = imagen_rgb.crop((x0, y0, x1, y1))
+        salida = io.BytesIO()
+        recortada.save(salida, format='PNG')
+        return salida.getvalue()
+    except Exception as e:
+        print(f"⚠️ No se pudo recortar el espacio en blanco de una firma: {e}")
+        return datos_imagen
+
+
 def _pdf_elemento_firma(url, estilos, ancho=None, alto=None, texto_si_falta='(Sin firma registrada)'):
     """Devuelve un flowable de reportlab con la firma incrustada desde 'url' (o un texto de
     reemplazo si no hay firma guardada, o si la descarga falla) — lo usan tanto el acta de
     asignación como la de devolución, que entre las dos llegan a incrustar hasta 3 firmas
-    distintas en un mismo PDF."""
+    distintas en un mismo PDF. La imagen se recorta primero al trazo real (ver
+    _recortar_imagen_firma) y se escala preservando su proporción dentro de 'ancho'x'alto' — así
+    la firma queda centrada de verdad en su celda, en vez de aparecer corrida hacia un lado por
+    el espacio en blanco sobrante del lienzo original (pedido de Tomás, 08/09/2026)."""
     from reportlab.platypus import Image, Paragraph
     from reportlab.lib.units import cm
     ancho = ancho if ancho is not None else 6.5 * cm
@@ -9956,7 +10001,21 @@ def _pdf_elemento_firma(url, estilos, ancho=None, alto=None, texto_si_falta='(Si
         try:
             with urllib.request.urlopen(url, timeout=15) as resp:
                 datos_imagen = resp.read()
-            imagen_firma = Image(io.BytesIO(datos_imagen), width=ancho, height=alto)
+            datos_imagen = _recortar_imagen_firma(datos_imagen)
+            ancho_final, alto_final = ancho, alto
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(io.BytesIO(datos_imagen)) as dimensiones:
+                    proporcion = dimensiones.width / dimensiones.height
+                if (ancho / alto) > proporcion:
+                    alto_final = alto
+                    ancho_final = alto * proporcion
+                else:
+                    ancho_final = ancho
+                    alto_final = ancho / proporcion
+            except Exception as e:
+                print(f"⚠️ No se pudo calcular la proporción de una firma, se usa el tamaño fijo: {e}")
+            imagen_firma = Image(io.BytesIO(datos_imagen), width=ancho_final, height=alto_final)
             imagen_firma.hAlign = 'CENTER'
             return imagen_firma
         except Exception as e:
