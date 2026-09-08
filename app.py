@@ -2870,6 +2870,40 @@ def _enviar_correo_simple(destino, asunto, cuerpo):
         return False
 
 
+def _enviar_pdf_acta_por_correo(destino, asunto, cuerpo, pdf_bytes, nombre_archivo, tipo_correo):
+    """Envía un correo con un PDF adjunto (acta de asignación o certificado de devolución) vía
+    el mismo webhook de Apps Script que usa el resto de la app (GMAIL_SCRIPT_URL) — ese script
+    ya soporta 'adjunto_base64'/'adjunto_nombre'/'adjunto_tipo' (arma un Blob y lo agrega a
+    GmailApp.sendEmail), a diferencia del envío de _enviar_correo_simple que nunca manda
+    adjuntos. Registra el resultado en 'correos_log' con el 'tipo_correo' dado
+    ('asignacion'/'devolucion'); nunca lanza — un fallo aquí no debe tumbar la asignación ni
+    la certificación de devolución que ya se guardaron correctamente en la base de datos."""
+    payload = {
+        "para": destino,
+        "asunto": asunto,
+        "cuerpo": cuerpo,
+        "adjunto_base64": base64.b64encode(pdf_bytes).decode('ascii'),
+        "adjunto_nombre": nombre_archivo,
+        "adjunto_tipo": "application/pdf",
+    }
+    try:
+        if requests:
+            res = requests.post(GMAIL_SCRIPT_URL, json=payload, timeout=30)
+            print(f"✅ Correo con adjunto '{asunto}' enviado a {destino}. Status: {res.status_code}")
+        else:
+            data_json = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(GMAIL_SCRIPT_URL, data=data_json, headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response.read()
+            print(f"✅ Correo con adjunto '{asunto}' enviado a {destino} vía urllib.")
+        registrar_correo_log(destino, asunto, tipo_correo, 'enviado')
+        return True
+    except Exception as e:
+        print(f"⚠️ Error enviando correo con adjunto '{asunto}' a {destino}: {e}")
+        registrar_correo_log(destino, asunto, tipo_correo, 'error', str(e))
+        return False
+
+
 def _listar_respaldos():
     """Lista los archivos de respaldo ya guardados en RESPALDOS_DIR, más recientes primero,
     incluyendo si cada uno ya tiene copia externa en Cloudinary (y su URL). Devuelve [] si la
@@ -9722,6 +9756,33 @@ def _resolver_firma_para_asignacion(asignado_a):
     return fila[0] if fila and fila[0] else None
 
 
+def _resolver_correo_para_asignacion(asignado_a):
+    """Como _resolver_firma_para_asignacion, pero para obtener el correo del colaborador (para
+    enviarle el PDF de la asignación o de la devolución por correo). Si 'asignado_a' es texto
+    libre sin '(usuario)' (se escribió el nombre a mano) no hay cuenta que resolver y no hay
+    correo al que enviar — se degrada devolviendo None (el llamador debe registrar esto en
+    'correos_log' como 'sin_correo' y no intentar el envío)."""
+    if not asignado_a:
+        return None
+    coincidencia = re.search(r'\(([^()]+)\)\s*$', asignado_a)
+    if not coincidencia:
+        return None
+    usuario = coincidencia.group(1).strip()
+    if not usuario:
+        return None
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT correo FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT correo FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (usuario,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error resolviendo correo para asignación ('{usuario}'): {e}")
+        fila = None
+    conn.close()
+    return fila[0] if fila and fila[0] else None
+
+
 def _resolver_firma_de_usuario(usuario_exacto):
     """Como _resolver_firma_para_asignacion, pero para cuando ya se tiene el 'usuario' EXACTO de
     una cuenta de Arkiv (no un texto tipo 'Nombre (usuario)' que haya que parsear) — se usa para
@@ -9948,14 +10009,12 @@ def _pdf_texto_celda(valor, estilos):
     return Paragraph(texto, estilos['Normal'])
 
 
-@app.route('/tickets/inventario/actas_asignacion/<int:acta_id>/pdf')
-@login_required
-@agente_o_admin_required
-def acta_asignacion_pdf(acta_id):
-    """Genera el PDF formal del acta de asignación (formato tipo Preventiva IPS: N° de acta,
-    fecha, cláusula de compromiso y firmas) — constancia de que tal activo (de TI o Biomédico,
-    según 'es_biomedico') se le entregó a tal usuario, con la firma de quien lo asigna y de quien
-    lo recibe."""
+def _campos_acta_asignacion(acta_id):
+    """Devuelve el dict de campos ya resueltos para armar el PDF del acta de asignación
+    'acta_id' guardada en 'actas_asignacion' (o None si no existe) — usado por la descarga bajo
+    demanda (acta_asignacion_pdf). Ver _pdf_bytes_acta_asignacion para quien SÍ arma el PDF a
+    partir de este dict, y _enviar_formulario_asignacion_por_correo para el envío automático
+    (que arma un dict equivalente SIN depender de que exista una fila aquí — ver esa función)."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -9980,17 +10039,40 @@ def acta_asignacion_pdf(acta_id):
     conn.close()
 
     if not fila:
-        return redirect(url_for('ver_inventario'))
+        return None
 
     (asignado_a, firma_url, firma_asigna_url, descripcion_breve, fecha, generado_por, generado_por_nombre,
      placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, estado, es_biomedico) = fila
-    responsable_asignacion = generado_por_nombre or generado_por
+    return {
+        'numero_acta': acta_id, 'fecha': fecha, 'responsable_asignacion': generado_por_nombre or generado_por,
+        'asignado_a': asignado_a, 'sede': sede, 'area': area, 'tipo_activo': tipo_activo, 'marca': marca,
+        'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie, 'proveedor': proveedor,
+        'descripcion_breve': descripcion_breve, 'firma_asigna_url': firma_asigna_url, 'firma_url': firma_url,
+        'es_biomedico': bool(es_biomedico),
+    }
 
+
+def _pdf_bytes_acta_asignacion(campos):
+    """Construye el PDF formal del acta de asignación (formato tipo Preventiva IPS: N° de acta,
+    fecha, cláusula de compromiso y firmas) a partir de 'campos' (ver _campos_acta_asignacion) —
+    constancia de que tal activo (de TI o Biomédico, según 'es_biomedico') se le entregó a tal
+    colaborador, con la firma de quien lo asigna y de quien lo recibe. Devuelve los bytes del PDF,
+    compartidos tanto por la descarga bajo demanda (acta_asignacion_pdf) como por el correo
+    automático al colaborador (_enviar_formulario_asignacion_por_correo)."""
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
+
+    numero_acta, fecha = campos['numero_acta'], campos['fecha']
+    responsable_asignacion, asignado_a = campos['responsable_asignacion'], campos['asignado_a']
+    sede, area = campos['sede'], campos['area']
+    tipo_activo, marca, modelo, placa = campos['tipo_activo'], campos['marca'], campos['modelo'], campos['placa']
+    numero_serie, proveedor = campos['numero_serie'], campos['proveedor']
+    descripcion_breve = campos['descripcion_breve']
+    firma_asigna_url, firma_url = campos['firma_asigna_url'], campos['firma_url']
+    es_biomedico = campos['es_biomedico']
 
     salida = io.BytesIO()
     doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
@@ -10002,7 +10084,7 @@ def acta_asignacion_pdf(acta_id):
     elementos = [
         Paragraph(f"FORMATO DE ACTA DE ASIGNACIÓN {variante.upper()}", estilos['Title']),
         Spacer(1, 0.4 * cm),
-        _pdf_tabla_encabezado_acta(acta_id, fecha),
+        _pdf_tabla_encabezado_acta(numero_acta, fecha),
         Spacer(1, 0.5 * cm),
     ]
 
@@ -10073,10 +10155,86 @@ def acta_asignacion_pdf(acta_id):
 
     doc.build(elementos)
     salida.seek(0)
-    return Response(salida.read(), headers={
+    return salida.read()
+
+
+@app.route('/tickets/inventario/actas_asignacion/<int:acta_id>/pdf')
+@login_required
+@agente_o_admin_required
+def acta_asignacion_pdf(acta_id):
+    """Genera el PDF formal del acta de asignación (formato tipo Preventiva IPS: N° de acta,
+    fecha, cláusula de compromiso y firmas) — constancia de que tal activo (de TI o Biomédico,
+    según 'es_biomedico') se le entregó a tal usuario, con la firma de quien lo asigna y de quien
+    lo recibe."""
+    campos = _campos_acta_asignacion(acta_id)
+    if not campos:
+        return redirect(url_for('ver_inventario'))
+    pdf_bytes = _pdf_bytes_acta_asignacion(campos)
+    return Response(pdf_bytes, headers={
         'Content-Type': 'application/pdf',
         'Content-Disposition': f'attachment; filename="Arkiv_Acta_Asignacion_{acta_id}.pdf"'
     })
+
+
+def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, firma_asignacion_url=None):
+    """Envía por correo, en un hilo aparte, el PDF del formulario de asignación diligenciado al
+    colaborador que acaba de recibir el activo 'activo_id' (pedido de Tomás, 08/09/2026) —
+    funciona SIEMPRE que la asignación se haya guardado con éxito, sin importar si se marcó la
+    casilla 'Generar acta' al crear/editar el activo: esa casilla solo controla la fila de
+    auditoría en 'actas_asignacion' y la descarga bajo demanda (ver _registrar_acta_asignacion),
+    nunca este envío automático. Por eso arma su propio dict de 'campos' leyendo directamente
+    'activos_inventario' (no depende de que exista una fila en 'actas_asignacion'), usando el
+    propio 'activo_id' como número de acta.
+
+    Si 'asignado_a' es texto libre sin '(usuario)' (se escribió el nombre a mano) o esa cuenta no
+    tiene 'correo' registrado, no hay a quién enviarle — se registra 'sin_correo' en
+    'correos_log' y no se intenta nada más. Debe llamarse SIEMPRE dentro de un
+    threading.Thread(...).start() para no demorar la respuesta HTTP de crear_activo/editar_activo."""
+    asunto = f"Arkiv - Formulario de asignación de activo #{activo_id}"
+    correo_destino = _resolver_correo_para_asignacion(asignado_a)
+    if not correo_destino:
+        registrar_correo_log('(sin correo)', asunto, 'asignacion', 'sin_correo',
+                              f"No se pudo resolver el correo de '{asignado_a}' para el activo {activo_id}")
+        return
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = ("SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico "
+             "FROM activos_inventario WHERE id = %s" if db_type == 'postgres' else
+             "SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico "
+             "FROM activos_inventario WHERE id = ?")
+        cursor.execute(q, (activo_id,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error consultando activo {activo_id} para el correo de asignación: {e}")
+        fila = None
+    conn.close()
+    if not fila:
+        registrar_correo_log(correo_destino, asunto, 'asignacion', 'error', f"Activo {activo_id} no encontrado")
+        return
+    placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico = fila
+    campos = {
+        'numero_acta': activo_id, 'fecha': datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d'),
+        'responsable_asignacion': _nombre_para_mostrar(creador, _mapa_nombres_usuarios()),
+        'asignado_a': asignado_a, 'sede': sede, 'area': area, 'tipo_activo': tipo_activo, 'marca': marca,
+        'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie, 'proveedor': proveedor,
+        'descripcion_breve': None, 'firma_asigna_url': _resolver_firma_de_usuario(creador),
+        'firma_url': firma_asignacion_url, 'es_biomedico': bool(es_biomedico),
+    }
+    try:
+        pdf_bytes = _pdf_bytes_acta_asignacion(campos)
+    except Exception as e:
+        print(f"⚠️ Error generando el PDF de asignación para el correo (activo {activo_id}): {e}")
+        registrar_correo_log(correo_destino, asunto, 'asignacion', 'error', f"Error generando PDF: {e}")
+        return
+    descripcion_equipo = f"{tipo_activo or 'Activo'} — {' '.join(filter(None, [marca, modelo])) or 'sin marca/modelo'} — Placa {placa}"
+    cuerpo = (
+        f"Hola,\n\nSe te asignó el siguiente activo en Arkiv:\n\n{descripcion_equipo}\n\n"
+        "Adjunto encontrarás el formulario de asignación diligenciado en PDF, como constancia de "
+        "esta entrega.\n\n---\nEquipo de Soporte - ARKIV System"
+    )
+    _enviar_pdf_acta_por_correo(correo_destino, asunto, cuerpo, pdf_bytes,
+                                 f"Arkiv_Acta_Asignacion_{activo_id}.pdf", 'asignacion')
 
 
 @app.route('/tickets/inventario/<int:activo_id>/actas')
@@ -10311,6 +10469,13 @@ def crear_activo():
                 nuevo_activo_id, request.form, usuario, conn, cursor, db_type, asignado_a or None, firma_asignacion_url)
             if mensaje_acta_asig:
                 flash(mensaje_acta_asig, categoria_acta_asig)
+            # 📧 Envío automático del formulario de asignación en PDF al correo del colaborador
+            # (pedido de Tomás, 08/09/2026) — funciona sin importar si se marcó 'Generar acta'
+            # (esa casilla solo controla la fila de auditoría de arriba). Solo tiene sentido si
+            # el activo quedó realmente 'Asignado' a alguien.
+            if estado == 'Asignado' and asignado_a:
+                threading.Thread(target=_enviar_formulario_asignacion_por_correo,
+                                  args=(nuevo_activo_id, asignado_a, usuario, firma_asignacion_url)).start()
         conn.close()
     return redirect(url_for('ver_inventario'))
 
@@ -10356,14 +10521,16 @@ def editar_activo(activo_id):
         conn, db_type = get_db()
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgres' else '?'
+        edicion_exitosa = False
+        asignado_a_actual = None
         try:
             # 🔒 Estado 'Devolución': mientras el activo YA esté en este estado, queda bloqueado
             # para cualquiera que no sea 'admin' — ver ESTADOS_ACTIVO. Se revisa el estado que
             # tiene HOY en la base (no el que llega en el formulario) para que un agente no pueda
             # sortear el bloqueo reenviando el mismo estado con otros datos cambiados.
-            cursor.execute(f"SELECT estado, fecha_devolucion FROM activos_inventario WHERE id = {ph}", (activo_id,))
+            cursor.execute(f"SELECT estado, fecha_devolucion, asignado_a FROM activos_inventario WHERE id = {ph}", (activo_id,))
             fila_actual = cursor.fetchone()
-            estado_actual, fecha_devolucion_actual = fila_actual if fila_actual else (None, None)
+            estado_actual, fecha_devolucion_actual, asignado_a_actual = fila_actual if fila_actual else (None, None, None)
             if estado_actual == 'Devolución' and session.get('rol') != 'admin':
                 conn.close()
                 flash("Este activo quedó bloqueado en estado 'Devolución'. Solo un administrador puede desbloquearlo.", "error")
@@ -10400,6 +10567,7 @@ def editar_activo(activo_id):
             q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph} WHERE id = {ph}"
             cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, activo_id))
             conn.commit()
+            edicion_exitosa = True
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
         except Exception as e:
             conn.rollback()
@@ -10413,6 +10581,13 @@ def editar_activo(activo_id):
         if mensaje_acta_asig:
             flash(mensaje_acta_asig, categoria_acta_asig)
         conn.close()
+        # 📧 Igual que en crear_activo, pero solo cuando la edición se guardó bien Y el
+        # colaborador asignado realmente CAMBIÓ (pedido de Tomás, 08/09/2026) — así no se manda
+        # un correo cada vez que se edita cualquier otro dato de un activo que ya estaba
+        # asignado a la misma persona (evita spam de correos en ediciones sin relación).
+        if edicion_exitosa and estado == 'Asignado' and asignado_a and asignado_a != (asignado_a_actual or ''):
+            threading.Thread(target=_enviar_formulario_asignacion_por_correo,
+                              args=(activo_id, asignado_a, session.get('username'), firma_asignacion_url)).start()
     return redirect(url_for('ver_inventario'))
 
 
@@ -10829,7 +11004,7 @@ def confirmar_devolucion_activo(activo_id):
             q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                      "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
                      "accesorios_devueltos, accesorio_otro_detalle) "
-                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                       if db_type == 'postgres' else
                       "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                       "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
@@ -10838,6 +11013,7 @@ def confirmar_devolucion_activo(activo_id):
             cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones, generar_acta,
                                     firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url,
                                     accesorios_devueltos, accesorio_otro_detalle_devuelto))
+            nueva_devolucion_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             # 🔒 Certificar la devolución ya NO deja el activo 'Disponible' de inmediato (eso
             # permitía que cualquier agente lo reasignara al instante) — pasa a 'Devolución',
             # con la fecha registrada y BLOQUEADO hasta que un administrador lo revise y decida
@@ -10850,6 +11026,12 @@ def confirmar_devolucion_activo(activo_id):
                           + (f" — nota: {observaciones}" if observaciones else "")
                           + (" — acta de devolución generada" if generar_acta else ""))
             flash(f"Devolución de '{nombre_activo}' certificada. El activo queda bloqueado en estado 'Devolución' hasta que un administrador lo revise y le asigne su siguiente estado.", "exito")
+            # 📧 Envío automático del certificado de devolución en PDF al correo del colaborador
+            # (pedido de Tomás, 08/09/2026) — la fila en 'inventario_devoluciones' SIEMPRE se crea
+            # en este punto, así que este correo se dispara siempre, sin importar si se marcó
+            # 'Generar acta' (esa casilla solo controla la descarga bajo demanda del PDF).
+            if nueva_devolucion_id:
+                threading.Thread(target=_enviar_certificado_devolucion_por_correo, args=(nueva_devolucion_id,)).start()
     except Exception as e:
         conn.rollback()
         print(f"Error certificando devolución del activo {activo_id}: {e}")
@@ -10858,14 +11040,14 @@ def confirmar_devolucion_activo(activo_id):
     return redirect(url_for('certificacion_devoluciones'))
 
 
-@app.route('/inventario/certificacion_devoluciones/<int:devolucion_id>/acta_pdf')
-@login_required
-@certificacion_devolucion_required
-def acta_devolucion_pdf(devolucion_id):
-    """Genera el PDF del acta/certificado de devolución (formato tipo Preventiva IPS: N° de acta,
-    fecha, cláusula de compromiso y firmas) — solo si esa certificación puntual se marcó con
-    'Generar acta' al confirmarla (ver confirmar_devolucion_activo). Si no se marcó, no hay PDF
-    que generar: se vuelve a la certificación de devoluciones."""
+def _campos_acta_devolucion(devolucion_id):
+    """Devuelve el dict de campos ya resueltos para armar el PDF del acta/certificado de
+    devolución 'devolucion_id' (o None si no existe) — incluye 'acta_generada' (la casilla
+    'Generar acta' marcada o no al confirmar, ver confirmar_devolucion_activo) para que
+    acta_devolucion_pdf (descarga bajo demanda) pueda seguir exigiéndola tal como antes; el
+    envío automático por correo (_enviar_certificado_devolucion_por_correo) usa este mismo dict
+    pero IGNORA 'acta_generada' — el certificado siempre existe (es la fila de
+    'inventario_devoluciones' en sí), se haya marcado esa casilla o no."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
@@ -10887,21 +11069,44 @@ def acta_devolucion_pdf(devolucion_id):
         fila = None
     conn.close()
 
-    if not fila or not fila[4]:
-        # No existe, o esta certificación puntual no se marcó para generar acta.
-        flash("Esta certificación de devolución no tiene un acta en PDF generada.", "error")
-        return redirect(url_for('certificacion_devoluciones'))
+    if not fila:
+        return None
 
-    (colaborador, confirmado_por, fecha, observaciones, _acta_generada, firma_entrega_url, firma_certifica_url,
+    (colaborador, confirmado_por, fecha, observaciones, acta_generada, firma_entrega_url, firma_certifica_url,
      nombre_familiar, firma_familiar_url, confirmado_por_nombre, placa, tipo_activo, marca, modelo,
      numero_serie, sede, area, es_biomedico) = fila
-    responsable_devolucion = confirmado_por_nombre or confirmado_por
+    return {
+        'acta_generada': bool(acta_generada),
+        'numero_acta': devolucion_id, 'fecha': fecha, 'responsable_devolucion': confirmado_por_nombre or confirmado_por,
+        'colaborador': colaborador, 'nombre_familiar': nombre_familiar,
+        'tipo_activo': tipo_activo, 'marca': marca, 'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie,
+        'sede': sede, 'area': area, 'observaciones': observaciones,
+        'firma_entrega_url': firma_entrega_url, 'firma_familiar_url': firma_familiar_url,
+        'firma_certifica_url': firma_certifica_url, 'es_biomedico': bool(es_biomedico),
+    }
 
+
+def _pdf_bytes_acta_devolucion(campos):
+    """Construye el PDF del acta/certificado de devolución (formato tipo Preventiva IPS: N° de
+    acta, fecha, cláusula de compromiso y firmas) a partir de 'campos' (ver
+    _campos_acta_devolucion). Devuelve los bytes del PDF, compartidos tanto por la descarga bajo
+    demanda (acta_devolucion_pdf) como por el correo automático al colaborador
+    (_enviar_certificado_devolucion_por_correo)."""
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
+
+    numero_acta, fecha = campos['numero_acta'], campos['fecha']
+    responsable_devolucion, colaborador = campos['responsable_devolucion'], campos['colaborador']
+    nombre_familiar = campos['nombre_familiar']
+    tipo_activo, marca, modelo, placa = campos['tipo_activo'], campos['marca'], campos['modelo'], campos['placa']
+    numero_serie, sede, area = campos['numero_serie'], campos['sede'], campos['area']
+    observaciones = campos['observaciones']
+    firma_entrega_url, firma_familiar_url, firma_certifica_url = (
+        campos['firma_entrega_url'], campos['firma_familiar_url'], campos['firma_certifica_url'])
+    es_biomedico = campos['es_biomedico']
 
     salida = io.BytesIO()
     doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
@@ -10913,7 +11118,7 @@ def acta_devolucion_pdf(devolucion_id):
     elementos = [
         Paragraph(f"FORMATO DE ACTA DE DEVOLUCIÓN {variante.upper()}", estilos['Title']),
         Spacer(1, 0.4 * cm),
-        _pdf_tabla_encabezado_acta(devolucion_id, fecha),
+        _pdf_tabla_encabezado_acta(numero_acta, fecha),
         Spacer(1, 0.5 * cm),
     ]
 
@@ -11006,10 +11211,66 @@ def acta_devolucion_pdf(devolucion_id):
 
     doc.build(elementos)
     salida.seek(0)
-    return Response(salida.read(), headers={
+    return salida.read()
+
+
+@app.route('/inventario/certificacion_devoluciones/<int:devolucion_id>/acta_pdf')
+@login_required
+@certificacion_devolucion_required
+def acta_devolucion_pdf(devolucion_id):
+    """Genera el PDF del acta/certificado de devolución — solo si esa certificación puntual se
+    marcó con 'Generar acta' al confirmarla (ver confirmar_devolucion_activo). Si no se marcó, no
+    hay PDF que generar: se vuelve a la certificación de devoluciones."""
+    campos = _campos_acta_devolucion(devolucion_id)
+    if not campos or not campos['acta_generada']:
+        # No existe, o esta certificación puntual no se marcó para generar acta.
+        flash("Esta certificación de devolución no tiene un acta en PDF generada.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+    pdf_bytes = _pdf_bytes_acta_devolucion(campos)
+    return Response(pdf_bytes, headers={
         'Content-Type': 'application/pdf',
         'Content-Disposition': f'attachment; filename="Arkiv_Acta_Devolucion_{devolucion_id}.pdf"'
     })
+
+
+def _enviar_certificado_devolucion_por_correo(devolucion_id):
+    """Envía por correo, en un hilo aparte, el PDF del certificado de devolución al colaborador
+    que devolvió el activo (pedido de Tomás, 08/09/2026) — la fila en 'inventario_devoluciones'
+    SIEMPRE se crea al certificar una devolución exitosa (ver confirmar_devolucion_activo), así
+    que este envío se dispara siempre, sin importar si se marcó la casilla 'Generar acta': esa
+    casilla solo controla 'acta_generada' (si la descarga bajo demanda de acta_devolucion_pdf
+    sirve el PDF o no) — por eso reutiliza _campos_acta_devolucion pero IGNORA a propósito su
+    'acta_generada'; el certificado existe de todas formas.
+
+    Si el colaborador es texto libre sin '(usuario)' o esa cuenta no tiene 'correo' registrado,
+    no hay a quién enviarle — se registra 'sin_correo' en 'correos_log' y no se intenta nada más.
+    Debe llamarse SIEMPRE dentro de un threading.Thread(...).start() para no demorar la
+    respuesta HTTP de confirmar_devolucion_activo."""
+    asunto = f"Arkiv - Certificado de devolución de activo #{devolucion_id}"
+    campos = _campos_acta_devolucion(devolucion_id)
+    if not campos:
+        registrar_correo_log('(sin correo)', asunto, 'devolucion', 'error',
+                              f"No se encontró la devolución {devolucion_id}")
+        return
+    correo_destino = _resolver_correo_para_asignacion(campos['colaborador'])
+    if not correo_destino:
+        registrar_correo_log('(sin correo)', asunto, 'devolucion', 'sin_correo',
+                              f"No se pudo resolver el correo de '{campos['colaborador']}' para la devolución {devolucion_id}")
+        return
+    try:
+        pdf_bytes = _pdf_bytes_acta_devolucion(campos)
+    except Exception as e:
+        print(f"⚠️ Error generando el PDF de devolución para el correo (devolución {devolucion_id}): {e}")
+        registrar_correo_log(correo_destino, asunto, 'devolucion', 'error', f"Error generando PDF: {e}")
+        return
+    descripcion_equipo = f"{campos['tipo_activo'] or 'Activo'} — {' '.join(filter(None, [campos['marca'], campos['modelo']])) or 'sin marca/modelo'} — Placa {campos['placa']}"
+    cuerpo = (
+        f"Hola,\n\nSe certificó la devolución del siguiente activo en Arkiv:\n\n{descripcion_equipo}\n\n"
+        "Adjunto encontrarás el certificado de devolución diligenciado en PDF, como constancia de "
+        "esta entrega.\n\n---\nEquipo de Soporte - ARKIV System"
+    )
+    _enviar_pdf_acta_por_correo(correo_destino, asunto, cuerpo, pdf_bytes,
+                                 f"Arkiv_Acta_Devolucion_{devolucion_id}.pdf", 'devolucion')
 
 
 @app.route('/inventario/certificacion_devoluciones/exportar_csv')
