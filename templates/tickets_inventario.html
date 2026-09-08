@@ -31,6 +31,10 @@
                 </div>
             </a>
 
+            <!-- LOGO INSTITUCIONAL (Preventiva Salud IPS): membrete de la página donde se asignan
+                 los activos, para darle una estructura más profesional (pedido de Tomás, 08/09/2026) -->
+            <img src="/static/img/logo_preventiva.png" alt="Preventiva Salud IPS" class="h-9 w-auto rounded-md bg-white px-1.5 py-1 shrink-0">
+
             <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
                 <i class="fa-solid fa-arrow-left"></i>
                 <span class="hidden sm:inline">Volver</span>
@@ -114,7 +118,7 @@
         </div>
 
         <!-- TARJETAS DE CONTEO POR ESTADO (reflejan la sede/tipo/búsqueda ya elegidos) -->
-        <div class="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-7 gap-4">
             <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total</p>
                 <p class="text-2xl font-extrabold text-white">{{ total_activos }}</p>
@@ -130,6 +134,10 @@
             <div class="bg-slate-800/60 border border-amber-500/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">En mantenimiento</p>
                 <p class="text-2xl font-extrabold text-amber-400">{{ conteos_estado.Mantenimiento }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-violet-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Devolución</p>
+                <p class="text-2xl font-extrabold text-violet-400">{{ conteos_estado['Devolución'] }}</p>
             </div>
             <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
                 <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">De baja</p>
@@ -194,6 +202,7 @@
                         <th class="pb-2 px-2 font-bold text-center text-emerald-400">Disponibles</th>
                         <th class="pb-2 px-2 font-bold text-center text-blue-400">Asignados</th>
                         <th class="pb-2 px-2 font-bold text-center text-amber-400">Mantenimiento</th>
+                        <th class="pb-2 px-2 font-bold text-center text-violet-400">Devolución</th>
                         <th class="pb-2 px-2 font-bold text-center text-slate-400">Baja</th>
                         <th class="pb-2 px-2 font-bold text-center text-rose-400">Perdidos</th>
                     </tr>
@@ -212,6 +221,7 @@
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Disponible }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Asignado }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Mantenimiento }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados['Devolución'] }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Baja }}</td>
                         <td class="py-2.5 px-2 text-center">{{ f.estados.Perdido }}</td>
                     </tr>
@@ -1538,9 +1548,9 @@
         }
 
         donut('chart-inv-estado',
-            ['Disponibles', 'Asignados', 'En mantenimiento', 'De baja', 'Perdidos'],
-            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado.Baja }}, {{ conteos_estado.Perdido }}],
-            ['#34d399', '#38bdf8', '#f59e0b', '#64748b', '#fb7185']
+            ['Disponibles', 'Asignados', 'En mantenimiento', 'Devolución', 'De baja', 'Perdidos'],
+            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado['Devolución'] }}, {{ conteos_estado.Baja }}, {{ conteos_estado.Perdido }}],
+            ['#34d399', '#38bdf8', '#f59e0b', '#a78bfa', '#64748b', '#fb7185']
         );
         barra('chart-inv-tipo', {{ por_tipo_activo.keys() | list | tojson }}, {{ por_tipo_activo.values() | list | tojson }}, '#a78bfa');
         barra('chart-inv-sede', {{ distribucion_por_sede | map(attribute='sede') | list | tojson }}, {{ distribucion_por_sede | map(attribute='total') | list | tojson }}, '#2dd4bf');
