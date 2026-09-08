@@ -3,15 +3,15 @@ cédula en Gestión de Usuarios, dar de alta varios aplicativos a la vez para el
 en una sola acción, y editar/eliminar permanentemente una fila existente."""
 
 
-def _crear_credencial_colaborador(app, colaborador='Empleado Editable', aplicativo='KUBAPP', password='ClaveInicial1'):
+def _crear_credencial_colaborador(app, colaborador='Empleado Editable', aplicativo='KUBAPP', password='ClaveInicial1', usuario_aplicativo=None):
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    q = ("INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
-         "estado, fecha_registro, registrado_por) VALUES (%s, %s, %s, '2026-01-01', 'activo', '2026-01-01 09:00:00', 'admin') RETURNING id"
+    q = ("INSERT INTO credenciales_colaboradores (colaborador, aplicativo, usuario_aplicativo, password_cifrada, fecha_creacion, "
+         "estado, fecha_registro, registrado_por) VALUES (%s, %s, %s, %s, '2026-01-01', 'activo', '2026-01-01 09:00:00', 'admin') RETURNING id"
          if db_type == 'postgres' else
-         "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, password_cifrada, fecha_creacion, "
-         "estado, fecha_registro, registrado_por) VALUES (?, ?, ?, '2026-01-01', 'activo', '2026-01-01 09:00:00', 'admin')")
-    cur.execute(q, (colaborador, aplicativo, app.encriptar_texto(password)))
+         "INSERT INTO credenciales_colaboradores (colaborador, aplicativo, usuario_aplicativo, password_cifrada, fecha_creacion, "
+         "estado, fecha_registro, registrado_por) VALUES (?, ?, ?, ?, '2026-01-01', 'activo', '2026-01-01 09:00:00', 'admin')")
+    cur.execute(q, (colaborador, aplicativo, usuario_aplicativo, app.encriptar_texto(password)))
     reg_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
     conn.commit()
     conn.close()
@@ -60,6 +60,85 @@ def test_alta_credencial_crea_un_registro_por_aplicativo_seleccionado(admin_sess
     aplicativos = [f[0] for f in cur.fetchall()]
     conn.close()
     assert aplicativos == ['KUBAPP', 'Moodle', 'SAMI']
+
+
+# --- Usuario/ID propio de cada aplicativo (pedido por Tomás, 08/09/2026) ---
+
+def test_alta_credencial_guarda_un_usuario_distinto_por_cada_aplicativo(admin_session, app):
+    """Cada aplicativo tiene su propia forma de identificar a la persona (cédula en SAMI, un
+    correo en Correo...) — a diferencia de la contraseña (compartida entre todos los
+    aplicativos marcados), el campo 'usuario_aplicativo__<nombre>' es independiente por
+    aplicativo."""
+    admin_session.post('/credenciales/colaboradores/crear', data={
+        'colaborador': 'Empleado Multi Aplicativo',
+        'aplicativos': ['KUBAPP', 'SAMI', 'Correo'],
+        'usuario_aplicativo__KUBAPP': '102576169',
+        'usuario_aplicativo__SAMI': '1025761690',
+        'usuario_aplicativo__Correo': 'empleado.multi@preventivaips.com.co',
+        'password': 'Clave123',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT aplicativo, usuario_aplicativo FROM credenciales_colaboradores WHERE colaborador = ? ORDER BY aplicativo ASC",
+        ('Empleado Multi Aplicativo',)
+    )
+    filas = dict(cur.fetchall())
+    conn.close()
+    assert filas == {
+        'Correo': 'empleado.multi@preventivaips.com.co',
+        'KUBAPP': '102576169',
+        'SAMI': '1025761690',
+    }
+
+
+def test_alta_credencial_usuario_aplicativo_es_opcional(admin_session, app):
+    """No siempre se conoce (o aplica) un usuario/ID propio distinto para un aplicativo — el
+    campo puede quedar en blanco sin que eso bloquee el alta (a diferencia de la casilla 'Otro'
+    del checklist de accesorios en Inventario, que sí es obligatoria cuando se marca)."""
+    admin_session.post('/credenciales/colaboradores/crear', data={
+        'colaborador': 'Empleado Sin Usuario Puntual',
+        'aplicativos': ['Moodle'],
+        'password': 'Clave123',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT usuario_aplicativo FROM credenciales_colaboradores WHERE colaborador = ?",
+        ('Empleado Sin Usuario Puntual',)
+    )
+    fila = cur.fetchone()
+    conn.close()
+    assert fila is not None
+    assert fila[0] is None
+
+
+def test_editar_credencial_actualiza_el_usuario_aplicativo(admin_session, app):
+    reg_id = _crear_credencial_colaborador(app, usuario_aplicativo='id-viejo')
+
+    admin_session.post(f'/credenciales/colaboradores/{reg_id}/editar', data={
+        'colaborador': 'Empleado Editable',
+        'aplicativo': 'KUBAPP',
+        'usuario_aplicativo': 'id-nuevo-123',
+        'password': '',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT usuario_aplicativo FROM credenciales_colaboradores WHERE id = ?", (reg_id,))
+    usuario_aplicativo = cur.fetchone()[0]
+    conn.close()
+    assert usuario_aplicativo == 'id-nuevo-123'
+
+
+def test_pagina_de_credenciales_muestra_el_usuario_de_cada_aplicativo(admin_session, app):
+    _crear_credencial_colaborador(app, colaborador='Empleado Visible', usuario_aplicativo='visible-id-42')
+
+    texto = admin_session.get('/credenciales/colaboradores').get_data(as_text=True)
+
+    assert 'visible-id-42' in texto
 
 
 def test_alta_credencial_sin_aplicativos_no_crea_nada(admin_session, app):
