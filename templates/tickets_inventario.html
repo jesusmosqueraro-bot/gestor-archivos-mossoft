@@ -540,14 +540,23 @@
                         <div>
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a</label>
                             <input type="text" name="asignado_a" id="input-activo-asignado" autocomplete="off" placeholder="Nombre del colaborador (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                            <div class="flex items-center gap-2 mt-1.5">
-                                <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
-                                    <i class="fa-solid fa-magnifying-glass"></i> Buscar
-                                </button>
+                            <!-- 🔎 Autocompletar (pedido por Tomás, 08/09/2026): mientras se escribe
+                                 la cédula (o el nombre) aparecen sugerencias de cuentas ya
+                                 registradas en Arkiv, igual que en Altas de Credenciales/Bóveda
+                                 Personal — ver activarAutocompletarPersona en /static/js/
+                                 autocompletar_persona.js. El botón "Buscar" se conserva para quien
+                                 prefiera exigir coincidencia exacta de cédula sin usar la lista. -->
+                            <div class="relative">
+                                <div class="flex items-center gap-2 mt-1.5">
+                                    <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula o nombre..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
+                                        <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                                    </button>
+                                </div>
+                                <div id="sugerencias-cedula-activo" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
                             </div>
                             <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
-                            <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv), o buscar por cédula si la persona ya está registrada como usuario.</p>
+                            <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv). Al escribir la cédula o el nombre de alguien ya registrado en Arkiv, aparecen sugerencias para elegir con un clic.</p>
                             <!-- 🆕 Acceso directo al alta rápida: antes solo aparecía si una búsqueda
                                  por cédula fallaba primero ("no encontrado"), lo cual Tomás reportó
                                  como que el módulo "no permite crear el usuario" — con este botón no
@@ -1552,6 +1561,7 @@
     </form>
 
     <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/autocompletar_persona.js"></script>
     <script src="/static/js/notificaciones.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
@@ -1561,6 +1571,23 @@
         document.addEventListener('DOMContentLoaded', function () {
             inicializarFirmaDigital('firma-rapido');
             firmaActaWidget = inicializarFirmaDigital('firma-acta');
+
+            // 🔎 Autocompletar por cédula o nombre (pedido por Tomás, 08/09/2026) — ver
+            // activarAutocompletarPersona en /static/js/autocompletar_persona.js. Elegir una
+            // sugerencia llena "Asignado a" igual que la búsqueda exacta por cédula (botón
+            // "Buscar"/buscarAsignadoPorCedula), incluyendo el aviso de firma reutilizable.
+            activarAutocompletarPersona({
+                inputId: 'input-activo-cedula-buscar',
+                listaId: 'sugerencias-cedula-activo',
+                onSeleccionar: function (persona) {
+                    document.getElementById('input-activo-asignado').value = persona.nombre + ' (' + persona.usuario + ')';
+                    document.getElementById('panel-crear-usuario-rapido').classList.add('hidden');
+                    var mensaje = document.getElementById('mensaje-busqueda-cedula');
+                    mensaje.textContent = 'Encontrado: ' + persona.nombre + ' (' + persona.usuario + ')' +
+                        (persona.firma ? ' — se usará su firma registrada como aceptación.' : '');
+                    mensaje.className = 'text-[10px] mt-1 text-emerald-400';
+                }
+            });
         });
     </script>
 </body>

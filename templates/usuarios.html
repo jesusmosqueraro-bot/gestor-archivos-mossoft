@@ -112,7 +112,7 @@
 
         <div class="mb-4 relative max-w-sm">
             <i class="fa-solid fa-id-card absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-            <input type="text" id="input-buscar-cedula" oninput="filtrarUsuariosPorCedula()" placeholder="Buscar por cédula..." autocomplete="off" class="w-full pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500">
+            <input type="text" id="input-buscar-cedula" oninput="filtrarUsuarios()" placeholder="Buscar por cédula o nombre..." autocomplete="off" class="w-full pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500">
         </div>
 
         <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -131,7 +131,10 @@
                     </thead>
                     <tbody id="tbody-usuarios" class="divide-y divide-slate-800/60 text-slate-300">
                         {% for u in usuarios %}
-                        <tr class="hover:bg-slate-800/30 transition-colors" data-cedula="{{ (u[7] or '')|lower }}">
+                        {# 🔎 'data-buscar' combina usuario/nombre/cédula para el filtro en vivo de abajo
+                           (pedido por Tomás, 08/09/2026: que también se pueda buscar por nombre, no
+                           solo por cédula — ver filtrarUsuarios()). #}
+                        <tr class="hover:bg-slate-800/30 transition-colors" data-buscar="{{ (u[1] ~ ' ' ~ (u[5] or '') ~ ' ' ~ (u[7] or ''))|lower }}">
                             <td class="px-4 py-3">
                                 <div class="font-bold text-white flex items-center gap-2">
                                     <i class="fa-regular fa-user text-cyan-400"></i> {{ u[1] }}
@@ -717,14 +720,16 @@
         }
         function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
 
-        // 🔎 Filtro rápido por cédula sobre la tabla ya cargada — no hace falta ir al servidor,
-        // el listado completo ya está en la página.
-        function filtrarUsuariosPorCedula() {
+        // 🔎 Filtro rápido por cédula O nombre sobre la tabla ya cargada — no hace falta ir al
+        // servidor, el listado completo ya está en la página, así que se filtra en vivo mientras
+        // se escribe (pedido de Tomás, 08/09/2026: que también se pueda buscar por nombre, no
+        // solo por cédula — ver 'data-buscar' en cada <tr>).
+        function filtrarUsuarios() {
             var termino = document.getElementById('input-buscar-cedula').value.trim().toLowerCase();
             var filas = document.querySelectorAll('#tbody-usuarios tr');
             filas.forEach(function(fila) {
-                var cedula = fila.getAttribute('data-cedula') || '';
-                fila.style.display = (!termino || cedula.indexOf(termino) !== -1) ? '' : 'none';
+                var buscar = fila.getAttribute('data-buscar') || '';
+                fila.style.display = (!termino || buscar.indexOf(termino) !== -1) ? '' : 'none';
             });
         }
 
