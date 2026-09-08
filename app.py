@@ -9932,15 +9932,30 @@ def listar_actas_asignacion(activo_id):
 
 
 def _pdf_fecha_partes(fecha_texto):
-    """Separa 'AAAA-MM-DD HH:MM:SS' (formato de obtener_fecha_actual) en (dd, mm, aaaa) para la
-    casilla de fecha del acta, imitando el formato en papel de Preventiva IPS ('FECHA | DD | MM |
-    AA'). Si el texto no viniera en ese formato exacto, se devuelve tal cual en 'aaaa' y los otros
-    dos vacíos, en vez de reventar la generación del PDF."""
-    try:
-        dt = datetime.strptime(fecha_texto, "%Y-%m-%d %H:%M:%S")
-        return dt.strftime('%d'), dt.strftime('%m'), dt.strftime('%Y')
-    except Exception:
-        return '', '', (fecha_texto or '-')
+    """Separa la fecha del acta en (dd, mm, aaaa) para la casilla 'FECHA | DD | MM | AAAA',
+    imitando el formato en papel de Preventiva IPS. Corrige un bug (reportado por Tomás,
+    08/09/2026: 'las actas viejas muestran la fecha completa metida en la casilla AAAA, con DD y
+    MM vacíos') — solo se intentaba el formato 'AAAA-MM-DD HH:MM:SS' de obtener_fecha_actual(),
+    pero el correo automático de asignación (_enviar_formulario_asignacion_por_correo) arma su
+    propia fecha SIN hora ('AAAA-MM-DD'), y las actas más antiguas, de antes de la corrección de
+    DateStyle en Postgres, quedaron guardadas en el formato previo ('DD/MM/AAAA hh:mm AM/PM' —
+    ver obtener_fecha_actual). Ahora se prueban los tres formatos conocidos en orden; si ninguno
+    coincide, se devuelve el texto tal cual en 'aaaa' y los otros dos vacíos, en vez de reventar
+    la generación del PDF."""
+    if not fecha_texto:
+        return '', '', '-'
+    formatos_conocidos = (
+        "%Y-%m-%d %H:%M:%S",  # obtener_fecha_actual() actual — usado por actas_asignacion/inventario_devoluciones
+        "%Y-%m-%d",           # sin hora — usado por el correo automático de asignación
+        "%d/%m/%Y %I:%M %p",  # formato histórico anterior a la corrección de DateStyle en Postgres
+    )
+    for formato in formatos_conocidos:
+        try:
+            dt = datetime.strptime(fecha_texto, formato)
+            return dt.strftime('%d'), dt.strftime('%m'), dt.strftime('%Y')
+        except Exception:
+            continue
+    return '', '', fecha_texto
 
 
 def _recortar_imagen_firma(datos_imagen):
@@ -10305,7 +10320,10 @@ def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, fir
         return
     placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico = fila
     campos = {
-        'numero_acta': activo_id, 'fecha': datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y-%m-%d'),
+        # 📅 Mismo formato que obtener_fecha_actual() (usado en TODO el resto de la app para
+        # guardar fechas) — antes se armaba aparte con strftime('%Y-%m-%d'), sin hora, lo que
+        # rompía la casilla DD/MM/AAAA del PDF (ver _pdf_fecha_partes).
+        'numero_acta': activo_id, 'fecha': obtener_fecha_actual(),
         'responsable_asignacion': _nombre_para_mostrar(creador, _mapa_nombres_usuarios()),
         'asignado_a': asignado_a, 'sede': sede, 'area': area, 'tipo_activo': tipo_activo, 'marca': marca,
         'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie, 'proveedor': proveedor,
