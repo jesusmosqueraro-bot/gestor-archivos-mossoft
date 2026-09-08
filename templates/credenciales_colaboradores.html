@@ -111,6 +111,7 @@
                     <tr>
                         <th class="pb-3 px-3 font-bold">Colaborador</th>
                         <th class="pb-3 px-3 font-bold">Aplicativo</th>
+                        <th class="pb-3 px-3 font-bold">Usuario</th>
                         <th class="pb-3 px-3 font-bold">Clave</th>
                         <th class="pb-3 px-3 font-bold">F. Creación</th>
                         <th class="pb-3 px-3 font-bold">F. Solicitud</th>
@@ -130,6 +131,7 @@
                             <td class="py-3 px-3 whitespace-nowrap">
                                 <span class="px-2 py-0.5 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ r.aplicativo }}</span>
                             </td>
+                            <td class="py-3 px-3 whitespace-nowrap text-slate-300 font-mono">{{ r.usuario_aplicativo or '—' }}</td>
                             <td class="py-3 px-3 whitespace-nowrap">
                                 <div class="flex items-center gap-1.5 font-mono">
                                     <input type="password" id="pass-colab-{{ r.id }}" value="••••••••" readonly class="bg-transparent text-slate-200 w-20 focus:outline-none font-bold">
@@ -186,7 +188,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="11" class="text-center py-10 text-slate-500 font-bold">
+                            <td colspan="12" class="text-center py-10 text-slate-500 font-bold">
                                 No se encontraron registros que coincidan con los filtros.
                             </td>
                         </tr>
@@ -198,7 +200,7 @@
 
     <!-- MODAL NUEVA ALTA -->
     <div id="modal-alta" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 class="text-base font-bold text-white">Nueva Alta de Credencial</h3>
                 <button onclick="cerrarModalAlta()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
@@ -227,13 +229,19 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo(s) *</label>
-                    <p class="text-slate-500 text-[10px] mb-1.5">Selecciona uno o varios — se crea una credencial por cada uno, con la misma contraseña.</p>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 bg-slate-900/60 border border-slate-700 rounded-xl p-2.5">
+                    <p class="text-slate-500 text-[10px] mb-1.5">Selecciona uno o varios — se crea una credencial por cada uno, con la misma contraseña. Cada aplicativo tiene su propia forma de identificar a la persona (una cédula, un correo, un ID...); si la conoces, márcalo abajo del aplicativo.</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-900/60 border border-slate-700 rounded-xl p-2.5">
                         {% for a in aplicativos %}
-                        <label class="flex items-center gap-1.5 text-slate-300 text-[11px] px-1.5 py-1 rounded-lg hover:bg-slate-800 cursor-pointer">
-                            <input type="checkbox" name="aplicativos" value="{{ a.nombre }}" class="accent-fuchsia-500">
-                            {{ a.nombre }}
-                        </label>
+                        <div class="rounded-lg px-1.5 py-1 hover:bg-slate-800/60">
+                            <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
+                                <input type="checkbox" name="aplicativos" value="{{ a.nombre }}" class="accent-fuchsia-500"
+                                       onchange="toggleUsuarioAplicativoAlta(this, {{ loop.index }})">
+                                {{ a.nombre }}
+                            </label>
+                            <input type="text" name="usuario_aplicativo__{{ a.nombre }}" id="usuario-app-alta-{{ loop.index }}"
+                                   placeholder="Usuario/ID en {{ a.nombre }} (si lo conoces)" autocomplete="off"
+                                   class="hidden mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-[11px] font-mono focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                        </div>
                         {% endfor %}
                     </div>
                 </div>
@@ -300,7 +308,7 @@
 
     <!-- MODAL EDITAR ALTA -->
     <div id="modal-editar-alta" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                 <h3 class="text-base font-bold text-white">Editar Alta de Credencial</h3>
                 <button type="button" onclick="cerrarModalEditarCredColab()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
@@ -325,6 +333,11 @@
                         <option value="{{ a.nombre }}">{{ a.nombre }}</option>
                         {% endfor %}
                     </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Usuario/ID en este aplicativo</label>
+                    <input type="text" name="usuario_aplicativo" id="edit-usuario-aplicativo" placeholder="Cédula, correo, ID... según el aplicativo" autocomplete="off" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 font-mono">
                 </div>
 
                 <div>
@@ -491,6 +504,21 @@
             document.getElementById('modal-alta').classList.add('hidden');
             document.getElementById('modal-alta').classList.remove('flex');
         }
+        // 🆔 Cada aplicativo tiene su propia forma de identificar a la persona (cédula, correo,
+        // ID numérico...) — igual que la casilla "Otro" del checklist de accesorios en
+        // Inventario, marcar un aplicativo revela un campo aparte para anotar ese usuario/ID
+        // puntual (pedido por Tomás, 08/09/2026). Al desmarcarlo se oculta Y se limpia, para no
+        // enviar por error un usuario de un aplicativo que ya no está seleccionado.
+        function toggleUsuarioAplicativoAlta(checkbox, idx) {
+            var campo = document.getElementById('usuario-app-alta-' + idx);
+            if (!campo) return;
+            if (checkbox.checked) {
+                campo.classList.remove('hidden');
+            } else {
+                campo.classList.add('hidden');
+                campo.value = '';
+            }
+        }
         // ✏️ Edición de una fila existente: reutiliza un modal aparte (no el de "Nueva Alta",
         // que permite marcar varios aplicativos a la vez) porque aquí solo se edita UN
         // aplicativo puntual. La contraseña llega vacía a propósito — igual que en la Bóveda de
@@ -499,6 +527,7 @@
             document.getElementById('form-editar-cred-colab').action = `/credenciales/colaboradores/${r.id}/editar`;
             document.getElementById('edit-colaborador').value = r.colaborador || '';
             document.getElementById('edit-aplicativo').value = r.aplicativo || '';
+            document.getElementById('edit-usuario-aplicativo').value = r.usuario_aplicativo || '';
             document.getElementById('edit-password').value = '';
             document.getElementById('edit-fecha-solicitud').value = r.fecha_solicitud || '';
             document.getElementById('edit-fecha-creacion').value = r.fecha_creacion || '';
