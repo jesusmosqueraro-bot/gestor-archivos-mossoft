@@ -141,6 +141,73 @@ def test_pagina_de_credenciales_muestra_el_usuario_de_cada_aplicativo(admin_sess
     assert 'visible-id-42' in texto
 
 
+# --- Contraseña puntual por aplicativo (pedido por Tomás, 08/09/2026) ---
+
+def test_alta_credencial_usa_la_contrasena_puntual_cuando_se_diligencia(admin_session, app):
+    """Por defecto todos los aplicativos marcados comparten la 'Contraseña asignada' — pero si
+    un aplicativo puntual trae su propio campo 'password_aplicativo__<nombre>' diligenciado, esa
+    fila debe guardar ESA contraseña en vez de la compartida."""
+    admin_session.post('/credenciales/colaboradores/crear', data={
+        'colaborador': 'Empleado Contraseñas Mixtas',
+        'aplicativos': ['KUBAPP', 'Moodle'],
+        'password_aplicativo__KUBAPP': 'ClavePuntualKubapp1',
+        'password': 'ClaveCompartida1',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT aplicativo, password_cifrada FROM credenciales_colaboradores WHERE colaborador = ? ORDER BY aplicativo ASC",
+        ('Empleado Contraseñas Mixtas',)
+    )
+    filas = {ap: app.desencriptar_texto(pw) for ap, pw in cur.fetchall()}
+    conn.close()
+    assert filas == {
+        'KUBAPP': 'ClavePuntualKubapp1',
+        'Moodle': 'ClaveCompartida1',
+    }
+
+
+# --- Filtro y autocompletar por PQRS (pedido por Tomás, 08/09/2026) ---
+
+def test_filtro_por_pqrs_muestra_solo_los_registros_de_ese_pqrs(admin_session, app):
+    """Ojo: 'colaboradores_existentes' (para el autocompletar del modal 'Nueva Alta') lista TODOS
+    los colaboradores sin importar el filtro activo — por eso la prueba busca el patrón exacto de
+    una FILA de la tabla (">Nombre<"), no solo si el nombre aparece en algún lugar de la página
+    (podría aparecer igual dentro del <datalist>)."""
+    _crear_credencial_colaborador(app, colaborador='Empleado PQRS Uno')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE credenciales_colaboradores SET solicitado_por = ? WHERE colaborador = ?", ('00001', 'Empleado PQRS Uno'))
+    conn.commit()
+    conn.close()
+    _crear_credencial_colaborador(app, colaborador='Empleado PQRS Dos', aplicativo='Moodle')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE credenciales_colaboradores SET solicitado_por = ? WHERE colaborador = ?", ('00002', 'Empleado PQRS Dos'))
+    conn.commit()
+    conn.close()
+
+    texto = admin_session.get('/credenciales/colaboradores?pqrs=00001&estado=todos').get_data(as_text=True)
+
+    assert '>Empleado PQRS Uno<' in texto
+    assert '>Empleado PQRS Dos<' not in texto
+
+
+def test_pagina_de_credenciales_sugiere_los_pqrs_ya_usados(admin_session, app):
+    _crear_credencial_colaborador(app, colaborador='Empleado PQRS Autocompletar')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE credenciales_colaboradores SET solicitado_por = ? WHERE colaborador = ?", ('00099', 'Empleado PQRS Autocompletar'))
+    conn.commit()
+    conn.close()
+
+    texto = admin_session.get('/credenciales/colaboradores').get_data(as_text=True)
+
+    assert 'lista_pqrs' in texto
+    assert '00099' in texto
+
+
 def test_alta_credencial_sin_aplicativos_no_crea_nada(admin_session, app):
     admin_session.post('/credenciales/colaboradores/crear', data={
         'colaborador': 'Sin Aplicativo',
