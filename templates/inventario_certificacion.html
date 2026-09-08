@@ -112,6 +112,23 @@
                     </div>
                     <form method="POST" action="{{ url_for('confirmar_devolucion_activo', activo_id=p.id) }}" onsubmit="return confirm('¿Confirmar que {{ p.asignado_a or "este colaborador" }} ya devolvió {{ p.nombre }}? El activo volverá a estar disponible en el Inventario.')" class="flex flex-col gap-2 flex-shrink-0 w-full sm:w-[380px]">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        {% if p.accesorios_asignados %}
+                        <!-- 🎒 Accesorios que se entregaron con este activo al asignarlo (ver
+                             ACCESORIOS_ACTIVO/_accesorios_marcados en app.py) — se muestran
+                             pre-marcados y se desmarcan solo los que NO regresaron, para dejar
+                             constancia de cuáles accesorios sí se recuperaron con la devolución. -->
+                        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-2.5">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1.5"><i class="fa-solid fa-boxes-packing mr-1 text-teal-400"></i>Accesorios que regresaron</p>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                {% for ac in p.accesorios_asignados %}
+                                <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                                    <input type="checkbox" name="accesorio_devuelto_{{ ac.clave }}" checked class="rounded border-slate-600 bg-slate-900 text-teal-500 focus:ring-teal-500">
+                                    {{ ac.etiqueta }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
                         {# 📝 Pedido de Tomás: el campo de observaciones era un <input> de una sola
                            línea y muy angosto (w-40) — apenas alcanzaba para un par de palabras.
                            Ahora es un <textarea> a todo el ancho del formulario, con varias líneas
@@ -183,6 +200,7 @@
                             <th class="py-2 pr-4 font-semibold">Certificado por</th>
                             <th class="py-2 pr-4 font-semibold">Fecha</th>
                             <th class="py-2 pr-4 font-semibold">Observaciones</th>
+                            <th class="py-2 pr-4 font-semibold">Accesorios devueltos</th>
                             <th class="py-2 font-semibold">Acta</th>
                         </tr>
                     </thead>
@@ -194,6 +212,7 @@
                             <td class="py-2 pr-4 text-slate-400">{{ h.confirmado_por }}</td>
                             <td class="py-2 pr-4 text-slate-400">{{ h.fecha }}</td>
                             <td class="py-2 pr-4 text-slate-500">{{ h.observaciones or '—' }}</td>
+                            <td class="py-2 pr-4 text-slate-500">{% if h.accesorios_devueltos %}{{ h.accesorios_devueltos | map(attribute='etiqueta') | join(', ') }}{% else %}—{% endif %}</td>
                             <td class="py-2">
                                 {% if h.acta_generada %}
                                 <a href="{{ url_for('acta_devolucion_pdf', devolucion_id=h.id) }}" target="_blank" class="inline-flex items-center gap-1.5 text-teal-400 hover:text-teal-300 font-semibold whitespace-nowrap">
