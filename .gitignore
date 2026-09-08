@@ -9,3 +9,8 @@ __pycache__/
 
 # Variables de entorno locales, si alguna vez se usa un archivo .env
 .env
+
+# Documentos de entrega/propuesta y mockups de diseño: no son parte de la app, se generan y
+# entregan por fuera (ver SendUserFile) — no deben vivir en este repo de código.
+/docs_entrega/
+/mockups/
