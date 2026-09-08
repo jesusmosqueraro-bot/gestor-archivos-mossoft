@@ -77,11 +77,26 @@
         </div>
 
         <!-- BARRA DE FILTROS -->
-        <form method="GET" action="{{ url_for('ver_credenciales_colaboradores') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <form method="GET" action="{{ url_for('ver_credenciales_colaboradores') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar (colaborador, aplicativo, solicitante)</label>
                 <div class="relative">
                     <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Escribe y presiona Enter..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+            </div>
+            <div>
+                <!-- 🔎 Filtro dedicado por PQRS (pedido por Tomás, 08/09/2026), aparte del
+                     buscador general de arriba — para ubicar de un vistazo todas las
+                     credenciales dadas de alta a raíz de un mismo número de PQRS. -->
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Filtrar por PQRS</label>
+                <div class="relative">
+                    <input type="text" name="pqrs" value="{{ f_pqrs }}" list="lista_pqrs_filtro" placeholder="N° de PQRS..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <datalist id="lista_pqrs_filtro">
+                        {% for p in pqrs_existentes %}
+                        <option value="{{ p }}"></option>
+                        {% endfor %}
+                    </datalist>
                     <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
                 </div>
             </div>
@@ -229,17 +244,20 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Aplicativo(s) *</label>
-                    <p class="text-slate-500 text-[10px] mb-1.5">Selecciona uno o varios — se crea una credencial por cada uno, con la misma contraseña. Cada aplicativo tiene su propia forma de identificar a la persona (una cédula, un correo, un ID...); si la conoces, márcalo abajo del aplicativo.</p>
+                    <p class="text-slate-500 text-[10px] mb-1.5">Selecciona uno o varios — por defecto se crea una credencial por cada uno con la misma contraseña de abajo. Cada aplicativo tiene su propia forma de identificar a la persona (una cédula, un correo, un ID...); si la conoces, márcalo abajo del aplicativo. Si además necesita una contraseña distinta a la compartida, diligencia también su campo de contraseña.</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-900/60 border border-slate-700 rounded-xl p-2.5">
                         {% for a in aplicativos %}
                         <div class="rounded-lg px-1.5 py-1 hover:bg-slate-800/60">
                             <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
                                 <input type="checkbox" name="aplicativos" value="{{ a.nombre }}" class="accent-fuchsia-500"
-                                       onchange="toggleUsuarioAplicativoAlta(this, {{ loop.index }})">
+                                       onchange="toggleCamposAplicativoAlta(this, {{ loop.index }})">
                                 {{ a.nombre }}
                             </label>
                             <input type="text" name="usuario_aplicativo__{{ a.nombre }}" id="usuario-app-alta-{{ loop.index }}"
                                    placeholder="Usuario/ID en {{ a.nombre }} (si lo conoces)" autocomplete="off"
+                                   class="hidden mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-[11px] font-mono focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <input type="text" name="password_aplicativo__{{ a.nombre }}" id="password-app-alta-{{ loop.index }}"
+                                   placeholder="Contraseña de {{ a.nombre }} (si es distinta a la de abajo)" autocomplete="off"
                                    class="hidden mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-[11px] font-mono focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
                         </div>
                         {% endfor %}
@@ -264,7 +282,14 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Solicitado por (PQRS)</label>
-                    <input type="text" name="solicitado_por" placeholder="Nombre de quien radicó la solicitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    {# 🔎 Sugiere PQRS ya usados antes mientras se escribe (pedido por Tomás,
+                       08/09/2026) — sigue siendo texto libre: un PQRS nuevo se puede escribir igual. #}
+                    <input type="text" name="solicitado_por" list="lista_pqrs" autocomplete="off" placeholder="Nombre de quien radicó la solicitud o N° de PQRS" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <datalist id="lista_pqrs">
+                        {% for p in pqrs_existentes %}
+                        <option value="{{ p }}"></option>
+                        {% endfor %}
+                    </datalist>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
@@ -358,7 +383,7 @@
 
                 <div>
                     <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Solicitado por (PQRS)</label>
-                    <input type="text" name="solicitado_por" id="edit-solicitado-por" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                    <input type="text" name="solicitado_por" id="edit-solicitado-por" list="lista_pqrs" autocomplete="off" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
@@ -504,20 +529,23 @@
             document.getElementById('modal-alta').classList.add('hidden');
             document.getElementById('modal-alta').classList.remove('flex');
         }
-        // 🆔 Cada aplicativo tiene su propia forma de identificar a la persona (cédula, correo,
-        // ID numérico...) — igual que la casilla "Otro" del checklist de accesorios en
-        // Inventario, marcar un aplicativo revela un campo aparte para anotar ese usuario/ID
-        // puntual (pedido por Tomás, 08/09/2026). Al desmarcarlo se oculta Y se limpia, para no
-        // enviar por error un usuario de un aplicativo que ya no está seleccionado.
-        function toggleUsuarioAplicativoAlta(checkbox, idx) {
-            var campo = document.getElementById('usuario-app-alta-' + idx);
-            if (!campo) return;
-            if (checkbox.checked) {
-                campo.classList.remove('hidden');
-            } else {
-                campo.classList.add('hidden');
-                campo.value = '';
-            }
+        // 🆔🔑 Cada aplicativo tiene su propia forma de identificar a la persona (cédula, correo,
+        // ID numérico...) y a veces necesita una contraseña distinta a la compartida — igual que
+        // la casilla "Otro" del checklist de accesorios en Inventario, marcar un aplicativo
+        // revela sus dos campos aparte (usuario y contraseña puntuales), pedido por Tomás,
+        // 08/09/2026. Al desmarcarlo se ocultan Y se limpian, para no enviar por error datos de
+        // un aplicativo que ya no está seleccionado.
+        function toggleCamposAplicativoAlta(checkbox, idx) {
+            ['usuario-app-alta-' + idx, 'password-app-alta-' + idx].forEach(function (id) {
+                var campo = document.getElementById(id);
+                if (!campo) return;
+                if (checkbox.checked) {
+                    campo.classList.remove('hidden');
+                } else {
+                    campo.classList.add('hidden');
+                    campo.value = '';
+                }
+            });
         }
         // ✏️ Edición de una fila existente: reutiliza un modal aparte (no el de "Nueva Alta",
         // que permite marcar varios aplicativos a la vez) porque aquí solo se edita UN
