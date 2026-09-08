@@ -11125,8 +11125,12 @@ def _pdf_bytes_acta_devolucion(campos):
     datos_devolucion = [
         ['Responsable de devolución', _pdf_texto_celda(responsable_devolucion, estilos)],
         ['Colaborador que entrega', _pdf_texto_celda(colaborador, estilos)],
-        ['Familiar/cuidador responsable', _pdf_texto_celda(nombre_familiar or '-', estilos)],
     ]
+    # 🩹 (pedido de Tomás, 08/09/2026) La fila "Familiar/cuidador responsable" solo aplica a
+    # equipos BIOMÉDICOS entregados a domicilio — en un activo de TI siempre salía vacía ("-"),
+    # puro ruido en el acta. Se omite por completo cuando el activo no es biomédico.
+    if es_biomedico:
+        datos_devolucion.append(['Familiar/cuidador responsable', _pdf_texto_celda(nombre_familiar or '-', estilos)])
     tabla_devolucion = Table(datos_devolucion, colWidths=[5.5 * cm, 10.5 * cm])
     tabla_devolucion.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -11176,17 +11180,27 @@ def _pdf_bytes_acta_devolucion(campos):
 
     elementos += [Paragraph(f"<b>NOTA:</b> {observaciones or '-'}", estilos['Normal']), Spacer(1, 0.9 * cm)]
 
+    # 🩹 (pedido de Tomás, 08/09/2026) Misma corrección que arriba: la firma del familiar/cuidador
+    # solo tiene sentido para equipos BIOMÉDICOS entregados a domicilio — en un activo de TI ya
+    # no se muestra ni la columna ni el "(No aplica...)" de relleno, solo la firma del colaborador
+    # que entrega, centrada a todo el ancho (igual que la firma de quien certifica, más abajo).
     firma_entrega = _pdf_elemento_firma(firma_entrega_url, estilos)
     if es_biomedico:
         firma_familiar = _pdf_elemento_firma(firma_familiar_url, estilos, texto_si_falta='(No firmó familiar/cuidador)')
+        tabla_firmas_fila1 = Table(
+            [[firma_entrega, firma_familiar],
+             [Paragraph('_' * 32, estilos['Normal']), Paragraph('_' * 32, estilos['Normal'])],
+             [Paragraph('Firma colaborador', estilos['Normal']), Paragraph('Firma familiar/cuidador', estilos['Normal'])]],
+            colWidths=[8.25 * cm, 8.25 * cm]
+        )
     else:
-        firma_familiar = Paragraph('(No aplica — no es equipo biomédico)', estilos['Normal'])
-    tabla_firmas_fila1 = Table(
-        [[firma_entrega, firma_familiar],
-         [Paragraph('_' * 32, estilos['Normal']), Paragraph('_' * 32, estilos['Normal'])],
-         [Paragraph('Firma colaborador', estilos['Normal']), Paragraph('Firma familiar/cuidador', estilos['Normal'])]],
-        colWidths=[8.25 * cm, 8.25 * cm]
-    )
+        tabla_firmas_fila1 = Table(
+            [[firma_entrega],
+             [Paragraph('_' * 32, estilos['Normal'])],
+             [Paragraph('Firma colaborador', estilos['Normal'])]],
+            colWidths=[8.5 * cm]
+        )
+        tabla_firmas_fila1.hAlign = 'CENTER'
     tabla_firmas_fila1.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
