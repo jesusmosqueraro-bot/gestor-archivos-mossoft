@@ -13284,6 +13284,7 @@ def ver_credenciales_colaboradores():
     q_busqueda = request.args.get('q', '').strip().lower()
     f_aplicativo = request.args.get('aplicativo', '').strip()
     f_estado = request.args.get('estado', 'activo').strip()
+    f_pqrs = request.args.get('pqrs', '').strip().lower()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -13309,6 +13310,11 @@ def ver_credenciales_colaboradores():
         if f_estado and f_estado != 'todos' and estado != f_estado:
             continue
         if f_aplicativo and aplicativo != f_aplicativo:
+            continue
+        # 🔎 Filtro dedicado por PQRS (pedido por Tomás, 08/09/2026), aparte del buscador general
+        # de arriba — para ubicar de un vistazo todas las credenciales dadas de alta a raíz de UN
+        # número de PQRS puntual, sin que se mezclen con coincidencias de nombre/aplicativo.
+        if f_pqrs and f_pqrs not in (solicitado_por or '').lower():
             continue
         if q_busqueda and q_busqueda not in f"{colaborador} {aplicativo} {usuario_aplicativo or ''} {solicitado_por or ''}".lower():
             continue
@@ -13347,13 +13353,26 @@ def ver_credenciales_colaboradores():
     except Exception as e:
         print(f"⚠️ Error listando colaboradores existentes para autocompletar: {e}")
         colaboradores_existentes = []
+    try:
+        # 📋 Números de PQRS ya usados antes, para que el campo "Solicitado por (PQRS)" del modal
+        # sugiera autocompletar (pedido por Tomás, 08/09/2026) en vez de obligar a retipear/recordar
+        # un número que ya se usó. Sigue siendo texto libre: un PQRS nuevo se puede escribir igual.
+        cursor3.execute(
+            "SELECT DISTINCT solicitado_por FROM credenciales_colaboradores "
+            "WHERE solicitado_por IS NOT NULL AND solicitado_por != '' ORDER BY solicitado_por ASC"
+        )
+        pqrs_existentes = [r[0] for r in cursor3.fetchall() if r[0]]
+    except Exception as e:
+        print(f"⚠️ Error listando PQRS existentes para autocompletar: {e}")
+        pqrs_existentes = []
     conn3.close()
 
     return render_template(
         'credenciales_colaboradores.html', registros=registros,
         aplicativos=_catalogo_aplicativos_activos(), medios=MEDIOS_ENVIO_CREDENCIAL,
-        q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado,
-        equipo_soporte=equipo_soporte, colaboradores_existentes=colaboradores_existentes
+        q_busqueda=q_busqueda, f_aplicativo=f_aplicativo, f_estado=f_estado, f_pqrs=f_pqrs,
+        equipo_soporte=equipo_soporte, colaboradores_existentes=colaboradores_existentes,
+        pqrs_existentes=pqrs_existentes
     )
 
 
@@ -13368,12 +13387,17 @@ def crear_credencial_colaborador():
     esquema): esta ruta simplemente inserta varias filas en una sola transacción.
 
     Cada aplicativo tiene su propia forma de identificar a la persona (una cédula en SAMI, un
-    correo en Correo, un ID numérico en Wolkvox...) — a diferencia de la contraseña, que sí se
-    comparte entre todos los aplicativos marcados, el 'usuario' de cada uno es independiente
+    correo en Correo, un ID numérico en Wolkvox...) — el 'usuario' de cada uno es independiente
     (pedido por Tomás, 08/09/2026). El formulario manda un campo de texto aparte por cada
     aplicativo del catálogo, nombrado 'usuario_aplicativo__<nombre del aplicativo>' — ver el
     modal 'Nueva Alta' en credenciales_colaboradores.html. Es opcional: no todos los aplicativos
-    tienen o requieren un usuario propio distinto del nombre del colaborador."""
+    tienen o requieren un usuario propio distinto del nombre del colaborador.
+
+    La contraseña sí se comparte por defecto entre todos los aplicativos marcados ('Contraseña
+    asignada', obligatoria) — pero un aplicativo puntual puede necesitar una distinta (pedido por
+    Tomás, 08/09/2026: mismo campo revelado que 'usuario', solo si se marca su casilla), mandada
+    como 'password_aplicativo__<nombre del aplicativo>'; si viene diligenciada, esa fila usa esa
+    contraseña en vez de la compartida."""
     colaborador = request.form.get('colaborador', '').strip()
     aplicativos_sel = [a.strip() for a in request.form.getlist('aplicativos') if a.strip()]
     password = request.form.get('password', '').strip()
@@ -13403,7 +13427,9 @@ def crear_credencial_colaborador():
             )
             for aplicativo in aplicativos_sel:
                 usuario_aplicativo = (request.form.get(f'usuario_aplicativo__{aplicativo}', '') or '').strip() or None
-                cursor.execute(q_ins, (colaborador, aplicativo, usuario_aplicativo, pass_cifrada, fecha_creacion, fecha_solicitud,
+                password_aplicativo = (request.form.get(f'password_aplicativo__{aplicativo}', '') or '').strip()
+                pass_cifrada_fila = encriptar_texto(password_aplicativo) if password_aplicativo else pass_cifrada
+                cursor.execute(q_ins, (colaborador, aplicativo, usuario_aplicativo, pass_cifrada_fila, fecha_creacion, fecha_solicitud,
                                         analista_gestiona, solicitado_por, capacitado_por, medio_envio,
                                         fecha_act, session.get('username')))
             conn.commit()
