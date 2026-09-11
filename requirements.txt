@@ -7,3 +7,4 @@ cloudinary==1.40.0
 requests==2.32.3
 cryptography==42.0.8
 tzdata>=2024.1
+pip install Flask-Limiter
