@@ -1196,7 +1196,21 @@ def init_db():
                 # 🏢 Sede asignada a la cuenta (mismo catálogo de arriba). Se preselecciona sola en
                 # el alta según la sede más cercana a la ubicación detectada, pero el campo sigue
                 # siendo editable — ver gestion_usuarios()/_crear_usuario_interno().
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede VARCHAR(150);"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede VARCHAR(150);",
+                # 🧭 Radio de tolerancia (metros) de cada Sede real, para marcar un acceso/alta como
+                # "dentro" o "fuera" de sede por Haversine (pedido de Tomás, 12/09/2026) — ver
+                # _sede_real_mas_cercana(). 200m por defecto para las sedes que ya existían.
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS radio_metros NUMERIC(8,2) DEFAULT 200;",
+                # 📍 Sede y dentro/fuera de sede calculados con la Sede real (no con el placeholder
+                # SEDES_AUTORIZADAS) en el momento del login, para que el histórico quede fijo
+                # aunque después cambien las coordenadas/radio de una Sede — ver
+                # registrar_geolocalizacion_login().
+                "ALTER TABLE login_geolocalizacion ADD COLUMN IF NOT EXISTS sede VARCHAR(150);",
+                "ALTER TABLE login_geolocalizacion ADD COLUMN IF NOT EXISTS dentro_de_sede BOOLEAN;",
+                # 📍 Igual que arriba pero al crear la cuenta: si el formulario mandó la ubicación
+                # detectada, ¿esa coordenada cayó dentro del radio de la Sede que quedó asignada?
+                # NULL si no había ubicación o la Sede asignada no tiene coordenadas cargadas.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede_dentro_de_radio BOOLEAN;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1503,7 +1517,11 @@ def init_db():
             for col_sede_sql in [
                 "ALTER TABLE ticket_configuraciones ADD COLUMN latitud REAL;",
                 "ALTER TABLE ticket_configuraciones ADD COLUMN longitud REAL;",
-                "ALTER TABLE usuarios ADD COLUMN sede TEXT;"
+                "ALTER TABLE usuarios ADD COLUMN sede TEXT;",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN radio_metros REAL DEFAULT 200;",
+                "ALTER TABLE login_geolocalizacion ADD COLUMN sede TEXT;",
+                "ALTER TABLE login_geolocalizacion ADD COLUMN dentro_de_sede INTEGER;",
+                "ALTER TABLE usuarios ADD COLUMN sede_dentro_de_radio INTEGER;"
             ]:
                 try:
                     cursor.execute(col_sede_sql)
@@ -1946,12 +1964,23 @@ def registrar_geolocalizacion_login(usuario, ip, latitud, longitud):
         lng = float(longitud) if longitud not in (None, '') else None
     except (TypeError, ValueError):
         lat = lng = None
+    # 🧭 Sede real (catálogo de /tickets/configuracion, con radio_metros) más cercana a la
+    # coordenada del login, y si cayó dentro de su radio — pedido de Tomás, 12/09/2026: se
+    # calcula y se guarda una sola vez aquí, al registrar el acceso, para que el histórico no
+    # cambie después si alguien edita las coordenadas/radio de una Sede.
+    sede_asignada = dentro_de_sede = None
+    if lat is not None and lng is not None:
+        sede_cercana, distancia = _sede_real_mas_cercana(lat, lng)
+        if sede_cercana:
+            sede_asignada = sede_cercana['nombre']
+            dentro_de_sede = distancia <= sede_cercana['radio_metros']
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
         fecha_actual = obtener_fecha_actual()
-        query = "INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha) VALUES (?, ?, ?, ?, ?)"
-        cursor.execute(query, (usuario, ip, lat, lng, fecha_actual))
+        query = ("INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha, sede, dentro_de_sede) VALUES (%s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha, sede, dentro_de_sede) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        cursor.execute(query, (usuario, ip, lat, lng, fecha_actual, sede_asignada, dentro_de_sede))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -4139,23 +4168,25 @@ def _revisar_alertas_sla():
 
 def _config_ticket_lista(tipo_config):
     """Devuelve [{'id', 'nombre', 'direccion', 'responsable', 'nit', 'razon_social', 'latitud',
-    'longitud'}] de las Áreas, Sedes, Categorías o Proveedores activos configurados por el
-    equipo de soporte en /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria' |
-    'proveedor'). 'direccion'/'responsable' solo tienen contenido real para tipo_config ==
-    'sede' (y 'responsable' también para 'area'/'categoria'); 'nit'/'razon_social' solo para
-    tipo_config == 'proveedor'; 'latitud'/'longitud' solo para 'sede' (ver
-    _sede_mas_cercana en templates/usuarios.html). Para el resto de combinaciones quedan en
-    None. Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
-    romper la página que la llama."""
+    'longitud', 'radio_metros'}] de las Áreas, Sedes, Categorías o Proveedores activos
+    configurados por el equipo de soporte en /tickets/configuracion (tipo_config: 'area' |
+    'sede' | 'categoria' | 'proveedor'). 'direccion'/'responsable' solo tienen contenido real
+    para tipo_config == 'sede' (y 'responsable' también para 'area'/'categoria');
+    'nit'/'razon_social' solo para tipo_config == 'proveedor'; 'latitud'/'longitud'/
+    'radio_metros' solo para 'sede' (ver _sede_mas_cercana en templates/usuarios.html y
+    _sede_real_mas_cercana() para el cálculo de dentro/fuera de sede). Para el resto de
+    combinaciones quedan en None. Si la tabla no existe todavía o falla la consulta, devuelve
+    una lista vacía en vez de romper la página que la llama."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        q = "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud, radio_metros FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud, radio_metros FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
         cursor.execute(q, (tipo_config,))
         filas = [{
             'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3], 'nit': r[4],
             'razon_social': r[5], 'latitud': float(r[6]) if r[6] is not None else None,
             'longitud': float(r[7]) if r[7] is not None else None,
+            'radio_metros': float(r[8]) if r[8] is not None else 200.0,
         } for r in cursor.fetchall()]
         conn.close()
         return filas
@@ -7959,6 +7990,19 @@ def _coordenada_valida(valor):
         return None
 
 
+def _radio_metros_valido(valor):
+    """Igual que _coordenada_valida pero para 'radio_metros': un valor vacío, no numérico o
+    menor o igual a cero cae al default de 200m (nunca deja la Sede sin radio de tolerancia)."""
+    valor = (valor or '').strip()
+    if not valor:
+        return 200
+    try:
+        numero = float(valor)
+        return numero if numero > 0 else 200
+    except ValueError:
+        return 200
+
+
 # ⚙️ CONFIGURACIÓN DE ÁREAS, SEDES Y CATEGORÍAS (solo equipo de soporte). Estos valores
 # alimentan los desplegables al crear una solicitud y los filtros de la lista de tickets.
 @app.route('/tickets/configuracion')
@@ -7998,6 +8042,7 @@ def crear_configuracion_ticket():
     # 📍 Latitud/longitud solo aplican a Sedes (ver _sede_mas_cercana en usuarios.html).
     latitud = _coordenada_valida(request.form.get('latitud')) if tipo == 'sede' else None
     longitud = _coordenada_valida(request.form.get('longitud')) if tipo == 'sede' else None
+    radio_metros = _radio_metros_valido(request.form.get('radio_metros')) if tipo == 'sede' else None
     if tipo not in ('sede', 'area'):
         direccion = None
     if tipo not in ('sede', 'area', 'categoria'):
@@ -8009,8 +8054,9 @@ def crear_configuracion_ticket():
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            cursor.execute(q, (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud))
+            q = ("INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud, radio_metros) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud, radio_metros) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q, (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud, radio_metros))
             conn.commit()
             detalle = f"Se agregó {tipo} '{nombre}'"
             if tipo in ('sede', 'area') and (direccion or responsable):
@@ -8047,8 +8093,10 @@ def editar_configuracion_ticket(config_id):
                 if tipo_actual == 'sede':
                     latitud = _coordenada_valida(request.form.get('latitud'))
                     longitud = _coordenada_valida(request.form.get('longitud'))
-                    q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s, latitud = %s, longitud = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ?, latitud = ?, longitud = ? WHERE id = ?"
-                    cursor.execute(q, (nombre, direccion, responsable, latitud, longitud, config_id))
+                    radio_metros = _radio_metros_valido(request.form.get('radio_metros'))
+                    q = ("UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s, latitud = %s, longitud = %s, radio_metros = %s WHERE id = %s" if db_type == 'postgres' else
+                         "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ?, latitud = ?, longitud = ?, radio_metros = ? WHERE id = ?")
+                    cursor.execute(q, (nombre, direccion, responsable, latitud, longitud, radio_metros, config_id))
                 else:
                     q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
                     cursor.execute(q, (nombre, direccion, responsable, config_id))
@@ -14040,6 +14088,22 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     # sola en el formulario según la sede más cercana a la ubicación detectada, ver
     # _sede_mas_cercana en usuarios.html, pero sigue siendo un campo editable/opcional).
     nueva_sede = (datos.get('sede') or '').strip() or None
+    # 🧭 Dentro/fuera de sede (Haversine, pedido de Tomás 12/09/2026): si el formulario mandó la
+    # ubicación detectada por el navegador (ver hidden inputs de _preseleccionarSedeMasCercana
+    # en usuarios.html), se compara contra el radio_metros de la Sede que quedó asignada arriba
+    # — sea la que se preseleccionó sola o la que el admin haya elegido a mano. Queda en None
+    # si no hubo ubicación o esa Sede todavía no tiene coordenadas cargadas.
+    sede_dentro_de_radio = None
+    if nueva_sede and datos.get('latitud_detectada') and datos.get('longitud_detectada'):
+        try:
+            lat_detectada = float(datos['latitud_detectada'])
+            lng_detectada = float(datos['longitud_detectada'])
+            sede_elegida = next((s for s in _config_ticket_lista('sede') if s['nombre'] == nueva_sede and s['latitud'] is not None), None)
+            if sede_elegida:
+                distancia = _distancia_metros(lat_detectada, lng_detectada, sede_elegida['latitud'], sede_elegida['longitud'])
+                sede_dentro_de_radio = distancia <= sede_elegida['radio_metros']
+        except (TypeError, ValueError):
+            pass
     nuevo_rol = datos.get('rol') or 'estandar'
     if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
         nuevo_rol = 'estandar'
@@ -14072,8 +14136,9 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
         nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
         nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
         nuevo_hash = generate_password_hash(nuevo_pass)
-        q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, 1, ?)"
-        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, firma_url))
+        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else
+                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?)")
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url))
         conn.commit()
         registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
 
@@ -14154,7 +14219,8 @@ def gestion_usuarios():
             'sede': (request.form.get('sede') or '').strip() or None,
         }
         error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
-            {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl')},
+            {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl'),
+             'latitud_detectada': request.form.get('latitud_detectada'), 'longitud_detectada': request.form.get('longitud_detectada')},
             session['username'], conn, cursor, db_type
         )
         if not error:
@@ -15471,6 +15537,20 @@ def _sede_que_contiene(lat, lng):
         if _distancia_metros(lat, lng, sede['lat'], sede['lng']) <= sede['radio_metros']:
             return sede
     return None
+
+
+def _sede_real_mas_cercana(lat, lng):
+    """Sede más cercana del catálogo REAL de /tickets/configuracion (a diferencia de
+    SEDES_AUTORIZADAS, de arriba, que sigue siendo un placeholder) a una coordenada dada, junto
+    con la distancia en metros — o (None, None) si ninguna Sede tiene aún latitud/longitud
+    cargadas. Usada por registrar_geolocalizacion_login() y _crear_usuario_interno() para
+    asignar la Sede y marcar "dentro"/"fuera de sede" (Haversine, radio_metros por Sede,
+    pedido de Tomás, 12/09/2026)."""
+    con_coordenadas = [s for s in _config_ticket_lista('sede') if s['latitud'] is not None and s['longitud'] is not None]
+    if not con_coordenadas:
+        return None, None
+    mas_cercana = min(con_coordenadas, key=lambda s: _distancia_metros(lat, lng, s['latitud'], s['longitud']))
+    return mas_cercana, _distancia_metros(lat, lng, mas_cercana['latitud'], mas_cercana['longitud'])
 
 
 def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
