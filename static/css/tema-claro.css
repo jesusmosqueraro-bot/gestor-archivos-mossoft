@@ -135,14 +135,23 @@ html[data-theme="claro"] body { background-color: #eef1f6 !important; }
    completo por uno claro con el mismo acento de marca (cian/naranja) pero muy tenue.
    Con el fondo ya claro, el texto de adentro (text-white, text-slate-300, etc.) se
    oscurece solo, con las mismas reglas genéricas de arriba — no hace falta nada
-   especial para él. */
+   especial para él.
+
+   🎨 ACTUALIZACIÓN (pedido por Tomás, 12/09/2026: paleta oficial en todos los módulos):
+   los tonos "cian"/"naranja" de estos degradados ya no son el cian-50/naranja-50 genéricos
+   de Tailwind, sino una mezcla de 95% blanco + 5% del color de marca real (--marca-cian
+   #0ca3c5 para el Comunicado Oficial, --marca-azul-primario #1654a5 para su otro extremo;
+   --marca-naranja #ee7128 para la Mesa de Ayuda) — un poco más tenue que el 90% usado en
+   los fondos de .card-acento-X porque aquí cubre un área mucho más grande. El borde usa
+   el mismo tono (76% blanco + 24% color de marca) ya calculado para .card-acento-cyan/
+   .card-acento-orange más abajo, así el borde combina exactamente con esas tarjetas. */
 html[data-theme="claro"] .banner-comunicado-oficial {
-    background-image: linear-gradient(to right, #ecfeff, #f8fafc, #eff6ff) !important;
-    border-color: #a5f3fc !important;
+    background-image: linear-gradient(to right, #f3fafc, #f8fafc, #f3f6fb) !important;
+    border-color: #c5e9f1 !important;
 }
 html[data-theme="claro"] .banner-mesa-ayuda {
-    background-image: linear-gradient(to bottom right, #fff7ed, #f8fafc, #f8fafc) !important;
-    border-color: #fed7aa !important;
+    background-image: linear-gradient(to bottom right, #fef8f4, #f8fafc, #f8fafc) !important;
+    border-color: #fbddcb !important;
 }
 
 /* Tarjetas del panel principal (bienvenida): en tema oscuro todas comparten el mismo
@@ -151,19 +160,79 @@ html[data-theme="claro"] .banner-mesa-ayuda {
    sólido a juego con su acento (en vez del gris genérico de .bg-slate-900\/80) y un
    borde un poco más marcado del mismo tono. Van al final del archivo a propósito:
    deben ganar por orden de cascada sobre las reglas genéricas de arriba, ya que
-   comparten el mismo nivel de especificidad. */
-html[data-theme="claro"] .card-acento-cyan     { background-color: #cffafe !important; border-color: #a5f3fc !important; }
-html[data-theme="claro"] .card-acento-blue     { background-color: #dbeafe !important; border-color: #bfdbfe !important; }
-html[data-theme="claro"] .card-acento-orange   { background-color: #ffedd5 !important; border-color: #fed7aa !important; }
-html[data-theme="claro"] .card-acento-emerald  { background-color: #d1fae5 !important; border-color: #a7f3d0 !important; }
-html[data-theme="claro"] .card-acento-fuchsia  { background-color: #fae8ff !important; border-color: #f5d0fe !important; }
-html[data-theme="claro"] .card-acento-purple   { background-color: #f3e8ff !important; border-color: #e9d5ff !important; }
-html[data-theme="claro"] .card-acento-rose     { background-color: #ffe4e6 !important; border-color: #fecdd3 !important; }
-html[data-theme="claro"] .card-acento-amber    { background-color: #fef3c7 !important; border-color: #fde68a !important; }
-html[data-theme="claro"] .card-acento-sky      { background-color: #e0f2fe !important; border-color: #bae6fd !important; }
-html[data-theme="claro"] .card-acento-indigo   { background-color: #e0e7ff !important; border-color: #c7d2fe !important; }
-html[data-theme="claro"] .card-acento-teal     { background-color: #ccfbf1 !important; border-color: #99f6e4 !important; }
-html[data-theme="claro"] .card-acento-violet   { background-color: #ede9fe !important; border-color: #ddd6fe !important; }
+   comparten el mismo nivel de especificidad.
+
+   🎨 ACTUALIZACIÓN (pedido por Tomás, 12/09/2026: "aplicar los colores de la paleta de
+   colores" en los temas Claro y Descanso, para todos los módulos/formularios): los 12
+   nombres de acento (cyan/blue/orange/emerald/fuchsia/purple/rose/amber/sky/indigo/teal/
+   violet) se conservan tal cual en el HTML de cada plantilla — no hubo que tocar ningún
+   archivo de templates/ — pero AHORA cada uno se pinta con un pastel derivado de uno de
+   los 7 colores oficiales del manual de marca (--marca-azul-primario/-secundario/-cian/
+   -naranja/-gris/-azul-oscuro/-morado, ver marca-institucional.css), no de la escala de
+   color genérica de Tailwind. Como la paleta oficial no tiene verde/rosado/índigo
+   propios, se agruparon por cercanía de tono:
+     cyan, sky        → cian (#0ca3c5)
+     blue             → azul primario (#1654a5)
+     indigo           → azul secundario (#145299)
+     orange, amber    → naranja (#ee7128)
+     emerald          → gris neutro (#a09f9e) — no hay verde en la paleta
+     teal             → azul oscuro/petróleo (#2d5461)
+     fuchsia, purple,
+     rose, violet     → morado (#7b4c9e)
+   Fórmula (ver /tmp del cálculo, no versionada): fondo = mezcla 90% blanco + 10% color
+   de marca; borde = 76% blanco + 24% color de marca — igual peso para los 7 colores, así
+   el resultado es parejo entre sí (a diferencia de la escala -100/-200 de Tailwind, que
+   varía de tono en tono).
+
+   ⚠️ Nota técnica: fondo y borde van en DOS reglas separadas (una línea cada una) en vez
+   de compartir una sola declaración, porque scripts/generar_tema_descanso.py clasifica
+   qué tono sepia aplicar mirando la línea completa — una línea con "background-color:"
+   y "border-color:" juntos se clasificaba entera como "fondo", así que el borde salía
+   con el blend de fondo (más crema) en vez del de borde (más tostado, correcto). Con
+   cada propiedad en su propia línea, el color de tema-descanso.css sale correcto para
+   ambas. */
+html[data-theme="claro"] .card-acento-cyan { background-color: #e7f6f9 !important; }
+html[data-theme="claro"] .card-acento-cyan { border-color: #c5e9f1 !important; }
+html[data-theme="claro"] .card-acento-blue { background-color: #e8eef6 !important; }
+html[data-theme="claro"] .card-acento-blue { border-color: #c7d6e9 !important; }
+html[data-theme="claro"] .card-acento-orange { background-color: #fdf1ea !important; }
+html[data-theme="claro"] .card-acento-orange { border-color: #fbddcb !important; }
+html[data-theme="claro"] .card-acento-emerald { background-color: #f6f5f5 !important; }
+html[data-theme="claro"] .card-acento-emerald { border-color: #e8e8e8 !important; }
+html[data-theme="claro"] .card-acento-fuchsia { background-color: #f2edf5 !important; }
+html[data-theme="claro"] .card-acento-fuchsia { border-color: #dfd4e8 !important; }
+html[data-theme="claro"] .card-acento-purple { background-color: #f2edf5 !important; }
+html[data-theme="claro"] .card-acento-purple { border-color: #dfd4e8 !important; }
+html[data-theme="claro"] .card-acento-rose { background-color: #f2edf5 !important; }
+html[data-theme="claro"] .card-acento-rose { border-color: #dfd4e8 !important; }
+html[data-theme="claro"] .card-acento-amber { background-color: #fdf1ea !important; }
+html[data-theme="claro"] .card-acento-amber { border-color: #fbddcb !important; }
+html[data-theme="claro"] .card-acento-sky { background-color: #e7f6f9 !important; }
+html[data-theme="claro"] .card-acento-sky { border-color: #c5e9f1 !important; }
+html[data-theme="claro"] .card-acento-indigo { background-color: #e8eef5 !important; }
+html[data-theme="claro"] .card-acento-indigo { border-color: #c7d5e7 !important; }
+html[data-theme="claro"] .card-acento-teal { background-color: #eaeeef !important; }
+html[data-theme="claro"] .card-acento-teal { border-color: #cdd6d9 !important; }
+html[data-theme="claro"] .card-acento-violet { background-color: #f2edf5 !important; }
+html[data-theme="claro"] .card-acento-violet { border-color: #dfd4e8 !important; }
+
+/* 🔲 Bordes al pasar el mouse sobre cada tarjeta de bienvenida.html (hover:border-{color}-500/50
+   en el HTML, un tono ya bastante saturado de Tailwind): sin esta regla se quedaban con el color
+   crudo de Tailwind, que no es ninguno de los 7 oficiales. Mismo agrupamiento de arriba, con un
+   tono intermedio (65% color de marca) para que se note el hover sin ser tan intenso como el
+   color base de marca. */
+html[data-theme="claro"] .hover\:border-cyan-500\/50:hover    { border-color: #61c3d9 !important; }
+html[data-theme="claro"] .hover\:border-sky-500\/50:hover     { border-color: #61c3d9 !important; }
+html[data-theme="claro"] .hover\:border-blue-500\/50:hover    { border-color: #6890c4 !important; }
+html[data-theme="claro"] .hover\:border-indigo-500\/50:hover  { border-color: #668fbd !important; }
+html[data-theme="claro"] .hover\:border-orange-500\/50:hover  { border-color: #f4a373 !important; }
+html[data-theme="claro"] .hover\:border-amber-500\/50:hover   { border-color: #f4a373 !important; }
+html[data-theme="claro"] .hover\:border-emerald-500\/50:hover { border-color: #c1c1c0 !important; }
+html[data-theme="claro"] .hover\:border-teal-500\/50:hover    { border-color: #769098 !important; }
+html[data-theme="claro"] .hover\:border-fuchsia-500\/50:hover { border-color: #a98bc0 !important; }
+html[data-theme="claro"] .hover\:border-purple-500\/50:hover  { border-color: #a98bc0 !important; }
+html[data-theme="claro"] .hover\:border-rose-500\/50:hover    { border-color: #a98bc0 !important; }
+html[data-theme="claro"] .hover\:border-violet-500\/50:hover  { border-color: #a98bc0 !important; }
 
 /* Tarjetas/paneles del RESTO de páginas (Soporte TI, Bóveda de Accesos, Usuarios,
    Auditoría, Papelera, Respaldos, etc.): en tema oscuro todos los paneles comparten
@@ -174,88 +243,95 @@ html[data-theme="claro"] .card-acento-violet   { background-color: #ede9fe !impo
    en su propio encabezado) y sus paneles genéricos pasan a un pastel sólido de ese
    mismo color, en vez del gris genérico. Se dejan fuera a propósito: la barra de
    navegación (bg-slate-800/80, bg-slate-900/60) y el botón flotante de tema
-   (bg-slate-800/90) — esos deben seguir neutros en todas las páginas. */
+   (bg-slate-800/90) — esos deben seguir neutros en todas las páginas.
+
+   🎨 ACTUALIZACIÓN (pedido por Tomás, 12/09/2026: paleta oficial en todos los módulos):
+   mismo cambio y mismo mapeo de los 12 nombres de acento → 7 colores de marca que ya se
+   documentó arriba en el bloque .card-acento-X (líneas ~156-176) — los valores de fondo/
+   borde de cada .pagina-acento-{color} de aquí abajo son idénticos a su .card-acento-
+   {color} correspondiente, para que una misma página se vea consistente sin importar si
+   el color viene de una tarjeta de bienvenida o del panel genérico de su propio módulo. */
 html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-cyan .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-cyan .bg-slate-900\/80    { background-color: #cffafe !important; }
+html[data-theme="claro"] .pagina-acento-cyan .bg-slate-900\/80    { background-color: #e7f6f9 !important; }
 html[data-theme="claro"] .pagina-acento-cyan .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-cyan .border-slate-800    { border-color: #a5f3fc !important; }
+html[data-theme="claro"] .pagina-acento-cyan .border-slate-800    { border-color: #c5e9f1 !important; }
 
 html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-blue .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-blue .bg-slate-900\/80    { background-color: #dbeafe !important; }
+html[data-theme="claro"] .pagina-acento-blue .bg-slate-900\/80    { background-color: #e8eef6 !important; }
 html[data-theme="claro"] .pagina-acento-blue .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-blue .border-slate-800    { border-color: #bfdbfe !important; }
+html[data-theme="claro"] .pagina-acento-blue .border-slate-800    { border-color: #c7d6e9 !important; }
 
 html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-orange .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-orange .bg-slate-900\/80  { background-color: #ffedd5 !important; }
+html[data-theme="claro"] .pagina-acento-orange .bg-slate-900\/80  { background-color: #fdf1ea !important; }
 html[data-theme="claro"] .pagina-acento-orange .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-orange .border-slate-800  { border-color: #fed7aa !important; }
+html[data-theme="claro"] .pagina-acento-orange .border-slate-800  { border-color: #fbddcb !important; }
 
 html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-emerald .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-emerald .bg-slate-900\/80 { background-color: #d1fae5 !important; }
+html[data-theme="claro"] .pagina-acento-emerald .bg-slate-900\/80 { background-color: #f6f5f5 !important; }
 html[data-theme="claro"] .pagina-acento-emerald .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-emerald .border-slate-800 { border-color: #a7f3d0 !important; }
+html[data-theme="claro"] .pagina-acento-emerald .border-slate-800 { border-color: #e8e8e8 !important; }
 
 html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-900\/80 { background-color: #fae8ff !important; }
+html[data-theme="claro"] .pagina-acento-fuchsia .bg-slate-900\/80 { background-color: #f2edf5 !important; }
 html[data-theme="claro"] .pagina-acento-fuchsia .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-fuchsia .border-slate-800 { border-color: #f5d0fe !important; }
+html[data-theme="claro"] .pagina-acento-fuchsia .border-slate-800 { border-color: #dfd4e8 !important; }
 
 html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-purple .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-purple .bg-slate-900\/80  { background-color: #f3e8ff !important; }
+html[data-theme="claro"] .pagina-acento-purple .bg-slate-900\/80  { background-color: #f2edf5 !important; }
 html[data-theme="claro"] .pagina-acento-purple .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-purple .border-slate-800  { border-color: #e9d5ff !important; }
+html[data-theme="claro"] .pagina-acento-purple .border-slate-800  { border-color: #dfd4e8 !important; }
 
 html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-rose .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-rose .bg-slate-900\/80    { background-color: #ffe4e6 !important; }
+html[data-theme="claro"] .pagina-acento-rose .bg-slate-900\/80    { background-color: #f2edf5 !important; }
 html[data-theme="claro"] .pagina-acento-rose .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-rose .border-slate-800    { border-color: #fecdd3 !important; }
+html[data-theme="claro"] .pagina-acento-rose .border-slate-800    { border-color: #dfd4e8 !important; }
 
 html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-sky .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-sky .bg-slate-900\/80     { background-color: #e0f2fe !important; }
+html[data-theme="claro"] .pagina-acento-sky .bg-slate-900\/80     { background-color: #e7f6f9 !important; }
 html[data-theme="claro"] .pagina-acento-sky .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-sky .border-slate-800     { border-color: #bae6fd !important; }
+html[data-theme="claro"] .pagina-acento-sky .border-slate-800     { border-color: #c5e9f1 !important; }
 
 html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-indigo .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-indigo .bg-slate-900\/80  { background-color: #e0e7ff !important; }
+html[data-theme="claro"] .pagina-acento-indigo .bg-slate-900\/80  { background-color: #e8eef5 !important; }
 html[data-theme="claro"] .pagina-acento-indigo .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-indigo .border-slate-800  { border-color: #c7d2fe !important; }
+html[data-theme="claro"] .pagina-acento-indigo .border-slate-800  { border-color: #c7d5e7 !important; }
 
 html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-violet .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-violet .bg-slate-900\/80  { background-color: #ede9fe !important; }
+html[data-theme="claro"] .pagina-acento-violet .bg-slate-900\/80  { background-color: #f2edf5 !important; }
 html[data-theme="claro"] .pagina-acento-violet .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-violet .border-slate-800  { border-color: #ddd6fe !important; }
+html[data-theme="claro"] .pagina-acento-violet .border-slate-800  { border-color: #dfd4e8 !important; }
 
 html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-amber .bg-slate-800\/30,
-html[data-theme="claro"] .pagina-acento-amber .bg-slate-900\/80   { background-color: #fef3c7 !important; }
+html[data-theme="claro"] .pagina-acento-amber .bg-slate-900\/80   { background-color: #fdf1ea !important; }
 html[data-theme="claro"] .pagina-acento-amber .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-amber .border-slate-800   { border-color: #fde68a !important; }
+html[data-theme="claro"] .pagina-acento-amber .border-slate-800   { border-color: #fbddcb !important; }
 
 html[data-theme="claro"] .pagina-acento-teal .bg-slate-800\/60,
 html[data-theme="claro"] .pagina-acento-teal .bg-slate-800\/40,
 html[data-theme="claro"] .pagina-acento-teal .bg-slate-800\/30,
 html[data-theme="claro"] .pagina-acento-teal .bg-slate-900\/80,
-html[data-theme="claro"] .pagina-acento-teal .bg-slate-900\/60    { background-color: #ccfbf1 !important; }
+html[data-theme="claro"] .pagina-acento-teal .bg-slate-900\/60    { background-color: #eaeeef !important; }
 html[data-theme="claro"] .pagina-acento-teal .border-slate-700\/60,
-html[data-theme="claro"] .pagina-acento-teal .border-slate-800    { border-color: #99f6e4 !important; }
+html[data-theme="claro"] .pagina-acento-teal .border-slate-800    { border-color: #cdd6d9 !important; }
