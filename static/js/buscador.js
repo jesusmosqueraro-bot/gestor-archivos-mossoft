@@ -3,10 +3,11 @@
 // no disparar una petición por cada tecla) y pinta los resultados agrupados por módulo. El
 // backend ya filtra qué módulos puede ver cada rol — este archivo solo pinta lo que reciba.
 // Categorías cubiertas hoy: Solicitudes TI, Comunicados, Base de Conocimiento, Gestor de
-// Archivos, Bóveda de Accesos, Accesos de Colaboradores, Inventario de Activos, Proveedores,
-// Áreas, Sedes, Categorías de Solicitudes, Mis Tareas, Actas de Recibido Biomédico, Plantillas
-// de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones, Usuarios y Chat
-// Interno (Canal General + los mensajes directos propios).
+// Archivos, Bóveda de Accesos, Mi Bóveda Personal, Accesos de Colaboradores, Inventario de
+// Activos, Proveedores, Áreas, Sedes, Categorías de Solicitudes, Mis Tareas, Actas de Recibido
+// Biomédico, Plantillas de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones,
+// Usuarios, Geolocalización de Accesos y Chat Interno (Canal General + los mensajes directos
+// propios).
 
 var _buscadorGlobalTimeout = null;
 var _buscadorGlobalUltimaConsulta = '';
@@ -42,6 +43,7 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Base de Conocimiento': 'fa-book',
     'Gestor de Archivos': 'fa-folder-open',
     'Bóveda de Accesos': 'fa-key',
+    'Mi Bóveda Personal': 'fa-lock',
     'Accesos de Colaboradores': 'fa-user-shield',
     'Inventario de Activos': 'fa-boxes-stacked',
     'Proveedores': 'fa-truck-field',
@@ -54,6 +56,7 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Vencimiento de Documentos': 'fa-calendar-days',
     'Certificación de Devoluciones': 'fa-rotate-left',
     'Usuarios': 'fa-users',
+    'Geolocalización de Accesos': 'fa-map-location-dot',
     'Chat Interno': 'fa-comment-dots'
 };
 
