@@ -1,0 +1,30 @@
+{# 🎨 Colores personalizados de los modales (pedido por Tomás, 12/09/2026: "un modal de diseño
+   para poder modificar a gusto los colores de los modales"). 'colores_modal' llega a CUALQUIER
+   plantilla automáticamente vía el context_processor _inyectar_colores_modal en app.py — no hace
+   falta pasarlo explícitamente en cada render_template(). Este include debe ir SIEMPRE justo
+   después del <link> a marca-institucional.css en el <head> de cada plantilla: como es un
+   <style> inline, carga después de esa hoja y gana por orden de cascada (misma especificidad),
+   redefiniendo las mismas variables --marca-*/--modal-* que esa hoja ya declaró en :root con sus
+   valores de fábrica. Ver /admin/diseno (ver_diseno_modales) para la pantalla donde un
+   super-admin cambia estos valores, y scripts/aplicar_colores_modal_templates.py, que fue el que
+   agregó este include a todas las plantillas. #}
+<style>
+:root {
+    --marca-azul-primario: {{ colores_modal.acentos.azul_primario }};
+    --marca-azul-secundario: {{ colores_modal.acentos.azul_secundario }};
+    --marca-cian: {{ colores_modal.acentos.cian }};
+    --marca-naranja: {{ colores_modal.acentos.naranja }};
+    --modal-oscuro-fondo: {{ colores_modal.oscuro.fondo }};
+    --modal-oscuro-borde: {{ colores_modal.oscuro.borde }};
+    --modal-oscuro-texto: {{ colores_modal.oscuro.texto }};
+    --modal-oscuro-texto-secundario: {{ colores_modal.oscuro.texto_secundario }};
+    --modal-claro-fondo: {{ colores_modal.claro.fondo }};
+    --modal-claro-borde: {{ colores_modal.claro.borde }};
+    --modal-claro-texto: {{ colores_modal.claro.texto }};
+    --modal-claro-texto-secundario: {{ colores_modal.claro.texto_secundario }};
+    --modal-descanso-fondo: {{ colores_modal.descanso.fondo }};
+    --modal-descanso-borde: {{ colores_modal.descanso.borde }};
+    --modal-descanso-texto: {{ colores_modal.descanso.texto }};
+    --modal-descanso-texto-secundario: {{ colores_modal.descanso.texto_secundario }};
+}
+</style>
