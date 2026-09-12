@@ -230,6 +230,20 @@ else:
         return dict(csrf_token=lambda: '')
 
 
+# 🎨 Colores personalizados de los modales (ver _colores_modal_actuales/CLAVE_COLORES_MODAL más
+# abajo, junto a configuracion_app): un context_processor los deja disponibles como la variable
+# 'colores_modal' en CUALQUIER plantilla renderizada con render_template, sin tener que agregar
+# el parámetro a cada una de las ~50 llamadas que ya existen en este archivo — partials/
+# colores_modal_personalizados.html (incluido al final del <head> de cada plantilla, después de
+# marca-institucional.css) es lo único que lo consume, inyectando un <style> con los valores
+# como variables CSS. Definido aquí arriba, antes de que _colores_modal_actuales exista todavía
+# (se define más abajo junto a configuracion_app) — Python resuelve el nombre recién cuando la
+# función de abajo SE LLAMA (en cada request), no cuando se define, así que el orden no importa.
+@app.context_processor
+def _inyectar_colores_modal():
+    return dict(colores_modal=_colores_modal_actuales())
+
+
 # 🖼️ Red de seguridad para el 413 "Request Entity Too Large": la causa real que reportó Tomás
 # (07/09/2026) era pegar una imagen directamente en el editor de texto enriquecido de un
 # comentario de ticket — ya bloqueado en el propio editor (ver editor-enriquecido.js). Este
@@ -2736,6 +2750,80 @@ def _guardar_config_app(clave, valor):
         return False
 
 
+# 🎨 "Modal de diseño" (pedido por Tomás, 12/09/2026: "que crees un modal de diseño para poder
+# modificar a gusto los colores de los modales cuando se requieran") — reutiliza el mismo
+# mecanismo de configuracion_app de arriba (clave/valor en BD) en vez de crear una tabla nueva,
+# guardando bajo UNA sola clave un JSON con todos los colores personalizables. Los valores por
+# defecto de abajo son EXACTAMENTE los colores que los modales ya tenían antes de este feature
+# (ver marca-institucional.css) — mientras nadie los cambie desde /admin/diseno, la app se ve
+# idéntica a como se veía antes.
+CLAVE_COLORES_MODAL = 'colores_modal_personalizados'
+
+COLORES_MODAL_POR_DEFECTO = {
+    'acentos': {
+        'azul_primario': '#1654a5',
+        'azul_secundario': '#145299',
+        'cian': '#0ca3c5',
+        'naranja': '#ee7128',
+    },
+    'oscuro': {
+        'fondo': '#0f172a',
+        'borde': '#1e293b',
+        'texto': '#ffffff',
+        'texto_secundario': '#94a3b8',
+    },
+    'claro': {
+        'fondo': '#ffffff',
+        'borde': '#e2e8f0',
+        'texto': '#1e293b',
+        'texto_secundario': '#64748b',
+    },
+    'descanso': {
+        'fondo': '#e8e2d5',
+        'borde': '#ded9c9',
+        'texto': '#3a322e',
+        'texto_secundario': '#605b5a',
+    },
+}
+
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _colores_modal_actuales():
+    """Colores vigentes de los modales: los de COLORES_MODAL_POR_DEFECTO, con cualquier
+    personalización guardada en configuracion_app superpuesta encima. Si el JSON guardado está
+    corrupto o incompleto, cada grupo/clave que falte cae de vuelta al valor por defecto — nunca
+    tumba la página que lo usa (ver _config_app_valor, que ya protege contra fallas de BD)."""
+    resultado = {grupo: dict(valores) for grupo, valores in COLORES_MODAL_POR_DEFECTO.items()}
+    guardado = _config_app_valor(CLAVE_COLORES_MODAL)
+    if guardado:
+        try:
+            personalizado = json.loads(guardado)
+            for grupo, valores in personalizado.items():
+                if grupo in resultado and isinstance(valores, dict):
+                    for clave, color in valores.items():
+                        if clave in resultado[grupo] and _HEX_COLOR_RE.match(color or ''):
+                            resultado[grupo][clave] = color
+        except (json.JSONDecodeError, AttributeError, TypeError) as e:
+            print(f"⚠️ colores_modal_personalizados guardado no es JSON válido, se usan los valores por defecto: {e}")
+    return resultado
+
+
+def _guardar_colores_modal(form):
+    """Lee del formulario de /admin/diseno un color por cada campo esperado (incluye SIEMPRE los
+    16 campos, nunca un subconjunto, para que el JSON guardado quede completo) y los valida como
+    '#rrggbb' antes de guardar — cualquier valor inválido o vacío cae al valor por defecto de ese
+    campo en vez de dejar basura en la BD. Devuelve el dict final guardado."""
+    resultado = {}
+    for grupo, valores in COLORES_MODAL_POR_DEFECTO.items():
+        resultado[grupo] = {}
+        for clave, valor_defecto in valores.items():
+            enviado = (form.get(f'{grupo}__{clave}') or '').strip()
+            resultado[grupo][clave] = enviado if _HEX_COLOR_RE.match(enviado) else valor_defecto
+    _guardar_config_app(CLAVE_COLORES_MODAL, json.dumps(resultado))
+    return resultado
+
+
 def _chat_estandar_habilitado():
     """True si un admin habilitó el asistente de Chat (por menú, ver módulo del bot más abajo)
     para las cuentas con rol 'estandar'. Apagado por defecto: hasta que un admin lo prenda a
@@ -3137,6 +3225,39 @@ def _respaldo_diario_automatico():
 
 if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
     threading.Thread(target=_respaldo_diario_automatico, daemon=True).start()
+
+
+@app.route('/admin/diseno')
+@login_required
+@admin_required
+@superadmin_required
+def ver_diseno_modales():
+    """Pantalla de personalización de colores de modales (pedido por Tomás, 12/09/2026) — mismo
+    nivel de acceso que Respaldos/Gestor de BD (@superadmin_required: ni siquiera otros admins
+    la ven), porque cambia la apariencia de TODA la plataforma para TODOS los usuarios."""
+    return render_template('diseno_modales.html', colores=_colores_modal_actuales())
+
+
+@app.route('/admin/diseno/guardar', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def guardar_diseno_modales():
+    _guardar_colores_modal(request.form)
+    registrar_log(session.get('username'), "Diseño de Modales", "Colores de los modales personalizados actualizados")
+    flash("Colores de los modales guardados. Ya se ven así para todas las personas que usan Arkiv.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
+
+
+@app.route('/admin/diseno/restablecer', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def restablecer_diseno_modales():
+    _guardar_config_app(CLAVE_COLORES_MODAL, json.dumps(COLORES_MODAL_POR_DEFECTO))
+    registrar_log(session.get('username'), "Diseño de Modales", "Colores de los modales restablecidos a los valores de fábrica")
+    flash("Colores de los modales restablecidos a los valores originales.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
 
 
 @app.route('/admin/respaldos')
