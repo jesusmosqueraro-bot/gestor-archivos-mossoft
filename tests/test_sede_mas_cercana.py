@@ -40,6 +40,21 @@ def test_crear_sede_guarda_latitud_y_longitud(admin_session, app):
     assert round(fila[2], 6) == -75.581215
 
 
+def test_crear_sede_admite_hasta_8_decimales_en_latitud_y_longitud(admin_session, app):
+    """Google Maps suele copiar coordenadas con 7-8 decimales; antes se guardaban truncadas a 6
+    (NUMERIC(9,6)) y el input HTML las rechazaba de entrada (step=0.000001). Pedido de Tomás,
+    12/09/2026."""
+    admin_session.post('/tickets/configuracion/nuevo', data={
+        'tipo': 'sede', 'nombre': 'Sede Ocho Decimales',
+        'latitud': '6.25065790', 'longitud': '-75.58284550',
+    }, follow_redirects=False)
+
+    fila = _sede_por_nombre(app, 'Sede Ocho Decimales')
+    assert fila is not None
+    assert round(fila[1], 8) == 6.2506579
+    assert round(fila[2], 8) == -75.5828455
+
+
 def test_crear_sede_con_coordenada_invalida_no_revienta_y_queda_sin_coordenadas(admin_session, app):
     r = admin_session.post('/tickets/configuracion/nuevo', data={
         'tipo': 'sede', 'nombre': 'Sede Sin Coordenadas Válidas',
@@ -64,6 +79,19 @@ def test_editar_sede_actualiza_sus_coordenadas(admin_session, app):
     _, lat, lng = _sede_por_nombre(app, 'Sede La Playa')
     assert round(lat, 6) == 6.252341
     assert round(lng, 6) == -75.573920
+
+
+def test_editar_sede_admite_hasta_8_decimales(admin_session, app):
+    admin_session.post('/tickets/configuracion/nuevo', data={'tipo': 'sede', 'nombre': 'Sede Ocho Decimales Editar'})
+    config_id, _, _ = _sede_por_nombre(app, 'Sede Ocho Decimales Editar')
+
+    admin_session.post(f'/tickets/configuracion/{config_id}/editar', data={
+        'nombre': 'Sede Ocho Decimales Editar', 'latitud': '6.25065790', 'longitud': '-75.58284550',
+    }, follow_redirects=False)
+
+    _, lat, lng = _sede_por_nombre(app, 'Sede Ocho Decimales Editar')
+    assert round(lat, 8) == 6.2506579
+    assert round(lng, 8) == -75.5828455
 
 
 def test_crear_area_ignora_latitud_y_longitud(admin_session, app):
