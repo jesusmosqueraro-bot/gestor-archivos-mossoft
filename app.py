@@ -1193,6 +1193,14 @@ def init_db():
                 # /tickets/configuracion → Sedes (no hay forma de adivinarlas).
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS latitud NUMERIC(9,6);",
                 "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS longitud NUMERIC(9,6);",
+                # 🔢 Amplía la precisión a 8 decimales (pedido de Tomás, 12/09/2026: el campo
+                # rechazaba coordenadas de Google Maps con 7-8 decimales porque NUMERIC(9,6) solo
+                # guardaba 6). NUMERIC(11,8) alcanza para longitud (3 dígitos enteros, hasta ±180)
+                # + 8 decimales sin perder precisión. Se re-ejecuta en cada arranque a propósito
+                # (igual que el ALTER COLUMN TYPE de totp_secret más arriba): si ya está en ese
+                # tipo, Postgres lo trata como no-op.
+                "ALTER TABLE ticket_configuraciones ALTER COLUMN latitud TYPE NUMERIC(11,8);",
+                "ALTER TABLE ticket_configuraciones ALTER COLUMN longitud TYPE NUMERIC(11,8);",
                 # 🏢 Sede asignada a la cuenta (mismo catálogo de arriba). Se preselecciona sola en
                 # el alta según la sede más cercana a la ubicación detectada, pero el campo sigue
                 # siendo editable — ver gestion_usuarios()/_crear_usuario_interno().
