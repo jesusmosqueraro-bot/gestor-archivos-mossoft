@@ -1,0 +1,22 @@
+/* =========================================================================
+   MARCA INSTITUCIONAL — Preventiva Salud IPS
+   Variables CSS del manual de marca (pedido por Tomás, 12/09/2026), para que
+   cualquier plantilla que quiera usar los colores/tipografía oficiales lo
+   haga referenciando estas variables (ej. clases Tailwind con valor
+   arbitrario: bg-[var(--marca-azul-primario)]) en vez de repetir códigos hex
+   sueltos por el código.
+
+   Por ahora se usan en /login (ver templates/login.html) y en el selector de
+   color del Muro de Comunicados (ver templates/comunicados.html); no se
+   aplican todavía al resto de la app para mantener este cambio acotado.
+   ========================================================================= */
+:root {
+    --marca-azul-primario: #1654a5;   /* Azul institucional principal */
+    --marca-azul-secundario: #145299; /* Azul de apoyo (degradados, hover) */
+    --marca-cian: #0ca3c5;            /* Cian de "Salud" en el isotipo */
+    --marca-naranja: #ee7128;         /* Naranja acento (check del isotipo) */
+    --marca-gris: #a09f9e;            /* Gris neutro de apoyo */
+    --marca-azul-oscuro: #2d5461;     /* Azul-petróleo oscuro */
+    --marca-morado: #7b4c9e;          /* Morado (variación Odontología) */
+    --marca-fuente: 'Montserrat', sans-serif;
+}
