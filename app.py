@@ -15367,29 +15367,89 @@ SEDES_AUTORIZADAS = [
 ]
 
 
+def _distancia_metros(lat1, lng1, lat2, lng2):
+    """Distancia en línea recta entre dos coordenadas (fórmula de Haversine), en metros. Usada
+    por admin_geolocalizacion() para decidir si un login cayó dentro del radio de una sede."""
+    radio_tierra = 6371000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    delta_p = math.radians(lat2 - lat1)
+    delta_l = math.radians(lng2 - lng1)
+    a = math.sin(delta_p / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(delta_l / 2) ** 2
+    return 2 * radio_tierra * math.asin(math.sqrt(a))
+
+
+def _sede_que_contiene(lat, lng):
+    for sede in SEDES_AUTORIZADAS:
+        if _distancia_metros(lat, lng, sede['lat'], sede['lng']) <= sede['radio_metros']:
+            return sede
+    return None
+
+
 @app.route('/admin/geolocalizacion')
 @login_required
 @admin_required
 def admin_geolocalizacion():
-    """Mapa (Leaflet) de los últimos inicios de sesión con su latitud/longitud, para validar
-    de un vistazo si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS)."""
+    """Mapa (Leaflet) + métricas/gráficas de los inicios de sesión con su latitud/longitud, para
+    validar si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS). Admite filtrar
+    por usuario y por rango de fechas (pedido de Tomás, 12/09/2026: "que se pueda visualizar con
+    métricas y gráficas también, incluye filtros por usuarios")."""
+    f_usuario = request.args.get('usuario', '').strip()
+    f_fecha_inicio = request.args.get('fecha_inicio', '').strip()
+    f_fecha_fin = request.args.get('fecha_fin', '').strip()
+
     conn, db_type = get_db()
     cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT usuario FROM login_geolocalizacion ORDER BY usuario ASC")
+    usuarios_disponibles = [u[0] for u in cursor.fetchall() if u[0]]
+
+    # 🔎 El filtro se aplica en Python (no en el SQL) sobre los últimos 2000 registros: son
+    # pocas filas, y así se reutiliza la misma lógica de "sede que contiene" tanto para las
+    # métricas/gráficas como para el mapa y la tabla de respaldo, sin duplicarla.
     cursor.execute(
         "SELECT usuario, ip, latitud, longitud, fecha FROM login_geolocalizacion "
-        "ORDER BY id DESC LIMIT 500"
+        "ORDER BY id DESC LIMIT 2000"
     )
     filas = cursor.fetchall()
     conn.close()
 
-    registros = [{
-        'usuario': usuario, 'ip': ip or '—',
-        'latitud': float(latitud) if latitud is not None else None,
-        'longitud': float(longitud) if longitud is not None else None,
-        'fecha': fecha,
-    } for usuario, ip, latitud, longitud, fecha in filas]
+    registros = []
+    for usuario, ip, latitud, longitud, fecha in filas:
+        if f_usuario and usuario != f_usuario:
+            continue
+        # obtener_fecha_actual() siempre arranca con 'AAAA-MM-DD', así que comparar el prefijo
+        # de 10 caracteres alcanza para un filtro por rango de fechas sin parsear el texto.
+        fecha_dia = (fecha or '')[:10]
+        if f_fecha_inicio and fecha_dia < f_fecha_inicio:
+            continue
+        if f_fecha_fin and fecha_dia > f_fecha_fin:
+            continue
 
-    return render_template('admin_geolocalizacion.html', registros=registros, sedes=SEDES_AUTORIZADAS)
+        lat = float(latitud) if latitud is not None else None
+        lng = float(longitud) if longitud is not None else None
+        sede = _sede_que_contiene(lat, lng) if (lat is not None and lng is not None) else None
+        registros.append({
+            'usuario': usuario, 'ip': ip or '—', 'latitud': lat, 'longitud': lng, 'fecha': fecha,
+            'sede': sede['nombre'] if sede else None,
+        })
+
+    con_ubicacion = [r for r in registros if r['latitud'] is not None]
+    dentro_de_sede = sum(1 for r in con_ubicacion if r['sede'])
+
+    conteo_por_usuario = {}
+    for r in registros:
+        conteo_por_usuario[r['usuario']] = conteo_por_usuario.get(r['usuario'], 0) + 1
+    top_usuarios = sorted(conteo_por_usuario.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    return render_template(
+        'admin_geolocalizacion.html', registros=registros, sedes=SEDES_AUTORIZADAS,
+        usuarios_disponibles=usuarios_disponibles, f_usuario=f_usuario,
+        f_fecha_inicio=f_fecha_inicio, f_fecha_fin=f_fecha_fin,
+        total_accesos=len(registros), usuarios_unicos=len({r['usuario'] for r in registros}),
+        dentro_de_sede=dentro_de_sede, fuera_de_sede=len(con_ubicacion) - dentro_de_sede,
+        sin_ubicacion=len(registros) - len(con_ubicacion),
+        top_usuarios_labels=[u for u, _ in top_usuarios],
+        top_usuarios_valores=[c for _, c in top_usuarios],
+    )
 
 
 # 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
