@@ -39,33 +39,91 @@ body {
     font-family: var(--marca-fuente);
 }
 
-/* 🪟 Modales institucionales (pedido de Tomás, 12/09/2026: "Aplica en marca-institucional.css
-   estilos para todos los modales"). Todos los modales de Arkiv comparten el mismo wrapper
-   (fixed inset-0 bg-slate-950/80 backdrop-blur-sm ...; confirmado por grep: 39 modales en 14
-   plantillas), así que basta un selector por atributo sobre ese wrapper para llegar a
-   cualquier modal sin editar plantilla por plantilla. La tipografía Montserrat ya les llega
-   por herencia desde la regla 'body' de arriba; aquí solo se ajustan color de divisores/
-   iconos de cabecera (azul/cian institucional) y el botón primario (el que ya sigue la
-   convención bg-cyan-600/bg-blue-600 de Arkiv) a los colores de marca. Los botones
-   secundarios/destructivos (slate, rose, red) no se tocan a propósito. Se usa !important solo
-   en estos selectores, muy acotados al propio modal, porque Tailwind (CDN) inyecta su hoja de
-   estilos en un momento que no podemos garantizar que quede antes en la cascada. */
-div[class*="bg-slate-950/80"] [class*="border-slate-700/60"] {
+/* 🪟 Modales institucionales — homologados al estilo claro de /login (pedido de Tomás,
+   12/09/2026: "Homologa el diseño de todos los modales y tarjetas al estilo del login").
+   Todos los modales de Arkiv (confirmado por grep: 37 modales en 36 plantillas) comparten el
+   mismo wrapper "fixed inset-0" (con distintos tonos/opacidades de velo oscuro semitransparente
+   detrás según la plantilla: bg-slate-950/80, bg-slate-950/90, bg-black/80, bg-black/70 — por
+   eso el selector usa "fixed inset-0", no un color puntual, para llegar a los 4 casos con un
+   único selector). Ese velo se DEJA tal cual a propósito: solo oscurece la página detrás, no es
+   el modal en sí — el mismo recurso visual que ya usan la mayoría de apps claras. Lo que cambia
+   es el panel/tarjeta de adentro: pasa de bg-slate-800/900 (oscuro) a blanco, con bordes
+   suaves, esquinas de 1rem y tipografía en tonos oscuros en vez de claros — sin editar
+   plantilla por plantilla. !important porque Tailwind (CDN) inyecta su hoja de estilos en un
+   momento que no podemos garantizar que quede antes en la cascada. */
+div[class*="fixed inset-0"] [class*="bg-slate-800"],
+div[class*="fixed inset-0"] [class*="bg-slate-900"] {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    border-radius: 1rem !important;
+}
+div[class*="fixed inset-0"] [class*="border-slate-600"],
+div[class*="fixed inset-0"] [class*="border-slate-700"],
+div[class*="fixed inset-0"] [class*="border-slate-800"],
+div[class*="fixed inset-0"] [class*="divide-slate-700"],
+div[class*="fixed inset-0"] [class*="divide-slate-800"] {
+    border-color: #e2e8f0 !important;
+}
+/* 🔤 Texto: de tonos claros (pensados para fondo oscuro) a tonos oscuros (para fondo blanco).
+   Los botones se excluyen y se restauran aparte más abajo: un botón primario azul/cian con
+   texto blanco debe seguir teniendo texto blanco, no oscuro. */
+div[class*="fixed inset-0"] [class*="text-white"] { color: #1e293b !important; }
+div[class*="fixed inset-0"] [class*="text-slate-100"],
+div[class*="fixed inset-0"] [class*="text-slate-200"],
+div[class*="fixed inset-0"] [class*="text-slate-300"] { color: #475569 !important; }
+div[class*="fixed inset-0"] [class*="text-slate-400"],
+div[class*="fixed inset-0"] [class*="text-slate-500"] { color: #64748b !important; }
+div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
+/* 📝 Inputs/selects/textareas de fondo oscuro -> blancos, con su texto ya oscurecido arriba. */
+div[class*="fixed inset-0"] input[class*="bg-slate-900"],
+div[class*="fixed inset-0"] input[class*="bg-slate-950"],
+div[class*="fixed inset-0"] select[class*="bg-slate-900"],
+div[class*="fixed inset-0"] select[class*="bg-slate-950"],
+div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
+div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
+    background-color: #ffffff !important;
+}
+div[class*="fixed inset-0"] input::placeholder,
+div[class*="fixed inset-0"] textarea::placeholder {
+    color: #94a3b8 !important;
+}
+/* 🔘 Botones secundarios (Cancelar, etc. — bg-slate-700/800 sin ser el primario azul/cian) a
+   gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca. */
+div[class*="fixed inset-0"] button[class*="bg-slate-700"],
+div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
+    background-color: #f1f5f9 !important;
+}
+div[class*="fixed inset-0"] button[class*="bg-slate-700"]:hover,
+div[class*="fixed inset-0"] button[class*="bg-slate-800"]:hover {
+    background-color: #e2e8f0 !important;
+}
+/* 🎨 Divisores/iconos de cabecera y botón primario en los colores de marca (igual que antes). */
+div[class*="fixed inset-0"] [class*="border-slate-700/60"] {
     border-color: var(--marca-azul-primario) !important;
 }
-div[class*="bg-slate-950/80"] [class*="text-cyan-400"] {
+div[class*="fixed inset-0"] [class*="text-cyan-400"] {
     color: var(--marca-cian) !important;
 }
-div[class*="bg-slate-950/80"] [class*="text-amber-400"],
-div[class*="bg-slate-950/80"] [class*="text-amber-500"] {
+div[class*="fixed inset-0"] [class*="text-amber-400"],
+div[class*="fixed inset-0"] [class*="text-amber-500"] {
     color: var(--marca-naranja) !important;
 }
-div[class*="bg-slate-950/80"] button[class*="bg-cyan-600"],
-div[class*="bg-slate-950/80"] button[class*="bg-blue-600"] {
+div[class*="fixed inset-0"] button[class*="bg-cyan-600"],
+div[class*="fixed inset-0"] button[class*="bg-blue-600"] {
     background-color: var(--marca-azul-primario) !important;
 }
-div[class*="bg-slate-950/80"] button[class*="bg-cyan-600"]:hover,
-div[class*="bg-slate-950/80"] button[class*="bg-blue-500"]:hover,
-div[class*="bg-slate-950/80"] button[class*="bg-blue-600"]:hover {
+div[class*="fixed inset-0"] button[class*="bg-cyan-600"]:hover,
+div[class*="fixed inset-0"] button[class*="bg-blue-500"]:hover,
+div[class*="fixed inset-0"] button[class*="bg-blue-600"]:hover {
     background-color: var(--marca-azul-secundario) !important;
+}
+
+/* 🪟 Por si en el futuro se agrega algún modal/diálogo con clases genéricas en vez del wrapper
+   de Arkiv (Tailwind puro no las usa hoy, pero quedan cubiertas si aparecen). */
+.modal-content, .modal-box, dialog {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    color: #1e293b;
 }
