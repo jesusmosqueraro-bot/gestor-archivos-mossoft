@@ -9,7 +9,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <style>#mapa-geolocalizacion { height: 60vh; width: 100%; }</style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>#mapa-geolocalizacion { height: 50vh; width: 100%; }</style>
 </head>
 <body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
 
@@ -29,8 +30,73 @@
 
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
+        <!-- 🔎 Filtros por usuario y rango de fechas (pedido por Tomás, 12/09/2026) -->
+        <form method="GET" action="{{ url_for('admin_geolocalizacion') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl flex flex-wrap items-end gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Usuario</label>
+                <select name="usuario" class="w-full sm:w-56 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    <option value="">Todos los usuarios</option>
+                    {% for u in usuarios_disponibles %}
+                    <option value="{{ u }}" {% if u == f_usuario %}selected{% endif %}>{{ u }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Desde</label>
+                <input type="date" name="fecha_inicio" value="{{ f_fecha_inicio }}" class="bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Hasta</label>
+                <input type="date" name="fecha_fin" value="{{ f_fecha_fin }}" class="bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+            </div>
+            <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2">
+                <i class="fa-solid fa-filter"></i> Filtrar
+            </button>
+            {% if f_usuario or f_fecha_inicio or f_fecha_fin %}
+            <a href="{{ url_for('admin_geolocalizacion') }}" class="text-slate-400 hover:text-cyan-400 font-bold px-2 py-2.5">
+                <i class="fa-solid fa-filter-circle-xmark"></i> Limpiar
+            </a>
+            {% endif %}
+        </form>
+
+        <!-- 📊 MÉTRICAS -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Accesos registrados</p>
+                <p class="text-3xl font-extrabold text-white mt-1">{{ total_accesos }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Usuarios únicos</p>
+                <p class="text-3xl font-extrabold text-white mt-1">{{ usuarios_unicos }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dentro de sede</p>
+                <p class="text-3xl font-extrabold text-emerald-400 mt-1">{{ dentro_de_sede }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fuera de sede</p>
+                <p class="text-3xl font-extrabold text-rose-400 mt-1">{{ fuera_de_sede }}</p>
+                {% if sin_ubicacion %}
+                <p class="text-[10px] text-slate-500 mt-1">+{{ sin_ubicacion }} sin ubicación capturada</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 📈 GRÁFICAS -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="lg:col-span-1 bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <h3 class="text-sm font-bold text-white mb-3">Dentro vs. fuera de sede</h3>
+                <div class="h-52"><canvas id="chart-sede"></canvas></div>
+            </div>
+            <div class="lg:col-span-2 bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <h3 class="text-sm font-bold text-white mb-3">Accesos por usuario (top 10)</h3>
+                <div class="h-52"><canvas id="chart-usuarios"></canvas></div>
+            </div>
+        </div>
+
         <p class="text-xs text-slate-400">
-            Últimos {{ registros|length }} inicios de sesión con ubicación capturada por el navegador.
+            {{ registros|length }} inicio{{ 's' if registros|length != 1 else '' }} de sesión
+            {% if f_usuario or f_fecha_inicio or f_fecha_fin %}que coinciden con el filtro{% else %}más recientes{% endif %}.
             <span class="inline-flex items-center gap-1 text-emerald-400"><i class="fa-solid fa-circle text-[8px]"></i> dentro de una sede autorizada</span>
             ·
             <span class="inline-flex items-center gap-1 text-rose-400"><i class="fa-solid fa-circle text-[8px]"></i> fuera de sede</span>
@@ -54,21 +120,10 @@
     </main>
 
     <script>
+        // 📍 'sede' ya viene calculada desde el servidor (ver _sede_que_contiene en app.py) para
+        // que el mapa, la tabla y las métricas de arriba usen siempre el mismo criterio.
         const REGISTROS = {{ registros | tojson }};
         const SEDES = {{ sedes | tojson }};
-
-        function distanciaMetros(lat1, lng1, lat2, lng2) {
-            const R = 6371000;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLng = (lng2 - lng1) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) ** 2 +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-            return 2 * R * Math.asin(Math.sqrt(a));
-        }
-
-        function sedeQueContiene(lat, lng) {
-            return SEDES.find(s => distanciaMetros(lat, lng, s.lat, s.lng) <= s.radio_metros) || null;
-        }
 
         const centro = SEDES.length ? [SEDES[0].lat, SEDES[0].lng] : [4.710989, -74.072092];
         const mapa = L.map('mapa-geolocalizacion').setView(centro, 11);
@@ -85,25 +140,60 @@
         const filas = [];
         REGISTROS.forEach(r => {
             if (r.latitud == null || r.longitud == null) return;
-            const sede = sedeQueContiene(r.latitud, r.longitud);
-            const valido = !!sede;
+            const valido = !!r.sede;
             L.circleMarker([r.latitud, r.longitud], {
                 radius: 6, color: valido ? '#10b981' : '#f43f5e', weight: 2, fillOpacity: 0.6,
             })
                 .addTo(mapa)
                 .bindPopup(
                     `<strong>${r.usuario}</strong><br>IP: ${r.ip}<br>${r.fecha}<br>` +
-                    (valido ? `✅ ${sede.nombre}` : '⚠️ Fuera de sede autorizada')
+                    (valido ? `✅ ${r.sede}` : '⚠️ Fuera de sede autorizada')
                 );
             filas.push(`<tr>
                 <td class="p-3">${r.usuario}</td><td class="p-3 font-mono">${r.ip}</td>
                 <td class="p-3 font-mono">${r.latitud.toFixed(6)}</td><td class="p-3 font-mono">${r.longitud.toFixed(6)}</td>
                 <td class="p-3">${r.fecha}</td>
-                <td class="p-3 ${valido ? 'text-emerald-400' : 'text-rose-400'}">${valido ? sede.nombre : 'Fuera de sede'}</td>
+                <td class="p-3 ${valido ? 'text-emerald-400' : 'text-rose-400'}">${valido ? r.sede : 'Fuera de sede'}</td>
             </tr>`);
         });
         document.getElementById('tabla-geolocalizacion').innerHTML =
-            filas.join('') || '<tr><td class="p-3 text-slate-500" colspan="6">Todavía no hay inicios de sesión con ubicación registrada.</td></tr>';
+            filas.join('') || '<tr><td class="p-3 text-slate-500" colspan="6">Ningún acceso coincide con el filtro actual.</td></tr>';
+
+        // 📊 Gráficas — misma paleta de marca que el resto de tableros de Arkiv (Cyan operativo,
+        // Rose reservado para alertas/fuera de sede).
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        new Chart(document.getElementById('chart-sede'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Dentro de sede', 'Fuera de sede', 'Sin ubicación'],
+                datasets: [{
+                    data: [{{ dentro_de_sede }}, {{ fuera_de_sede }}, {{ sin_ubicacion }}],
+                    backgroundColor: ['#10b981', '#f43f5e', '#475569'], borderWidth: 0,
+                }],
+            },
+            options: {
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+                maintainAspectRatio: false,
+            },
+        });
+
+        new Chart(document.getElementById('chart-usuarios'), {
+            type: 'bar',
+            data: {
+                labels: {{ top_usuarios_labels | tojson }},
+                datasets: [{
+                    data: {{ top_usuarios_valores | tojson }},
+                    backgroundColor: '#00A3DA', borderRadius: 6,
+                }],
+            },
+            options: {
+                plugins: { legend: { display: false } },
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } },
+            },
+        });
     </script>
 </body>
 </html>
