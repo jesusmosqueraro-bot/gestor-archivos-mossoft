@@ -126,8 +126,10 @@
     </main>
 
     <script>
-        // 📍 'sede' ya viene calculada desde el servidor (ver _sede_que_contiene en app.py) para
-        // que el mapa, la tabla y las métricas de arriba usen siempre el mismo criterio.
+        // 📍 'sede'/'dentro_de_sede' ya vienen calculadas y guardadas desde el servidor al
+        // momento del login (ver registrar_geolocalizacion_login en app.py, contra el catálogo
+        // real de /tickets/configuracion), para que el mapa, la tabla y las métricas de arriba
+        // usen siempre el mismo criterio y no cambien si después se edita una Sede.
         const REGISTROS = {{ registros | tojson }};
         const SEDES = {{ sedes | tojson }};
 
@@ -146,7 +148,7 @@
         const filas = [];
         REGISTROS.forEach(r => {
             const tieneUbicacion = r.latitud != null && r.longitud != null;
-            const valido = !!r.sede;
+            const valido = r.dentro_de_sede === true;
             if (tieneUbicacion) {
                 L.circleMarker([r.latitud, r.longitud], {
                     radius: 6, color: valido ? '#10b981' : '#f43f5e', weight: 2, fillOpacity: 0.6,
@@ -154,19 +156,20 @@
                     .addTo(mapa)
                     .bindPopup(
                         `<strong>${r.usuario}</strong><br>IP: ${r.ip}<br>${r.fecha}<br>` +
-                        (valido ? `✅ ${r.sede}` : '⚠️ Fuera de sede autorizada')
+                        (valido ? `✅ ${r.sede}` : (r.sede ? `⚠️ Fuera de ${r.sede}` : '⚠️ Fuera de sede autorizada'))
                     );
             }
             // 🔧 Antes esta fila se saltaba entera cuando faltaba ubicación (mismo "return" que
             // el marcador de arriba), por eso la tabla salía vacía aunque hubiera accesos
             // registrados: ahora SIEMPRE lista (Usuario, IP, Latitud, Longitud, Fecha, Sede),
             // mostrando "—"/"Sin ubicación" cuando el navegador no capturó coordenadas.
+            const etiquetaSede = valido ? r.sede : (r.sede ? `Fuera de ${r.sede}` : 'Fuera de sede');
             filas.push(`<tr>
                 <td class="p-3">${r.usuario}</td><td class="p-3 font-mono">${r.ip}</td>
                 <td class="p-3 font-mono">${tieneUbicacion ? r.latitud.toFixed(6) : '—'}</td>
                 <td class="p-3 font-mono">${tieneUbicacion ? r.longitud.toFixed(6) : '—'}</td>
                 <td class="p-3">${r.fecha}</td>
-                <td class="p-3 ${tieneUbicacion ? (valido ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}">${tieneUbicacion ? (valido ? r.sede : 'Fuera de sede') : 'Sin ubicación'}</td>
+                <td class="p-3 ${tieneUbicacion ? (valido ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}">${tieneUbicacion ? etiquetaSede : 'Sin ubicación'}</td>
             </tr>`);
         });
         document.getElementById('tabla-geolocalizacion').innerHTML =

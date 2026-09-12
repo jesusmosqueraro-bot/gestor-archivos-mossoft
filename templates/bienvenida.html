@@ -584,10 +584,12 @@
                         puntos.push([sede.lat, sede.lng]);
                     });
                     conUbicacion.forEach(r => {
-                        const color = r.sede ? '#10b981' : '#f43f5e';
+                        const dentro = r.dentro_de_sede === true;
+                        const color = dentro ? '#10b981' : '#f43f5e';
+                        const etiqueta = dentro ? r.sede : (r.sede ? `Fuera de ${r.sede}` : 'Fuera de sede');
                         const marcador = L.circleMarker([r.latitud, r.longitud], {
                             radius: 6, color: color, fillColor: color, fillOpacity: 0.8,
-                        }).addTo(geolocMapa).bindPopup(`${r.usuario}<br>${r.fecha}<br>${r.sede ? r.sede : 'Fuera de sede'}`);
+                        }).addTo(geolocMapa).bindPopup(`${r.usuario}<br>${r.fecha}<br>${etiqueta}`);
                         geolocCapasDinamicas.push(marcador);
                         puntos.push([r.latitud, r.longitud]);
                     });
