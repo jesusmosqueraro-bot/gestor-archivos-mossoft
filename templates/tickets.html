@@ -70,7 +70,7 @@
 
     <!-- SUB-NAV DEL MÓDULO -->
     <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
-        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
+        <div class="max-w-[1600px] mx-auto flex items-center gap-1 overflow-x-auto">
             <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
             <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>{% if es_soporte %}Todas las Solicitudes{% else %}Mis Solicitudes{% endif %}</a>
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
@@ -85,7 +85,13 @@
     </div>
 
     <!-- CONTENIDO -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <!-- 📐 Ancho ampliado (pedido por Tomás, 12/09/2026, sobre "Todas las Solicitudes"): la
+         tabla de tickets tiene muchas columnas (Tipo, Título, Categoría, Área/Sede, Prioridad,
+         Estado, SLA, Progreso, Creado por, Asignado a, Actualizado) y con max-w-7xl (1280px) se
+         veía apretada, obligando a scroll horizontal incluso en monitores anchos. max-w-[1600px]
+         le da más aire sin perder el centrado; el sub-nav de arriba (línea ~73) usa el mismo
+         ancho para que ambos sigan alineados. -->
+    <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
         <!-- PESTAÑAS DE CUMPLIMIENTO DE SLA -->
         <div class="flex items-center gap-2 overflow-x-auto pb-1">
