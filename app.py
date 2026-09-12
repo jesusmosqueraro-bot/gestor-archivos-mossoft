@@ -15385,18 +15385,13 @@ def _sede_que_contiene(lat, lng):
     return None
 
 
-@app.route('/admin/geolocalizacion')
-@login_required
-@admin_required
-def admin_geolocalizacion():
-    """Mapa (Leaflet) + métricas/gráficas de los inicios de sesión con su latitud/longitud, para
-    validar si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS). Admite filtrar
-    por usuario y por rango de fechas (pedido de Tomás, 12/09/2026: "que se pueda visualizar con
-    métricas y gráficas también, incluye filtros por usuarios")."""
-    f_usuario = request.args.get('usuario', '').strip()
-    f_fecha_inicio = request.args.get('fecha_inicio', '').strip()
-    f_fecha_fin = request.args.get('fecha_fin', '').strip()
-
+def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
+    """Calcula los registros filtrados + métricas + top de usuarios de
+    login_geolocalizacion. Extraído de admin_geolocalizacion() para que tanto la página
+    completa (con mapa, gráficas, tabla y filtros) como el modal de vista rápida en
+    bienvenida.html (pedido de Tomás, 12/09/2026: "dame un modal en el bienvenida.html" /
+    "Ambos, por favor" — métricas + mapa embebido) compartan exactamente la misma lógica de
+    filtrado y de "sede que contiene", sin duplicarla."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT usuario FROM login_geolocalizacion ORDER BY usuario ASC")
@@ -15440,16 +15435,64 @@ def admin_geolocalizacion():
         conteo_por_usuario[r['usuario']] = conteo_por_usuario.get(r['usuario'], 0) + 1
     top_usuarios = sorted(conteo_por_usuario.items(), key=lambda kv: kv[1], reverse=True)[:10]
 
+    return {
+        'registros': registros,
+        'usuarios_disponibles': usuarios_disponibles,
+        'total_accesos': len(registros),
+        'usuarios_unicos': len({r['usuario'] for r in registros}),
+        'dentro_de_sede': dentro_de_sede,
+        'fuera_de_sede': len(con_ubicacion) - dentro_de_sede,
+        'sin_ubicacion': len(registros) - len(con_ubicacion),
+        'top_usuarios_labels': [u for u, _ in top_usuarios],
+        'top_usuarios_valores': [c for _, c in top_usuarios],
+    }
+
+
+@app.route('/admin/geolocalizacion')
+@login_required
+@admin_required
+def admin_geolocalizacion():
+    """Mapa (Leaflet) + métricas/gráficas de los inicios de sesión con su latitud/longitud, para
+    validar si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS). Admite filtrar
+    por usuario y por rango de fechas (pedido de Tomás, 12/09/2026: "que se pueda visualizar con
+    métricas y gráficas también, incluye filtros por usuarios")."""
+    f_usuario = request.args.get('usuario', '').strip()
+    f_fecha_inicio = request.args.get('fecha_inicio', '').strip()
+    f_fecha_fin = request.args.get('fecha_fin', '').strip()
+
+    datos = _datos_geolocalizacion(f_usuario, f_fecha_inicio, f_fecha_fin)
+
     return render_template(
-        'admin_geolocalizacion.html', registros=registros, sedes=SEDES_AUTORIZADAS,
-        usuarios_disponibles=usuarios_disponibles, f_usuario=f_usuario,
+        'admin_geolocalizacion.html', registros=datos['registros'], sedes=SEDES_AUTORIZADAS,
+        usuarios_disponibles=datos['usuarios_disponibles'], f_usuario=f_usuario,
         f_fecha_inicio=f_fecha_inicio, f_fecha_fin=f_fecha_fin,
-        total_accesos=len(registros), usuarios_unicos=len({r['usuario'] for r in registros}),
-        dentro_de_sede=dentro_de_sede, fuera_de_sede=len(con_ubicacion) - dentro_de_sede,
-        sin_ubicacion=len(registros) - len(con_ubicacion),
-        top_usuarios_labels=[u for u, _ in top_usuarios],
-        top_usuarios_valores=[c for _, c in top_usuarios],
+        total_accesos=datos['total_accesos'], usuarios_unicos=datos['usuarios_unicos'],
+        dentro_de_sede=datos['dentro_de_sede'], fuera_de_sede=datos['fuera_de_sede'],
+        sin_ubicacion=datos['sin_ubicacion'],
+        top_usuarios_labels=datos['top_usuarios_labels'],
+        top_usuarios_valores=datos['top_usuarios_valores'],
     )
+
+
+@app.route('/admin/geolocalizacion/resumen')
+@login_required
+@admin_required
+def admin_geolocalizacion_resumen():
+    """Endpoint JSON liviano para el modal de vista rápida en bienvenida.html (pedido de Tomás,
+    12/09/2026: "Ambos, por favor" — métricas + mapa embebido, con un enlace a la página
+    completa para filtros/gráficas/tabla). No admite filtros: siempre trae el resumen general
+    más reciente, y limita los registros a 300 para que el mapa cargue rápido dentro del modal
+    (la página completa /admin/geolocalizacion sigue usando el límite de 2000)."""
+    datos = _datos_geolocalizacion()
+    return jsonify({
+        'sedes': SEDES_AUTORIZADAS,
+        'registros': datos['registros'][:300],
+        'total_accesos': datos['total_accesos'],
+        'usuarios_unicos': datos['usuarios_unicos'],
+        'dentro_de_sede': datos['dentro_de_sede'],
+        'fuera_de_sede': datos['fuera_de_sede'],
+        'sin_ubicacion': datos['sin_ubicacion'],
+    })
 
 
 # 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
