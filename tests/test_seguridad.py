@@ -74,6 +74,45 @@ def test_login_respeta_limite_de_peticiones_por_minuto(client, app, monkeypatch)
     assert 429 in codigos
 
 
+def test_ip_cliente_usa_el_ultimo_valor_de_x_forwarded_for(app):
+    """🔒 Hallazgo crítico de auditoría de seguridad (12/09/2026, reportado por Tomás, confirmado
+    en vivo contra arkivapp.co con fetch() desde el navegador): _obtener_ip_cliente() tomaba el
+    PRIMER valor de X-Forwarded-For, que cualquier cliente puede mandar con lo que quiera (no es
+    un header prohibido en fetch()/curl) — Render, al recibir la petición, AGREGA la IP real al
+    FINAL de ese header en vez de reemplazarlo, así que el primer valor podía ser una IP
+    inventada, distinta en cada intento. Como Flask-Limiter usa _obtener_ip_cliente() como
+    key_func del límite de /login, esto anulaba por completo el límite de 5 intentos/minuto: cada
+    intento con una IP falsa distinta contaba como "otro visitante". El arreglo usa el ÚLTIMO
+    valor (el que agrega el único proxy de confianza delante de la app, el balanceador de
+    Render) en vez del primero (que puede venir falsificado por quien hizo la petición)."""
+    with app.app.test_request_context(
+        '/login', headers={'X-Forwarded-For': '203.0.113.99, 198.51.100.7'}
+    ):
+        # 203.0.113.99: lo que un atacante podría inventarse y variar en cada intento.
+        # 198.51.100.7: la IP real que Render vio en la conexión TCP y agregó al final.
+        assert app._obtener_ip_cliente() == '198.51.100.7'
+
+
+def test_login_sigue_limitado_aunque_se_falsifique_x_forwarded_for(client, app, monkeypatch):
+    """Extremo a extremo del hallazgo de arriba: un atacante que manda un X-Forwarded-For DISTINTO
+    en cada intento (para intentar que Flask-Limiter los cuente como visitantes distintos) sigue
+    topándose con el límite de 5/minuto, porque la IP real (la que un proxy de confianza como
+    Render agregaría al final del header) es la misma en los 8 intentos."""
+    monkeypatch.setattr(app, 'verificar_recaptcha', lambda token: False)
+
+    codigos = []
+    for i in range(8):
+        ip_falsa_del_atacante = f'10.10.10.{i}'  # distinta en cada intento
+        ip_real_segun_render = '198.51.100.42'    # la misma en los 8 (es el mismo atacante)
+        r = client.post(
+            '/login', data={'usuario': 'x', 'password': 'y'},
+            headers={'X-Forwarded-For': f'{ip_falsa_del_atacante}, {ip_real_segun_render}'},
+        )
+        codigos.append(r.status_code)
+
+    assert 429 in codigos, f"El límite debía activarse pese al X-Forwarded-For falsificado; códigos: {codigos}"
+
+
 def test_codigo_de_recuperacion_es_numerico_de_seis_digitos_y_queda_en_sesion(client, app, crear_usuario, monkeypatch):
     """Hallazgo de auditoría de seguridad (06/09/2026): el código de recuperación de clave se
     generaba con `random.randint` (Mersenne Twister, no apto para nada de seguridad) en vez de
