@@ -1,0 +1,11 @@
+<!-- 🏢 Logo institucional de Preventiva Salud IPS en la barra de navegación (pedido por Tomás,
+     13/09/2026: "incluye el logo de preventiva... que se visualice en los modulos que no tienen
+     el logo de preventiva"). El archivo static/img/logo_preventiva.png trae fondo blanco sólido
+     (sin canal alfa, ver tests/test_logo_institucional.py), así que se envuelve en una placa
+     blanca redondeada para que se vea como una insignia intencional sobre la barra oscura (y no
+     se pierda sobre el fondo casi blanco de los temas Claro/Descanso, gracias al borde). Oculto
+     en pantallas muy angostas (hidden sm:flex) para no apretar el resto de la barra en celular,
+     igual que ya hacen el texto de "Volver" y el rol de usuario en estas mismas barras. -->
+<div class="hidden sm:flex items-center bg-white rounded-xl px-2.5 py-1.5 border border-slate-200 shadow-sm shrink-0" title="Preventiva Salud IPS">
+    <img src="/static/img/logo_preventiva.png" alt="Preventiva Salud IPS" class="h-6 w-auto object-contain">
+</div>
