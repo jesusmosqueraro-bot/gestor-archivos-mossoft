@@ -6,9 +6,12 @@
    arbitrario: bg-[var(--marca-azul-primario)]) en vez de repetir códigos hex
    sueltos por el código.
 
-   Por ahora se usan en /login (ver templates/login.html) y en el selector de
-   color del Muro de Comunicados (ver templates/comunicados.html); no se
-   aplican todavía al resto de la app para mantener este cambio acotado.
+   Los colores se usan en /login y en el selector de color del Muro de
+   Comunicados (ver templates/comunicados.html). La tipografía (ver la regla
+   'body' más abajo) es global: esta hoja de estilos está enlazada al final
+   del <head> de TODAS las plantillas (pedido por Tomás, 12/09/2026: "Haz
+   global la fuente Montserrat"), así que Montserrat aplica en toda la
+   plataforma sin tocar plantilla por plantilla.
    ========================================================================= */
 :root {
     --marca-azul-primario: #1654a5;   /* Azul institucional principal */
@@ -19,4 +22,19 @@
     --marca-azul-oscuro: #2d5461;     /* Azul-petróleo oscuro */
     --marca-morado: #7b4c9e;          /* Morado (variación Odontología) */
     --marca-fuente: 'Montserrat', sans-serif;
+}
+
+/* 🌐 Tipografía global: se aplica sobre 'body' (se hereda a todo el texto
+   normal) y a propósito SIN '* { ... !important }' — forzar el font-family a
+   TODOS los elementos con !important rompería los iconos de Font Awesome
+   (fa-solid/fa-regular dibujan su glifo con su propio font-family, que
+   quedaría pisado) y los textos que varias plantillas ya ponen a propósito
+   en fuente monoespaciada (.font-mono: IPs, cédulas, fechas, JSON, MACs).
+   Con 'body' sin !important, esas clases más específicas siguen ganando
+   como deben, y como este archivo se enlaza al final de cada <head>, gana
+   por orden de cascada sobre cualquier font-family que ya tuviera esa
+   plantilla en un <style> propio (misma especificidad, pero se carga
+   después). */
+body {
+    font-family: var(--marca-fuente);
 }
