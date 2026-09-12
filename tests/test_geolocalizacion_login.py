@@ -200,3 +200,54 @@ def test_admin_geolocalizacion_filtra_por_rango_de_fechas_excluye_fuera_de_rango
     inicio_datos = texto.index('const REGISTROS')
     fin_datos = texto.index('const SEDES')
     assert usuario not in texto[inicio_datos:fin_datos]
+
+
+# --- /admin/geolocalizacion/resumen: endpoint JSON para el modal de vista rápida en
+# bienvenida.html (pedido de Tomás, 12/09/2026: "dame un modal en el bienvenida.html" /
+# "Ambos, por favor" — métricas + mapa embebido). Comparte _datos_geolocalizacion() con la
+# página completa, así que aquí solo se verifica el contrato JSON en sí (forma, roles y que
+# de verdad refleje los accesos registrados), no de nuevo toda la lógica de filtrado/sede.
+
+def test_resumen_geolocalizacion_requiere_rol_admin(client, app, crear_usuario):
+    """Igual que la página completa, el resumen JSON tampoco debe ser visible para un usuario
+    estándar autenticado."""
+    usuario = crear_usuario(rol='estandar')
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['username'] = usuario
+        sess['rol'] = 'estandar'
+        sess['instance_id'] = app.SERVER_INSTANCE_ID
+        sess['debe_cambiar_password'] = False
+        sess['debe_activar_2fa'] = False
+
+    r = client.get('/admin/geolocalizacion/resumen', follow_redirects=False)
+
+    assert r.status_code == 302
+
+
+def test_resumen_geolocalizacion_requiere_sesion_iniciada(client):
+    r = client.get('/admin/geolocalizacion/resumen', follow_redirects=False)
+    assert r.status_code == 302
+    assert '/login' in r.headers.get('Location', '')
+
+
+def test_resumen_geolocalizacion_devuelve_metricas_y_sedes(admin_session, app, crear_usuario, monkeypatch):
+    """El JSON debe traer las sedes autorizadas y reflejar en las métricas un acceso recién
+    registrado, para que el modal pueda pintar el mapa y las tarjetas de métricas sin tener
+    que llamar a la página completa."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    app.app.test_client().post('/login', data={
+        'usuario': usuario, 'password': 'ClaveSegura123',
+        'latitud': '4.710989', 'longitud': '-74.072092',  # exactamente Sede Principal
+    })
+
+    r = admin_session.get('/admin/geolocalizacion/resumen')
+
+    assert r.status_code == 200
+    datos = r.get_json()
+    assert datos is not None
+    assert any(sede['nombre'] == 'Sede Principal' for sede in datos['sedes'])
+    assert datos['total_accesos'] >= 1
+    assert datos['dentro_de_sede'] >= 1
+    assert any(reg['usuario'] == usuario and reg['sede'] == 'Sede Principal' for reg in datos['registros'])
