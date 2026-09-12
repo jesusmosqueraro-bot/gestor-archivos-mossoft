@@ -138,3 +138,65 @@ def test_admin_geolocalizacion_muestra_los_accesos_registrados(admin_session, ap
     assert usuario in texto
     assert 'leaflet' in texto.lower()
     assert 'Sede Principal' in texto
+
+
+def test_admin_geolocalizacion_clasifica_dentro_y_fuera_de_sede_en_las_metricas(admin_session, app, crear_usuario, monkeypatch):
+    """Pedido de Tomás (12/09/2026): la vista debe mostrar métricas — aquí se verifica que un
+    login con las coordenadas exactas de una sede autorizada cuenta como 'dentro', y uno con
+    coordenadas muy lejanas cuenta como 'fuera' (SEDES_AUTORIZADAS usa un radio de 150 m)."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario_dentro = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    usuario_fuera = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    cliente_aux = app.app.test_client()
+    cliente_aux.post('/login', data={
+        'usuario': usuario_dentro, 'password': 'ClaveSegura123',
+        'latitud': '4.710989', 'longitud': '-74.072092',  # exactamente Sede Principal
+    })
+    cliente_aux.post('/login', data={
+        'usuario': usuario_fuera, 'password': 'ClaveSegura123',
+        'latitud': '10.0', 'longitud': '-70.0',  # muy lejos de cualquier sede
+    })
+
+    r = admin_session.get('/admin/geolocalizacion')
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert '"sede": "Sede Principal"' in texto or '"sede":"Sede Principal"' in texto
+
+
+def test_admin_geolocalizacion_filtra_por_usuario(admin_session, app, crear_usuario, monkeypatch):
+    """El selector de usuario (pedido de Tomás) debe acotar el mapa/tabla/métricas a un solo
+    usuario, sin mostrar los accesos de los demás."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario_a = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    usuario_b = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    cliente_aux = app.app.test_client()
+    cliente_aux.post('/login', data={'usuario': usuario_a, 'password': 'ClaveSegura123'})
+    cliente_aux.post('/login', data={'usuario': usuario_b, 'password': 'ClaveSegura123'})
+
+    r = admin_session.get(f'/admin/geolocalizacion?usuario={usuario_a}')
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert f'"usuario": "{usuario_a}"' in texto or f'"usuario":"{usuario_a}"' in texto
+    # El usuario_b no debe aparecer en los datos embebidos (REGISTROS), que son los únicos que
+    # alimentan el mapa, la tabla y las métricas.
+    inicio_datos = texto.index('const REGISTROS')
+    fin_datos = texto.index('const SEDES')
+    assert usuario_b not in texto[inicio_datos:fin_datos]
+
+
+def test_admin_geolocalizacion_filtra_por_rango_de_fechas_excluye_fuera_de_rango(admin_session, app, crear_usuario, monkeypatch):
+    """Un rango de fechas que no incluye hoy debe dejar el listado vacío, sin romper la página."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    app.app.test_client().post('/login', data={'usuario': usuario, 'password': 'ClaveSegura123'})
+
+    r = admin_session.get('/admin/geolocalizacion?fecha_inicio=2000-01-01&fecha_fin=2000-01-02')
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert 'Ningún acceso coincide con el filtro actual' in texto
+    inicio_datos = texto.index('const REGISTROS')
+    fin_datos = texto.index('const SEDES')
+    assert usuario not in texto[inicio_datos:fin_datos]
