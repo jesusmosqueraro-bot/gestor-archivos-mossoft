@@ -16144,13 +16144,22 @@ def buscar_global_api():
         print(f"⚠️ Error buscando en galerías (buscador global): {e}")
 
     # --- Bóveda de Accesos (solo admin/agente — NUNCA se busca ni se expone la contraseña) ---
+    # 🩹 Corrección (12/09/2026): esta consulta no filtraba por 'visibilidad', así que un ítem
+    # 'personal' de CUALQUIER usuario se colaba aquí para cualquier admin/agente que buscara —
+    # exponiendo título/área/notas de la contraseña personal de otra persona bajo la categoría
+    # institucional (y con un enlace a /credenciales, donde ese ítem ni siquiera aparece listado,
+    # porque ver_credenciales() sí filtra por _puede_ver_credencial_item). Ahora se excluyen los
+    # ítems 'personal' de este bloque institucional: esos se buscan aparte, abajo, en "Mi Bóveda
+    # Personal", scopeados a su propio dueño.
     if es_soporte:
         try:
-            cursor.execute("SELECT id, titulo, usuario_acceso, area, notas FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado'")
+            cursor.execute("SELECT id, titulo, usuario_acceso, area, notas, visibilidad FROM credenciales WHERE COALESCE(estado, 'activo') != 'eliminado'")
             contador = 0
-            for c_id, titulo, usuario_acceso, area, notas in cursor.fetchall():
+            for c_id, titulo, usuario_acceso, area, notas, visibilidad in cursor.fetchall():
                 if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
                     break
+                if (visibilidad or 'equipo') == 'personal':
+                    continue
                 if q_norm in normalizar(f"{titulo} {usuario_acceso or ''} {area or ''} {notas or ''}"):
                     contador += 1
                     resultados.append({
@@ -16162,6 +16171,32 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en credenciales (buscador global): {e}")
 
+    # --- Mi Bóveda Personal (pedido por Tomás: transversal para CUALQUIER cuenta logueada,
+    # incluida 'estandar' — hasta ahora este módulo no aparecía en ninguna búsqueda. Nunca se
+    # busca ni se expone la contraseña, igual que la Bóveda de Accesos institucional. Se limita
+    # estrictamente a lo que el propio usuario guardó — igual que la vista /mi_boveda — sin
+    # importar el rol, y sin comparticiones puntuales de otros ítems 'personal', para no
+    # complicar el alcance de la búsqueda más allá de lo que la propia página ya muestra) ---
+    try:
+        q_mi_boveda = ("SELECT id, titulo, usuario_acceso, notas FROM credenciales WHERE propietario = %s AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado'" if db_type == 'postgres'
+                       else "SELECT id, titulo, usuario_acceso, notas FROM credenciales WHERE propietario = ? AND visibilidad = 'personal' AND COALESCE(estado, 'activo') != 'eliminado'")
+        cursor.execute(q_mi_boveda, (usuario,))
+        contador = 0
+        for c_id, titulo, usuario_acceso, notas in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            if q_norm in normalizar(f"{titulo} {usuario_acceso or ''} {notas or ''}"):
+                contador += 1
+                resultados.append({
+                    'categoria': 'Mi Bóveda Personal',
+                    'titulo': titulo,
+                    'subtitulo': usuario_acceso or '',
+                    'url': url_for('mi_boveda')
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en Mi Bóveda Personal (buscador global): {e}")
+
+    if es_soporte:
         # --- Accesos de Colaboradores (registro de aplicativos entregados, solo admin/agente) ---
         try:
             cursor.execute("SELECT id, colaborador, aplicativo, solicitado_por FROM credenciales_colaboradores ORDER BY id DESC")
