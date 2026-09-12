@@ -12732,7 +12732,17 @@ def ver_credenciales():
                     'usuario': usuario,
                     'categoria': categoria or 'General',
                     'notas': notas or '',
-                    'fecha': fecha,
+                    # 🩹 Bug de producción (reportado por Tomás, 12/09/2026, video del modal de la
+                    # Bóveda con "Internal Server Error"): 'fecha_creacion' es VARCHAR(100) en el
+                    # esquema, pero alguna fila real en Postgres llegó con un valor
+                    # datetime.datetime nativo en vez de texto (posible resto de una migración o
+                    # inserción antigua) — la plantilla hace item.fecha[:10] para el filtro por
+                    # fecha (data-fecha) y un datetime no se puede indexar así (TypeError:
+                    # 'datetime.datetime' object is not subscriptable), tumbando toda la Bóveda con
+                    # un 500. Se normaliza a texto aquí, en el único lugar que arma este diccionario,
+                    # para que la plantilla siempre reciba una cadena sin importar qué haya quedado
+                    # guardado en esa columna.
+                    'fecha': str(fecha) if fecha is not None else '',
                     'rotacion_dias': rotacion_dias,
                     'rotacion': _estado_rotacion_credencial(rotacion_dias, fecha_ultima_rotacion),
                     'etiquetas_texto': etiquetas_texto or '',
