@@ -128,7 +128,15 @@
             <div id="grid-credenciales" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {% for item in credenciales %}
                     <div class="tarjeta-credencial bg-slate-800/60 border border-slate-700/60 hover:border-slate-600/80 rounded-3xl p-5 flex flex-col justify-between shadow-lg transition-all hover:shadow-xl"
-                         data-tipo="{{ item.visibilidad }}" data-categoria="{{ item.categoria }}" data-fecha="{{ item.fecha[:10] if item.fecha else '' }}">
+                         data-tipo="{{ item.visibilidad }}" data-categoria="{{ item.categoria }}" data-fecha="{{ (item.fecha|string)[:10] if item.fecha else '' }}">
+                         <!-- 🩹 (item.fecha|string) en vez de item.fecha directo: 'fecha' ya se
+                              normaliza a texto en ver_credenciales() (app.py), pero el filtro
+                              |string es un segundo resguardo barato aquí mismo, por si algún otro
+                              lugar llega a alimentar esta plantilla con un valor que no sea texto
+                              — evita repetir el 500 "'datetime.datetime' object is not
+                              subscriptable" que tumbaba la Bóveda completa (reportado por Tomás,
+                              12/09/2026). -->
+
 
                         <div>
                             <div class="flex items-start justify-between gap-3 mb-3">
