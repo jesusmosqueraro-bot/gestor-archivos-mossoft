@@ -1185,7 +1185,18 @@ def init_db():
                 # Tomás, 12/09/2026, manual de marca de Preventiva): NULL/'' usa el estilo por
                 # defecto de la tarjeta. Se valida como hex de 6 dígitos antes de guardarse — ver
                 # _color_comunicado_valido()/crear_comunicado()/editar_comunicado().
-                "ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS color VARCHAR(20);"
+                "ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS color VARCHAR(20);",
+                # 📍 Coordenadas de cada Sede (solo aplican a tipo = 'sede'; el resto de
+                # ticket_configuraciones queda en NULL) — para calcular, al crear un usuario, cuál
+                # es la sede más cercana a la ubicación que detecta el navegador (ver
+                # _sede_mas_cercana en templates/usuarios.html). Se cargan a mano desde
+                # /tickets/configuracion → Sedes (no hay forma de adivinarlas).
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS latitud NUMERIC(9,6);",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN IF NOT EXISTS longitud NUMERIC(9,6);",
+                # 🏢 Sede asignada a la cuenta (mismo catálogo de arriba). Se preselecciona sola en
+                # el alta según la sede más cercana a la ubicación detectada, pero el campo sigue
+                # siendo editable — ver gestion_usuarios()/_crear_usuario_interno().
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede VARCHAR(150);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1484,6 +1495,18 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_config_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 📍 Coordenadas de cada Sede + sede asignada a la cuenta. Ver comentario equivalente
+            # en la rama de Postgres.
+            for col_sede_sql in [
+                "ALTER TABLE ticket_configuraciones ADD COLUMN latitud REAL;",
+                "ALTER TABLE ticket_configuraciones ADD COLUMN longitud REAL;",
+                "ALTER TABLE usuarios ADD COLUMN sede TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_sede_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -4115,20 +4138,25 @@ def _revisar_alertas_sla():
 
 
 def _config_ticket_lista(tipo_config):
-    """Devuelve [{'id', 'nombre', 'direccion', 'responsable', 'nit', 'razon_social'}] de las
-    Áreas, Sedes, Categorías o Proveedores activos configurados por el equipo de soporte en
-    /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria' | 'proveedor').
-    'direccion'/'responsable' solo tienen contenido real para tipo_config == 'sede' (y
-    'responsable' también para 'area'/'categoria'); 'nit'/'razon_social' solo para
-    tipo_config == 'proveedor'. Para el resto de combinaciones quedan en None.
-    Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
+    """Devuelve [{'id', 'nombre', 'direccion', 'responsable', 'nit', 'razon_social', 'latitud',
+    'longitud'}] de las Áreas, Sedes, Categorías o Proveedores activos configurados por el
+    equipo de soporte en /tickets/configuracion (tipo_config: 'area' | 'sede' | 'categoria' |
+    'proveedor'). 'direccion'/'responsable' solo tienen contenido real para tipo_config ==
+    'sede' (y 'responsable' también para 'area'/'categoria'); 'nit'/'razon_social' solo para
+    tipo_config == 'proveedor'; 'latitud'/'longitud' solo para 'sede' (ver
+    _sede_mas_cercana en templates/usuarios.html). Para el resto de combinaciones quedan en
+    None. Si la tabla no existe todavía o falla la consulta, devuelve una lista vacía en vez de
     romper la página que la llama."""
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        q = "SELECT id, nombre, direccion, responsable, nit, razon_social FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable, nit, razon_social FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        q = "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT id, nombre, direccion, responsable, nit, razon_social, latitud, longitud FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
         cursor.execute(q, (tipo_config,))
-        filas = [{'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3], 'nit': r[4], 'razon_social': r[5]} for r in cursor.fetchall()]
+        filas = [{
+            'id': r[0], 'nombre': r[1], 'direccion': r[2], 'responsable': r[3], 'nit': r[4],
+            'razon_social': r[5], 'latitud': float(r[6]) if r[6] is not None else None,
+            'longitud': float(r[7]) if r[7] is not None else None,
+        } for r in cursor.fetchall()]
         conn.close()
         return filas
     except Exception as e:
@@ -7918,6 +7946,19 @@ def abrir_conocimiento(articulo_id):
     return redirect(url_doc)
 
 
+def _coordenada_valida(valor):
+    """Convierte 'valor' (lo que llega crudo del formulario) a float, o None si viene vacío o
+    no es un número — para que un valor manipulado/basura en latitud/longitud no rompa el
+    guardado de la Sede ni quede como texto donde se espera un número."""
+    valor = (valor or '').strip()
+    if not valor:
+        return None
+    try:
+        return float(valor)
+    except ValueError:
+        return None
+
+
 # ⚙️ CONFIGURACIÓN DE ÁREAS, SEDES Y CATEGORÍAS (solo equipo de soporte). Estos valores
 # alimentan los desplegables al crear una solicitud y los filtros de la lista de tickets.
 @app.route('/tickets/configuracion')
@@ -7954,6 +7995,9 @@ def crear_configuracion_ticket():
     responsable = request.form.get('responsable', '').strip() or None
     nit = request.form.get('nit', '').strip() or None
     razon_social = request.form.get('razon_social', '').strip() or None
+    # 📍 Latitud/longitud solo aplican a Sedes (ver _sede_mas_cercana en usuarios.html).
+    latitud = _coordenada_valida(request.form.get('latitud')) if tipo == 'sede' else None
+    longitud = _coordenada_valida(request.form.get('longitud')) if tipo == 'sede' else None
     if tipo not in ('sede', 'area'):
         direccion = None
     if tipo not in ('sede', 'area', 'categoria'):
@@ -7965,8 +8009,8 @@ def crear_configuracion_ticket():
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social) VALUES (%s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social) VALUES (?, ?, ?, ?, ?, ?)"
-            cursor.execute(q, (tipo, nombre, direccion, responsable, nit, razon_social))
+            q = "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO ticket_configuraciones (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            cursor.execute(q, (tipo, nombre, direccion, responsable, nit, razon_social, latitud, longitud))
             conn.commit()
             detalle = f"Se agregó {tipo} '{nombre}'"
             if tipo in ('sede', 'area') and (direccion or responsable):
@@ -7997,11 +8041,17 @@ def editar_configuracion_ticket(config_id):
 
             if tipo_actual in ('sede', 'area'):
                 # 📍 Sedes y Áreas tienen dirección y responsable; sus formularios envían
-                # estos dos campos junto con el nombre.
+                # estos dos campos junto con el nombre. Latitud/longitud solo aplican a Sedes.
                 direccion = request.form.get('direccion', '').strip() or None
                 responsable = request.form.get('responsable', '').strip() or None
-                q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
-                cursor.execute(q, (nombre, direccion, responsable, config_id))
+                if tipo_actual == 'sede':
+                    latitud = _coordenada_valida(request.form.get('latitud'))
+                    longitud = _coordenada_valida(request.form.get('longitud'))
+                    q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s, latitud = %s, longitud = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ?, latitud = ?, longitud = ? WHERE id = ?"
+                    cursor.execute(q, (nombre, direccion, responsable, latitud, longitud, config_id))
+                else:
+                    q = "UPDATE ticket_configuraciones SET nombre = %s, direccion = %s, responsable = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE ticket_configuraciones SET nombre = ?, direccion = ?, responsable = ? WHERE id = ?"
+                    cursor.execute(q, (nombre, direccion, responsable, config_id))
                 etiqueta_tipo = 'sede' if tipo_actual == 'sede' else 'área'
                 detalle = f"Se editó la {etiqueta_tipo} '{nombre}' (dirección: {direccion or 'sin especificar'}, responsable: {responsable or 'sin asignar'})"
             elif tipo_actual == 'categoria':
@@ -13986,6 +14036,10 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     nuevo_telefono = (datos.get('telefono') or '').strip() or None
     nueva_cedula = (datos.get('cedula') or '').strip() or None
     nueva_especialidad = (datos.get('especialidad') or '').strip() or None
+    # 🏢 Sede asignada a la cuenta (catálogo de /tickets/configuracion → Sedes; se preselecciona
+    # sola en el formulario según la sede más cercana a la ubicación detectada, ver
+    # _sede_mas_cercana en usuarios.html, pero sigue siendo un campo editable/opcional).
+    nueva_sede = (datos.get('sede') or '').strip() or None
     nuevo_rol = datos.get('rol') or 'estandar'
     if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
         nuevo_rol = 'estandar'
@@ -14018,8 +14072,8 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
         nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
         nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
         nuevo_hash = generate_password_hash(nuevo_pass)
-        q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, 1, ?)"
-        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, firma_url))
+        q_ins = "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, 1, ?)"
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, firma_url))
         conn.commit()
         registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
 
@@ -14097,6 +14151,7 @@ def gestion_usuarios():
             'telefono': (request.form.get('telefono') or '').strip() or None,
             'cedula': (request.form.get('cedula') or '').strip() or None,
             'especialidad': (request.form.get('especialidad') or '').strip() or None,
+            'sede': (request.form.get('sede') or '').strip() or None,
         }
         error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
             {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl')},
@@ -14123,7 +14178,11 @@ def gestion_usuarios():
         'usuarios.html', usuarios=lista_usuarios, busqueda="", error=error, form_data=form_data,
         usuario_creado=usuario_creado, especialidades=_catalogo_especialidades_activas(),
         error_cedula=error_cedula, error_pass_corta=error_pass_corta,
-        longitud_minima_password=LONGITUD_MINIMA_PASSWORD_CUENTA
+        longitud_minima_password=LONGITUD_MINIMA_PASSWORD_CUENTA,
+        # 📍 Catálogo de Sedes (con lat/lng, cuando ya se cargaron desde /tickets/configuracion)
+        # para preseleccionar sola la sede más cercana a la ubicación detectada — ver
+        # _sede_mas_cercana en usuarios.html.
+        sedes=_config_ticket_lista('sede')
     )
 
 
