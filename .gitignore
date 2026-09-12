@@ -7,6 +7,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Entorno virtual local usado solo para correr la suite de pruebas en este entorno de trabajo
+# (no es parte del código de la app ni se despliega a Render).
+.venv/
+
 # Variables de entorno locales, si alguna vez se usa un archivo .env
 .env
 
