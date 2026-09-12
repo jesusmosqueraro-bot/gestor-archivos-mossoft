@@ -2014,10 +2014,28 @@ def registrar_geolocalizacion_login(usuario, ip, latitud, longitud):
 # legible ("Chrome en Windows") en vez del header crudo.
 def _obtener_ip_cliente():
     """Preferimos X-Forwarded-For (la IP real del visitante, que agrega el proxy de Render)
-    porque request.remote_addr, detrás de ese proxy, siempre muestra la IP interna del balanceador."""
+    porque request.remote_addr, detrás de ese proxy, siempre muestra la IP interna del balanceador.
+
+    🔒 Hallazgo crítico de auditoría de seguridad (12/09/2026, reportado por Tomás): tomar el
+    PRIMER valor de X-Forwarded-For (xff.split(',')[0]) permitía saltarse por completo el límite
+    de 5 intentos/minuto de /login (Flask-Limiter usa esta misma función como key_func) — un
+    cliente puede mandar su propio header 'X-Forwarded-For' con cualquier IP falsa distinta en
+    cada petición (no está en la lista de headers prohibidos de fetch()/curl, cualquiera puede
+    ponerlo), y Render, al recibir la petición, AGREGA la IP real al final de ese header en vez
+    de reemplazarlo — quedando algo como 'X-Forwarded-For: <ip-falsa-del-cliente>, <ip-real-que-
+    vio-Render>'. Leer el primer valor devolvía la IP falsa (distinta en cada intento, así que
+    Flask-Limiter los contaba como "visitantes" distintos y nunca frenaba), en vez de la real.
+    Confirmado en producción con fetch() desde el navegador: 8 POST a /login con un
+    X-Forwarded-For distinto en cada uno devolvieron 200 las 8 veces (nunca 429); con el mismo
+    ataque pero SIN falsificar el header, ya al 5to intento respondía 429 como se esperaba.
+
+    Arreglo: como Arkiv corre detrás de un único proxy de confianza (el balanceador de Render,
+    sin ningún CDN/proxy propio delante), el valor de confianza es el ÚLTIMO de la lista — el
+    que Render agregó al final con la IP que él mismo vio en la conexión TCP — nunca el primero,
+    que puede venir ya falsificado por quien hizo la petición."""
     xff = request.headers.get('X-Forwarded-For', '')
     if xff:
-        return xff.split(',')[0].strip()
+        return xff.split(',')[-1].strip()
     return request.remote_addr or ''
 
 def _detectar_dispositivo(user_agent):
