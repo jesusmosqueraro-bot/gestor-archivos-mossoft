@@ -65,7 +65,8 @@ def test_logs_paginacion_con_pagina_invalida_no_rompe(admin_session):
 
 
 def test_login_respeta_limite_de_peticiones_por_minuto(client, app, monkeypatch):
-    """Hallazgo QA H-08: /login está limitado a 20 peticiones POST por minuto por IP."""
+    """Hallazgo QA H-08: /login está limitado a 5 peticiones POST por minuto por IP (endurecido
+    desde 20, específicamente contra fuerza bruta de contraseñas)."""
     monkeypatch.setattr(app, 'verificar_recaptcha', lambda token: False)  # no importa el resultado, solo contar peticiones
 
     codigos = [client.post('/login', data={'usuario': 'x', 'password': 'y'}).status_code for _ in range(25)]

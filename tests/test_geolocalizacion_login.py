@@ -1,0 +1,140 @@
+"""Pruebas de la geolocalización de inicio de sesión (pedido por Tomás, 12/09/2026):
+capturar fecha/hora + lat/lon de cada login exitoso y ofrecer una vista en mapa para
+verificar que el acceso ocurrió desde la sede/área correspondiente.
+
+La geolocalización es "mejor esfuerzo": nunca debe bloquear el login, y debe quedar NULL en
+la base de datos si el navegador no la envía (permiso denegado, navegador sin soporte, o
+usuario que no pasó por el JS del formulario — como estas pruebas, que llaman a /login
+directamente sin ejecutar el script de login.html)."""
+from werkzeug.security import generate_password_hash
+
+
+def _forzar_recaptcha_ok(monkeypatch, app):
+    monkeypatch.setattr(app, 'verificar_recaptcha', lambda token: True)
+
+
+def _ultima_geolocalizacion(app, usuario):
+    conn, db_type = app.get_db()
+    cursor = conn.cursor()
+    query = (
+        "SELECT usuario, ip, latitud, longitud, fecha FROM login_geolocalizacion "
+        "WHERE usuario = %s ORDER BY id DESC LIMIT 1"
+        if db_type == 'postgres' else
+        "SELECT usuario, ip, latitud, longitud, fecha FROM login_geolocalizacion "
+        "WHERE usuario = ? ORDER BY id DESC LIMIT 1"
+    )
+    cursor.execute(query, (usuario,))
+    fila = cursor.fetchone()
+    conn.close()
+    return fila
+
+
+def test_login_exitoso_sin_coordenadas_registra_geolocalizacion_con_lat_lon_nulos(client, app, crear_usuario, monkeypatch):
+    """Si el navegador no envía latitud/longitud (permiso denegado, sin soporte, o —como en esta
+    prueba— un cliente que no ejecutó el script de login.html), el login debe seguir
+    funcionando igual, y la fila en login_geolocalizacion debe quedar con lat/lon en NULL."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+
+    r = client.post('/login', data={'usuario': usuario, 'password': 'ClaveSegura123'}, follow_redirects=False)
+
+    assert r.status_code == 302
+    assert '/bienvenida' in r.headers.get('Location', '')
+    fila = _ultima_geolocalizacion(app, usuario)
+    assert fila is not None, "El login exitoso debía registrar una fila en login_geolocalizacion"
+    _, ip, lat, lng, fecha = fila
+    assert lat is None and lng is None
+    assert fecha
+
+
+def test_login_exitoso_con_coordenadas_las_guarda_correctamente(client, app, crear_usuario, monkeypatch):
+    """Cuando login.html sí logra obtener la ubicación, los dos campos ocultos 'latitud'/
+    'longitud' viajan en el mismo POST de /login y deben guardarse tal cual (numéricos)."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+
+    r = client.post('/login', data={
+        'usuario': usuario, 'password': 'ClaveSegura123',
+        'latitud': '4.710989', 'longitud': '-74.072092',
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    fila = _ultima_geolocalizacion(app, usuario)
+    assert fila is not None
+    _, ip, lat, lng, fecha = fila
+    assert round(float(lat), 6) == 4.710989
+    assert round(float(lng), 6) == -74.072092
+
+
+def test_login_con_coordenadas_invalidas_no_revienta_y_guarda_nulo(client, app, crear_usuario, monkeypatch):
+    """Un campo manipulado o corrupto (no numérico) no debe tumbar el login: la geolocalización
+    es informativa, nunca un requisito para poder entrar."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+
+    r = client.post('/login', data={
+        'usuario': usuario, 'password': 'ClaveSegura123',
+        'latitud': 'no-es-un-numero', 'longitud': 'tampoco',
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    fila = _ultima_geolocalizacion(app, usuario)
+    assert fila is not None
+    _, ip, lat, lng, fecha = fila
+    assert lat is None and lng is None
+
+
+def test_login_contrasena_incorrecta_no_registra_geolocalizacion(client, app, crear_usuario, monkeypatch):
+    """Solo un login EXITOSO debe quedar en login_geolocalizacion — de lo contrario cualquiera
+    podría llenar la tabla con intentos fallidos con coordenadas arbitrarias."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+
+    client.post('/login', data={
+        'usuario': usuario, 'password': 'clave-equivocada',
+        'latitud': '4.710989', 'longitud': '-74.072092',
+    })
+
+    assert _ultima_geolocalizacion(app, usuario) is None
+
+
+def test_admin_geolocalizacion_requiere_rol_admin(client, app, crear_usuario):
+    """Un usuario estándar autenticado no debe poder ver el mapa de accesos de todos."""
+    usuario = crear_usuario(rol='estandar')
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['username'] = usuario
+        sess['rol'] = 'estandar'
+        sess['instance_id'] = app.SERVER_INSTANCE_ID
+        sess['debe_cambiar_password'] = False
+        sess['debe_activar_2fa'] = False
+
+    r = client.get('/admin/geolocalizacion', follow_redirects=False)
+
+    assert r.status_code == 302
+    assert 'geolocalizacion' not in r.headers.get('Location', '')
+
+
+def test_admin_geolocalizacion_requiere_sesion_iniciada(client):
+    r = client.get('/admin/geolocalizacion', follow_redirects=False)
+    assert r.status_code == 302
+    assert '/login' in r.headers.get('Location', '')
+
+
+def test_admin_geolocalizacion_muestra_los_accesos_registrados(admin_session, app, crear_usuario, monkeypatch):
+    """La vista /admin/geolocalizacion (solo admin) debe listar los inicios de sesión con
+    ubicación y pintar el mapa Leaflet con las sedes autorizadas."""
+    _forzar_recaptcha_ok(monkeypatch, app)
+    usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
+    app.app.test_client().post('/login', data={
+        'usuario': usuario, 'password': 'ClaveSegura123',
+        'latitud': '4.710989', 'longitud': '-74.072092',
+    })
+
+    r = admin_session.get('/admin/geolocalizacion')
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert usuario in texto
+    assert 'leaflet' in texto.lower()
+    assert 'Sede Principal' in texto
