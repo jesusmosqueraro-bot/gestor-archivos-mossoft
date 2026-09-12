@@ -1180,7 +1180,12 @@ def init_db():
                 # correo en Correo, un ID numérico en Wolkvox...) — se guarda aparte de la
                 # contraseña compartida, un valor por fila (colaborador, aplicativo). Ver
                 # crear_credencial_colaborador/editar_credencial_colaborador.
-                "ALTER TABLE credenciales_colaboradores ADD COLUMN IF NOT EXISTS usuario_aplicativo VARCHAR(150);"
+                "ALTER TABLE credenciales_colaboradores ADD COLUMN IF NOT EXISTS usuario_aplicativo VARCHAR(150);",
+                # 🎨 Color de fondo/tarjeta personalizado del Muro de Comunicados (pedido por
+                # Tomás, 12/09/2026, manual de marca de Preventiva): NULL/'' usa el estilo por
+                # defecto de la tarjeta. Se valida como hex de 6 dígitos antes de guardarse — ver
+                # _color_comunicado_valido()/crear_comunicado()/editar_comunicado().
+                "ALTER TABLE comunicados ADD COLUMN IF NOT EXISTS color VARCHAR(20);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1451,7 +1456,10 @@ def init_db():
                 "ALTER TABLE comunicados ADD COLUMN recordatorio_enviado_fecha TEXT;",
                 # 👁️ Visibilidad del Comunicado (pedido por Tomás, igual que 'visibilidad' en
                 # Instructivos): 'todos' o 'admin'. Ver comentario equivalente en la rama de Postgres.
-                "ALTER TABLE comunicados ADD COLUMN visibilidad TEXT DEFAULT 'todos';"
+                "ALTER TABLE comunicados ADD COLUMN visibilidad TEXT DEFAULT 'todos';",
+                # 🎨 Color de fondo/tarjeta personalizado (manual de marca). Ver comentario
+                # equivalente en la rama de Postgres.
+                "ALTER TABLE comunicados ADD COLUMN color TEXT;"
             ]:
                 try:
                     cursor.execute(col_comunicado_sql)
@@ -3174,19 +3182,33 @@ def eliminar_respaldo(nombre):
 
 
 # 📢 MÓDULO MURO DE COMUNICADOS
+_PATRON_COLOR_HEX = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _color_comunicado_valido(color):
+    """Valida el color de fondo/tarjeta personalizado del Muro de Comunicados (manual de marca
+    de Preventiva, pedido por Tomás, 12/09/2026): solo se acepta un hex de 6 dígitos con '#'
+    (lo que manda tanto un <input type="color"> como los presets de la paleta institucional);
+    cualquier otra cosa —vacío, texto suelto, o un intento de inyectar CSS/HTML— se descarta
+    silenciosamente a favor de '' (sin color personalizado, la tarjeta usa su estilo por
+    defecto)."""
+    color = (color or '').strip()
+    return color if _PATRON_COLOR_HEX.match(color) else ''
+
+
 @app.route('/comunicados')
 @login_required
 def ver_comunicados():
     pestana = request.args.get('tab', 'activos')
     q_busqueda = request.args.get('q', '').strip().lower()
-    
+
     conn, db_type = get_db()
     cursor = conn.cursor()
-    
+
     estado_filtro = 'activo' if pestana == 'activos' else 'archivado'
-    
+
     try:
-        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
+        query = "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad, color FROM comunicados WHERE estado = %s ORDER BY fijado DESC, id DESC" if db_type == 'postgres' else "SELECT id, titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad, color FROM comunicados WHERE estado = ? ORDER BY fijado DESC, id DESC"
         cursor.execute(query, (estado_filtro,))
         rows = cursor.fetchall()
     except Exception as e:
@@ -3206,7 +3228,7 @@ def ver_comunicados():
 
     comunicados = []
     for r in rows:
-        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor, visibilidad = r
+        c_id, titulo, contenido, nivel, fijado, img_url, estado, fecha, autor, visibilidad, color = r
         if (visibilidad or 'todos') == 'admin' and not es_soporte:
             continue
         texto_full = f"{titulo} {contenido} {autor}".lower()
@@ -3221,7 +3243,8 @@ def ver_comunicados():
                 'estado': estado,
                 'fecha': fecha,
                 'autor': _nombre_para_mostrar(autor, nombres_usuarios),
-                'visibilidad': visibilidad or 'todos'
+                'visibilidad': visibilidad or 'todos',
+                'color': color or ''
             })
 
     # 👁️ Ver el muro de Comunicados marca como "leídos" todos los que están activos (no los
@@ -3265,6 +3288,10 @@ def crear_comunicado():
     visibilidad = (request.form.get('visibilidad') or 'todos').strip()
     if visibilidad not in ('todos', 'admin'):
         visibilidad = 'todos'
+    # 🎨 Color de fondo/tarjeta personalizado (manual de marca de Preventiva, pedido por Tomás,
+    # 12/09/2026) — ver _color_comunicado_valido(). '' = sin personalizar, usa el estilo por
+    # defecto de la tarjeta.
+    color = _color_comunicado_valido(request.form.get('color', ''))
     imagen = request.files.get('imagen')
 
     imagen_url = ""
@@ -3293,8 +3320,8 @@ def crear_comunicado():
         conn, db_type = get_db()
         cursor = conn.cursor()
         try:
-            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
-            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor, visibilidad))
+            q_ins = "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad, color) VALUES (%s, %s, %s, %s, %s, 'activo', %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO comunicados (titulo, contenido, nivel, fijado, imagen_url, estado, fecha, autor, visibilidad, color) VALUES (?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?)"
+            cursor.execute(q_ins, (titulo, contenido, nivel, fijado, imagen_url, fecha_act, autor, visibilidad, color))
             conn.commit()
             registrar_log(autor, "Publicación de Comunicado", f"Nuevo comunicado: '{titulo}' [{nivel}] (visibilidad: {'solo Admin/Agente' if visibilidad == 'admin' else 'todos los usuarios'})")
             if error_imagen:
@@ -3347,6 +3374,8 @@ def editar_comunicado(com_id):
         visibilidad = (request.form.get('visibilidad') or 'todos').strip()
         if visibilidad not in ('todos', 'admin'):
             visibilidad = 'todos'
+        # 🎨 Color de fondo/tarjeta personalizado — ver comentario equivalente en crear_comunicado().
+        color = _color_comunicado_valido(request.form.get('color', ''))
         imagen = request.files.get('imagen')
 
         if not titulo or not contenido or _html_esta_vacio(contenido):
@@ -3373,8 +3402,8 @@ def editar_comunicado(com_id):
                              f"permitido o su contenido no coincide con su extensión (posible "
                              f"archivo renombrado o corrupto). Se conservó la imagen anterior.")
 
-        q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s, visibilidad = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ?, visibilidad = ? WHERE id = ?"
-        cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, visibilidad, com_id))
+        q_upd = "UPDATE comunicados SET titulo = %s, contenido = %s, nivel = %s, fijado = %s, imagen_url = %s, visibilidad = %s, color = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE comunicados SET titulo = ?, contenido = ?, nivel = ?, fijado = ?, imagen_url = ?, visibilidad = ?, color = ? WHERE id = ?"
+        cursor.execute(q_upd, (titulo, contenido, nivel, fijado, imagen_url, visibilidad, color, com_id))
         conn.commit()
         registrar_log(session.get('username'), "Edición de Comunicado", f"Comunicado '{titulo}' (ID {com_id}) actualizado")
         if error_imagen:
