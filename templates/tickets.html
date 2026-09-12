@@ -23,7 +23,9 @@
     <link rel="stylesheet" href="/static/css/marca-institucional.css">
     {% include 'partials/colores_modal_personalizados.html' %}
 </head>
-<body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+<!-- overflow-x-hidden: evita una franja de scroll horizontal de un par de píxeles causada por
+     la técnica "full-bleed breakout" de la tabla de tickets (ver comentario junto a esa tabla) -->
+<body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col overflow-x-hidden">
 
     <!-- NAVBAR -->
     <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
@@ -70,7 +72,7 @@
 
     <!-- SUB-NAV DEL MÓDULO -->
     <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
-        <div class="max-w-[1600px] mx-auto flex items-center gap-1 overflow-x-auto">
+        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
             <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
             <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>{% if es_soporte %}Todas las Solicitudes{% else %}Mis Solicitudes{% endif %}</a>
             <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
@@ -85,13 +87,7 @@
     </div>
 
     <!-- CONTENIDO -->
-    <!-- 📐 Ancho ampliado (pedido por Tomás, 12/09/2026, sobre "Todas las Solicitudes"): la
-         tabla de tickets tiene muchas columnas (Tipo, Título, Categoría, Área/Sede, Prioridad,
-         Estado, SLA, Progreso, Creado por, Asignado a, Actualizado) y con max-w-7xl (1280px) se
-         veía apretada, obligando a scroll horizontal incluso en monitores anchos. max-w-[1600px]
-         le da más aire sin perder el centrado; el sub-nav de arriba (línea ~73) usa el mismo
-         ancho para que ambos sigan alineados. -->
-    <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
         <!-- PESTAÑAS DE CUMPLIMIENTO DE SLA -->
         <div class="flex items-center gap-2 overflow-x-auto pb-1">
@@ -179,8 +175,17 @@
         </form>
 
         <!-- TABLA DE TICKETS -->
+        <!-- 📐 Ancho ampliado SOLO de la tabla (pedido por Tomás, 12/09/2026: "que se amplié
+             solo la tabla no el texto"). El intento anterior ensanchaba <main> completo
+             (max-w-[1600px]), lo que también ensanchaba la barra de filtros y el sub-nav —
+             rechazado por el usuario. Esta vez <main> y el sub-nav vuelven a max-w-7xl (ancho
+             normal de lectura) y SOLO el contenedor de la tabla se "escapa" de ese ancho con la
+             técnica de "full-bleed breakout": width 100vw (relativo al viewport, no al padre) +
+             left 50% + margin-left -50vw, que centra el contenedor en la pantalla sin importar
+             el ancho de <main>. max-w-[1600px] limita qué tanto crece en monitores enormes. -->
+        <div class="w-screen max-w-[1600px] relative left-1/2 -translate-x-1/2 px-4 sm:px-6 lg:px-8">
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
-            <table class="w-full text-left text-xs text-slate-300">
+            <table class="w-full text-left text-xs text-slate-300" data-tabla-interactiva="tickets">
                 <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
                     <tr>
                         <th class="pb-3 px-3 font-bold">#</th>
@@ -272,6 +277,7 @@
                     {% endif %}
                 </tbody>
             </table>
+        </div>
         </div>
 
     </main>
@@ -704,5 +710,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <!-- 🧰 Reordenar/filtrar/ocultar columnas en la tabla de tickets (pedido por Tomás,
+         12/09/2026: "habilita en arkiv en todas las tablas que existan, en los encabezados,
+         funciones como poder reordenar, filtrar, ocultar") — ver static/js/tabla-interactiva.js -->
+    <script src="/static/js/tabla-interactiva.js"></script>
 </body>
 </html>

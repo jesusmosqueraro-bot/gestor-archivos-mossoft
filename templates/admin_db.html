@@ -114,7 +114,7 @@
             </div>
 
             <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs text-slate-300">
+                <table class="w-full text-left text-xs text-slate-300" data-tabla-interactiva="admin-db-{{ tabla or 'consulta' }}">
                     <thead class="bg-slate-900/80 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-700/60">
                         <tr>
                             {% for col in columnas %}
@@ -164,5 +164,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <!-- 🧰 Reordenar/filtrar/ocultar columnas (pedido por Tomás, 12/09/2026) — ver
+         static/js/tabla-interactiva.js. Aquí es aún más útil: cada tabla de la base de datos
+         tiene sus propias columnas y su propia preferencia guardada (admin-db-{{ tabla }}). -->
+    <script src="/static/js/tabla-interactiva.js"></script>
 </body>
 </html>
