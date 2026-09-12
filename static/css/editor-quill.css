@@ -96,3 +96,51 @@ html[data-theme="claro"] .ql-snow.ql-toolbar button.ql-active .ql-fill {
 html[data-theme="claro"] .ql-snow .ql-picker-item:hover {
     color: #ea580c;
 }
+
+/* Tema "Descansar la vista": faltaba por completo (bug reportado por Tomás 12/09/2026 — el
+   texto escrito en la caja de respuesta de un ticket se veía casi invisible en este tema: sin
+   este bloque, el fondo de .ql-editor SÍ quedaba sepia claro por las reglas genéricas de
+   tema-descanso.css (heredadas del div contenedor bg-slate-900), pero el color de TEXTO seguía
+   siendo el valor oscuro-por-defecto de arriba (#e2e8f0, pensado para fondo oscuro) porque Quill
+   pone ese color directo sobre .ql-editor, con más especificidad que la herencia — texto claro
+   sobre fondo claro). Los valores de abajo son los mismos de arriba pasados por el mismo filtro
+   sepia que usa scripts/generar_tema_descanso.py sobre tema-claro.css (mezcla con los mismos
+   tonos de referencia café/crema/tostado para texto/fondo/borde), para que la caja del editor
+   se sienta del mismo tema que el resto de la página. Igual que con tema-claro.css, este bloque
+   se debe actualizar a mano si algún día cambian los valores del bloque claro de arriba (este
+   archivo no lo genera el script porque no es una hoja basada en clases Tailwind). */
+html[data-theme="descanso"] .ql-toolbar.ql-snow,
+html[data-theme="descanso"] .ql-container.ql-snow {
+    border-color: #d0cec0;
+    background-color: #efe9d9;
+}
+html[data-theme="descanso"] .ql-editor {
+    color: #3a322e;
+}
+html[data-theme="descanso"] .ql-editor.ql-blank::before {
+    color: #504a48;
+}
+html[data-theme="descanso"] .ql-snow .ql-stroke {
+    stroke: #504a48;
+}
+html[data-theme="descanso"] .ql-snow .ql-fill {
+    fill: #504a48;
+}
+html[data-theme="descanso"] .ql-snow .ql-picker {
+    color: #504a48;
+}
+html[data-theme="descanso"] .ql-snow .ql-picker-options {
+    background-color: #efe9d9;
+    border-color: #d0cec0 !important;
+}
+html[data-theme="descanso"] .ql-snow.ql-toolbar button:hover .ql-stroke,
+html[data-theme="descanso"] .ql-snow.ql-toolbar button.ql-active .ql-stroke {
+    stroke: #aa4c15;
+}
+html[data-theme="descanso"] .ql-snow.ql-toolbar button:hover .ql-fill,
+html[data-theme="descanso"] .ql-snow.ql-toolbar button.ql-active .ql-fill {
+    fill: #aa4c15;
+}
+html[data-theme="descanso"] .ql-snow .ql-picker-item:hover {
+    color: #aa4c15;
+}

@@ -142,6 +142,27 @@ html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-800
     background-color: #e2e8f0 !important;
 }
 
+/* 🌑 Velo oscuro del modal (bg-slate-950/80, /90 en el wrapper "fixed inset-0" mismo, no en un
+   descendiente): debe quedarse oscuro en LOS 3 TEMAS, a propósito (un fondo semitransparente
+   oscuro detrás de una tarjeta clara se ve bien tanto en oscuro/descanso, donde ya es su color
+   nativo, como en claro). El problema (hallado 12/09/2026, ver captura de Tomás del <thead> de
+   Usuarios) es que tema-claro.css/tema-descanso.css ahora SÍ convierten bg-slate-950/80 y /90 de
+   forma genérica, porque esas mismas clases de Tailwind también las usan elementos que nada
+   tienen que ver con el velo del modal (esa tabla). La solución no es dejar de convertirlas
+   ahí (eso volvería a romper el <thead>), sino restaurar el oscuro puntualmente aquí, con un
+   selector que solo hace match sobre el DIV que es a la vez "fixed inset-0" Y trae esa clase de
+   fondo — nunca sobre un <thead>, tarjeta u otro elemento que solo tenga la clase de fondo sin
+   ser el wrapper del modal. Como este archivo se enlaza al final de cada <head> (después de
+   tema-claro.css y tema-descanso.css), gana la cascada con la misma especificidad. */
+html[data-theme="claro"] div[class*="fixed inset-0"][class*="bg-slate-950/80"],
+html[data-theme="descanso"] div[class*="fixed inset-0"][class*="bg-slate-950/80"] {
+    background-color: rgba(2, 6, 23, 0.8) !important;
+}
+html[data-theme="claro"] div[class*="fixed inset-0"][class*="bg-slate-950/90"],
+html[data-theme="descanso"] div[class*="fixed inset-0"][class*="bg-slate-950/90"] {
+    background-color: rgba(2, 6, 23, 0.9) !important;
+}
+
 /* 🪟 Por si en el futuro se agrega algún modal/diálogo con clases genéricas en vez del wrapper
    de Arkiv (Tailwind puro no las usa hoy, pero quedan cubiertas si aparecen). Fallback en la
    paleta clara de /login, igual que el resto de este bloque. */
