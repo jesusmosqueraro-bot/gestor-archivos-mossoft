@@ -272,6 +272,85 @@ def test_admin_ve_entradas_personales_en_boveda_institucional(admin_session, app
     assert b'Auditable Por Admin' in r.data
 
 
+# 🐛 Hallazgo reportado por Tomás (video adjunto, 12/09/2026): abrir la Bóveda de Accesos
+# (/credenciales) tumbaba TODA la página con un 500 "Internal Server Error" en producción.
+# Traceback real (logs de Render): TypeError: 'datetime.datetime' object is not subscriptable,
+# en credenciales.html línea 131 (data-fecha="{{ item.fecha[:10] ... }}"). Causa: 'fecha_creacion'
+# es VARCHAR(100) en el esquema (ver CREATE TABLE credenciales en app.py), pero al menos una fila
+# real en Postgres tenía un datetime.datetime nativo guardado ahí en vez de texto — la plantilla
+# asumía que 'fecha' siempre era texto y podía cortarse con [:10].
+#
+# No se puede reproducir insertando un datetime.datetime "a mano" en sqlite (el propio módulo
+# sqlite3 de Python lo adapta a texto ISO automáticamente al guardarlo Y al leerlo de vuelta, así
+# que llegaría como str de todas formas — a diferencia de Postgres/psycopg2, donde una columna
+# TEXT/VARCHAR con ese valor puede volver como datetime.datetime real según cómo haya quedado
+# guardada la fila). Por eso esta prueba envuelve get_db() para que, SOLO en la consulta que arma
+# la lista de la Bóveda, la fila de esta credencial vuelva con un datetime.datetime real en la
+# posición de fecha_creacion — simulando exactamente la fila real de producción — y verifica que
+# la página ya no se caiga con eso.
+def test_credencial_con_fecha_datetime_nativo_no_rompe_la_boveda(admin_session, app, monkeypatch):
+    import datetime as _dt
+
+    titulo_marcador = 'Con Fecha Datetime Nativo'
+    fecha_datetime_real = _dt.datetime(2026, 1, 1, 10, 0, 0)
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    pass_cifrada = app.encriptar_texto('ClaveDeEjemplo1')
+    q = ("INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, etiquetas, tipo_item, contenido_seguro, propietario, visibilidad) "
+         "VALUES (%s, '', 'usr', %s, 'IT', '', '2026-01-01 10:00:00', 'activo', '', 'credencial', NULL, NULL, 'equipo')"
+         if db_type == 'postgres' else
+         "INSERT INTO credenciales (titulo, url_acceso, usuario_acceso, password_cifrada, area, notas, fecha_creacion, estado, etiquetas, tipo_item, contenido_seguro, propietario, visibilidad) "
+         "VALUES (?, '', 'usr', ?, 'IT', '', '2026-01-01 10:00:00', 'activo', '', 'credencial', NULL, NULL, 'equipo')")
+    cur.execute(q, (titulo_marcador, pass_cifrada))
+    conn.commit()
+    conn.close()
+
+    class _CursorQueSimulaDatetimeDePostgres:
+        """Envuelve el cursor real: deja pasar todo tal cual, salvo que en la fila de
+        'titulo_marcador' devuelta por la consulta de ver_credenciales() reemplaza el texto de
+        fecha_creacion (columna índice 6, ver el SELECT en ver_credenciales) por un
+        datetime.datetime real, como llegaría desde una fila así en Postgres."""
+        def __init__(self, cursor_real):
+            self._cursor_real = cursor_real
+
+        def __getattr__(self, nombre):
+            return getattr(self._cursor_real, nombre)
+
+        def fetchall(self):
+            filas = self._cursor_real.fetchall()
+            resultado = []
+            for fila in filas:
+                fila = list(fila)
+                if fila[1] == titulo_marcador:
+                    fila[6] = fecha_datetime_real
+                resultado.append(tuple(fila))
+            return resultado
+
+    class _ConexionQueSimulaDatetimeDePostgres:
+        def __init__(self, conexion_real):
+            self._conexion_real = conexion_real
+
+        def __getattr__(self, nombre):
+            return getattr(self._conexion_real, nombre)
+
+        def cursor(self):
+            return _CursorQueSimulaDatetimeDePostgres(self._conexion_real.cursor())
+
+    get_db_original = app.get_db
+
+    def _get_db_envuelto():
+        conexion, tipo_db = get_db_original()
+        return _ConexionQueSimulaDatetimeDePostgres(conexion), tipo_db
+
+    monkeypatch.setattr(app, 'get_db', _get_db_envuelto)
+
+    r = admin_session.get('/credenciales')
+
+    assert r.status_code == 200
+    assert titulo_marcador.encode() in r.data
+
+
 # 🐛 Hallazgo reportado por el usuario 'prueba_neon' (video adjunto): "No se guardan las
 # credenciales aquí" — al llenar "Nueva entrada" y darle Guardar, la página volvía a Mi Bóveda
 # Personal sin ningún aviso de error y la lista seguía vacía. Causa real: mi_boveda.html tiene
