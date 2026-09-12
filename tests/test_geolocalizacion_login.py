@@ -13,6 +13,17 @@ def _forzar_recaptcha_ok(monkeypatch, app):
     monkeypatch.setattr(app, 'verificar_recaptcha', lambda token: True)
 
 
+def _crear_sede(admin_session, nombre, lat, lng, radio_metros=None):
+    """Crea una Sede real en /tickets/configuracion (el catálogo que desde el 12/09/2026 también
+    usa /admin/geolocalizacion para el mapa y para clasificar dentro/fuera de sede — ya no el
+    placeholder SEDES_AUTORIZADAS)."""
+    data = {'tipo': 'sede', 'nombre': nombre, 'latitud': str(lat), 'longitud': str(lng)}
+    if radio_metros is not None:
+        data['radio_metros'] = str(radio_metros)
+    admin_session.post('/tickets/configuracion/nuevo', data=data)
+    return nombre
+
+
 def _ultima_geolocalizacion(app, usuario):
     conn, db_type = app.get_db()
     cursor = conn.cursor()
@@ -123,12 +134,14 @@ def test_admin_geolocalizacion_requiere_sesion_iniciada(client):
 
 def test_admin_geolocalizacion_muestra_los_accesos_registrados(admin_session, app, crear_usuario, monkeypatch):
     """La vista /admin/geolocalizacion (solo admin) debe listar los inicios de sesión con
-    ubicación y pintar el mapa Leaflet con las sedes autorizadas."""
+    ubicación y pintar el mapa Leaflet con las Sedes reales configuradas en
+    /tickets/configuracion (ya no con el placeholder SEDES_AUTORIZADAS)."""
     _forzar_recaptcha_ok(monkeypatch, app)
+    _crear_sede(admin_session, 'Sede De Prueba Mapa', 6.244203, -75.581215)
     usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
     app.app.test_client().post('/login', data={
         'usuario': usuario, 'password': 'ClaveSegura123',
-        'latitud': '4.710989', 'longitud': '-74.072092',
+        'latitud': '6.244203', 'longitud': '-75.581215',
     })
 
     r = admin_session.get('/admin/geolocalizacion')
@@ -137,22 +150,29 @@ def test_admin_geolocalizacion_muestra_los_accesos_registrados(admin_session, ap
     texto = r.get_data(as_text=True)
     assert usuario in texto
     assert 'leaflet' in texto.lower()
-    assert 'Sede Principal' in texto
+    assert 'Sede De Prueba Mapa' in texto
 
 
 def test_admin_geolocalizacion_clasifica_dentro_y_fuera_de_sede_en_las_metricas(admin_session, app, crear_usuario, monkeypatch):
     """Pedido de Tomás (12/09/2026): la vista debe mostrar métricas — aquí se verifica que un
-    login con las coordenadas exactas de una sede autorizada cuenta como 'dentro', y uno con
-    coordenadas muy lejanas cuenta como 'fuera' (SEDES_AUTORIZADAS usa un radio de 150 m)."""
+    login con las coordenadas exactas de una Sede real cuenta como 'dentro', y uno con
+    coordenadas muy lejanas cuenta como 'fuera' (radio_metros de la Sede: 200 m por defecto).
+    Antes esto se comparaba contra el placeholder SEDES_AUTORIZADAS (Bogotá), así que ningún
+    login fuera de esas coordenadas de ejemplo podía salir "dentro", sin importar la Sede real
+    configurada — caso reportado por Tomás con NUEVO NARANJAL en Medellín."""
     _forzar_recaptcha_ok(monkeypatch, app)
+    _crear_sede(admin_session, 'Sede De Prueba Metricas', 6.244203, -75.581215)
     usuario_dentro = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
     usuario_fuera = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
-    cliente_aux = app.app.test_client()
-    cliente_aux.post('/login', data={
+    # 🔧 Un cliente de prueba POR login: una vez el primero deja 'logged_in' en su sesión,
+    # before_request() intercepta cualquier POST siguiente a /login de ese mismo cliente y
+    # redirige derecho a /bienvenida sin ejecutar la vista (ver ENDPOINTS_SOLO_SIN_SESION) —
+    # reutilizar el mismo cliente para el segundo login lo dejaría sin registrar.
+    app.app.test_client().post('/login', data={
         'usuario': usuario_dentro, 'password': 'ClaveSegura123',
-        'latitud': '4.710989', 'longitud': '-74.072092',  # exactamente Sede Principal
+        'latitud': '6.244203', 'longitud': '-75.581215',  # exactamente la Sede de prueba
     })
-    cliente_aux.post('/login', data={
+    app.app.test_client().post('/login', data={
         'usuario': usuario_fuera, 'password': 'ClaveSegura123',
         'latitud': '10.0', 'longitud': '-70.0',  # muy lejos de cualquier sede
     })
@@ -161,7 +181,9 @@ def test_admin_geolocalizacion_clasifica_dentro_y_fuera_de_sede_en_las_metricas(
 
     assert r.status_code == 200
     texto = r.get_data(as_text=True)
-    assert '"sede": "Sede Principal"' in texto or '"sede":"Sede Principal"' in texto
+    assert '"sede": "Sede De Prueba Metricas"' in texto or '"sede":"Sede De Prueba Metricas"' in texto
+    assert '"dentro_de_sede": true' in texto or '"dentro_de_sede":true' in texto
+    assert '"dentro_de_sede": false' in texto or '"dentro_de_sede":false' in texto
 
 
 def test_admin_geolocalizacion_filtra_por_usuario(admin_session, app, crear_usuario, monkeypatch):
@@ -232,14 +254,15 @@ def test_resumen_geolocalizacion_requiere_sesion_iniciada(client):
 
 
 def test_resumen_geolocalizacion_devuelve_metricas_y_sedes(admin_session, app, crear_usuario, monkeypatch):
-    """El JSON debe traer las sedes autorizadas y reflejar en las métricas un acceso recién
-    registrado, para que el modal pueda pintar el mapa y las tarjetas de métricas sin tener
-    que llamar a la página completa."""
+    """El JSON debe traer las Sedes reales (con coordenadas cargadas) y reflejar en las métricas
+    un acceso recién registrado, para que el modal pueda pintar el mapa y las tarjetas de
+    métricas sin tener que llamar a la página completa."""
     _forzar_recaptcha_ok(monkeypatch, app)
+    _crear_sede(admin_session, 'Sede De Prueba Resumen', 6.244203, -75.581215)
     usuario = crear_usuario(password_hash=generate_password_hash('ClaveSegura123'), rol='estandar')
     app.app.test_client().post('/login', data={
         'usuario': usuario, 'password': 'ClaveSegura123',
-        'latitud': '4.710989', 'longitud': '-74.072092',  # exactamente Sede Principal
+        'latitud': '6.244203', 'longitud': '-75.581215',  # exactamente la Sede de prueba
     })
 
     r = admin_session.get('/admin/geolocalizacion/resumen')
@@ -247,7 +270,10 @@ def test_resumen_geolocalizacion_devuelve_metricas_y_sedes(admin_session, app, c
     assert r.status_code == 200
     datos = r.get_json()
     assert datos is not None
-    assert any(sede['nombre'] == 'Sede Principal' for sede in datos['sedes'])
+    assert any(sede['nombre'] == 'Sede De Prueba Resumen' for sede in datos['sedes'])
     assert datos['total_accesos'] >= 1
     assert datos['dentro_de_sede'] >= 1
-    assert any(reg['usuario'] == usuario and reg['sede'] == 'Sede Principal' for reg in datos['registros'])
+    assert any(
+        reg['usuario'] == usuario and reg['sede'] == 'Sede De Prueba Resumen' and reg['dentro_de_sede'] is True
+        for reg in datos['registros']
+    )
