@@ -39,65 +39,39 @@ body {
     font-family: var(--marca-fuente);
 }
 
-/* 🪟 Modales institucionales — homologados al estilo claro de /login (pedido de Tomás,
-   12/09/2026: "Homologa el diseño de todos los modales y tarjetas al estilo del login").
-   Todos los modales de Arkiv (confirmado por grep: 37 modales en 36 plantillas) comparten el
-   mismo wrapper "fixed inset-0" (con distintos tonos/opacidades de velo oscuro semitransparente
-   detrás según la plantilla: bg-slate-950/80, bg-slate-950/90, bg-black/80, bg-black/70 — por
-   eso el selector usa "fixed inset-0", no un color puntual, para llegar a los 4 casos con un
-   único selector). Ese velo se DEJA tal cual a propósito: solo oscurece la página detrás, no es
-   el modal en sí — el mismo recurso visual que ya usan la mayoría de apps claras. Lo que cambia
-   es el panel/tarjeta de adentro: pasa de bg-slate-800/900 (oscuro) a blanco, con bordes
-   suaves, esquinas de 1rem y tipografía en tonos oscuros en vez de claros — sin editar
-   plantilla por plantilla. !important porque Tailwind (CDN) inyecta su hoja de estilos en un
-   momento que no podemos garantizar que quede antes en la cascada. */
+/* 🪟 Modales institucionales — rediseño por tema (pedido de Tomás, 12/09/2026: "quiero que el
+   estilo del login sea así mismo de limpio para todos los modales en sus diferentes temas,
+   oscuro, claro y en reposo"). Todos los modales de Arkiv comparten el mismo wrapper
+   "fixed inset-0" (con distintos tonos/opacidades de velo detrás según la plantilla:
+   bg-slate-950/80, bg-slate-950/90, bg-black/80, bg-black/70 — por eso el selector usa
+   "fixed inset-0", no un color puntual, para llegar a los 4 casos con un único selector). Ese
+   velo se DEJA tal cual: solo oscurece la página detrás, no es el modal en sí.
+
+   🔧 Origen del rediseño: la primera versión (homologar modales al estilo claro de /login,
+   commit 89bfca5) forzaba SIEMPRE fondo blanco y texto oscuro en el panel del modal, sin mirar
+   el tema activo (html[data-theme]) — así que en 'oscuro' los modales salían blancos de golpe
+   en medio de una interfaz oscura, y en 'descanso' salían blanco-frío en vez del sepia cálido
+   de ese tema, rompiendo la consistencia que Arkiv ya cuidaba en el resto de cada página (ver
+   static/css/tema-claro.css / tema-descanso.css, que sí recolorean bg-slate-800/900 etc. según
+   el tema). Ahora:
+     · Estructura (radio de esquina + sombra + acentos de marca en azul/cian/naranja): igual en
+       los 3 temas, para que "cada modal sea igual" y se sienta de la misma familia que /login.
+     · Colores de fondo/texto: en 'oscuro' y 'descanso' NO se tocan aquí — se dejan heredar de
+       las clases Tailwind nativas (oscuro) o de tema-descanso.css (descanso), que ya cubren
+       bg-slate-800/900, texto y placeholders para CUALQUIER elemento con esas clases, modales
+       incluidos. En 'claro' sí se fuerza el blanco puro de /login (más "limpio" que el
+       #f8fafc genérico de tema-claro.css, a propósito: el modal es la pieza que más se
+       parece a la tarjeta de login, y el pedido de Tomás fue explícito en que el claro se
+       viera "muy parecido a como está implementada la paleta de colores en login"). */
 div[class*="fixed inset-0"] [class*="bg-slate-800"],
 div[class*="fixed inset-0"] [class*="bg-slate-900"] {
-    background-color: #ffffff !important;
-    border-color: #e2e8f0 !important;
     border-radius: 1rem !important;
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.35), 0 8px 10px -6px rgb(0 0 0 / 0.3) !important;
 }
-div[class*="fixed inset-0"] [class*="border-slate-600"],
-div[class*="fixed inset-0"] [class*="border-slate-700"],
-div[class*="fixed inset-0"] [class*="border-slate-800"],
-div[class*="fixed inset-0"] [class*="divide-slate-700"],
-div[class*="fixed inset-0"] [class*="divide-slate-800"] {
-    border-color: #e2e8f0 !important;
-}
-/* 🔤 Texto: de tonos claros (pensados para fondo oscuro) a tonos oscuros (para fondo blanco).
-   Los botones se excluyen y se restauran aparte más abajo: un botón primario azul/cian con
-   texto blanco debe seguir teniendo texto blanco, no oscuro. */
-div[class*="fixed inset-0"] [class*="text-white"] { color: #1e293b !important; }
-div[class*="fixed inset-0"] [class*="text-slate-100"],
-div[class*="fixed inset-0"] [class*="text-slate-200"],
-div[class*="fixed inset-0"] [class*="text-slate-300"] { color: #475569 !important; }
-div[class*="fixed inset-0"] [class*="text-slate-400"],
-div[class*="fixed inset-0"] [class*="text-slate-500"] { color: #64748b !important; }
-div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
-/* 📝 Inputs/selects/textareas de fondo oscuro -> blancos, con su texto ya oscurecido arriba. */
-div[class*="fixed inset-0"] input[class*="bg-slate-900"],
-div[class*="fixed inset-0"] input[class*="bg-slate-950"],
-div[class*="fixed inset-0"] select[class*="bg-slate-900"],
-div[class*="fixed inset-0"] select[class*="bg-slate-950"],
-div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
-div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
-    background-color: #ffffff !important;
-}
-div[class*="fixed inset-0"] input::placeholder,
-div[class*="fixed inset-0"] textarea::placeholder {
-    color: #94a3b8 !important;
-}
-/* 🔘 Botones secundarios (Cancelar, etc. — bg-slate-700/800 sin ser el primario azul/cian) a
-   gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca. */
-div[class*="fixed inset-0"] button[class*="bg-slate-700"],
-div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
-    background-color: #f1f5f9 !important;
-}
-div[class*="fixed inset-0"] button[class*="bg-slate-700"]:hover,
-div[class*="fixed inset-0"] button[class*="bg-slate-800"]:hover {
-    background-color: #e2e8f0 !important;
-}
-/* 🎨 Divisores/iconos de cabecera y botón primario en los colores de marca (igual que antes). */
+
+/* 🎨 Acentos de marca (divisores/iconos de cabecera y botón primario): iguales en los 3 temas,
+   para que el CTA azul institucional y los acentos cian/naranja no cambien de tono al cambiar
+   de tema — es la parte de "colores corporativos" que sí debe ser idéntica siempre. */
 div[class*="fixed inset-0"] [class*="border-slate-700/60"] {
     border-color: var(--marca-azul-primario) !important;
 }
@@ -118,8 +92,59 @@ div[class*="fixed inset-0"] button[class*="bg-blue-600"]:hover {
     background-color: var(--marca-azul-secundario) !important;
 }
 
+/* 🤍 Tema CLARO: paleta idéntica a /login (blanco puro, bordes #e2e8f0, texto en slate oscuro).
+   Solo dentro de modales — el resto de la app en tema claro sigue usando el #f8fafc algo más
+   gris de tema-claro.css; el modal es, a propósito, el elemento más "blanco y limpio" de la
+   página, igual que la tarjeta de /login. */
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="bg-slate-800"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="bg-slate-900"] {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+}
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-600"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-700"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-800"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="divide-slate-700"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="divide-slate-800"] {
+    border-color: #e2e8f0 !important;
+}
+/* 🔤 Texto: de tonos claros (pensados para fondo oscuro) a tonos oscuros (para fondo blanco).
+   Los botones se excluyen y se restauran aparte: un botón primario azul/cian con texto blanco
+   debe seguir teniendo texto blanco, no oscuro. */
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-white"] { color: #1e293b !important; }
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-100"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-200"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-300"] { color: #475569 !important; }
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-400"],
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-500"] { color: #64748b !important; }
+html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
+/* 📝 Inputs/selects/textareas de fondo oscuro -> blancos, con su texto ya oscurecido arriba. */
+html[data-theme="claro"] div[class*="fixed inset-0"] input[class*="bg-slate-900"],
+html[data-theme="claro"] div[class*="fixed inset-0"] input[class*="bg-slate-950"],
+html[data-theme="claro"] div[class*="fixed inset-0"] select[class*="bg-slate-900"],
+html[data-theme="claro"] div[class*="fixed inset-0"] select[class*="bg-slate-950"],
+html[data-theme="claro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
+html[data-theme="claro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
+    background-color: #ffffff !important;
+}
+html[data-theme="claro"] div[class*="fixed inset-0"] input::placeholder,
+html[data-theme="claro"] div[class*="fixed inset-0"] textarea::placeholder {
+    color: #94a3b8 !important;
+}
+/* 🔘 Botones secundarios (Cancelar, etc. — bg-slate-700/800 sin ser el primario azul/cian) a
+   gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca. */
+html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-700"],
+html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
+    background-color: #f1f5f9 !important;
+}
+html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-700"]:hover,
+html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-800"]:hover {
+    background-color: #e2e8f0 !important;
+}
+
 /* 🪟 Por si en el futuro se agrega algún modal/diálogo con clases genéricas en vez del wrapper
-   de Arkiv (Tailwind puro no las usa hoy, pero quedan cubiertas si aparecen). */
+   de Arkiv (Tailwind puro no las usa hoy, pero quedan cubiertas si aparecen). Fallback en la
+   paleta clara de /login, igual que el resto de este bloque. */
 .modal-content, .modal-box, dialog {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
