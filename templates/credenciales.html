@@ -83,6 +83,31 @@
                 </select>
             </form>
             {% endif %}
+
+            <!-- 🔎 Filtros dinámicos (tipo de nota, categoría, fecha): 100% client-side sobre
+                 las tarjetas ya renderizadas (ver data-tipo/data-categoria/data-fecha en cada
+                 tarjeta y el script filtrarBoveda() al final de la página) — no recargan la
+                 página ni golpean la base de datos. -->
+            <select id="filtro-tipo" onchange="filtrarBoveda()" class="bg-slate-800/90 border border-slate-700/70 rounded-2xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                <option value="">Personal y equipo</option>
+                <option value="personal">Solo personal</option>
+                <option value="equipo">Solo equipo</option>
+            </select>
+
+            {% if todas_las_categorias %}
+            <select id="filtro-categoria" onchange="filtrarBoveda()" class="bg-slate-800/90 border border-slate-700/70 rounded-2xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                <option value="">Todas las categorías</option>
+                {% for cat in todas_las_categorias %}
+                <option value="{{ cat }}">{{ cat }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+
+            <input type="date" id="filtro-fecha" onchange="filtrarBoveda()" class="bg-slate-800/90 border border-slate-700/70 rounded-2xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+
+            <button type="button" onclick="limpiarFiltrosBoveda()" class="text-[11px] text-slate-400 hover:text-blue-400 font-bold px-2">
+                <i class="fa-solid fa-filter-circle-xmark"></i> Limpiar filtros
+            </button>
         </div>
 
         <!-- NOTIFICACIÓN TOAST -->
@@ -93,10 +118,11 @@
 
         <!-- GRID DE TARJETAS -->
         {% if credenciales %}
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div id="grid-credenciales" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {% for item in credenciales %}
-                    <div class="bg-slate-800/60 border border-slate-700/60 hover:border-slate-600/80 rounded-3xl p-5 flex flex-col justify-between shadow-lg transition-all hover:shadow-xl">
-                        
+                    <div class="tarjeta-credencial bg-slate-800/60 border border-slate-700/60 hover:border-slate-600/80 rounded-3xl p-5 flex flex-col justify-between shadow-lg transition-all hover:shadow-xl"
+                         data-tipo="{{ item.visibilidad }}" data-categoria="{{ item.categoria }}" data-fecha="{{ item.fecha[:10] if item.fecha else '' }}">
+
                         <div>
                             <div class="flex items-start justify-between gap-3 mb-3">
                                 <div>
@@ -248,6 +274,11 @@
 
                     </div>
                 {% endfor %}
+            </div>
+            <div id="sin-resultados-filtro" class="hidden text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800">
+                <i class="fa-solid fa-filter-circle-xmark text-4xl text-slate-600 mb-3"></i>
+                <h3 class="text-slate-300 font-bold text-sm">Ningún acceso coincide con los filtros</h3>
+                <p class="text-slate-500 text-xs mt-1">Prueba a limpiar el filtro de tipo, categoría o fecha.</p>
             </div>
         {% else %}
             <div class="text-center py-16 bg-slate-800/30 rounded-3xl border border-slate-800">
@@ -941,6 +972,39 @@
         function cerrarModal() {
             document.getElementById('modal-credencial').classList.add('hidden');
             document.getElementById('modal-credencial').classList.remove('flex');
+        }
+
+        // 🔎 Filtros dinámicos de la Bóveda (tipo personal/equipo, categoría, fecha) — filtra
+        // en el navegador las tarjetas ya renderizadas (data-tipo/data-categoria/data-fecha en
+        // cada .tarjeta-credencial), sin recargar la página ni consultar la base de datos otra vez.
+        function filtrarBoveda() {
+            const tipo = document.getElementById('filtro-tipo')?.value || '';
+            const categoriaSel = document.getElementById('filtro-categoria');
+            const categoria = categoriaSel ? categoriaSel.value : '';
+            const fecha = document.getElementById('filtro-fecha')?.value || '';
+
+            let visibles = 0;
+            document.querySelectorAll('.tarjeta-credencial').forEach(tarjeta => {
+                const coincide =
+                    (!tipo || tarjeta.dataset.tipo === tipo) &&
+                    (!categoria || tarjeta.dataset.categoria === categoria) &&
+                    (!fecha || tarjeta.dataset.fecha === fecha);
+                tarjeta.classList.toggle('hidden', !coincide);
+                if (coincide) visibles++;
+            });
+
+            const sinResultados = document.getElementById('sin-resultados-filtro');
+            if (sinResultados) sinResultados.classList.toggle('hidden', visibles !== 0);
+        }
+
+        function limpiarFiltrosBoveda() {
+            const tipo = document.getElementById('filtro-tipo');
+            const categoria = document.getElementById('filtro-categoria');
+            const fecha = document.getElementById('filtro-fecha');
+            if (tipo) tipo.value = '';
+            if (categoria) categoria.value = '';
+            if (fecha) fecha.value = '';
+            filtrarBoveda();
         }
     </script>
 

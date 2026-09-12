@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Geolocalización de Accesos</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <style>#mapa-geolocalizacion { height: 60vh; width: 100%; }</style>
+</head>
+<body class="bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif">
+                <i class="fa-solid fa-map-location-dot text-cyan-400"></i> Geolocalización de Accesos
+            </h1>
+        </div>
+    </nav>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <p class="text-xs text-slate-400">
+            Últimos {{ registros|length }} inicios de sesión con ubicación capturada por el navegador.
+            <span class="inline-flex items-center gap-1 text-emerald-400"><i class="fa-solid fa-circle text-[8px]"></i> dentro de una sede autorizada</span>
+            ·
+            <span class="inline-flex items-center gap-1 text-rose-400"><i class="fa-solid fa-circle text-[8px]"></i> fuera de sede</span>
+        </p>
+
+        <div id="mapa-geolocalizacion" class="rounded-2xl border border-slate-700/60 shadow-lg"></div>
+
+        <!-- TABLA DE RESPALDO (accesibilidad / auditoría sin depender del mapa) -->
+        <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
+            <table class="w-full text-xs text-left">
+                <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                    <tr>
+                        <th class="p-3">Usuario</th><th class="p-3">IP</th>
+                        <th class="p-3">Latitud</th><th class="p-3">Longitud</th>
+                        <th class="p-3">Fecha</th><th class="p-3">Sede</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-geolocalizacion" class="divide-y divide-slate-800"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        const REGISTROS = {{ registros | tojson }};
+        const SEDES = {{ sedes | tojson }};
+
+        function distanciaMetros(lat1, lng1, lat2, lng2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(a));
+        }
+
+        function sedeQueContiene(lat, lng) {
+            return SEDES.find(s => distanciaMetros(lat, lng, s.lat, s.lng) <= s.radio_metros) || null;
+        }
+
+        const centro = SEDES.length ? [SEDES[0].lat, SEDES[0].lng] : [4.710989, -74.072092];
+        const mapa = L.map('mapa-geolocalizacion').setView(centro, 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+        }).addTo(mapa);
+
+        SEDES.forEach(s => {
+            L.circle([s.lat, s.lng], { radius: s.radio_metros, color: '#22c55e', weight: 2, fillOpacity: 0.08 })
+                .addTo(mapa)
+                .bindPopup(`<strong>${s.nombre}</strong><br>Sede autorizada (radio ${s.radio_metros} m)`);
+        });
+
+        const filas = [];
+        REGISTROS.forEach(r => {
+            if (r.latitud == null || r.longitud == null) return;
+            const sede = sedeQueContiene(r.latitud, r.longitud);
+            const valido = !!sede;
+            L.circleMarker([r.latitud, r.longitud], {
+                radius: 6, color: valido ? '#10b981' : '#f43f5e', weight: 2, fillOpacity: 0.6,
+            })
+                .addTo(mapa)
+                .bindPopup(
+                    `<strong>${r.usuario}</strong><br>IP: ${r.ip}<br>${r.fecha}<br>` +
+                    (valido ? `✅ ${sede.nombre}` : '⚠️ Fuera de sede autorizada')
+                );
+            filas.push(`<tr>
+                <td class="p-3">${r.usuario}</td><td class="p-3 font-mono">${r.ip}</td>
+                <td class="p-3 font-mono">${r.latitud.toFixed(6)}</td><td class="p-3 font-mono">${r.longitud.toFixed(6)}</td>
+                <td class="p-3">${r.fecha}</td>
+                <td class="p-3 ${valido ? 'text-emerald-400' : 'text-rose-400'}">${valido ? sede.nombre : 'Fuera de sede'}</td>
+            </tr>`);
+        });
+        document.getElementById('tabla-geolocalizacion').innerHTML =
+            filas.join('') || '<tr><td class="p-3 text-slate-500" colspan="6">Todavía no hay inicios de sesión con ubicación registrada.</td></tr>';
+    </script>
+</body>
+</html>

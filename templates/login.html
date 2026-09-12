@@ -100,8 +100,13 @@
             {% endif %}
 
             <!-- Formulario Login -->
-            <form action="/login" method="POST" class="flex flex-col gap-4">
+            <form action="/login" method="POST" class="flex flex-col gap-4" id="form-login">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <!-- 📍 Geolocalización (ver script al final): se llenan solas si el navegador
+                     concede el permiso; si lo niega o no responde a tiempo, quedan vacías y el
+                     login sigue funcionando igual (nunca bloquea el ingreso). -->
+                <input type="hidden" name="latitud" id="login-latitud">
+                <input type="hidden" name="longitud" id="login-longitud">
                 <div>
                     <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
                     <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
@@ -159,6 +164,25 @@
         })();
     </script>
     {% endif %}
+
+    <script>
+        // 📍 Geolocalización de login (pedido de auditoría/seguridad de sedes): se pide el
+        // permiso apenas carga la página, para que ya esté lista cuando la persona envíe el
+        // formulario. Es "mejor esfuerzo": si el navegador no soporta la API, si la persona
+        // niega el permiso o si no responde a tiempo, los campos quedan vacíos y el login
+        // continúa exactamente igual (ver registrar_geolocalizacion_login en el servidor).
+        (function () {
+            if (!navigator.geolocation) return;
+            navigator.geolocation.getCurrentPosition(
+                function (pos) {
+                    document.getElementById('login-latitud').value = pos.coords.latitude;
+                    document.getElementById('login-longitud').value = pos.coords.longitude;
+                },
+                function () { /* permiso denegado o error: se envía sin coordenadas */ },
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+            );
+        })();
+    </script>
 
 </body>
 </html>

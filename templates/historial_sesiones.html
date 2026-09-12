@@ -76,6 +76,9 @@
                     <i class="fa-solid fa-triangle-exclamation"></i> Viendo el historial de otra cuenta.
                 </span>
             {% endif %}
+            <a href="{{ url_for('admin_geolocalizacion') }}" class="sm:ml-auto bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl font-bold flex items-center gap-2 shrink-0">
+                <i class="fa-solid fa-map-location-dot"></i> Mapa de accesos
+            </a>
         </form>
         {% endif %}
 
