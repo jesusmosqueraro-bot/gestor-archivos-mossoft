@@ -38,3 +38,34 @@
 body {
     font-family: var(--marca-fuente);
 }
+
+/* 🪟 Modales institucionales (pedido de Tomás, 12/09/2026: "Aplica en marca-institucional.css
+   estilos para todos los modales"). Todos los modales de Arkiv comparten el mismo wrapper
+   (fixed inset-0 bg-slate-950/80 backdrop-blur-sm ...; confirmado por grep: 39 modales en 14
+   plantillas), así que basta un selector por atributo sobre ese wrapper para llegar a
+   cualquier modal sin editar plantilla por plantilla. La tipografía Montserrat ya les llega
+   por herencia desde la regla 'body' de arriba; aquí solo se ajustan color de divisores/
+   iconos de cabecera (azul/cian institucional) y el botón primario (el que ya sigue la
+   convención bg-cyan-600/bg-blue-600 de Arkiv) a los colores de marca. Los botones
+   secundarios/destructivos (slate, rose, red) no se tocan a propósito. Se usa !important solo
+   en estos selectores, muy acotados al propio modal, porque Tailwind (CDN) inyecta su hoja de
+   estilos en un momento que no podemos garantizar que quede antes en la cascada. */
+div[class*="bg-slate-950/80"] [class*="border-slate-700/60"] {
+    border-color: var(--marca-azul-primario) !important;
+}
+div[class*="bg-slate-950/80"] [class*="text-cyan-400"] {
+    color: var(--marca-cian) !important;
+}
+div[class*="bg-slate-950/80"] [class*="text-amber-400"],
+div[class*="bg-slate-950/80"] [class*="text-amber-500"] {
+    color: var(--marca-naranja) !important;
+}
+div[class*="bg-slate-950/80"] button[class*="bg-cyan-600"],
+div[class*="bg-slate-950/80"] button[class*="bg-blue-600"] {
+    background-color: var(--marca-azul-primario) !important;
+}
+div[class*="bg-slate-950/80"] button[class*="bg-cyan-600"]:hover,
+div[class*="bg-slate-950/80"] button[class*="bg-blue-500"]:hover,
+div[class*="bg-slate-950/80"] button[class*="bg-blue-600"]:hover {
+    background-color: var(--marca-azul-secundario) !important;
+}
