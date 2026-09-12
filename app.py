@@ -158,7 +158,9 @@ def _agregar_cabeceras_seguridad(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    # 📍 geolocation=(self): habilitado solo para nuestro propio origen — lo usa /login para
+    # capturar lat/lon con navigator.geolocation (ver registrar_geolocalizacion_login).
+    response.headers['Permissions-Policy'] = 'geolocation=(self), microphone=(), camera=()'
     response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains'
     # CSP armada específicamente con los orígenes externos que la app realmente usa
     # hoy (Tailwind CDN, Font Awesome/cdnjs, Google Fonts, Cloudinary, reCAPTCHA).
@@ -172,7 +174,8 @@ def _agregar_cabeceras_seguridad(response):
         "https://www.google.com https://www.gstatic.com; "
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
-        "img-src 'self' data: https://res.cloudinary.com; "
+        # 🗺️ tile.openstreetmap.org: teselas del mapa de Leaflet en /admin/geolocalizacion.
+        "img-src 'self' data: https://res.cloudinary.com https://*.tile.openstreetmap.org; "
         "media-src 'self' https://res.cloudinary.com; "
         "connect-src 'self' https://www.google.com; "
         # 🩹 'self' y res.cloudinary.com: el visor de archivos (index.html) inserta un
@@ -238,6 +241,22 @@ def _manejar_archivo_demasiado_grande(e):
     print(f"⚠️ Petición demasiado grande (413): {getattr(e, 'description', e)}")
     flash("Lo que intentaste enviar es demasiado pesado. Si es una imagen pegada en el texto, quítala y adjúntala como archivo; si es un archivo adjunto, prueba con uno más liviano.", "error")
     return redirect(request.referrer or url_for('index'))
+
+# 🔒 429 "Too Many Requests" — lo dispara Flask-Limiter (ver @limiter.limit de /login, más abajo)
+# cuando una IP supera el tope de peticiones. Sin este manejador, Flask-Limiter ya responde 429
+# por su cuenta, pero con una página en blanco/inglés; este mismo patrón que
+# _manejar_csrf_invalido/_manejar_archivo_demasiado_grande de arriba solo la reemplaza por algo
+# legible en español, sin cambiar el código de estado.
+@app.errorhandler(429)
+def _manejar_limite_excedido(e):
+    print(f"⚠️ Límite de peticiones excedido (429) en {request.path}: {getattr(e, 'description', e)}")
+    mensaje = "Demasiados intentos en poco tiempo. Espera un minuto y vuelve a intentarlo."
+    if request.path == '/login':
+        return _render_login(error=mensaje), 429
+    if request.path.startswith('/api/') or request.accept_mimetypes['application/json'] >= request.accept_mimetypes['text/html']:
+        return jsonify(error=mensaje), 429
+    flash(mensaje, "error")
+    return redirect(request.referrer or url_for('index')), 429
 
 # 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
 # que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
@@ -694,6 +713,12 @@ def init_db():
             # comportamiento de siempre) no necesita filas aquí: lo ve todo admin/agente.
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_compartidas (
                 id SERIAL PRIMARY KEY, credencial_id INTEGER NOT NULL REFERENCES credenciales(id) ON DELETE CASCADE, usuario VARCHAR(100) NOT NULL, fecha_compartido VARCHAR(100) NOT NULL, compartido_por VARCHAR(100)
+            )''')
+            # 📍 Geolocalización de inicios de sesión (navigator.geolocation del navegador, ver
+            # login.html): permite validar en /admin/geolocalizacion si el acceso ocurrió dentro
+            # de una sede autorizada. latitud/longitud quedan NULL si el usuario no dio permiso.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS login_geolocalizacion (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, ip VARCHAR(100), latitud NUMERIC(9,6), longitud NUMERIC(9,6), fecha VARCHAR(100) NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id SERIAL PRIMARY KEY, titulo VARCHAR(200) NOT NULL, contenido TEXT NOT NULL, nivel VARCHAR(50) DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado VARCHAR(50) DEFAULT 'activo', fecha VARCHAR(100) NOT NULL, autor VARCHAR(100) NOT NULL
@@ -1191,6 +1216,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS credenciales_compartidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, credencial_id INTEGER NOT NULL, usuario TEXT NOT NULL, fecha_compartido TEXT NOT NULL, compartido_por TEXT, FOREIGN KEY(credencial_id) REFERENCES credenciales(id) ON DELETE CASCADE
+            )''')
+            # 📍 Ver comentario equivalente en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS login_geolocalizacion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, ip TEXT, latitud REAL, longitud REAL, fecha TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS comunicados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, contenido TEXT NOT NULL, nivel TEXT DEFAULT 'info', fijado INTEGER DEFAULT 0, imagen_url TEXT DEFAULT '', estado TEXT DEFAULT 'activo', fecha TEXT NOT NULL, autor TEXT NOT NULL
@@ -1874,6 +1903,28 @@ def registrar_log(usuario, accion, detalles="", credencial_id=None, ip=None, dis
         conn.close()
     except Exception as e:
         print(f"Error registrando log: {e}")
+
+# 📍 GEOLOCALIZACIÓN DE LOGIN — guarda lat/lon (capturadas en el navegador con
+# navigator.geolocation, ver login.html) de cada inicio de sesión exitoso, para poder validar
+# en /admin/geolocalizacion si el acceso ocurrió dentro de una sede autorizada. Si el usuario no
+# dio permiso de ubicación, latitud/longitud llegan vacíos y se guardan como NULL (no bloquea
+# el login: la geolocalización es informativa, nunca un requisito para poder entrar).
+def registrar_geolocalizacion_login(usuario, ip, latitud, longitud):
+    try:
+        lat = float(latitud) if latitud not in (None, '') else None
+        lng = float(longitud) if longitud not in (None, '') else None
+    except (TypeError, ValueError):
+        lat = lng = None
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        fecha_actual = obtener_fecha_actual()
+        query = "INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha) VALUES (%s, %s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO login_geolocalizacion (usuario, ip, latitud, longitud, fecha) VALUES (?, ?, ?, ?, ?)"
+        cursor.execute(query, (usuario, ip, lat, lng, fecha_actual))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error registrando geolocalización de login: {e}")
 
 # 🕵️ HISTORIAL DE SESIONES — helpers usados por login()/logout() para registrar desde dónde se
 # conectó cada cuenta (ver /perfil/historial-sesiones más abajo). No son librerías de
@@ -11697,8 +11748,11 @@ def _render_login(**kwargs):
 
 
 # 🔑 LOGIN
+# 🔒 5 intentos por minuto por IP (antes 20): endurecido a pedido, específicamente contra
+# fuerza bruta de contraseñas. Al superarlo, Flask-Limiter corta la petición ANTES de tocar la
+# base de datos y responde 429 (ver _manejar_limite_excedido, más abajo, para el mensaje).
 @app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("20 per minute", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
 def login():
     if request.method == 'POST':
         try:
@@ -11773,11 +11827,17 @@ def login():
                             session['debe_activar_2fa'] = False
                             session['foto_perfil'] = user[9] if len(user) > 9 else None
                             registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso (dispositivo de confianza 2FA, no se pidió el código)", ip=ip_actual, dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+                            registrar_geolocalizacion_login(user[0], ip_actual, request.form.get('latitud'), request.form.get('longitud'))
                             return redirect(url_for('bienvenida'))
 
                         session['pre_2fa_usuario'] = user[0]
                         session['pre_2fa_expira'] = (datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp()
                         session.pop('pre_2fa_intentos', None)
+                        # 📍 La geolocalización viaja en ESTE POST (login.html); como /login/2fa es
+                        # un segundo formulario sin esos campos, se guarda en sesión para
+                        # registrarla solo cuando el segundo paso se complete con éxito.
+                        session['pre_2fa_lat'] = request.form.get('latitud')
+                        session['pre_2fa_lng'] = request.form.get('longitud')
                         return redirect(url_for('login_2fa'))
 
                     session.permanent = True
@@ -11793,7 +11853,9 @@ def login():
                     # 🖼️ Foto de perfil: se cachea en la sesión para no consultar la BD en cada
                     # página solo para pintar el ícono del encabezado (ver partials/perfil_boton.html).
                     session['foto_perfil'] = user[9] if len(user) > 9 else None
-                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=_obtener_ip_cliente(), dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+                    ip_actual_sin_2fa = _obtener_ip_cliente()
+                    registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=ip_actual_sin_2fa, dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
+                    registrar_geolocalizacion_login(user[0], ip_actual_sin_2fa, request.form.get('latitud'), request.form.get('longitud'))
                     return redirect(url_for('bienvenida'))
                 elif user:
                     # 🔒 Contraseña incorrecta en una cuenta que sí existe: cuenta como intento
@@ -11888,6 +11950,9 @@ def login_2fa():
             ip_actual = _obtener_ip_cliente()
             dispositivo_actual = _detectar_dispositivo(request.headers.get('User-Agent', ''))
             registrar_log(user[0], "Inicio de Sesión", detalle, ip=ip_actual, dispositivo=dispositivo_actual)
+            # 📍 Lat/lon quedaron en sesión desde el primer paso de /login (ver arriba); se
+            # registran solo ahora que el segundo paso también fue exitoso.
+            registrar_geolocalizacion_login(user[0], ip_actual, session.pop('pre_2fa_lat', None), session.pop('pre_2fa_lng', None))
 
             respuesta = redirect(url_for('bienvenida'))
             # 📱 Dispositivo de confianza (pedido por Tomás): al pasar el 2FA con éxito, este
@@ -12383,6 +12448,7 @@ def ver_credenciales():
 
     lista_credenciales = []
     todas_las_etiquetas = set()
+    todas_las_categorias = set()
     for r in rows:
         try:
             c_id, servicio, url, usuario, categoria, notas, fecha, rotacion_dias, fecha_ultima_rotacion, etiquetas_texto, tipo_item, contenido_seguro, campos_personalizados, propietario, visibilidad = r
@@ -12395,6 +12461,10 @@ def ver_credenciales():
 
             etiquetas = _lista_etiquetas(etiquetas_texto)
             todas_las_etiquetas.update(etiquetas)
+            # 🔎 Filtros dinámicos (tipo/categoría/fecha, ver credenciales.html): la categoría se
+            # recolecta ANTES del filtro de búsqueda de texto, igual que las etiquetas arriba, para
+            # que el selector siempre ofrezca todas las categorías existentes.
+            todas_las_categorias.add(categoria or 'General')
             texto_full = f"{servicio} {usuario} {categoria} {notas} {etiquetas_texto or ''}".lower()
             if q_etiqueta and q_etiqueta.lower() not in [e.lower() for e in etiquetas]:
                 continue
@@ -12432,6 +12502,7 @@ def ver_credenciales():
     return render_template(
         'credenciales.html', credenciales=lista_credenciales, q_busqueda=q_busqueda,
         q_etiqueta=q_etiqueta, todas_las_etiquetas=sorted(todas_las_etiquetas, key=str.lower),
+        todas_las_categorias=sorted(todas_las_categorias, key=str.lower),
         equipo_para_compartir=sorted(equipo_para_compartir, key=str.lower), es_admin_actual=es_admin_actual
     )
 
@@ -15284,6 +15355,41 @@ def historial_sesiones():
         usuario_consultado=usuario_consultado,
         es_propio=(usuario_consultado == usuario_sesion)
     )
+
+
+# 📍 SEDES AUTORIZADAS — coordenadas (lat, lng) y radio de tolerancia en metros usados por
+# /admin/geolocalizacion para pintar el círculo de cada sede y marcar cada login como
+# "dentro"/"fuera" de una sede válida. ⚠️ Son coordenadas de ejemplo (Bogotá): reemplázalas por
+# las coordenadas reales de las sedes de Preventiva antes de usar esto para auditoría real.
+SEDES_AUTORIZADAS = [
+    {'nombre': 'Sede Principal', 'lat': 4.710989, 'lng': -74.072092, 'radio_metros': 150},
+    {'nombre': 'Sede Norte', 'lat': 4.718000, 'lng': -74.050000, 'radio_metros': 150},
+]
+
+
+@app.route('/admin/geolocalizacion')
+@login_required
+@admin_required
+def admin_geolocalizacion():
+    """Mapa (Leaflet) de los últimos inicios de sesión con su latitud/longitud, para validar
+    de un vistazo si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT usuario, ip, latitud, longitud, fecha FROM login_geolocalizacion "
+        "ORDER BY id DESC LIMIT 500"
+    )
+    filas = cursor.fetchall()
+    conn.close()
+
+    registros = [{
+        'usuario': usuario, 'ip': ip or '—',
+        'latitud': float(latitud) if latitud is not None else None,
+        'longitud': float(longitud) if longitud is not None else None,
+        'fecha': fecha,
+    } for usuario, ip, latitud, longitud, fecha in filas]
+
+    return render_template('admin_geolocalizacion.html', registros=registros, sedes=SEDES_AUTORIZADAS)
 
 
 # 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
