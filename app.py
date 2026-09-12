@@ -15519,16 +15519,6 @@ def historial_sesiones():
     )
 
 
-# 📍 SEDES AUTORIZADAS — coordenadas (lat, lng) y radio de tolerancia en metros usados por
-# /admin/geolocalizacion para pintar el círculo de cada sede y marcar cada login como
-# "dentro"/"fuera" de una sede válida. ⚠️ Son coordenadas de ejemplo (Bogotá): reemplázalas por
-# las coordenadas reales de las sedes de Preventiva antes de usar esto para auditoría real.
-SEDES_AUTORIZADAS = [
-    {'nombre': 'Sede Principal', 'lat': 4.710989, 'lng': -74.072092, 'radio_metros': 150},
-    {'nombre': 'Sede Norte', 'lat': 4.718000, 'lng': -74.050000, 'radio_metros': 150},
-]
-
-
 def _distancia_metros(lat1, lng1, lat2, lng2):
     """Distancia en línea recta entre dos coordenadas (fórmula de Haversine), en metros. Usada
     por admin_geolocalizacion() para decidir si un login cayó dentro del radio de una sede."""
@@ -15540,25 +15530,37 @@ def _distancia_metros(lat1, lng1, lat2, lng2):
     return 2 * radio_tierra * math.asin(math.sqrt(a))
 
 
-def _sede_que_contiene(lat, lng):
-    for sede in SEDES_AUTORIZADAS:
-        if _distancia_metros(lat, lng, sede['lat'], sede['lng']) <= sede['radio_metros']:
-            return sede
-    return None
-
-
 def _sede_real_mas_cercana(lat, lng):
-    """Sede más cercana del catálogo REAL de /tickets/configuracion (a diferencia de
-    SEDES_AUTORIZADAS, de arriba, que sigue siendo un placeholder) a una coordenada dada, junto
+    """Sede más cercana del catálogo REAL de /tickets/configuracion a una coordenada dada, junto
     con la distancia en metros — o (None, None) si ninguna Sede tiene aún latitud/longitud
     cargadas. Usada por registrar_geolocalizacion_login() y _crear_usuario_interno() para
     asignar la Sede y marcar "dentro"/"fuera de sede" (Haversine, radio_metros por Sede,
-    pedido de Tomás, 12/09/2026)."""
+    pedido de Tomás, 12/09/2026).
+
+    🔧 Hasta acá llegaba también /admin/geolocalizacion, pero por un placeholder aparte
+    (SEDES_AUTORIZADAS, con coordenadas de ejemplo en Bogotá): por eso cambiar el radio_metros de
+    una Sede real en /tickets/configuracion no tenía ningún efecto en esa vista, y cualquier login
+    fuera de Bogotá salía "Fuera de sede" sin importar qué tan cerca estuviera de la Sede real
+    (caso reportado por Tomás, 12/09/2026, con NUEVO NARANJAL en Medellín). Se eliminó ese
+    placeholder: ahora tanto el registro al momento del login (esta función) como la vista de
+    /admin/geolocalizacion (ver _sedes_reales_para_mapa) usan el mismo catálogo real."""
     con_coordenadas = [s for s in _config_ticket_lista('sede') if s['latitud'] is not None and s['longitud'] is not None]
     if not con_coordenadas:
         return None, None
     mas_cercana = min(con_coordenadas, key=lambda s: _distancia_metros(lat, lng, s['latitud'], s['longitud']))
     return mas_cercana, _distancia_metros(lat, lng, mas_cercana['latitud'], mas_cercana['longitud'])
+
+
+def _sedes_reales_para_mapa():
+    """Catálogo real de Sedes (de /tickets/configuracion) que sí tienen latitud/longitud
+    cargadas, en el formato {'nombre', 'lat', 'lng', 'radio_metros'} que ya esperaban el mapa
+    Leaflet de admin_geolocalizacion.html y el modal de vista rápida en bienvenida.html (antes
+    alimentados por el placeholder SEDES_AUTORIZADAS — ver la nota en _sede_real_mas_cercana)."""
+    return [
+        {'nombre': s['nombre'], 'lat': s['latitud'], 'lng': s['longitud'], 'radio_metros': s['radio_metros']}
+        for s in _config_ticket_lista('sede')
+        if s['latitud'] is not None and s['longitud'] is not None
+    ]
 
 
 def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
@@ -15574,17 +15576,25 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
     usuarios_disponibles = [u[0] for u in cursor.fetchall() if u[0]]
 
     # 🔎 El filtro se aplica en Python (no en el SQL) sobre los últimos 2000 registros: son
-    # pocas filas, y así se reutiliza la misma lógica de "sede que contiene" tanto para las
-    # métricas/gráficas como para el mapa y la tabla de respaldo, sin duplicarla.
+    # pocas filas, y así se reutiliza la misma lógica tanto para las métricas/gráficas como para
+    # el mapa y la tabla de respaldo, sin duplicarla.
+    # 🔧 'sede'/'dentro_de_sede' se leen tal cual quedaron guardadas por
+    # registrar_geolocalizacion_login() (calculadas una sola vez, al momento del login, contra el
+    # catálogo REAL de /tickets/configuracion) en vez de recalcularse aquí contra un catálogo
+    # aparte: antes esta vista ignoraba esas dos columnas y volvía a calcular "sede" con el
+    # placeholder SEDES_AUTORIZADAS (coordenadas de ejemplo en Bogotá), así que cambiar el
+    # radio_metros o las coordenadas de una Sede real no se reflejaba nunca aquí, y cualquier
+    # login fuera de Bogotá salía "Fuera de sede" sin importar la Sede real (caso reportado por
+    # Tomás, 12/09/2026, con NUEVO NARANJAL en Medellín).
     cursor.execute(
-        "SELECT usuario, ip, latitud, longitud, fecha FROM login_geolocalizacion "
+        "SELECT usuario, ip, latitud, longitud, fecha, sede, dentro_de_sede FROM login_geolocalizacion "
         "ORDER BY id DESC LIMIT 2000"
     )
     filas = cursor.fetchall()
     conn.close()
 
     registros = []
-    for usuario, ip, latitud, longitud, fecha in filas:
+    for usuario, ip, latitud, longitud, fecha, sede, dentro_de_sede in filas:
         if f_usuario and usuario != f_usuario:
             continue
         # obtener_fecha_actual() siempre arranca con 'AAAA-MM-DD', así que comparar el prefijo
@@ -15597,14 +15607,13 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
 
         lat = float(latitud) if latitud is not None else None
         lng = float(longitud) if longitud is not None else None
-        sede = _sede_que_contiene(lat, lng) if (lat is not None and lng is not None) else None
         registros.append({
             'usuario': usuario, 'ip': ip or '—', 'latitud': lat, 'longitud': lng, 'fecha': fecha,
-            'sede': sede['nombre'] if sede else None,
+            'sede': sede, 'dentro_de_sede': bool(dentro_de_sede) if dentro_de_sede is not None else None,
         })
 
     con_ubicacion = [r for r in registros if r['latitud'] is not None]
-    dentro_de_sede = sum(1 for r in con_ubicacion if r['sede'])
+    dentro_de_sede_total = sum(1 for r in con_ubicacion if r['dentro_de_sede'])
 
     conteo_por_usuario = {}
     for r in registros:
@@ -15614,10 +15623,11 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
     return {
         'registros': registros,
         'usuarios_disponibles': usuarios_disponibles,
+        'sedes': _sedes_reales_para_mapa(),
         'total_accesos': len(registros),
         'usuarios_unicos': len({r['usuario'] for r in registros}),
-        'dentro_de_sede': dentro_de_sede,
-        'fuera_de_sede': len(con_ubicacion) - dentro_de_sede,
+        'dentro_de_sede': dentro_de_sede_total,
+        'fuera_de_sede': len(con_ubicacion) - dentro_de_sede_total,
         'sin_ubicacion': len(registros) - len(con_ubicacion),
         'top_usuarios_labels': [u for u, _ in top_usuarios],
         'top_usuarios_valores': [c for _, c in top_usuarios],
@@ -15629,9 +15639,10 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
 @admin_required
 def admin_geolocalizacion():
     """Mapa (Leaflet) + métricas/gráficas de los inicios de sesión con su latitud/longitud, para
-    validar si ocurrieron dentro de una sede autorizada (ver SEDES_AUTORIZADAS). Admite filtrar
-    por usuario y por rango de fechas (pedido de Tomás, 12/09/2026: "que se pueda visualizar con
-    métricas y gráficas también, incluye filtros por usuarios")."""
+    validar si ocurrieron dentro de una sede autorizada (catálogo real de /tickets/configuracion,
+    ver _sedes_reales_para_mapa). Admite filtrar por usuario y por rango de fechas (pedido de
+    Tomás, 12/09/2026: "que se pueda visualizar con métricas y gráficas también, incluye filtros
+    por usuarios")."""
     f_usuario = request.args.get('usuario', '').strip()
     f_fecha_inicio = request.args.get('fecha_inicio', '').strip()
     f_fecha_fin = request.args.get('fecha_fin', '').strip()
@@ -15639,7 +15650,7 @@ def admin_geolocalizacion():
     datos = _datos_geolocalizacion(f_usuario, f_fecha_inicio, f_fecha_fin)
 
     return render_template(
-        'admin_geolocalizacion.html', registros=datos['registros'], sedes=SEDES_AUTORIZADAS,
+        'admin_geolocalizacion.html', registros=datos['registros'], sedes=datos['sedes'],
         usuarios_disponibles=datos['usuarios_disponibles'], f_usuario=f_usuario,
         f_fecha_inicio=f_fecha_inicio, f_fecha_fin=f_fecha_fin,
         total_accesos=datos['total_accesos'], usuarios_unicos=datos['usuarios_unicos'],
@@ -15661,7 +15672,7 @@ def admin_geolocalizacion_resumen():
     (la página completa /admin/geolocalizacion sigue usando el límite de 2000)."""
     datos = _datos_geolocalizacion()
     return jsonify({
-        'sedes': SEDES_AUTORIZADAS,
+        'sedes': datos['sedes'],
         'registros': datos['registros'][:300],
         'total_accesos': datos['total_accesos'],
         'usuarios_unicos': datos['usuarios_unicos'],
