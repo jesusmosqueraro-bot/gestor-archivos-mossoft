@@ -25,9 +25,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/marca-institucional.css">
-    <style>
-        body { font-family: var(--marca-fuente); }
-    </style>
 </head>
 <body class="bg-slate-50 min-h-screen flex items-stretch">
 
@@ -106,7 +103,7 @@
                     <div class="g-recaptcha scale-90 sm:scale-100 origin-center" data-sitekey="6LcU0mAtAAAAAOj_aciK31VM2nAuECZQe0-G36Ph"></div>
                 </div>
 
-                <button type="submit" class="w-full bg-[var(--marca-azul-primario)] hover:bg-[var(--marca-azul-secundario)] text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-[var(--marca-azul-primario)]/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
+                <button type="submit" id="btn-login-submit" class="w-full bg-[var(--marca-azul-primario)] hover:bg-[var(--marca-azul-secundario)] text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-[var(--marca-azul-primario)]/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait">
                     Iniciar Sesión →
                 </button>
             </form>
@@ -147,21 +144,61 @@
     {% endif %}
 
     <script>
-        // 📍 Geolocalización de login (pedido de auditoría/seguridad de sedes): se pide el
-        // permiso apenas carga la página, para que ya esté lista cuando la persona envíe el
-        // formulario. Es "mejor esfuerzo": si el navegador no soporta la API, si la persona
-        // niega el permiso o si no responde a tiempo, los campos quedan vacíos y el login
-        // continúa exactamente igual (ver registrar_geolocalizacion_login en el servidor).
+        // 📍 Geolocalización de login (pedido de auditoría/seguridad de sedes; ajustado por
+        // Tomás, 12/09/2026: "asegura que el formulario espere... antes del submit"). Se pide
+        // el permiso apenas carga la página (para adelantar trabajo), pero además el envío del
+        // formulario ahora ESPERA a que esa solicitud resuelva (o se agote un límite de 3s)
+        // antes de dejar pasar el submit real — así los campos ocultos 'latitud'/'longitud' ya
+        // quedan llenos cuando el navegador manda a tiempo, en vez de depender de que la
+        // persona tarde en hacer clic. Sigue siendo "mejor esfuerzo": si el navegador no
+        // soporta la API, si la persona niega el permiso, o si no responde en 3s, el login
+        // continúa igual con los campos vacíos (ver registrar_geolocalizacion_login en el
+        // servidor) — nunca se bloquea el ingreso por esto.
         (function () {
-            if (!navigator.geolocation) return;
-            navigator.geolocation.getCurrentPosition(
-                function (pos) {
-                    document.getElementById('login-latitud').value = pos.coords.latitude;
-                    document.getElementById('login-longitud').value = pos.coords.longitude;
-                },
-                function () { /* permiso denegado o error: se envía sin coordenadas */ },
-                { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-            );
+            var TIEMPO_LIMITE_MS = 3000;
+            var form = document.getElementById('form-login');
+            var boton = document.getElementById('btn-login-submit');
+            var textoBotonOriginal = boton.innerHTML;
+
+            // Promesa que SIEMPRE se resuelve (nunca se rechaza), ya sea con coordenadas o sin
+            // ellas — lo primero que ocurra entre: el navegador responde, el permiso se niega,
+            // o se cumple TIEMPO_LIMITE_MS.
+            var geolocalizacionLista = new Promise(function (resolve) {
+                if (!navigator.geolocation) { resolve(); return; }
+                var yaResolvio = false;
+                var terminar = function () {
+                    if (yaResolvio) return;
+                    yaResolvio = true;
+                    resolve();
+                };
+                navigator.geolocation.getCurrentPosition(
+                    function (pos) {
+                        document.getElementById('login-latitud').value = pos.coords.latitude;
+                        document.getElementById('login-longitud').value = pos.coords.longitude;
+                        terminar();
+                    },
+                    function () { terminar(); /* permiso denegado o error: se envía sin coordenadas */ },
+                    { enableHighAccuracy: true, timeout: TIEMPO_LIMITE_MS, maximumAge: 60000 }
+                );
+                // Cinturón de seguridad: algunos navegadores/dispositivos nunca llaman a
+                // ninguno de los dos callbacks de arriba. Este límite garantiza que el login
+                // nunca espera más de TIEMPO_LIMITE_MS por esto, pase lo que pase.
+                setTimeout(terminar, TIEMPO_LIMITE_MS);
+            });
+
+            var listoParaEnviar = false;
+            form.addEventListener('submit', function (e) {
+                if (listoParaEnviar) return; // ya se esperó la geolocalización: dejar pasar
+                e.preventDefault();
+                boton.disabled = true;
+                boton.innerHTML = 'Verificando ubicación…';
+                geolocalizacionLista.then(function () {
+                    listoParaEnviar = true;
+                    boton.disabled = false;
+                    boton.innerHTML = textoBotonOriginal;
+                    form.submit();
+                });
+            });
         })();
     </script>
 
