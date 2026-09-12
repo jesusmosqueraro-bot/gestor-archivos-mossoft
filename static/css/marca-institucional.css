@@ -86,13 +86,41 @@ body {
      · ACTUALIZACIÓN 12/09/2026 (/admin/diseno): 'oscuro' y 'descanso' antes se dejaban heredar
        de las clases Tailwind nativas / tema-descanso.css sin bloque propio aquí. Ahora los tres
        temas fuerzan explícitamente fondo/borde/texto del modal, pero a través de variables CSS
-       (--modal-oscuro-*/--modal-claro-*/--modal-descanso-*, definidas en :root con el mismo
+       (--modal-oscuro-*, --modal-claro-*, --modal-descanso-*, definidas en :root con el mismo
        valor que cada tema ya tenía) para que /admin/diseno pueda personalizarlas sin tocar esta
-       hoja — ver los tres bloques de abajo y _colores_modal_actuales en app.py. */
-div[class*="fixed inset-0"] [class*="bg-slate-800"],
-div[class*="fixed inset-0"] [class*="bg-slate-900"] {
-    border-radius: 1rem !important;
-    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.35), 0 8px 10px -6px rgb(0 0 0 / 0.3) !important;
+       hoja — ver los tres bloques de abajo y _colores_modal_actuales en app.py.
+
+       🐛 BUG CRÍTICO hallado y corregido en la verificación visual del rediseño (12/09/2026): la
+       versión anterior de este comentario escribía la lista de variables como
+       "--modal-oscuro-*{/}--modal-claro-*{/}--modal-descanso-*" (con '/' pegado al '*' de en
+       medio, sin espacio) — eso son DOS apariciones literales de la secuencia de caracteres
+       '*' + '/', que en CSS SIEMPRE cierra el comentario ahí mismo, sin importar que "la
+       intención" fuera seguir comentando. Efecto real (confirmado con el CSSOM del navegador,
+       comparando cssRules antes/después de este fix): el comentario se cerraba de golpe a la
+       mitad, y el texto suelto que quedaba ("-modal-claro-*, --modal-descanso-*, ... *\/") pasaba
+       a interpretarse como CSS de verdad — basura sintáctica que el parser no podía digerir, y
+       que arrastraba consigo la ruptura silenciosa de varias reglas siguientes (el radio/sombra
+       del panel del modal, y la regla de fondo/borde del panel en tema 'oscuro' — es decir, la
+       personalización de colores en oscuro desde /admin/diseno llevaba rota desde que se
+       desplegó ese comentario, sin que ningún test unitario pudiera detectarlo porque pytest no
+       ejecuta un motor CSS). Lección: nunca escribir '*' inmediatamente seguido de '/' dentro de
+       un comentario CSS, ni siquiera para notación abreviada de nombres de variables. */
+/* ⚠️ Ojo con el combinador '>': a propósito es hijo DIRECTO del wrapper "fixed inset-0", no
+   descendiente genérico. Confirmado (12/09/2026) que en TODOS los modales de Arkiv el panel
+   visible es siempre el <div> hijo directo del wrapper — pero varios modales (ej.
+   mi_boveda.html) también tienen <input>/<textarea>/<label> internos con bg-slate-900/60, que
+   con un selector de descendiente genérico (el usado hasta ahora para todo lo demás en este
+   bloque) también harían match y se llevarían el radio/sombra/barra de acento pensados solo
+   para el panel. */
+div[class*="fixed inset-0"] > [class*="bg-slate-800"],
+div[class*="fixed inset-0"] > [class*="bg-slate-900"] {
+    border-radius: 1.25rem !important;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.45), 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.04) !important;
+    /* 'relative' para que la barra de acento superior (::before, ver más abajo, sección "✨
+       Rediseño profesional de modales") pueda anclarse con position:absolute sin depender de
+       que la plantilla ya trajera la clase 'relative' (algunas sí, ej. usuarios.html; otras no,
+       ej. comunicados.html) — forzarlo aquí cubre ambas familias de marcado por igual. */
+    position: relative !important;
 }
 
 /* 🎨 Acentos de marca (divisores/iconos de cabecera y botón primario): iguales en los 3 temas,
@@ -169,9 +197,16 @@ html[data-theme="claro"] div[class*="fixed inset-0"] textarea::placeholder {
    propio aquí — se dejaban heredar tal cual de las clases Tailwind nativas (oscuro) o de
    tema-descanso.css (descanso), a propósito, para no duplicar cientos de reglas. Para que el
    admin pueda personalizarlos igual que el claro de arriba, ahora sí se fuerzan explícitamente,
-   pero con las variables --modal-oscuro-*/--modal-descanso-* cuyo valor por defecto (ver :root
+   pero con las variables --modal-oscuro-*, --modal-descanso-* cuyo valor por defecto (ver :root
    al principio de este archivo) es EXACTAMENTE el color que ya tenían de forma nativa/heredada
-   — así que, igual que con claro, nada cambia visualmente mientras no se use /admin/diseno. */
+   — así que, igual que con claro, nada cambia visualmente mientras no se use /admin/diseno.
+
+   🐛 Igual al bug de más arriba: esta misma nota tenía los dos nombres de variable separados por
+   una barra pegada al asterisco (sin espacio de por medio) — esa secuencia de caracteres '*'
+   seguido de '/' cierra el comentario CSS ahí mismo, sin importar la intención. Rompía la regla
+   de fondo/borde de OSCURO que viene justo abajo (la personalización de /admin/diseno en tema
+   oscuro llevaba rota desde que se desplegó este comentario). Corregido igual: coma en vez de
+   '/' entre nombres de variable. */
 html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="bg-slate-800"],
 html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="bg-slate-900"] {
     background-color: var(--modal-oscuro-fondo, #0f172a) !important;
@@ -237,14 +272,33 @@ html[data-theme="descanso"] div[class*="fixed inset-0"] textarea::placeholder {
 }
 
 /* 🔘 Botones secundarios (Cancelar, etc. — bg-slate-700/800 sin ser el primario azul/cian) a
-   gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca. */
+   gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca.
+   🐛 Bug de contraste hallado en la verificación visual del rediseño (12/09/2026): varias
+   plantillas ponen 'text-white' en el mismo botón (ej. "bg-slate-700 hover:bg-slate-600
+   text-white", patrón típico de Cancelar/Cerrar en tickets_inventario.html y otras) — la regla
+   de más arriba "button[class*='text-white'] { color: #ffffff !important; }" (pensada para los
+   botones PRIMARIOS azul/cian, donde texto blanco sí tiene contraste) también le gana a este
+   botón secundario, dejando texto blanco sobre el gris casi blanco de acá abajo: prácticamente
+   ilegible. Se agrega 'color' aquí explícitamente — misma especificidad que esa regla, pero
+   ésta va después en la hoja, así que gana por orden de cascada. */
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-700"],
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
     background-color: #f1f5f9 !important;
+    color: var(--modal-claro-texto, #1e293b) !important;
 }
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-700"]:hover,
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-800"]:hover {
     background-color: #e2e8f0 !important;
+}
+
+/* 🐛 Mismo bug de contraste que arriba, pero en 'descanso': tema-descanso.css (que carga antes
+   que esta hoja) ya aclara .bg-slate-700/800 a un sepia claro en TODA la app, así que un botón
+   secundario con 'text-white' dentro de un modal en este tema hereda ese mismo problema —
+   ver 'button[class*="text-white"] { color: #ffffff !important; }' en el bloque de descanso más
+   arriba, pensado para los botones primarios, no para estos. */
+html[data-theme="descanso"] div[class*="fixed inset-0"] button[class*="bg-slate-700"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
+    color: var(--modal-descanso-texto, #3a322e) !important;
 }
 
 /* 🌑 Velo oscuro del modal (bg-slate-950/80, /90 en el wrapper "fixed inset-0" mismo, no en un
@@ -274,7 +328,124 @@ html[data-theme="descanso"] div[class*="fixed inset-0"][class*="bg-slate-950/90"
 .modal-content, .modal-box, dialog {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 1rem;
-    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    border-radius: 1.25rem;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.15), 0 10px 15px -3px rgb(0 0 0 / 0.1);
     color: #1e293b;
+}
+
+/* =========================================================================
+   ✨ Rediseño "más profesional" de los modales (pedido por Tomás, 12/09/2026:
+   "aplica un diseño mas profesional a todos los modales ya"). Todo lo de acá
+   abajo es CSS puro sobre el mismo wrapper "fixed inset-0" / panel
+   bg-slate-800|900 que ya usa el bloque de arriba — ningún archivo HTML de
+   ningún modal se tocó, así que esto aplica automáticamente a los ~40+
+   modales de toda la app, en sus 2 variantes de marcado (con encabezado
+   separado por un borde inferior, ej. comunicados.html, y sin ese borde,
+   ej. usuarios.html) y en los 3 temas por igual, reutilizando currentColor
+   para no tener que repetir reglas por tema.
+   ========================================================================= */
+
+/* 🌈 Barra de acento superior: una franja de degradado con los 3 colores de marca, pegada al
+   borde superior del panel (mismo radio que el panel, así que se ve como una costura integrada,
+   no como una barra flotante). Es puramente decorativa (aria-hidden vía ::before, no toma foco
+   ni espacio en el documento) y no depende de que la plantilla traiga 'overflow-hidden': al
+   tener su propio border-radius en las 2 esquinas superiores, queda a ras del borde del panel
+   aunque el panel no recorte su contenido (varios modales usan overflow-y-auto para poder hacer
+   scroll del formulario, y forzar overflow:hidden ahí rompería ese scroll). */
+div[class*="fixed inset-0"] > [class*="bg-slate-800"]::before,
+div[class*="fixed inset-0"] > [class*="bg-slate-900"]::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    border-radius: 1.25rem 1.25rem 0 0;
+    background: linear-gradient(90deg, var(--marca-azul-primario), var(--marca-cian) 55%, var(--marca-naranja));
+    pointer-events: none;
+}
+
+/* 🏷️ Insignia para el ícono del título del modal: el primer <i> dentro del <h2>/<h3> de la
+   cabecera (en las 2 familias de marcado: con 'flex items-center gap-2' en el propio <h3>, ej.
+   usuarios.html, o suelto con 'mr-2' antes del texto, ej. comunicados.html — en ambas ese <i> es
+   el primer hijo elemento del encabezado) pasa de ser un simple glifo suelto a una insignia con
+   fondo suave. Usa 'color-mix(in srgb, currentColor ...)' para teñir el fondo con el MISMO color
+   que ya tiene el ícono (cian, naranja, o el color de texto del tema si no trae acento propio —
+   ver bloque "🎨 Acentos de marca" y los bloques por tema más arriba, que ya fijan ese color vía
+   currentColor antes de que esta regla se aplique), así que no hace falta repetir la paleta por
+   tema ni por color de acento aquí. */
+div[class*="fixed inset-0"] h2 > i:first-child,
+div[class*="fixed inset-0"] h3 > i:first-child {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75em;
+    height: 1.75em;
+    margin-right: 0.5rem;
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    vertical-align: middle;
+}
+
+/* 🔘 Botón de cerrar (la 'x'): en las 43 apariciones de fa-xmark de toda la app, el ícono es
+   siempre hijo directo de un <button> — :has() permite darle una zona de click circular con
+   hover sin tener que tocar el HTML de ningún modal. El hover usa currentColor igual que la
+   insignia de arriba, así que se ve correcto en los 3 temas sin reglas adicionales por tema
+   (el color de texto del botón ya lo fija el bloque de arriba según el tema activo). */
+div[class*="fixed inset-0"] button:has(> i.fa-xmark) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+div[class*="fixed inset-0"] button:has(> i.fa-xmark):hover {
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* 🔲 Botones primarios/secundarios del modal: transición suave de color en vez del cambio
+   brusco que ya tenían (los colores de hover en sí — azul-secundario, #f1f5f9/#e2e8f0 — no
+   cambian, ver los bloques de arriba; esto solo agrega la transición). */
+div[class*="fixed inset-0"] button[class*="bg-cyan-600"],
+div[class*="fixed inset-0"] button[class*="bg-blue-600"],
+div[class*="fixed inset-0"] button[class*="bg-blue-500"],
+div[class*="fixed inset-0"] button[class*="bg-slate-700"],
+div[class*="fixed inset-0"] button[class*="bg-slate-800"] {
+    transition: background-color 0.15s ease, transform 0.1s ease !important;
+}
+
+/* 🌫️ Velo con desenfoque consistente: unifica el backdrop-blur del velo detrás del modal en
+   TODA la app — algunas plantillas ya traían 'backdrop-blur-sm' en el HTML y otras no (ej.
+   admin_boveda_personal.html, mi_boveda.html), lo que hacía que unos modales se sintieran más
+   "flotando sobre un vidrio esmerilado" que otros. Como esta hoja se enlaza al final del <head>,
+   este valor gana la cascada parejo en todos, sin tocar el HTML de ninguna plantilla. */
+div[class*="fixed inset-0"] {
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+}
+
+/* 🎬 Animación de entrada: el velo aparece con un fade y el panel con un fade+escala suave. Los
+   modales de Arkiv se muestran/ocultan alternando la clase 'hidden' de Tailwind
+   (display:none ⇄ flex) vía classList.add/remove en JS — los navegadores reinician una
+   animación CSS cada vez que un elemento pasa de display:none a visible, así que no hace falta
+   ningún cambio de JS para que esto se dispare en cada apertura. Se respeta
+   prefers-reduced-motion para quienes lo tengan activado en su sistema. */
+@keyframes arkiv-modal-velo-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes arkiv-modal-panel-in {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+    div[class*="fixed inset-0"] {
+        animation: arkiv-modal-velo-in 0.18s ease-out;
+    }
+    div[class*="fixed inset-0"] > [class*="bg-slate-800"],
+    div[class*="fixed inset-0"] > [class*="bg-slate-900"] {
+        animation: arkiv-modal-panel-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
 }
