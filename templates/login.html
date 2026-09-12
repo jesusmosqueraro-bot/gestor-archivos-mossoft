@@ -19,8 +19,17 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (pedido por Tomás, 12/09/2026): tipografía
+         Montserrat + variables CSS con la paleta institucional — ver marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    <style>
+        body { font-family: var(--marca-fuente); }
+    </style>
 </head>
-<body class="bg-slate-900 min-h-screen flex items-stretch">
+<body class="bg-slate-50 min-h-screen flex items-stretch">
 
     {% if fondo_media %}
     <!-- 🖼️ PANEL DE MARCA (imagen/video corto, administrable desde Novedades y Comunicados
@@ -51,40 +60,12 @@
 
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
-            <!-- ENCABEZADO CON LOGO NÓRDICO ATEMPORAL -->
+            <!-- ENCABEZADO CON LOGO PRINCIPAL DE PREVENTIVA SALUD IPS (manual de marca, pedido
+                 por Tomás, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema. -->
             <div class="text-center mb-6">
-                <!-- ISOTIPO VECTORIAL ARKIV -->
-                <div class="w-16 h-16 mx-auto mb-3 drop-shadow-md">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-full h-full" role="img" aria-label="Logo de Arkiv, software de gestión documental y archivo">
-                        <title>Arkiv — Gestión Documental y Archivo</title>
-                        <defs>
-                            <linearGradient id="bgSlate" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#020617;stop-opacity:1" />
-                            </linearGradient>
-                            <linearGradient id="platLight" x1="0%" y1="0%" x2="0%" y2="100%">
-                                <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
-                            </linearGradient>
-                            <linearGradient id="steelG" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#94a3b8;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#64748b;stop-opacity:1" />
-                            </linearGradient>
-                        </defs>
-                        <rect width="100" height="100" rx="22" fill="url(#bgSlate)"/>
-                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
-                        <polygon points="50,16 18,78 32,78 50,42" fill="url(#platLight)" />
-                        <polygon points="50,16 82,78 68,78 50,42" fill="url(#steelG)" />
-                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
-                        <polygon points="34,52 66,52 60,46 40,46" fill="url(#platLight)" />
-                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
-                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
-                    </svg>
-                </div>
-
-                <h1 class="text-2xl font-black text-slate-800 tracking-tight font-serif">Arkiv</h1>
-                <div class="h-0.5 w-8 bg-slate-200 mx-auto my-2 rounded-full"></div>
-                <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Ecosistema Digital Corporativo</p>
+                <img src="{{ url_for('static', filename='img/logo_preventiva.png') }}" alt="Preventiva Salud IPS" class="h-16 w-auto mx-auto mb-3">
+                <div class="h-0.5 w-8 bg-[var(--marca-cian)]/40 mx-auto my-2 rounded-full"></div>
+                <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Arkiv · Ecosistema Digital Corporativo</p>
             </div>
 
             {% if error %}
@@ -109,15 +90,15 @@
                 <input type="hidden" name="longitud" id="login-longitud">
                 <div>
                     <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
-                    <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+                    <input type="text" name="usuario" placeholder="Ej: admin" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-[var(--marca-azul-primario)]/[0.04] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[var(--marca-cian)] text-slate-800 font-medium transition-all">
                 </div>
 
                 <div>
                     <div class="flex justify-between items-center mb-1">
                         <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contraseña</label>
-                        <a href="/recuperar" class="text-[11px] text-blue-600 hover:underline font-medium">¿Olvidaste tu clave?</a>
+                        <a href="/recuperar" class="text-[11px] text-[var(--marca-azul-primario)] hover:underline font-medium">¿Olvidaste tu clave?</a>
                     </div>
-                    <input type="password" name="contrasena" placeholder="••••" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-blue-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium transition-all">
+                    <input type="password" name="contrasena" placeholder="••••" required class="w-full text-xs p-3 border border-slate-200 rounded-xl bg-[var(--marca-azul-primario)]/[0.04] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[var(--marca-cian)] text-slate-800 font-medium transition-all">
                 </div>
 
                 <!-- reCAPTCHA v2 con Clave de Sitio Oficial -->
@@ -125,7 +106,7 @@
                     <div class="g-recaptcha scale-90 sm:scale-100 origin-center" data-sitekey="6LcU0mAtAAAAAOj_aciK31VM2nAuECZQe0-G36Ph"></div>
                 </div>
 
-                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
+                <button type="submit" class="w-full bg-[var(--marca-azul-primario)] hover:bg-[var(--marca-azul-secundario)] text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-[var(--marca-azul-primario)]/25 text-xs transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]">
                     Iniciar Sesión →
                 </button>
             </form>
@@ -136,7 +117,7 @@
                     • Conexión segura y cifrada
                 </p>
                 <p class="text-[10px] text-slate-400 mt-1">
-                    <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-100">v1.3.0 Pro</span> • Powered by <strong class="text-slate-600">MosSoft</strong>
+                    <span class="bg-[var(--marca-cian)]/10 text-[var(--marca-azul-primario)] px-2 py-0.5 rounded-full font-bold border border-[var(--marca-cian)]/30">v1.3.0 Pro</span> • Powered by <strong class="text-slate-600">MosSoft</strong>
                 </p>
             </div>
 

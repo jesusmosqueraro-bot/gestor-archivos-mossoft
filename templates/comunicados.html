@@ -98,8 +98,13 @@
         {% if comunicados %}
             <div class="space-y-4">
                 {% for c in comunicados %}
-                    <div class="bg-slate-800/60 border {% if c.fijado %}border-sky-500/60 shadow-lg shadow-sky-500/5{% else %}border-slate-700/60{% endif %} rounded-3xl p-5 transition-all">
-                        
+                    <!-- 🎨 Color de fondo/tarjeta personalizado (manual de marca, pedido por Tomás,
+                         12/09/2026): si el comunicado tiene un color elegido se pinta como un tinte
+                         translúcido de fondo + borde a juego, sin perder el estilo de la tarjeta
+                         (fijado/legibilidad del texto claro se mantienen igual). Sin color, se ve
+                         exactamente como antes. -->
+                    <div class="bg-slate-800/60 border {% if c.fijado %}border-sky-500/60 shadow-lg shadow-sky-500/5{% else %}border-slate-700/60{% endif %} rounded-3xl p-5 transition-all"{% if c.color %} style="background-color: {{ c.color }}26; border-color: {{ c.color }}66;"{% endif %}>
+
                         <!-- CABECERA -->
                         <div class="flex items-start justify-between gap-3 mb-3">
                             <div class="flex items-center gap-2 flex-wrap">
@@ -243,6 +248,23 @@
                     </select>
                 </div>
 
+                <!-- 🎨 Color de fondo/tarjeta (opcional, manual de marca de Preventiva): presets de
+                     la paleta institucional + selector libre. Sin elegir ninguno, la tarjeta queda
+                     con su estilo por defecto (igual que hasta ahora). -->
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Color de la tarjeta (opcional)</label>
+                    <div id="crear-paleta-color" class="flex items-center flex-wrap gap-2">
+                        {% for hex in ['#1654a5', '#145299', '#0ca3c5', '#ee7128', '#a09f9e', '#2d5461', '#7b4c9e'] %}
+                        <button type="button" data-color="{{ hex }}" class="w-7 h-7 rounded-full border-2 border-transparent hover:scale-110 transition-transform" style="background-color: {{ hex }};" onclick="elegirColorComunicado('crear', '{{ hex }}', this)" title="{{ hex }}"></button>
+                        {% endfor %}
+                        <button type="button" data-color="" class="w-7 h-7 rounded-full border-2 border-dashed border-slate-500 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:border-slate-300" onclick="elegirColorComunicado('crear', '', this)" title="Sin color (usar el estilo por defecto)">
+                            <i class="fa-solid fa-xmark text-[10px]"></i>
+                        </button>
+                        <input type="color" id="crear-color-picker" value="#1654a5" class="w-7 h-7 rounded-full border-2 border-transparent cursor-pointer bg-transparent p-0" onchange="elegirColorComunicado('crear', this.value, null)" title="Elegir otro color">
+                    </div>
+                    <input type="hidden" name="color" id="crear-color-valor" value="">
+                </div>
+
                 <div class="flex items-center gap-2 py-1">
                     <input type="checkbox" id="fijado" name="fijado" class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500">
                     <label for="fijado" class="text-slate-300 font-bold cursor-pointer">Fijar destacado en Inicio</label>
@@ -305,6 +327,21 @@
                     </select>
                 </div>
 
+                <!-- 🎨 Color de fondo/tarjeta (opcional) — ver comentario equivalente en el modal de Crear. -->
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Color de la tarjeta (opcional)</label>
+                    <div id="editar-paleta-color" class="flex items-center flex-wrap gap-2">
+                        {% for hex in ['#1654a5', '#145299', '#0ca3c5', '#ee7128', '#a09f9e', '#2d5461', '#7b4c9e'] %}
+                        <button type="button" data-color="{{ hex }}" class="w-7 h-7 rounded-full border-2 border-transparent hover:scale-110 transition-transform" style="background-color: {{ hex }};" onclick="elegirColorComunicado('editar', '{{ hex }}', this)" title="{{ hex }}"></button>
+                        {% endfor %}
+                        <button type="button" data-color="" class="w-7 h-7 rounded-full border-2 border-dashed border-slate-500 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:border-slate-300" onclick="elegirColorComunicado('editar', '', this)" title="Sin color (usar el estilo por defecto)">
+                            <i class="fa-solid fa-xmark text-[10px]"></i>
+                        </button>
+                        <input type="color" id="editar-color-picker" value="#1654a5" class="w-7 h-7 rounded-full border-2 border-transparent cursor-pointer bg-transparent p-0" onchange="elegirColorComunicado('editar', this.value, null)" title="Elegir otro color">
+                    </div>
+                    <input type="hidden" name="color" id="editar-color-valor" value="">
+                </div>
+
                 <div class="flex items-center gap-2 py-1">
                     <input type="checkbox" id="editar-fijado" name="fijado" class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500">
                     <label for="editar-fijado" class="text-slate-300 font-bold cursor-pointer">Fijar destacado en Inicio</label>
@@ -342,10 +379,31 @@
         );
         const quillEditarComunicado = crearEditorEnriquecido('editor-editar-contenido', 'editar-contenido', '');
 
+        // 🎨 Selector de color de fondo/tarjeta (manual de marca, pedido por Tomás, 12/09/2026):
+        // 'prefijo' es 'crear' o 'editar' (cada modal tiene su propia paleta/hidden/picker).
+        // 'color' es un hex ('' para "sin color"). 'swatchEl' es el botón de preset clicado (o
+        // null cuando el cambio viene del <input type="color"> libre, que no tiene un botón que
+        // resaltar). Solo actualiza el DOM del modal — la validación real ocurre en el servidor
+        // (ver _color_comunicado_valido en app.py), así que un valor manipulado aquí no cambia
+        // nada de seguridad, solo se ignoraría al guardar.
+        function elegirColorComunicado(prefijo, color, swatchEl) {
+            document.getElementById(prefijo + '-color-valor').value = color;
+            document.querySelectorAll('#' + prefijo + '-paleta-color button').forEach(function (b) {
+                b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-slate-800', 'ring-white');
+            });
+            if (swatchEl) {
+                swatchEl.classList.add('ring-2', 'ring-offset-2', 'ring-offset-slate-800', 'ring-white');
+            }
+            if (color) {
+                document.getElementById(prefijo + '-color-picker').value = color;
+            }
+        }
+
         function abrirModalCrear() {
             // Por si el modal ya se había abierto y cancelado antes en esta misma página: se
             // limpia el editor para no arrastrar texto de un intento anterior.
             cargarContenidoEnEditor(quillCrearComunicado, 'input-crear-contenido', '');
+            elegirColorComunicado('crear', '', null);
             document.getElementById('modal-crear').classList.remove('hidden');
             document.getElementById('modal-crear').classList.add('flex');
         }
@@ -362,6 +420,13 @@
             document.getElementById('editar-visibilidad').value = c.visibilidad || 'todos';
             cargarContenidoEnEditor(quillEditarComunicado, 'editar-contenido', c.contenido || '');
             document.getElementById('editar-fijado').checked = !!c.fijado;
+
+            // Resalta el preset que coincida con el color guardado (si lo hay); si el color no
+            // coincide con ningún preset (se eligió con el selector libre), no resalta ninguno
+            // pero sí dibuja ese color en el <input type="color">.
+            const colorGuardado = c.color || '';
+            const swatchGuardado = document.querySelector('#editar-paleta-color button[data-color="' + colorGuardado + '"]');
+            elegirColorComunicado('editar', colorGuardado, swatchGuardado || null);
 
             const imgPreview = document.getElementById('editar-imagen-actual');
             const sinImagen = document.getElementById('editar-sin-imagen');
