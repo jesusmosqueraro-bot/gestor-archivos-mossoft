@@ -16441,6 +16441,37 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en usuarios (buscador global): {e}")
 
+    # --- Geolocalización de Accesos (solo rol admin, mismo acceso que /admin/geolocalizacion):
+    # hasta ahora este módulo no tenía ninguna categoría en el buscador global. Se busca por
+    # usuario (nombre o usuario de login), IP, sede asignada y el estado dentro/fuera de sede,
+    # para poder ubicar un acceso puntual sin tener que aplicar los filtros de la página primero.
+    # LIMIT 500 en SQL, igual que Chat Interno, para no escanear todo el historial en cada tecla.
+    if es_admin:
+        try:
+            nombres_geo = _mapa_nombres_usuarios()
+            cursor.execute("SELECT usuario, ip, latitud, longitud, fecha, sede, dentro_de_sede FROM login_geolocalizacion ORDER BY id DESC LIMIT 500")
+            contador = 0
+            for g_usuario, g_ip, g_lat, g_lng, g_fecha, g_sede, g_dentro in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if g_lat is None or g_lng is None:
+                    estado_texto = 'Sin ubicación'
+                elif g_dentro:
+                    estado_texto = 'Dentro de sede'
+                else:
+                    estado_texto = 'Fuera de sede'
+                nombre_mostrar = _nombre_para_mostrar(g_usuario, nombres_geo)
+                if q_norm in normalizar(f"{nombre_mostrar} {g_usuario} {g_ip or ''} {g_sede or ''} {estado_texto}"):
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Geolocalización de Accesos',
+                        'titulo': nombre_mostrar,
+                        'subtitulo': f"{g_sede or estado_texto} · {g_fecha}",
+                        'url': url_for('admin_geolocalizacion', usuario=g_usuario)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en geolocalización de accesos (buscador global): {e}")
+
     # --- Chat Interno (solo admin/agente, los únicos con acceso): el Canal General completo
     # (es de todo el equipo) más solo los mensajes directos donde participa quien busca — nunca
     # los directos ajenos, aunque quien busca sea admin. Cada resultado abre /chat ya en esa
