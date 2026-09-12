@@ -149,6 +149,9 @@
                         <input type="number" step="0.000001" name="latitud" placeholder="Latitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                         <input type="number" step="0.000001" name="longitud" placeholder="Longitud" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                     </div>
+                    <!-- 🧭 Radio de tolerancia (metros) para marcar un acceso/alta como "dentro" de esta
+                         Sede (Haversine) — 200m si se deja en blanco, ver _sede_real_mas_cercana(). -->
+                    <input type="number" step="1" min="1" name="radio_metros" placeholder="Radio en metros (200 por defecto)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <select name="responsable" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
                         <option value="">Sin responsable asignado</option>
                         {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}">{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}
@@ -183,6 +186,7 @@
                                     <input type="number" step="0.000001" name="latitud" value="{{ s.latitud if s.latitud is not none else '' }}" placeholder="Latitud" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
                                     <input type="number" step="0.000001" name="longitud" value="{{ s.longitud if s.longitud is not none else '' }}" placeholder="Longitud" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
                                 </div>
+                                <input type="number" step="1" min="1" name="radio_metros" value="{{ s.radio_metros if s.radio_metros is not none else '' }}" placeholder="Radio en metros (200 por defecto)" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
                                 <select name="responsable" class="w-full bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500">
                                     <option value="" {% if not s.responsable %}selected{% endif %}>Sin responsable asignado</option>
                                     {% for u in usuarios_disponibles %}<option value="{{ u.usuario }}" {% if u.usuario == s.responsable %}selected{% endif %}>{{ u.nombre or u.usuario }} ({{ u.usuario }})</option>{% endfor %}

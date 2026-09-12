@@ -458,6 +458,11 @@
                                 <option value="{{ s.nombre }}" data-lat="{{ s.latitud if s.latitud is not none else '' }}" data-lng="{{ s.longitud if s.longitud is not none else '' }}" {% if form_data and form_data.sede == s.nombre %}selected{% endif %}>{{ s.nombre }}</option>
                                 {% endfor %}
                             </select>
+                            <!-- 📍 Ubicación cruda detectada por el navegador (si la hubo), para que el
+                                 backend marque "dentro"/"fuera de sede" contra la Sede que quede asignada
+                                 arriba — ver _preseleccionarSedeMasCercana() y _crear_usuario_interno(). -->
+                            <input type="hidden" name="latitud_detectada" id="input-latitud-detectada">
+                            <input type="hidden" name="longitud_detectada" id="input-longitud-detectada">
                         </div>
 
                         <div>
@@ -763,6 +768,10 @@
             if (sedeGeolocalizacionIntentada || !navigator.geolocation) return;
             sedeGeolocalizacionIntentada = true;
             navigator.geolocation.getCurrentPosition(function (pos) {
+                // Se guarda siempre (aunque ya haya elegido una sede a mano) para que el backend
+                // pueda marcar dentro/fuera de sede contra lo que quede en el <select>.
+                document.getElementById('input-latitud-detectada').value = pos.coords.latitude;
+                document.getElementById('input-longitud-detectada').value = pos.coords.longitude;
                 if (!sedeAutoSeleccionActiva) return; // ya eligió una sede a mano mientras se resolvía
                 const opcion = _sedeMasCercana(pos.coords.latitude, pos.coords.longitude);
                 if (opcion) opcion.selected = true;
