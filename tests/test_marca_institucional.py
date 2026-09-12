@@ -1,6 +1,36 @@
 """Pruebas de la aplicación del manual de marca de Preventiva Salud IPS en Arkiv (pedido por
-Tomás, 12/09/2026): logo principal e tipografía Montserrat en /login, y el color de
-fondo/tarjeta personalizado (paleta institucional) en el Muro de Comunicados."""
+Tomás, 12/09/2026): logo principal e tipografía Montserrat en /login (y ahora, global, en toda
+la plataforma), y el color de fondo/tarjeta personalizado (paleta institucional) en el Muro de
+Comunicados."""
+import glob
+import os
+
+
+def test_montserrat_esta_enlazada_globalmente_en_todas_las_plantillas():
+    """Pedido de Tomás, 12/09/2026: "Haz global la fuente Montserrat" — en vez de un
+    templates/base.html (esta app no usa herencia de plantillas Jinja, cada .html es un
+    documento completo), marca-institucional.css se enlaza al final del <head> de cada
+    plantilla. Esta prueba evita que una plantilla nueva se quede afuera sin que nadie lo note."""
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    plantillas = sorted(glob.glob(os.path.join(raiz, 'templates', '*.html')))
+    assert plantillas, "no se encontraron plantillas — revisar la ruta de búsqueda"
+    sin_marca = []
+    for ruta in plantillas:
+        with open(ruta, encoding='utf-8') as f:
+            contenido = f.read()
+        if 'marca-institucional.css' not in contenido:
+            sin_marca.append(os.path.basename(ruta))
+    assert not sin_marca, f"Plantillas sin la tipografía institucional: {sin_marca}"
+
+
+def test_bienvenida_incluye_la_hoja_de_marca_institucional(admin_session):
+    """Chequeo end-to-end (no solo estático) de que una página distinta a /login también carga
+    marca-institucional.css — confirma que el enlace realmente se sirve, no solo que el texto
+    está en el archivo fuente."""
+    r = admin_session.get('/bienvenida')
+
+    assert r.status_code == 200
+    assert 'marca-institucional.css' in r.get_data(as_text=True)
 
 
 def test_login_muestra_el_logo_principal_de_preventiva_centrado(client):
