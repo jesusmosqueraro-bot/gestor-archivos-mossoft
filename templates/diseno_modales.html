@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Diseño de Modales</title>
+    <!-- FAVICON OFICIAL ARKIV -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
+         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-fuchsia bg-slate-900 min-h-screen text-slate-100 flex flex-col font-sans">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 font-serif whitespace-nowrap">
+                <i class="fa-solid fa-palette text-fuchsia-400"></i> Diseño de Modales
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/buscador.html' %}
+            {% include 'partials/historial_sesiones_boton.html' %}
+            {% include 'partials/seguridad_boton.html' %}
+            {% include 'partials/perfil_boton.html' %}
+            {% include 'partials/chat_boton.html' %}
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <main class="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- MENSAJES -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-center gap-3 {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 text-xs text-slate-400 leading-relaxed space-y-1.5">
+            <p><i class="fa-solid fa-circle-info text-fuchsia-400 mr-1.5"></i> Aquí se personaliza cómo se ven TODOS los modales de Arkiv (crear/editar usuario, geolocalización, etc.) en cada uno de los 3 temas. Los cambios se ven para <strong>todas las personas</strong> que usan la plataforma, apenas los guardes — no solo para tu cuenta.</p>
+            <p><i class="fa-solid fa-swatchbook text-fuchsia-400 mr-1.5"></i> Los "Colores de marca" de abajo también se usan fuera de los modales: en la pantalla de inicio de sesión y en el selector de color del Muro de Comunicados — cámbialos con eso en mente.</p>
+        </div>
+
+        <form method="POST" action="{{ url_for('guardar_diseno_modales') }}" id="form-diseno-modales" class="space-y-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+            <!-- COLORES DE MARCA -->
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-4">
+                    <i class="fa-solid fa-star text-fuchsia-400"></i> Colores de marca (iguales en los 3 temas)
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {% set campos_acentos = [
+                        ('azul_primario', 'Azul primario', 'Borde de acento y botón principal del modal'),
+                        ('azul_secundario', 'Azul secundario', 'Color del botón principal al pasar el mouse'),
+                        ('cian', 'Cian', 'Íconos de acento (ej. usuario, geolocalización)'),
+                        ('naranja', 'Naranja', 'Íconos de alerta/aviso'),
+                    ] %}
+                    {% for clave, etiqueta, ayuda in campos_acentos %}
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-300 mb-1">{{ etiqueta }}</label>
+                        <div class="flex items-center gap-2">
+                            <input type="color" data-grupo="acentos" data-clave="{{ clave }}" name="acentos__{{ clave }}" value="{{ colores.acentos[clave] }}" class="w-10 h-10 rounded-lg border border-slate-600 bg-slate-900 cursor-pointer">
+                            <input type="text" data-hex-de="acentos__{{ clave }}" value="{{ colores.acentos[clave] }}" readonly class="w-24 text-[11px] font-mono p-2 border border-slate-600 rounded-lg bg-slate-900 text-slate-300">
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">{{ ayuda }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- UN BLOQUE POR TEMA -->
+            {% set temas = [
+                ('oscuro', 'Tema oscuro', 'fa-moon', 'sky'),
+                ('claro', 'Tema claro', 'fa-sun', 'amber'),
+                ('descanso', 'Descansar la vista', 'fa-mug-hot', 'orange'),
+            ] %}
+            {% set campos_tema = [
+                ('fondo', 'Fondo del panel'),
+                ('borde', 'Borde'),
+                ('texto', 'Texto principal'),
+                ('texto_secundario', 'Texto secundario (etiquetas, ayudas)'),
+            ] %}
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {% for tema_clave, tema_nombre, tema_icono, tema_color in temas %}
+                <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5">
+                    <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-4">
+                        <i class="fa-solid {{ tema_icono }} text-{{ tema_color }}-400"></i> {{ tema_nombre }}
+                    </h3>
+                    <div class="space-y-3 mb-4">
+                        {% for clave, etiqueta in campos_tema %}
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-300 mb-1">{{ etiqueta }}</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" data-grupo="{{ tema_clave }}" data-clave="{{ clave }}" name="{{ tema_clave }}__{{ clave }}" value="{{ colores[tema_clave][clave] }}" class="w-9 h-9 shrink-0 rounded-lg border border-slate-600 bg-slate-900 cursor-pointer">
+                                <input type="text" data-hex-de="{{ tema_clave }}__{{ clave }}" value="{{ colores[tema_clave][clave] }}" readonly class="w-full text-[11px] font-mono p-2 border border-slate-600 rounded-lg bg-slate-900 text-slate-300">
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <!-- VISTA PREVIA EN VIVO -->
+                    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Vista previa</p>
+                    <div class="rounded-xl p-4 bg-slate-950/80" style="background-color:#111827;">
+                        <div id="preview-{{ tema_clave }}" class="rounded-2xl p-4 shadow-xl" style="border-width:1px; border-style:solid;">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="preview-titulo font-bold text-sm">Modal de ejemplo</span>
+                                <i class="fa-regular fa-circle-question preview-icono"></i>
+                            </div>
+                            <p class="preview-secundario text-[11px] mb-3">Este es el texto secundario de ayuda.</p>
+                            <button type="button" class="preview-boton text-white text-[11px] font-bold py-1.5 px-3 rounded-lg">Guardar</button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg shadow-fuchsia-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar colores
+                </button>
+                <span class="text-[11px] text-slate-500">Los cambios se aplican de inmediato para todos los usuarios.</span>
+            </div>
+        </form>
+
+        <form method="POST" action="{{ url_for('restablecer_diseno_modales') }}" onsubmit="return confirm('¿Restablecer todos los colores de los modales a los valores originales de Arkiv? Se perderá cualquier personalización guardada.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button type="submit" class="text-[11px] text-slate-500 hover:text-rose-400 font-semibold flex items-center gap-1.5 transition-colors">
+                <i class="fa-solid fa-arrow-rotate-left"></i> Restablecer a los colores originales
+            </button>
+        </form>
+
+    </main>
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+
+    <!-- 🎨 /admin/diseno: sincroniza cada <input type="color"> con su cuadro de texto hex de al
+         lado (readonly, solo para que se vea el código) y repinta la vista previa de los 3
+         temas en vivo mientras se elige un color — sin recargar la página ni llamar al
+         servidor. Los nombres 'name="grupo__clave"' de los inputs los arma/valida
+         _guardar_colores_modal en app.py al enviar el formulario. -->
+    <script>
+        (function () {
+            var CAMPOS_TEMA = ['fondo', 'borde', 'texto', 'texto_secundario'];
+
+            function actualizarHex(input) {
+                var destino = document.querySelector('[data-hex-de="' + input.dataset.grupo + '__' + input.dataset.clave + '"]');
+                if (destino) destino.value = input.value;
+            }
+
+            function actualizarPreviewAcentos() {
+                var azulPrimario = document.querySelector('[name="acentos__azul_primario"]').value;
+                document.querySelectorAll('.preview-boton').forEach(function (b) { b.style.backgroundColor = azulPrimario; });
+                document.querySelectorAll('.preview-icono').forEach(function (i) { i.style.color = azulPrimario; });
+            }
+
+            function actualizarPreviewTema(tema) {
+                var preview = document.getElementById('preview-' + tema);
+                if (!preview) return;
+                var valor = function (clave) {
+                    var el = document.querySelector('[name="' + tema + '__' + clave + '"]');
+                    return el ? el.value : '';
+                };
+                preview.style.backgroundColor = valor('fondo');
+                preview.style.borderColor = valor('borde');
+                var titulo = preview.querySelector('.preview-titulo');
+                var secundario = preview.querySelector('.preview-secundario');
+                if (titulo) titulo.style.color = valor('texto');
+                if (secundario) secundario.style.color = valor('texto_secundario');
+            }
+
+            function actualizarTodo() {
+                actualizarPreviewAcentos();
+                ['oscuro', 'claro', 'descanso'].forEach(actualizarPreviewTema);
+            }
+
+            document.querySelectorAll('input[type="color"]').forEach(function (input) {
+                input.addEventListener('input', function () {
+                    actualizarHex(input);
+                    actualizarTodo();
+                });
+            });
+
+            actualizarTodo();
+        })();
+    </script>
+</body>
+</html>
