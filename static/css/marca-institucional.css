@@ -22,6 +22,29 @@
     --marca-azul-oscuro: #2d5461;     /* Azul-petróleo oscuro */
     --marca-morado: #7b4c9e;          /* Morado (variación Odontología) */
     --marca-fuente: 'Montserrat', sans-serif;
+
+    /* 🎨 Colores de los modales, personalizables desde /admin/diseno (pedido por Tomás,
+       12/09/2026: "un modal de diseño para poder modificar a gusto los colores de los
+       modales"). Los valores de aquí abajo son el respaldo (fallback de cada var() donde se
+       usan, unas líneas más abajo) por si esta hoja se sirviera sin pasar por
+       partials/colores_modal_personalizados.html — en el uso normal, ese partial (inyectado al
+       final del <head> de cada plantilla con los valores guardados en la BD, ver
+       _colores_modal_actuales en app.py) redefine estas mismas variables con lo que el admin
+       haya guardado, y como se enlaza DESPUÉS de este archivo, gana por orden de cascada. Los
+       valores de abajo son EXACTAMENTE los que los modales ya tenían antes de este feature, así
+       que mientras nadie personalice nada desde /admin/diseno, no cambia nada visualmente. */
+    --modal-oscuro-fondo: #0f172a;
+    --modal-oscuro-borde: #1e293b;
+    --modal-oscuro-texto: #ffffff;
+    --modal-oscuro-texto-secundario: #94a3b8;
+    --modal-claro-fondo: #ffffff;
+    --modal-claro-borde: #e2e8f0;
+    --modal-claro-texto: #1e293b;
+    --modal-claro-texto-secundario: #64748b;
+    --modal-descanso-fondo: #e8e2d5;
+    --modal-descanso-borde: #ded9c9;
+    --modal-descanso-texto: #3a322e;
+    --modal-descanso-texto-secundario: #605b5a;
 }
 
 /* 🌐 Tipografía global: se aplica sobre 'body' (se hereda a todo el texto
@@ -56,13 +79,16 @@ body {
    el tema). Ahora:
      · Estructura (radio de esquina + sombra + acentos de marca en azul/cian/naranja): igual en
        los 3 temas, para que "cada modal sea igual" y se sienta de la misma familia que /login.
-     · Colores de fondo/texto: en 'oscuro' y 'descanso' NO se tocan aquí — se dejan heredar de
-       las clases Tailwind nativas (oscuro) o de tema-descanso.css (descanso), que ya cubren
-       bg-slate-800/900, texto y placeholders para CUALQUIER elemento con esas clases, modales
-       incluidos. En 'claro' sí se fuerza el blanco puro de /login (más "limpio" que el
+     · Colores de fondo/texto: en 'claro' se fuerza el blanco puro de /login (más "limpio" que el
        #f8fafc genérico de tema-claro.css, a propósito: el modal es la pieza que más se
        parece a la tarjeta de login, y el pedido de Tomás fue explícito en que el claro se
-       viera "muy parecido a como está implementada la paleta de colores en login"). */
+       viera "muy parecido a como está implementada la paleta de colores en login").
+     · ACTUALIZACIÓN 12/09/2026 (/admin/diseno): 'oscuro' y 'descanso' antes se dejaban heredar
+       de las clases Tailwind nativas / tema-descanso.css sin bloque propio aquí. Ahora los tres
+       temas fuerzan explícitamente fondo/borde/texto del modal, pero a través de variables CSS
+       (--modal-oscuro-*/--modal-claro-*/--modal-descanso-*, definidas en :root con el mismo
+       valor que cada tema ya tenía) para que /admin/diseno pueda personalizarlas sin tocar esta
+       hoja — ver los tres bloques de abajo y _colores_modal_actuales en app.py. */
 div[class*="fixed inset-0"] [class*="bg-slate-800"],
 div[class*="fixed inset-0"] [class*="bg-slate-900"] {
     border-radius: 1rem !important;
@@ -98,39 +124,118 @@ div[class*="fixed inset-0"] button[class*="bg-blue-600"]:hover {
    página, igual que la tarjeta de /login. */
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="bg-slate-800"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="bg-slate-900"] {
-    background-color: #ffffff !important;
-    border-color: #e2e8f0 !important;
+    background-color: var(--modal-claro-fondo, #ffffff) !important;
+    border-color: var(--modal-claro-borde, #e2e8f0) !important;
 }
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-600"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-700"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="border-slate-800"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="divide-slate-700"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="divide-slate-800"] {
-    border-color: #e2e8f0 !important;
+    border-color: var(--modal-claro-borde, #e2e8f0) !important;
 }
 /* 🔤 Texto: de tonos claros (pensados para fondo oscuro) a tonos oscuros (para fondo blanco).
    Los botones se excluyen y se restauran aparte: un botón primario azul/cian con texto blanco
-   debe seguir teniendo texto blanco, no oscuro. */
-html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-white"] { color: #1e293b !important; }
+   debe seguir teniendo texto blanco, no oscuro. Nota sobre /admin/diseno: antes de este feature
+   text-white usaba un tono más oscuro (#1e293b) que text-slate-100/200/300 (#475569) — para que
+   el admin personalice UN solo "texto principal" en vez de dos tonos casi iguales, aquí se
+   consolidan ambos en --modal-claro-texto (con el valor más oscuro/legible de los dos, #1e293b,
+   como valor por defecto: un cambio cosmético mínimo, más contraste, no menos). */
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-white"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-100"],
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-200"],
-html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-300"] { color: #475569 !important; }
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-300"] { color: var(--modal-claro-texto, #1e293b) !important; }
 html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-400"],
-html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-500"] { color: #64748b !important; }
+html[data-theme="claro"] div[class*="fixed inset-0"] [class*="text-slate-500"] { color: var(--modal-claro-texto-secundario, #64748b) !important; }
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
-/* 📝 Inputs/selects/textareas de fondo oscuro -> blancos, con su texto ya oscurecido arriba. */
+/* 📝 Inputs/selects/textareas de fondo oscuro -> mismo fondo del panel, con su texto ya
+   oscurecido arriba. El placeholder se consolida con --modal-claro-texto-secundario (antes tenía
+   su propio tono #94a3b8, ligeramente más claro que el texto secundario #64748b — otro cambio
+   cosmético mínimo por la misma razón de arriba: un solo campo de "texto secundario" que
+   personalizar, no dos casi iguales). */
 html[data-theme="claro"] div[class*="fixed inset-0"] input[class*="bg-slate-900"],
 html[data-theme="claro"] div[class*="fixed inset-0"] input[class*="bg-slate-950"],
 html[data-theme="claro"] div[class*="fixed inset-0"] select[class*="bg-slate-900"],
 html[data-theme="claro"] div[class*="fixed inset-0"] select[class*="bg-slate-950"],
 html[data-theme="claro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
 html[data-theme="claro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
-    background-color: #ffffff !important;
+    background-color: var(--modal-claro-fondo, #ffffff) !important;
 }
 html[data-theme="claro"] div[class*="fixed inset-0"] input::placeholder,
 html[data-theme="claro"] div[class*="fixed inset-0"] textarea::placeholder {
-    color: #94a3b8 !important;
+    color: var(--modal-claro-texto-secundario, #64748b) !important;
 }
+/* 🌑 Tema OSCURO y 🟤 Tema DESCANSO: antes de /admin/diseno estos dos temas NO tenían un bloque
+   propio aquí — se dejaban heredar tal cual de las clases Tailwind nativas (oscuro) o de
+   tema-descanso.css (descanso), a propósito, para no duplicar cientos de reglas. Para que el
+   admin pueda personalizarlos igual que el claro de arriba, ahora sí se fuerzan explícitamente,
+   pero con las variables --modal-oscuro-*/--modal-descanso-* cuyo valor por defecto (ver :root
+   al principio de este archivo) es EXACTAMENTE el color que ya tenían de forma nativa/heredada
+   — así que, igual que con claro, nada cambia visualmente mientras no se use /admin/diseno. */
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="bg-slate-800"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="bg-slate-900"] {
+    background-color: var(--modal-oscuro-fondo, #0f172a) !important;
+    border-color: var(--modal-oscuro-borde, #1e293b) !important;
+}
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="border-slate-600"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="border-slate-700"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="border-slate-800"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="divide-slate-700"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="divide-slate-800"] {
+    border-color: var(--modal-oscuro-borde, #1e293b) !important;
+}
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-white"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-slate-100"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-slate-200"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-slate-300"] { color: var(--modal-oscuro-texto, #ffffff) !important; }
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-slate-400"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] [class*="text-slate-500"] { color: var(--modal-oscuro-texto-secundario, #94a3b8) !important; }
+html[data-theme="oscuro"] div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
+html[data-theme="oscuro"] div[class*="fixed inset-0"] input[class*="bg-slate-900"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] input[class*="bg-slate-950"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] select[class*="bg-slate-900"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] select[class*="bg-slate-950"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
+html[data-theme="oscuro"] div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
+    background-color: var(--modal-oscuro-fondo, #0f172a) !important;
+}
+html[data-theme="oscuro"] div[class*="fixed inset-0"] input::placeholder,
+html[data-theme="oscuro"] div[class*="fixed inset-0"] textarea::placeholder {
+    color: var(--modal-oscuro-texto-secundario, #94a3b8) !important;
+}
+
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="bg-slate-800"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="bg-slate-900"] {
+    background-color: var(--modal-descanso-fondo, #e8e2d5) !important;
+    border-color: var(--modal-descanso-borde, #ded9c9) !important;
+}
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="border-slate-600"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="border-slate-700"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="border-slate-800"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="divide-slate-700"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="divide-slate-800"] {
+    border-color: var(--modal-descanso-borde, #ded9c9) !important;
+}
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-white"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-slate-100"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-slate-200"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-slate-300"] { color: var(--modal-descanso-texto, #3a322e) !important; }
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-slate-400"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] [class*="text-slate-500"] { color: var(--modal-descanso-texto-secundario, #605b5a) !important; }
+html[data-theme="descanso"] div[class*="fixed inset-0"] button[class*="text-white"] { color: #ffffff !important; }
+html[data-theme="descanso"] div[class*="fixed inset-0"] input[class*="bg-slate-900"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] input[class*="bg-slate-950"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] select[class*="bg-slate-900"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] select[class*="bg-slate-950"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] textarea[class*="bg-slate-900"],
+html[data-theme="descanso"] div[class*="fixed inset-0"] textarea[class*="bg-slate-950"] {
+    background-color: var(--modal-descanso-fondo, #e8e2d5) !important;
+}
+html[data-theme="descanso"] div[class*="fixed inset-0"] input::placeholder,
+html[data-theme="descanso"] div[class*="fixed inset-0"] textarea::placeholder {
+    color: var(--modal-descanso-texto-secundario, #605b5a) !important;
+}
+
 /* 🔘 Botones secundarios (Cancelar, etc. — bg-slate-700/800 sin ser el primario azul/cian) a
    gris claro, sin quedar en un fondo oscuro perdido dentro de una tarjeta blanca. */
 html[data-theme="claro"] div[class*="fixed inset-0"] button[class*="bg-slate-700"],
