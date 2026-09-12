@@ -598,6 +598,20 @@
                         geolocMapa.setView([4.7110, -74.0721], 12);
                     }
                     setTimeout(() => geolocMapa.invalidateSize(), 50);
+
+                    // 📍 "Mi ubicación": pide el permiso por defecto al abrir el modal (sin
+                    // esperar clic) y, si el navegador la concede, la marca y recentra el mapa
+                    // ahí con zoom 15 (gana sobre el fitBounds/setView de arriba, que solo es
+                    // el punto de partida mientras se resuelve el permiso).
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(pos => {
+                            const miMarcador = L.marker([pos.coords.latitude, pos.coords.longitude])
+                                .addTo(geolocMapa).bindPopup('📍 Tu ubicación actual');
+                            geolocCapasDinamicas.push(miMarcador);
+                            geolocMapa.setView([pos.coords.latitude, pos.coords.longitude], 15);
+                            geolocMapa.invalidateSize();
+                        }, () => {}, { enableHighAccuracy: true, timeout: 5000 });
+                    }
                 })
                 .catch(() => {
                     document.getElementById('geoloc-cargando').classList.add('hidden');
