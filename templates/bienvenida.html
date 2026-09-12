@@ -20,6 +20,11 @@
     <link rel="stylesheet" href="/static/css/tema-claro.css">
     <link rel="stylesheet" href="/static/css/tema-descanso.css">
     <link rel="stylesheet" href="/static/css/contenido-enriquecido.css">
+    {% if rol == 'admin' %}
+    <!-- Leaflet (mapa OpenStreetMap) para el modal de Geolocalización de Accesos, solo admin. -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    {% endif %}
 </head>
 <body class="min-h-screen bg-[#0b0f19] text-slate-100 selection:bg-cyan-500 selection:text-white flex flex-col justify-between">
 
@@ -312,6 +317,21 @@
                     <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
+
+            <!-- 5.1 Geolocalización de Accesos (Solo Admin) -->
+            <button type="button" onclick="abrirModalGeolocalizacion()" class="group text-left card-acento-cyan bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">Geolocalización de Accesos</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Mapa y métricas de dónde ocurrieron los inicios de sesión, dentro o fuera de las sedes autorizadas.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-cyan-400">
+                    <span>Vista rápida</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </button>
             {% endif %}
 
             {% if rol in ['admin', 'agente'] %}
@@ -396,6 +416,62 @@
         </div>
     </main>
 
+    {% if rol == 'admin' %}
+    <!-- Modal de Geolocalización de Accesos (vista rápida): métricas + mapa embebido, con un
+         enlace a /admin/geolocalizacion para filtros, gráficas y la tabla completa (pedido de
+         Tomás, 12/09/2026: "dame un modal en el bienvenida.html" / "Ambos, por favor"). -->
+    <div id="modal-geolocalizacion" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white"><i class="fa-solid fa-map-location-dot text-cyan-400"></i> Geolocalización de Accesos</h3>
+                <button onclick="cerrarModalGeolocalizacion()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div id="geoloc-cargando" class="text-center text-slate-400 text-xs py-8">
+                <i class="fa-solid fa-spinner fa-spin"></i> Cargando datos de accesos&hellip;
+            </div>
+
+            <div id="geoloc-contenido" class="hidden">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-slate-900 border border-slate-700 rounded-2xl p-3 text-center">
+                        <p id="geoloc-total" class="text-xl font-bold text-white">0</p>
+                        <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Accesos</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-700 rounded-2xl p-3 text-center">
+                        <p id="geoloc-usuarios" class="text-xl font-bold text-white">0</p>
+                        <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Usuarios</p>
+                    </div>
+                    <div class="bg-slate-900 border border-emerald-700/40 rounded-2xl p-3 text-center">
+                        <p id="geoloc-dentro" class="text-xl font-bold text-emerald-400">0</p>
+                        <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Dentro de sede</p>
+                    </div>
+                    <div class="bg-slate-900 border border-rose-700/40 rounded-2xl p-3 text-center">
+                        <p id="geoloc-fuera" class="text-xl font-bold text-rose-400">0</p>
+                        <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Fuera de sede</p>
+                    </div>
+                </div>
+
+                <div id="geoloc-mapa" class="w-full h-64 rounded-2xl border border-slate-700 overflow-hidden"></div>
+
+                <div id="geoloc-sin-datos" class="hidden text-center text-slate-400 text-xs py-6">
+                    Aún no hay accesos con ubicación registrada.
+                </div>
+            </div>
+
+            <div id="geoloc-error" class="hidden text-center text-rose-400 text-xs py-8">
+                <i class="fa-solid fa-triangle-exclamation"></i> No se pudo cargar la información. Intenta de nuevo.
+            </div>
+
+            <div class="mt-5 pt-4 border-t border-slate-700/60 flex items-center justify-between gap-2">
+                <button type="button" onclick="cerrarModalGeolocalizacion()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold text-xs">Cerrar</button>
+                <a href="{{ url_for('admin_geolocalizacion') }}" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-xs flex items-center gap-2">
+                    Ver mapa completo, filtros y gráficas <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Footer -->
     <footer class="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
         Arkiv &bull; Ecosistema Digital Corporativo &bull; 2026
@@ -421,5 +497,108 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+
+    {% if rol == 'admin' %}
+    <script>
+        // Modal de Geolocalización de Accesos (vista rápida): el mapa Leaflet solo se inicializa
+        // la primera vez que se abre el modal (nunca en la carga de la página) porque un mapa
+        // creado dentro de un contenedor con "display:none" se renderiza con tamaño cero; por
+        // eso también se llama invalidateSize() justo después de mostrar el modal.
+        let geolocMapa = null;
+        let geolocCapasDinamicas = [];
+        let geolocDatosCargados = false;
+
+        function abrirModalGeolocalizacion() {
+            const modal = document.getElementById('modal-geolocalizacion');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            if (!geolocDatosCargados) {
+                cargarResumenGeolocalizacion();
+            } else if (geolocMapa) {
+                setTimeout(() => geolocMapa.invalidateSize(), 50);
+            }
+        }
+
+        function cerrarModalGeolocalizacion() {
+            const modal = document.getElementById('modal-geolocalizacion');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function cargarResumenGeolocalizacion() {
+            document.getElementById('geoloc-cargando').classList.remove('hidden');
+            document.getElementById('geoloc-contenido').classList.add('hidden');
+            document.getElementById('geoloc-error').classList.add('hidden');
+
+            fetch('{{ url_for("admin_geolocalizacion_resumen") }}')
+                .then(r => {
+                    if (!r.ok) throw new Error('respuesta no OK');
+                    return r.json();
+                })
+                .then(datos => {
+                    geolocDatosCargados = true;
+                    document.getElementById('geoloc-cargando').classList.add('hidden');
+                    document.getElementById('geoloc-contenido').classList.remove('hidden');
+
+                    document.getElementById('geoloc-total').textContent = datos.total_accesos;
+                    document.getElementById('geoloc-usuarios').textContent = datos.usuarios_unicos;
+                    document.getElementById('geoloc-dentro').textContent = datos.dentro_de_sede;
+                    document.getElementById('geoloc-fuera').textContent = datos.fuera_de_sede;
+
+                    const conUbicacion = datos.registros.filter(r => r.latitud !== null && r.longitud !== null);
+                    const mapaDiv = document.getElementById('geoloc-mapa');
+
+                    if (conUbicacion.length === 0 && datos.sedes.length === 0) {
+                        mapaDiv.classList.add('hidden');
+                        document.getElementById('geoloc-sin-datos').classList.remove('hidden');
+                        return;
+                    }
+                    mapaDiv.classList.remove('hidden');
+                    document.getElementById('geoloc-sin-datos').classList.add('hidden');
+
+                    if (!geolocMapa) {
+                        geolocMapa = L.map('geoloc-mapa');
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '&copy; OpenStreetMap',
+                            maxZoom: 19,
+                        }).addTo(geolocMapa);
+                    }
+
+                    // Limpia capas de una carga anterior (si el modal se reabre) antes de volver a dibujar.
+                    geolocCapasDinamicas.forEach(capa => geolocMapa.removeLayer(capa));
+                    geolocCapasDinamicas = [];
+
+                    const puntos = [];
+                    datos.sedes.forEach(sede => {
+                        const circulo = L.circle([sede.lat, sede.lng], {
+                            radius: sede.radio_metros, color: '#00A3DA', fillColor: '#00A3DA', fillOpacity: 0.15,
+                        }).addTo(geolocMapa).bindPopup(sede.nombre);
+                        geolocCapasDinamicas.push(circulo);
+                        puntos.push([sede.lat, sede.lng]);
+                    });
+                    conUbicacion.forEach(r => {
+                        const color = r.sede ? '#10b981' : '#f43f5e';
+                        const marcador = L.circleMarker([r.latitud, r.longitud], {
+                            radius: 6, color: color, fillColor: color, fillOpacity: 0.8,
+                        }).addTo(geolocMapa).bindPopup(`${r.usuario}<br>${r.fecha}<br>${r.sede ? r.sede : 'Fuera de sede'}`);
+                        geolocCapasDinamicas.push(marcador);
+                        puntos.push([r.latitud, r.longitud]);
+                    });
+
+                    if (puntos.length > 0) {
+                        geolocMapa.fitBounds(puntos, { padding: [20, 20], maxZoom: 16 });
+                    } else {
+                        geolocMapa.setView([4.7110, -74.0721], 12);
+                    }
+                    setTimeout(() => geolocMapa.invalidateSize(), 50);
+                })
+                .catch(() => {
+                    document.getElementById('geoloc-cargando').classList.add('hidden');
+                    document.getElementById('geoloc-error').classList.remove('hidden');
+                });
+        }
+    </script>
+    {% endif %}
 </body>
 </html>
