@@ -819,7 +819,8 @@ def init_db():
             # puede exportar, y a la vez lo que destraba la baja de su cuenta en Gestión de
             # Usuarios (ver toggle_estado_usuario / _activos_pendientes_devolucion).
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
-                id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, colaborador VARCHAR(150) NOT NULL, confirmado_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, observaciones TEXT, acta_generada BOOLEAN DEFAULT FALSE, firma_entrega_url TEXT, firma_certifica_url TEXT, nombre_familiar VARCHAR(150), firma_familiar_url TEXT
+                id SERIAL PRIMARY KEY, activo_id INTEGER REFERENCES activos_inventario(id) ON DELETE CASCADE, colaborador VARCHAR(150) NOT NULL, confirmado_por VARCHAR(100) NOT NULL, fecha VARCHAR(100) NOT NULL, observaciones TEXT, acta_generada BOOLEAN DEFAULT FALSE, firma_entrega_url TEXT, firma_certifica_url TEXT, nombre_familiar VARCHAR(150), firma_familiar_url TEXT,
+                firma_colaborador TEXT, fecha_firma_colaborador VARCHAR(100), firma_ti TEXT, ti_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL, fecha_firma_ti VARCHAR(100), firma_gh TEXT, gh_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL, fecha_firma_gh VARCHAR(100), estado VARCHAR(20)
             )''')
             # 🏥 Acta de recibido para activos BIOMÉDICOS entregados a domicilio (bombas de
             # infusión y equipos similares que se le llevan a un paciente a su casa): a diferencia
@@ -1216,6 +1217,42 @@ def init_db():
                 "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS firma_certifica_url TEXT;",
                 "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS nombre_familiar VARCHAR(150);",
                 "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS firma_familiar_url TEXT;",
+                # 🖊️ Paz y salvo de 3 firmas (pedido por Tomás, 13/09/2026): el estándar formal de
+                # un paz y salvo laboral integral en la IPS exige, además de la certificación que
+                # ya hacía TI/Gestión Humana al confirmar la devolución (ver firma_certifica_url
+                # de arriba, que sigue existiendo tal cual para no romper actas ya emitidas), un
+                # flujo de APROBACIÓN explícito con tres firmas capturadas por separado, cada una
+                # con su propio momento y — cuando aplica — quién la puso:
+                #   1) Colaborador que entrega (firma_colaborador/fecha_firma_colaborador):
+                #      capturada en un canvas de firma digital en el propio formulario de
+                #      devolución, junto a firma_entrega_url (que sigue auto-resolviéndose del
+                #      perfil si existe) — esta es la firma "en vivo" de esa entrega puntual.
+                #   2) Soporte TI que recibe los activos y revoca accesos (firma_ti/ti_usuario_id/
+                #      fecha_firma_ti) — solo un usuario con rol admin/agente puede firmar este
+                #      paso (ver ROLES_CON_ACCESO_OPERATIVO/firmar_paz_y_salvo_devolucion).
+                #   3) Gestión Humana que valida y autoriza la liquidación (firma_gh/gh_usuario_id/
+                #      fecha_firma_gh) — solo admin/gestion_humana puede firmar este paso, y es lo
+                #      único que puede dejar 'estado' en 'completado'.
+                # 'estado' recorre 'pendiente_ti' -> 'pendiente_gh' -> 'completado' (o
+                # 'rechazado' en cualquiera de los dos pasos) — ver firmar_paz_y_salvo_devolucion.
+                # Las fechas se guardan como texto (mismo formato de obtener_fecha_actual() que
+                # usa 'fecha' un poco más arriba en esta misma tabla, y toda la app en general),
+                # no como TIMESTAMP nativo: ninguna columna de fecha de todo Arkiv usa ese tipo,
+                # así que un TIMESTAMP real aquí sería la única excepción y no aportaría nada
+                # (la app nunca hace aritmética de fechas en SQL, siempre en Python).
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS firma_colaborador TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS fecha_firma_colaborador VARCHAR(100);",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS firma_ti TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS ti_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS fecha_firma_ti VARCHAR(100);",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS firma_gh TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS gh_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS fecha_firma_gh VARCHAR(100);",
+                # Sin DEFAULT a propósito: las devoluciones ya certificadas antes de este cambio
+                # quedan con 'estado' en NULL (siguen siendo válidas tal cual, un paz y salvo de
+                # una sola firma) — solo las devoluciones NUEVAS arrancan en 'pendiente_ti' (ver
+                # confirmar_devolucion_activo).
+                "ALTER TABLE inventario_devoluciones ADD COLUMN IF NOT EXISTS estado VARCHAR(20);",
                 # 🎒 Accesorios entregados con el activo (pedido por Tomás): checklist marcado al
                 # asignar (ver ACCESORIOS_ACTIVO/_accesorios_marcados) y que se vuelve a mostrar al
                 # certificar la devolución, para confirmar cuáles de esos accesorios regresaron
@@ -1343,7 +1380,9 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER, url TEXT NOT NULL, nombre_original TEXT NOT NULL, subido_por TEXT NOT NULL, fecha TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_devoluciones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, colaborador TEXT NOT NULL, confirmado_por TEXT NOT NULL, fecha TEXT NOT NULL, observaciones TEXT, acta_generada INTEGER DEFAULT 0, firma_entrega_url TEXT, firma_certifica_url TEXT, nombre_familiar TEXT, firma_familiar_url TEXT, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
+                id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, colaborador TEXT NOT NULL, confirmado_por TEXT NOT NULL, fecha TEXT NOT NULL, observaciones TEXT, acta_generada INTEGER DEFAULT 0, firma_entrega_url TEXT, firma_certifica_url TEXT, nombre_familiar TEXT, firma_familiar_url TEXT,
+                firma_colaborador TEXT, fecha_firma_colaborador TEXT, firma_ti TEXT, ti_usuario_id INTEGER REFERENCES usuarios(id), fecha_firma_ti TEXT, firma_gh TEXT, gh_usuario_id INTEGER REFERENCES usuarios(id), fecha_firma_gh TEXT, estado TEXT,
+                FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
             # 🏥 Acta de recibido para activos biomédicos entregados a domicilio. Ver comentario
             # equivalente en la rama de Postgres.
@@ -1723,6 +1762,24 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_firmas_acta_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🖊️ Paz y salvo de 3 firmas (Colaborador/Soporte TI/Gestión Humana). Ver comentario
+            # equivalente y completo en la rama de Postgres, junto a estas mismas columnas.
+            for col_paz_y_salvo_sql in [
+                "ALTER TABLE inventario_devoluciones ADD COLUMN firma_colaborador TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN fecha_firma_colaborador TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN firma_ti TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN ti_usuario_id INTEGER REFERENCES usuarios(id);",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN fecha_firma_ti TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN firma_gh TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN gh_usuario_id INTEGER REFERENCES usuarios(id);",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN fecha_firma_gh TEXT;",
+                "ALTER TABLE inventario_devoluciones ADD COLUMN estado TEXT;",
+            ]:
+                try:
+                    cursor.execute(col_paz_y_salvo_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -2616,6 +2673,25 @@ def certificacion_devolucion_required(f):
         if session.get('rol') not in ROLES_CERTIFICACION_DEVOLUCION: return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+# 🖊️ Paz y salvo de 3 firmas (pedido por Tomás, 13/09/2026): dentro de ROLES_CERTIFICACION_
+# DEVOLUCION (quienes pueden siquiera ENTRAR al módulo), estos dos sub-conjuntos deciden quién
+# puede firmar cada paso puntual del flujo de aprobación — ver firmar_paz_y_salvo_devolucion.
+# 'Soporte TI' de la firma técnica es, en la práctica, exactamente ROLES_CON_ACCESO_OPERATIVO
+# (admin/agente: quienes ya reciben activos y administran accesos en el Inventario/Bóveda de
+# Accesos hoy) — se reutiliza tal cual en vez de crear un rol nuevo. La firma de Gestión Humana
+# (el cierre que pasa 'estado' a 'completado') es más restringida a propósito: agente NO puede
+# firmarla (aunque sí ve/gestiona el módulo), solo 'gestion_humana' o 'admin' como respaldo.
+ROLES_FIRMA_TI_PAZ_Y_SALVO = ROLES_CON_ACCESO_OPERATIVO
+ROLES_FIRMA_GH_PAZ_Y_SALVO = ('admin', 'gestion_humana')
+
+# 🪪 'usuarios' no tiene un campo de cargo/puesto dedicado — para el bloque de firmas del PDF
+# del paz y salvo (ver _campos_acta_devolucion/_pdf_bloque_firmas_paz_y_salvo), se muestra el
+# rol de la cuenta como equivalente legible en vez de un cargo real.
+_CARGO_LEGIBLE_POR_ROL = {
+    'admin': 'Administrador', 'agente': 'Soporte TI', 'gestion_humana': 'Gestión Humana',
+    'estandar': 'Colaborador',
+}
 
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
 @app.route('/admin/db', methods=['GET', 'POST'])
@@ -10181,6 +10257,28 @@ def _resolver_firma_de_usuario(usuario_exacto):
     return fila[0] if fila and fila[0] else None
 
 
+def _id_de_usuario(usuario_exacto):
+    """Resuelve el 'id' entero (usuarios.id, la PK) del 'usuario' EXACTO de una cuenta de Arkiv
+    — usado por firmar_paz_y_salvo_devolucion para guardar QUIÉN de Soporte TI/Gestión Humana
+    firmó cada paso ('ti_usuario_id'/'gh_usuario_id'), a diferencia del resto de la app, que casi
+    siempre guarda el 'usuario' (texto) en vez del id (ver confirmado_por/creado_por/etc.) —
+    aquí se guarda el id porque así lo pidió Tomás explícitamente. Devuelve None si la cuenta ya
+    no existe (no debería bloquear la firma: la sesión activa ya demostró que existía)."""
+    if not usuario_exacto:
+        return None
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT id FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT id FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (usuario_exacto,))
+        fila = cursor.fetchone()
+    except Exception as e:
+        print(f"⚠️ Error resolviendo id de usuario ('{usuario_exacto}'): {e}")
+        fila = None
+    conn.close()
+    return fila[0] if fila else None
+
+
 RELACIONES_RESPONSABLE_ACTA = ('paciente', 'cuidador', 'otro')
 
 
@@ -11433,6 +11531,16 @@ def confirmar_devolucion_activo(activo_id):
     generar_acta = request.form.get('generar_acta') in ('on', '1', 'true')
     nombre_familiar = (request.form.get('nombre_familiar') or '').strip() or None
     firma_familiar_dataurl = request.form.get('firma_familiar_dataurl') or ''
+    # 🖊️ Paz y salvo de 3 firmas (pedido por Tomás, 13/09/2026): la firma del COLABORADOR que
+    # entrega es la única de las tres que se captura AQUÍ, en el propio formulario de devolución
+    # (canvas de firma digital — ver static/js/firma-canvas.js/inventario_certificacion.html),
+    # porque es quien está presente en este momento. Las otras dos (TI y Gestión Humana) se
+    # firman después, cada una por separado, en firmar_paz_y_salvo_devolucion — de ahí que esta
+    # certificación arranque en 'pendiente_ti' en vez de 'completado'. A diferencia de
+    # firma_entrega_url/firma_familiar_url (que se resuelven del perfil o se suben a Cloudinary,
+    # ver _resolver_firma_para_asignacion/_subir_firma_desde_dataurl), 'firma_colaborador' se
+    # guarda tal cual como TEXT/Base64 en la propia fila — no es una URL.
+    firma_colaborador_dataurl = (request.form.get('firma_colaborador_dataurl') or '').strip() or None
     # 🎒 Accesorios que realmente regresaron (pedido de Tomás): checklist marcado en el mismo
     # formulario de "Pendientes de devolución", con nombres 'accesorio_devuelto_<clave>' — ver
     # ACCESORIOS_ACTIVO/_accesorios_marcados e inventario_certificacion.html.
@@ -11485,18 +11593,28 @@ def confirmar_devolucion_activo(activo_id):
             else:
                 nombre_familiar = None
 
+            # 🖊️ Paz y salvo de 3 firmas: si el colaborador firmó en el canvas, esta devolución
+            # arranca el flujo de aprobación ('pendiente_ti', a la espera de que Soporte TI firme
+            # el recibido — ver firmar_paz_y_salvo_devolucion). Si no firmó (formulario usado sin
+            # ese paso, p. ej. una devolución antigua o un caso donde no aplica), 'estado' queda
+            # en NULL — exactamente como quedaban TODAS las devoluciones antes de este cambio: un
+            # certificado de una sola firma, sin el flujo de aprobación adicional.
+            fecha_firma_colaborador = fecha_act if firma_colaborador_dataurl else None
+            estado_paz_y_salvo = 'pendiente_ti' if firma_colaborador_dataurl else None
+
             q_ins = ("INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                      "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
-                     "accesorios_devueltos, accesorio_otro_detalle) "
-                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+                     "accesorios_devueltos, accesorio_otro_detalle, firma_colaborador, fecha_firma_colaborador, estado) "
+                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                       if db_type == 'postgres' else
                       "INSERT INTO inventario_devoluciones (activo_id, colaborador, confirmado_por, fecha, observaciones, "
                       "acta_generada, firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url, "
-                      "accesorios_devueltos, accesorio_otro_detalle) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                      "accesorios_devueltos, accesorio_otro_detalle, firma_colaborador, fecha_firma_colaborador, estado) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             cursor.execute(q_ins, (activo_id, colaborador, usuario, fecha_act, observaciones, generar_acta,
                                     firma_entrega_url, firma_certifica_url, nombre_familiar, firma_familiar_url,
-                                    accesorios_devueltos, accesorio_otro_detalle_devuelto))
+                                    accesorios_devueltos, accesorio_otro_detalle_devuelto,
+                                    firma_colaborador_dataurl, fecha_firma_colaborador, estado_paz_y_salvo))
             nueva_devolucion_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             # 🔒 Certificar la devolución ya NO deja el activo 'Disponible' de inmediato (eso
             # permitía que cualquier agente lo reasignara al instante) — pasa a 'Devolución',
@@ -11524,6 +11642,122 @@ def confirmar_devolucion_activo(activo_id):
     return redirect(url_for('certificacion_devoluciones'))
 
 
+# 🖊️ Paz y salvo de 3 firmas (pedido por Tomás, 13/09/2026, estándar formal de un paz y salvo
+# laboral integral en una IPS): Colaborador (entrega conforme, capturado en
+# confirmar_devolucion_activo), Soporte TI (recibe los activos y revoca accesos) y Gestión
+# Humana (valida y autoriza la liquidación) — 'rol_firma' en el formulario dice cuál de estos
+# dos pasos restantes se está firmando ('ti' o 'gh'); un tercer valor no existe porque el paso
+# del Colaborador ya quedó resuelto al certificar la devolución.
+@app.route('/inventario/certificacion_devoluciones/<int:devolucion_id>/firmar', methods=['POST'])
+@login_required
+@certificacion_devolucion_required
+def firmar_paz_y_salvo_devolucion(devolucion_id):
+    """Firma (o rechaza) un paso del flujo de aprobación de 3 firmas de una certificación de
+    devolución ya existente:
+
+      - rol_firma='ti': Soporte TI certifica que recibió los activos y revocó los accesos.
+        Restringido a ROLES_FIRMA_TI_PAZ_Y_SALVO (admin/agente) y solo si 'estado' está en
+        'pendiente_ti' — al firmar, pasa a 'pendiente_gh'.
+      - rol_firma='gh': Gestión Humana valida y autoriza la liquidación — el cierre.
+        Restringido a ROLES_FIRMA_GH_PAZ_Y_SALVO (admin/gestion_humana, NO agente) y solo si
+        'estado' está en 'pendiente_gh' — al firmar, pasa a 'completado'.
+
+    En cualquiera de los dos pasos, 'accion=rechazar' (en vez de 'firmar') dejar 'estado' en
+    'rechazado' sin exigir ni guardar una firma — el certificado de una sola firma
+    (firma_certifica_url, ya existente desde antes de este flujo) sigue intacto, esto solo
+    detiene el flujo de aprobación adicional.
+
+    'firma_dataurl' (lo que deja el canvas de firma digital en el frontend) se guarda tal cual
+    como TEXT/Base64 en la propia fila — igual que 'firma_colaborador', no es una URL de
+    Cloudinary como firma_entrega_url/firma_familiar_url."""
+    rol_firma = (request.form.get('rol_firma') or '').strip().lower()
+    accion = (request.form.get('accion') or 'firmar').strip().lower()
+    firma_dataurl = (request.form.get('firma_dataurl') or '').strip() or None
+    usuario = session.get('username')
+    rol_sesion = session.get('rol')
+
+    if rol_firma not in ('ti', 'gh'):
+        flash("Paso de firma inválido — debe ser 'ti' o 'gh'.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+    if accion not in ('firmar', 'rechazar'):
+        flash("Acción inválida — debe ser 'firmar' o 'rechazar'.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+
+    # 🔒 Restricción de permisos (pedido explícito de Tomás): "solo rol TI puede firmar el check
+    # técnico de activos; solo rol GH puede firmar el cierre final". Se valida el rol ANTES de
+    # tocar la base de datos, con el mismo mensaje explicativo que el resto de la app (ver
+    # _mensaje_error_para_agente) en vez de un 403 desnudo.
+    if rol_firma == 'ti' and rol_sesion not in ROLES_FIRMA_TI_PAZ_Y_SALVO:
+        flash("Solo un usuario de Soporte TI (admin/agente) puede firmar la recepción de activos.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+    if rol_firma == 'gh' and rol_sesion not in ROLES_FIRMA_GH_PAZ_Y_SALVO:
+        flash("Solo Gestión Humana puede firmar el cierre del paz y salvo.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+    if accion == 'firmar' and not firma_dataurl:
+        flash("Falta la firma digital — dibújala en el recuadro antes de confirmar.", "error")
+        return redirect(url_for('certificacion_devoluciones'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT estado FROM inventario_devoluciones WHERE id = {ph}", (devolucion_id,))
+        fila = cursor.fetchone()
+        if not fila:
+            flash("Esa certificación de devolución no existe.", "error")
+            conn.close()
+            return redirect(url_for('certificacion_devoluciones'))
+
+        estado_actual = fila[0]
+        estado_esperado = 'pendiente_ti' if rol_firma == 'ti' else 'pendiente_gh'
+        if estado_actual != estado_esperado:
+            nombres_estado = {
+                None: "no tiene un flujo de 3 firmas activo (se certificó antes de este cambio, o el colaborador no firmó en el canvas)",
+                'pendiente_ti': "está esperando la firma de Soporte TI",
+                'pendiente_gh': "está esperando la firma de Gestión Humana",
+                'completado': "ya quedó completada con las 3 firmas",
+                'rechazado': "ya fue rechazada",
+            }
+            flash(f"No se puede registrar esa firma: esta certificación {nombres_estado.get(estado_actual, f'está en estado {estado_actual!r}')}.", "error")
+            conn.close()
+            return redirect(url_for('certificacion_devoluciones'))
+
+        fecha_act = obtener_fecha_actual()
+        etapa_legible = 'Soporte TI' if rol_firma == 'ti' else 'Gestión Humana'
+        if accion == 'rechazar':
+            cursor.execute(f"UPDATE inventario_devoluciones SET estado = {ph} WHERE id = {ph}", ('rechazado', devolucion_id))
+            conn.commit()
+            registrar_log(usuario, "Paz y Salvo — Rechazo",
+                          f"Se rechazó el paz y salvo de devolución #{devolucion_id} en el paso de {etapa_legible}.")
+            flash("Paz y salvo rechazado.", "exito")
+        elif rol_firma == 'ti':
+            usuario_id = _id_de_usuario(usuario)
+            cursor.execute(
+                f"UPDATE inventario_devoluciones SET firma_ti = {ph}, ti_usuario_id = {ph}, "
+                f"fecha_firma_ti = {ph}, estado = {ph} WHERE id = {ph}",
+                (firma_dataurl, usuario_id, fecha_act, 'pendiente_gh', devolucion_id))
+            conn.commit()
+            registrar_log(usuario, "Paz y Salvo — Firma de Soporte TI",
+                          f"Soporte TI certificó la recepción de activos y revocación de accesos del paz y salvo #{devolucion_id}.")
+            flash("Firma de Soporte TI registrada. Queda pendiente el cierre de Gestión Humana.", "exito")
+        else:  # rol_firma == 'gh'
+            usuario_id = _id_de_usuario(usuario)
+            cursor.execute(
+                f"UPDATE inventario_devoluciones SET firma_gh = {ph}, gh_usuario_id = {ph}, "
+                f"fecha_firma_gh = {ph}, estado = {ph} WHERE id = {ph}",
+                (firma_dataurl, usuario_id, fecha_act, 'completado', devolucion_id))
+            conn.commit()
+            registrar_log(usuario, "Paz y Salvo — Firma de Gestión Humana",
+                          f"Gestión Humana validó y autorizó la liquidación del paz y salvo #{devolucion_id} — queda 'completado'.")
+            flash("Paz y salvo completado: Gestión Humana autorizó la liquidación.", "exito")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error firmando el paz y salvo de devolución #{devolucion_id} (paso {rol_firma}): {e}")
+        flash(_mensaje_error_para_agente(e), "error")
+    conn.close()
+    return redirect(url_for('certificacion_devoluciones'))
+
+
 def _campos_acta_devolucion(devolucion_id):
     """Devuelve el dict de campos ya resueltos para armar el PDF del acta/certificado de
     devolución 'devolucion_id' (o None si no existe) — incluye 'acta_generada' (la casilla
@@ -11535,17 +11769,31 @@ def _campos_acta_devolucion(devolucion_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
+        # 🖊️ Paz y salvo de 3 firmas: 'ti' y 'gh' son alias de dos JOIN distintos a usuarios (uno
+        # por cada firmante posible), para poder mostrar su nombre/cédula/rol en el PDF sin una
+        # segunda consulta — ninguno de los dos existía antes de este flujo, así que quedan en
+        # NULL para cualquier devolución certificada antes de este cambio (ver 'estado').
         q = ("SELECT d.colaborador, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, "
              "d.firma_entrega_url, d.firma_certifica_url, d.nombre_familiar, d.firma_familiar_url, u.nombre, "
-             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico "
+             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico, "
+             "d.estado, d.firma_colaborador, d.fecha_firma_colaborador, "
+             "d.firma_ti, d.fecha_firma_ti, ti.nombre, ti.cedula, ti.rol, "
+             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol "
              "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id "
-             "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por WHERE d.id = %s"
+             "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por "
+             "LEFT JOIN usuarios ti ON ti.id = d.ti_usuario_id "
+             "LEFT JOIN usuarios gh ON gh.id = d.gh_usuario_id WHERE d.id = %s"
              if db_type == 'postgres' else
              "SELECT d.colaborador, d.confirmado_por, d.fecha, d.observaciones, d.acta_generada, "
              "d.firma_entrega_url, d.firma_certifica_url, d.nombre_familiar, d.firma_familiar_url, u.nombre, "
-             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico "
+             "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico, "
+             "d.estado, d.firma_colaborador, d.fecha_firma_colaborador, "
+             "d.firma_ti, d.fecha_firma_ti, ti.nombre, ti.cedula, ti.rol, "
+             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol "
              "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id "
-             "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por WHERE d.id = ?")
+             "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por "
+             "LEFT JOIN usuarios ti ON ti.id = d.ti_usuario_id "
+             "LEFT JOIN usuarios gh ON gh.id = d.gh_usuario_id WHERE d.id = ?")
         cursor.execute(q, (devolucion_id,))
         fila = cursor.fetchone()
     except Exception as e:
@@ -11558,7 +11806,9 @@ def _campos_acta_devolucion(devolucion_id):
 
     (colaborador, confirmado_por, fecha, observaciones, acta_generada, firma_entrega_url, firma_certifica_url,
      nombre_familiar, firma_familiar_url, confirmado_por_nombre, placa, tipo_activo, marca, modelo,
-     numero_serie, sede, area, es_biomedico) = fila
+     numero_serie, sede, area, es_biomedico, estado_paz_y_salvo, firma_colaborador, fecha_firma_colaborador,
+     firma_ti, fecha_firma_ti, ti_nombre, ti_cedula, ti_rol,
+     firma_gh, fecha_firma_gh, gh_nombre, gh_cedula, gh_rol) = fila
     return {
         'acta_generada': bool(acta_generada),
         'numero_acta': devolucion_id, 'fecha': fecha, 'responsable_devolucion': confirmado_por_nombre or confirmado_por,
@@ -11567,7 +11817,155 @@ def _campos_acta_devolucion(devolucion_id):
         'sede': sede, 'area': area, 'observaciones': observaciones,
         'firma_entrega_url': firma_entrega_url, 'firma_familiar_url': firma_familiar_url,
         'firma_certifica_url': firma_certifica_url, 'es_biomedico': bool(es_biomedico),
+        # 🖊️ Paz y salvo de 3 firmas — 'estado' es None para cualquier devolución certificada
+        # antes de este flujo (ver _pdf_bytes_acta_devolucion: en ese caso el PDF no cambia en
+        # nada frente a como era antes). 'cargo' no existe como campo propio en 'usuarios' —
+        # se usa el rol, en texto legible, como equivalente (no hay un campo de cargo/puesto
+        # dedicado en el esquema; agregarlo queda fuera del alcance pedido para este cambio).
+        'estado_paz_y_salvo': estado_paz_y_salvo,
+        'firma_colaborador': firma_colaborador, 'fecha_firma_colaborador': fecha_firma_colaborador,
+        'firma_ti': firma_ti, 'fecha_firma_ti': fecha_firma_ti,
+        'ti_nombre': ti_nombre, 'ti_cedula': ti_cedula, 'ti_cargo': _CARGO_LEGIBLE_POR_ROL.get(ti_rol, ti_rol),
+        'firma_gh': firma_gh, 'fecha_firma_gh': fecha_firma_gh,
+        'gh_nombre': gh_nombre, 'gh_cedula': gh_cedula, 'gh_cargo': _CARGO_LEGIBLE_POR_ROL.get(gh_rol, gh_rol),
     }
+
+
+_COLOR_INSTITUCIONAL_PREVENTIVA = '#1654a5'
+_RUTA_FUENTES_PDF = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'fonts')
+_FUENTE_INSTITUCIONAL_REGULAR = 'Helvetica'
+_FUENTE_INSTITUCIONAL_BOLD = 'Helvetica-Bold'
+_MONTSERRAT_YA_SE_INTENTO_REGISTRAR = False
+
+
+def _registrar_fuente_montserrat():
+    """Registra Montserrat (manual de marca, pedido por Tomás: 'fuente Montserrat' para el PDF
+    del paz y salvo) como fuente de reportlab, si sus archivos .ttf están presentes en
+    static/fonts/Montserrat-Regular.ttf y static/fonts/Montserrat-Bold.ttf. Si no están (este
+    cambio no los incluye — son de Google Fonts, licencia SIL Open Font, hay que colocarlos ahí
+    a mano), _FUENTE_INSTITUCIONAL_REGULAR/_BOLD simplemente se quedan en Helvetica: el PDF se
+    sigue generando igual, nunca revienta por una fuente faltante — mismo criterio defensivo que
+    _pdf_encabezado_con_logo con el logo. Solo se intenta una vez por proceso (no en cada PDF)."""
+    global _FUENTE_INSTITUCIONAL_REGULAR, _FUENTE_INSTITUCIONAL_BOLD, _MONTSERRAT_YA_SE_INTENTO_REGISTRAR
+    if _MONTSERRAT_YA_SE_INTENTO_REGISTRAR:
+        return
+    _MONTSERRAT_YA_SE_INTENTO_REGISTRAR = True
+    ruta_regular = os.path.join(_RUTA_FUENTES_PDF, 'Montserrat-Regular.ttf')
+    ruta_bold = os.path.join(_RUTA_FUENTES_PDF, 'Montserrat-Bold.ttf')
+    if os.path.exists(ruta_regular) and os.path.exists(ruta_bold):
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            pdfmetrics.registerFont(TTFont('Montserrat', ruta_regular))
+            pdfmetrics.registerFont(TTFont('Montserrat-Bold', ruta_bold))
+            _FUENTE_INSTITUCIONAL_REGULAR = 'Montserrat'
+            _FUENTE_INSTITUCIONAL_BOLD = 'Montserrat-Bold'
+        except Exception as e:
+            print(f"⚠️ No se pudo registrar la fuente Montserrat en el PDF del paz y salvo, se usa Helvetica: {e}")
+
+
+def _pdf_fecha_texto_corta(fecha_texto):
+    """'dd/mm/aaaa' a partir de cualquiera de los formatos que reconoce _pdf_fecha_partes, para
+    la línea de fecha bajo cada firma del paz y salvo — '-' si no hay fecha o no se reconoce."""
+    dd, mm, aaaa = _pdf_fecha_partes(fecha_texto)
+    return f"{dd}/{mm}/{aaaa}" if dd and mm else (aaaa or '-')
+
+
+def _pdf_bloque_firmas_paz_y_salvo(campos, estilos):
+    """Bloque inferior del PDF institucional del Paz y Salvo de 3 firmas (pedido por Tomás,
+    13/09/2026, estándar formal de un paz y salvo laboral integral en una IPS): un recuadro por
+    cada firmante — Colaborador que entrega, Soporte TI que recibe y Gestión Humana que liquida
+    — con su firma (o un texto de reemplazo si ese paso todavía no se firmó), la fecha en que
+    firmó y su cédula/cargo (ver 'ti_cargo'/'gh_cargo' en _campos_acta_devolucion: el rol de la
+    cuenta como equivalente legible, porque 'usuarios' no tiene un campo de cargo dedicado).
+
+    Solo se llama cuando 'estado_paz_y_salvo' no es None (ver _pdf_bytes_acta_devolucion) — una
+    devolución certificada antes de que existiera este flujo no tiene estas firmas, y su PDF
+    sigue exactamente igual que antes de este cambio."""
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    _registrar_fuente_montserrat()
+
+    color_marca = colors.HexColor(_COLOR_INSTITUCIONAL_PREVENTIVA)
+    estilo_titulo_firmante = ParagraphStyle(
+        'TituloFirmantePazYSalvo', parent=estilos['Normal'], fontName=_FUENTE_INSTITUCIONAL_BOLD,
+        textColor=color_marca, fontSize=9.5, alignment=1,  # 1 = TA_CENTER
+    )
+    estilo_detalle_firmante = ParagraphStyle(
+        'DetalleFirmantePazYSalvo', parent=estilos['Normal'], fontName=_FUENTE_INSTITUCIONAL_REGULAR,
+        fontSize=8, alignment=1, textColor=colors.HexColor('#334155'), leading=11,
+    )
+
+    ESTADOS_LEGIBLES = {
+        'pendiente_ti': 'PENDIENTE — falta la firma de Soporte TI',
+        'pendiente_gh': 'PENDIENTE — falta la firma de Gestión Humana',
+        'completado': 'COMPLETADO — Paz y Salvo con las 3 firmas',
+        'rechazado': 'RECHAZADO',
+    }
+
+    def _detalle(nombre, cedula, cargo, fecha_texto, texto_si_falta):
+        if not nombre:
+            return Paragraph(texto_si_falta, estilo_detalle_firmante)
+        linea_cedula_cargo = ' — '.join(filter(None, [f"C.C. {cedula}" if cedula else None, cargo]))
+        partes = [f"<b>{nombre}</b>"]
+        if linea_cedula_cargo:
+            partes.append(linea_cedula_cargo)
+        partes.append(_pdf_fecha_texto_corta(fecha_texto))
+        return Paragraph('<br/>'.join(partes), estilo_detalle_firmante)
+
+    columna = [
+        (
+            'Colaborador que entrega', campos.get('firma_colaborador'),
+            _detalle(campos.get('colaborador'), None, 'Colaborador', campos.get('fecha_firma_colaborador'), '(Aún sin firmar)'),
+        ),
+        (
+            'Soporte TI que recibe', campos.get('firma_ti'),
+            _detalle(campos.get('ti_nombre'), campos.get('ti_cedula'), campos.get('ti_cargo'), campos.get('fecha_firma_ti'), '(Pendiente de firma)'),
+        ),
+        (
+            'Gestión Humana que liquida', campos.get('firma_gh'),
+            _detalle(campos.get('gh_nombre'), campos.get('gh_cedula'), campos.get('gh_cargo'), campos.get('fecha_firma_gh'), '(Pendiente de firma)'),
+        ),
+    ]
+
+    fila_titulos, fila_firmas, fila_lineas, fila_detalles = [], [], [], []
+    for titulo, firma_dataurl, detalle in columna:
+        fila_titulos.append(Paragraph(titulo, estilo_titulo_firmante))
+        fila_firmas.append(_pdf_elemento_firma(firma_dataurl, estilos, ancho=5.2 * cm, alto=2.1 * cm, texto_si_falta='(Sin firma)'))
+        fila_lineas.append(Paragraph('_' * 26, estilos['Normal']))
+        fila_detalles.append(detalle)
+
+    tabla_firmas = Table([fila_titulos, fila_firmas, fila_lineas, fila_detalles], colWidths=[5.5 * cm] * 3)
+    tabla_firmas.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LINEABOVE', (0, 0), (-1, 0), 1.3, color_marca),
+    ]))
+
+    estado = campos.get('estado_paz_y_salvo')
+    barra_estado = Table([[Paragraph(ESTADOS_LEGIBLES.get(estado, estado or ''), ParagraphStyle(
+        'EstadoPazYSalvo', parent=estilos['Normal'], fontName=_FUENTE_INSTITUCIONAL_BOLD,
+        fontSize=9, textColor=colors.white, alignment=1,
+    ))]], colWidths=[16.5 * cm])
+    barra_estado.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), color_marca),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+
+    return [
+        Paragraph('PAZ Y SALVO — APROBACIÓN DE 3 FIRMAS', ParagraphStyle(
+            'TituloPazYSalvo', parent=estilos['Normal'], fontName=_FUENTE_INSTITUCIONAL_BOLD,
+            fontSize=11, textColor=color_marca, spaceAfter=6,
+        )),
+        barra_estado,
+        Spacer(1, 0.5 * cm),
+        tabla_firmas,
+    ]
 
 
 def _pdf_bytes_acta_devolucion(campos):
@@ -11664,48 +12062,59 @@ def _pdf_bytes_acta_devolucion(campos):
 
     elementos += [Paragraph(f"<b>NOTA:</b> {observaciones or '-'}", estilos['Normal']), Spacer(1, 0.9 * cm)]
 
-    # 🩹 (pedido de Tomás, 08/09/2026) Misma corrección que arriba: la firma del familiar/cuidador
-    # solo tiene sentido para equipos BIOMÉDICOS entregados a domicilio — en un activo de TI ya
-    # no se muestra ni la columna ni el "(No aplica...)" de relleno, solo la firma del colaborador
-    # que entrega, centrada a todo el ancho (igual que la firma de quien certifica, más abajo).
-    firma_entrega = _pdf_elemento_firma(firma_entrega_url, estilos)
-    if es_biomedico:
-        firma_familiar = _pdf_elemento_firma(firma_familiar_url, estilos, texto_si_falta='(No firmó familiar/cuidador)')
-        tabla_firmas_fila1 = Table(
-            [[firma_entrega, firma_familiar],
-             [Paragraph('_' * 32, estilos['Normal']), Paragraph('_' * 32, estilos['Normal'])],
-             [Paragraph('Firma colaborador', estilos['Normal']), Paragraph('Firma familiar/cuidador', estilos['Normal'])]],
-            colWidths=[8.25 * cm, 8.25 * cm]
-        )
+    # 🖊️ Paz y salvo de 3 firmas (pedido por Tomás, 13/09/2026): cuando esta certificación pasó
+    # por ese flujo ('estado_paz_y_salvo' no es None — ver _campos_acta_devolucion), el bloque de
+    # firmas de siempre (colaborador/familiar + responsable de devolución) se REEMPLAZA por el
+    # bloque institucional de 3 recuadros (Colaborador/Soporte TI/Gestión Humana), que ya incluye
+    # la firma del colaborador — no se duplica. Una devolución certificada ANTES de este cambio
+    # ('estado_paz_y_salvo' es None) sigue mostrando exactamente el mismo bloque de firmas de
+    # siempre, sin ningún cambio visual.
+    if campos.get('estado_paz_y_salvo'):
+        elementos += _pdf_bloque_firmas_paz_y_salvo(campos, estilos)
     else:
-        tabla_firmas_fila1 = Table(
-            [[firma_entrega],
+        # 🩹 (pedido de Tomás, 08/09/2026) Misma corrección que arriba: la firma del
+        # familiar/cuidador solo tiene sentido para equipos BIOMÉDICOS entregados a domicilio —
+        # en un activo de TI ya no se muestra ni la columna ni el "(No aplica...)" de relleno,
+        # solo la firma del colaborador que entrega, centrada a todo el ancho (igual que la
+        # firma de quien certifica, más abajo).
+        firma_entrega = _pdf_elemento_firma(firma_entrega_url, estilos)
+        if es_biomedico:
+            firma_familiar = _pdf_elemento_firma(firma_familiar_url, estilos, texto_si_falta='(No firmó familiar/cuidador)')
+            tabla_firmas_fila1 = Table(
+                [[firma_entrega, firma_familiar],
+                 [Paragraph('_' * 32, estilos['Normal']), Paragraph('_' * 32, estilos['Normal'])],
+                 [Paragraph('Firma colaborador', estilos['Normal']), Paragraph('Firma familiar/cuidador', estilos['Normal'])]],
+                colWidths=[8.25 * cm, 8.25 * cm]
+            )
+        else:
+            tabla_firmas_fila1 = Table(
+                [[firma_entrega],
+                 [Paragraph('_' * 32, estilos['Normal'])],
+                 [Paragraph('Firma colaborador', estilos['Normal'])]],
+                colWidths=[8.5 * cm]
+            )
+            tabla_firmas_fila1.hAlign = 'CENTER'
+        tabla_firmas_fila1.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+            ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        elementos += [tabla_firmas_fila1, Spacer(1, 0.8 * cm)]
+
+        firma_certifica = _pdf_elemento_firma(firma_certifica_url, estilos)
+        tabla_firma_responsable = Table(
+            [[firma_certifica],
              [Paragraph('_' * 32, estilos['Normal'])],
-             [Paragraph('Firma colaborador', estilos['Normal'])]],
+             [Paragraph('Firma responsable de devolución', estilos['Normal'])]],
             colWidths=[8.5 * cm]
         )
-        tabla_firmas_fila1.hAlign = 'CENTER'
-    tabla_firmas_fila1.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-    ]))
-    elementos += [tabla_firmas_fila1, Spacer(1, 0.8 * cm)]
-
-    firma_certifica = _pdf_elemento_firma(firma_certifica_url, estilos)
-    tabla_firma_responsable = Table(
-        [[firma_certifica],
-         [Paragraph('_' * 32, estilos['Normal'])],
-         [Paragraph('Firma responsable de devolución', estilos['Normal'])]],
-        colWidths=[8.5 * cm]
-    )
-    tabla_firma_responsable.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-    ]))
-    tabla_firma_responsable.hAlign = 'CENTER'
-    elementos.append(tabla_firma_responsable)
+        tabla_firma_responsable.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+            ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        tabla_firma_responsable.hAlign = 'CENTER'
+        elementos.append(tabla_firma_responsable)
 
     doc.build(elementos)
     salida.seek(0)
