@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ARKIV | Software de Gestión Documental y Archivo</title>
-    <!-- 🔎 SEO básico (pedido por MOSQUERA, 05/09/2026): esta es la ÚNICA pantalla pública de Arkiv
+    <title>Arkiv | Software de Gestión Documental y Archivo</title>
+    <!-- 🔎 SEO básico (pedido por Tomás, 05/09/2026): esta es la ÚNICA pantalla pública de Arkiv
          (todo lo demás vive detrás de @login_required y redirige aquí), así que es la única que
          tiene sentido posicionar en buscadores — de ahí que el title/description mencionen
          "gestión documental" y no cosas internas de la app. Ver también /robots.txt y
@@ -19,7 +19,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-    <!-- 🎨 Manual de marca de Preventiva Salud IPS (pedido por MOSQUERA, 12/09/2026): tipografía
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (pedido por Tomás, 12/09/2026): tipografía
          Montserrat + variables CSS con la paleta institucional — ver marca-institucional.css. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,16 +35,40 @@
          del login (60/40) para que no quede tanto espacio muerto alrededor de la tarjeta blanca.
          Oculto en celular a propósito: en pantalla angosta solo importa que el login cargue
          rápido y sea fácil de usar; el panel es puramente decorativo.
-         Fondo blanco (pedido de MOSQUERA, 13/09/2026: antes era bg-slate-950 y con object-contain
+         Fondo blanco (pedido de Tomás, 13/09/2026: antes era bg-slate-950 y con object-contain
          dejaba una franja oscura visible cuando la imagen no llenaba todo el panel; con fondo
          blanco esa franja pasa a ser neutral en vez de una barra oscura llamativa). Por eso
          también se quitó el degradado oscuro que había encima (bg-gradient-to-t from-slate-950/50):
          ya no tiene sentido contra un fondo blanco. -->
     <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0 bg-white">
         {% for item in fondo_media %}
-        <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
+        <!-- 'data-duracion-ms' (pedido de Tomás, 13/09/2026): cuánto se queda ESTE archivo en
+             pantalla antes de rotar al siguiente, configurable por archivo desde Fondo de Login
+             (pensado sobre todo para video, donde 6s fijos para todos no calzaba con la
+             duración real del clip) — ver el script de rotación más abajo. -->
+        <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0 pointer-events-none{% endif %}" data-duracion-ms="{{ (item.duracion_segundos or 6) * 1000 }}">
             {% if item.tipo == 'video' %}
-            <video src="{{ item.url }}" autoplay muted loop playsinline class="w-full h-full object-contain"></video>
+            <!-- Los navegadores bloquean el autoplay CON sonido — por eso 'muted' es obligatorio
+                 aquí, si no el video ni siquiera arrancaría solo. 'data-intenta-sonido' (pedido
+                 de Tomás, 13/09/2026: "que el tema de dar sonido... se haga directamente cuando
+                 se carga el video al sistema") viene de la casilla "Reproducir con sonido" de
+                 Fondo de Login — si está marcada, el script de abajo intenta des-silenciarlo
+                 automáticamente al mostrarse. El botón queda como respaldo manual para cuando el
+                 navegador de la visita bloquea ese intento automático (política estándar de
+                 autoplay: nunca hay garantía de sonido automático en la primera visita a una
+                 página) — así nunca se congela el video, en el peor caso sigue en silencio. -->
+            <video src="{{ item.url }}" autoplay muted loop playsinline data-intenta-sonido="{{ '1' if item.reproducir_con_sonido else '0' }}" class="w-full h-full object-contain fondo-login-video"></video>
+            <button type="button" class="fondo-login-mute-btn absolute bottom-4 right-4 z-10 w-9 h-9 rounded-full bg-white/80 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all" aria-label="Activar sonido del video" title="Activar sonido">
+                <svg class="fondo-login-icono-mute h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 3.5a.75.75 0 00-1.264-.546L4.703 6.5H2.75A1.75 1.75 0 001 8.25v3.5A1.75 1.75 0 002.75 13.5h1.953l4.033 3.546A.75.75 0 0010 16.5v-13z" />
+                    <path d="M15.53 7.47a.75.75 0 10-1.06 1.06L15.94 10l-1.47 1.47a.75.75 0 101.06 1.06L17 11.06l1.47 1.47a.75.75 0 101.06-1.06L18.06 10l1.47-1.47a.75.75 0 10-1.06-1.06L17 8.94l-1.47-1.47z" />
+                </svg>
+                <svg class="fondo-login-icono-sonido h-5 w-5 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 3.5a.75.75 0 00-1.264-.546L4.703 6.5H2.75A1.75 1.75 0 001 8.25v3.5A1.75 1.75 0 002.75 13.5h1.953l4.033 3.546A.75.75 0 0010 16.5v-13z" />
+                    <path d="M14.28 7.22a.75.75 0 10-1.06 1.06 2.5 2.5 0 010 3.44.75.75 0 101.06 1.06 4 4 0 000-5.56z" />
+                    <path d="M16.463 5.037a.75.75 0 10-1.06 1.061 6 6 0 010 8.244.75.75 0 001.06 1.06 7.5 7.5 0 000-10.365z" />
+                </svg>
+            </button>
             {% else %}
             <img src="{{ item.url }}" alt="" class="w-full h-full object-contain">
             {% endif %}
@@ -52,7 +76,7 @@
         {% endfor %}
 
         {% if fondo_media|length > 1 %}
-        <!-- Controles manuales del carrusel (pedido de MOSQUERA, 13/09/2026: "agrega botones para
+        <!-- Controles manuales del carrusel (pedido de Tomás, 13/09/2026: "agrega botones para
              poder pasar las imagenes del carrusel"). Solo se imprimen si hay más de un archivo
              activo — con uno solo no hay nada entre qué navegar. Los botones y los puntos llaman
              a la misma función mostrar(indice) que usa la rotación automática (ver script al
@@ -89,8 +113,8 @@
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
             <!-- ENCABEZADO CON LOGO PRINCIPAL DE PREVENTIVA SALUD IPS (manual de marca, pedido
-                 por MOSQUERA, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema.
-                 Pedido por MOSQUERA (13/09/2026): que el logo lleve al sitio público de Preventiva
+                 por Tomás, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema.
+                 Pedido por Tomás (13/09/2026): que el logo lleve al sitio público de Preventiva
                  (https://preventivaips.com.co/) al hacer clic, en pestaña nueva. -->
             <div class="text-center mb-6">
                 <a href="https://preventivaips.com.co/" target="_blank" rel="noopener noreferrer" title="Ir al sitio de Preventiva Salud IPS" class="inline-block">
@@ -157,44 +181,143 @@
 
     </div>
 
+    {% if fondo_media %}
+    <script>
+        // 🔊 Sonido de los videos del panel de marca. Dos pedidos de Tomás, 13/09/2026, sobre lo
+        // mismo:
+        //   1) "no se escuchan los videos cuando se cargan en el login" — el <video> siempre
+        //      arranca con 'muted' (obligatorio: los navegadores bloquean el autoplay CON
+        //      sonido, así que sin esto ni siquiera se reproduciría solo).
+        //   2) "que el tema de dar sonido... se haga directamente cuando se carga el video al
+        //      sistema" — en vez de depender de que la visita encuentre y presione un botón,
+        //      cada video trae 'data-intenta-sonido' desde Fondo de Login (casilla "Reproducir
+        //      con sonido") y este script intenta des-silenciarlo solo. El botón manual sigue
+        //      existiendo como respaldo para cuando el navegador bloquea ese intento automático
+        //      (ningún navegador garantiza sonido automático en la primera visita a una página;
+        //      si eso pasa, el video sigue en silencio en vez de congelarse).
+        // Corre siempre que haya al menos un archivo (no solo cuando hay varios rotando), para
+        // que un único video también se pueda escuchar. window.__fondoLoginIntentarSonido queda
+        // expuesta para que el script de rotación (más abajo) la reutilice en cada slide nuevo.
+        (function () {
+            function actualizarIconoBoton(boton, silenciado) {
+                var iconoMute = boton.querySelector('.fondo-login-icono-mute');
+                var iconoSonido = boton.querySelector('.fondo-login-icono-sonido');
+                iconoMute.classList.toggle('hidden', !silenciado);
+                iconoSonido.classList.toggle('hidden', silenciado);
+                boton.title = silenciado ? 'Activar sonido' : 'Silenciar';
+                boton.setAttribute('aria-label', silenciado ? 'Activar sonido del video' : 'Silenciar el video');
+            }
+
+            function intentarSonido(slide) {
+                var video = slide && slide.querySelector('.fondo-login-video');
+                if (!video || video.dataset.intentaSonido !== '1') return;
+                var boton = slide.querySelector('.fondo-login-mute-btn');
+                video.muted = false;
+                var intento = video.play();
+                if (intento && typeof intento.then === 'function') {
+                    intento.then(function () {
+                        if (boton) actualizarIconoBoton(boton, false);
+                    }).catch(function () {
+                        // Bloqueado por la política de autoplay del navegador (lo esperado en
+                        // una primera visita sin ningún clic todavía) — se queda en silencio.
+                        video.muted = true;
+                        if (boton) actualizarIconoBoton(boton, true);
+                    });
+                } else if (boton) {
+                    actualizarIconoBoton(boton, video.muted);
+                }
+            }
+            window.__fondoLoginIntentarSonido = intentarSonido;
+
+            document.querySelectorAll('.fondo-login-mute-btn').forEach(function (boton) {
+                var video = boton.previousElementSibling; // el <video> se imprime justo antes del botón
+                if (!video) return;
+                boton.addEventListener('click', function () {
+                    video.muted = !video.muted;
+                    if (!video.muted) video.play().catch(function () {});
+                    actualizarIconoBoton(boton, video.muted);
+                });
+            });
+
+            var slideInicial = document.querySelector('.fondo-login-slide.opacity-100') || document.querySelector('.fondo-login-slide');
+            intentarSonido(slideInicial);
+        })();
+    </script>
+    {% endif %}
+
     {% if fondo_media|length > 1 %}
     <script>
         // 🎞️ Rotación del panel de marca (ver Fondo de Login) — sin librerías externas, alterna
-        // la opacidad entre slides cada 6 segundos. Además soporta navegación manual (pedido de
-        // MOSQUERA, 13/09/2026: "agrega botones para poder pasar las imagenes del carrusel") con
-        // flechas prev/next y puntos indicadores, reiniciando el temporizador automático cada vez
-        // que la persona navega a mano para que no se sienta "revertido" al segundo siguiente. Si
-        // solo hay un archivo activo, este bloque ni siquiera se imprime (ver la condición Jinja
-        // de arriba) y el archivo se queda fijo, sin parpadeos ni controles.
+        // la opacidad entre slides. Cada slide tiene su propia duración vía 'data-duracion-ms'
+        // (pedido de Tomás, 13/09/2026: "un campo... de duración... más por el tema de los
+        // videos" — antes eran 6s fijos parejo para todos, sin importar si el archivo era un
+        // video más largo). Además soporta navegación manual (pedido de Tomás, mismo día:
+        // "agrega botones para poder pasar las imagenes del carrusel") con flechas prev/next y
+        // puntos indicadores, reiniciando el temporizador automático cada vez que la persona
+        // navega a mano para que no se sienta "revertido" al segundo siguiente. Si solo hay un
+        // archivo activo, este bloque ni siquiera se imprime (ver la condición Jinja de arriba)
+        // y el archivo se queda fijo, sin parpadeos ni controles.
         (function () {
             var slides = document.querySelectorAll('.fondo-login-slide');
             if (slides.length < 2) return;
             var puntos = document.querySelectorAll('.fondo-login-punto');
             var actual = 0;
-            var intervaloId = null;
+            var timeoutId = null;
+
+            function duracionDe(indice) {
+                var ms = parseInt(slides[indice].dataset.duracionMs, 10);
+                return (ms && ms > 0) ? ms : 6000;
+            }
+
+            function silenciarSlide(indice) {
+                // Si el video de un slide se activó con sonido y el carrusel avanza, se
+                // vuelve a silenciar al ocultarlo — si no, seguiría sonando de fondo detrás
+                // del slide que sí se ve (pedido de Tomás, 13/09/2026, junto con el botón de
+                // activar sonido).
+                var video = slides[indice].querySelector('.fondo-login-video');
+                if (!video || video.muted) return;
+                video.muted = true;
+                var boton = slides[indice].querySelector('.fondo-login-mute-btn');
+                if (boton) {
+                    boton.querySelector('.fondo-login-icono-mute').classList.remove('hidden');
+                    boton.querySelector('.fondo-login-icono-sonido').classList.add('hidden');
+                    boton.title = 'Activar sonido';
+                    boton.setAttribute('aria-label', 'Activar sonido del video');
+                }
+            }
 
             function mostrar(indice) {
                 slides[actual].classList.remove('opacity-100');
-                slides[actual].classList.add('opacity-0');
+                slides[actual].classList.add('opacity-0', 'pointer-events-none');
+                silenciarSlide(actual);
                 puntos[actual] && puntos[actual].classList.remove('w-5', 'bg-[var(--marca-azul-primario)]');
                 puntos[actual] && puntos[actual].classList.add('w-1.5', 'bg-slate-300');
 
                 actual = ((indice % slides.length) + slides.length) % slides.length;
 
-                slides[actual].classList.remove('opacity-0');
+                slides[actual].classList.remove('opacity-0', 'pointer-events-none');
                 slides[actual].classList.add('opacity-100');
                 puntos[actual] && puntos[actual].classList.remove('w-1.5', 'bg-slate-300');
                 puntos[actual] && puntos[actual].classList.add('w-5', 'bg-[var(--marca-azul-primario)]');
+
+                // El nuevo slide activo intenta su propio sonido si así se configuró en Fondo
+                // de Login (ver window.__fondoLoginIntentarSonido, definida en el script de
+                // arriba) — un clic previo en prev/next/un punto/el botón de sonido ya cuenta
+                // como el gesto que algunos navegadores exigen para permitirlo.
+                if (window.__fondoLoginIntentarSonido) window.__fondoLoginIntentarSonido(slides[actual]);
             }
 
-            function iniciarAutoRotacion() {
-                if (intervaloId) clearInterval(intervaloId);
-                intervaloId = setInterval(function () { mostrar(actual + 1); }, 6000);
+            function programarRotacion() {
+                if (timeoutId) clearTimeout(timeoutId);
+                timeoutId = setTimeout(function () {
+                    mostrar(actual + 1);
+                    programarRotacion();
+                }, duracionDe(actual));
             }
 
             function irManualmente(indice) {
                 mostrar(indice);
-                iniciarAutoRotacion(); // reinicia el conteo de 6s tras una acción manual
+                programarRotacion(); // reinicia el conteo tras una acción manual
             }
 
             var btnPrev = document.getElementById('fondo-login-prev');
@@ -205,14 +328,14 @@
                 punto.addEventListener('click', function () { irManualmente(parseInt(punto.dataset.indice, 10)); });
             });
 
-            iniciarAutoRotacion();
+            programarRotacion();
         })();
     </script>
     {% endif %}
 
     <script>
         // 📍 Geolocalización de login (pedido de auditoría/seguridad de sedes; ajustado por
-        // MOSQUERA, 12/09/2026: "asegura que el formulario espere... antes del submit"). Se pide
+        // Tomás, 12/09/2026: "asegura que el formulario espere... antes del submit"). Se pide
         // el permiso apenas carga la página (para adelantar trabajo), pero además el envío del
         // formulario ahora ESPERA a que esa solicitud resuelva (o se agote un límite de 3s)
         // antes de dejar pasar el submit real — así los campos ocultos 'latitud'/'longitud' ya

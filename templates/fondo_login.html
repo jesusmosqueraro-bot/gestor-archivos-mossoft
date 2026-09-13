@@ -72,18 +72,37 @@
 
         <div class="p-4 rounded-2xl bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-200 text-xs flex items-start gap-3">
             <i class="fa-solid fa-circle-info text-base mt-0.5"></i>
-            <span>Estas imágenes y videos cortos se muestran en un panel junto al formulario de inicio de sesión (solo en pantallas grandes; en celular se oculta para que el login cargue rápido y liviano). Si hay más de un archivo activo, van rotando automáticamente en el orden de la lista. El archivo se muestra completo, sin recortar — usa una imagen cercana a cuadrada (por ejemplo 1200×1200 px) para que se vea lo más grande posible sin franjas a los lados.</span>
+            <span>Estas imágenes y videos cortos se muestran en un panel junto al formulario de inicio de sesión (solo en pantallas grandes; en celular se oculta para que el login cargue rápido y liviano). Si hay más de un archivo activo, van rotando automáticamente en el orden de la lista, cada uno el tiempo que le hayas puesto en "Duración". El archivo se muestra completo, sin recortar — usa una imagen cercana a cuadrada (por ejemplo 1200×1200 px) para que se vea lo más grande posible sin franjas a los lados.</span>
         </div>
 
         <!-- SUBIR NUEVO ARCHIVO -->
         <form method="POST" action="{{ url_for('subir_fondo_login') }}" enctype="multipart/form-data" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <input type="file" name="archivo" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" required class="flex-1 text-xs text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-fuchsia-600 file:text-white hover:file:bg-fuchsia-500 file:cursor-pointer cursor-pointer">
+            <!-- ⏱️ Duración en segundos (pedido de Tomás, 13/09/2026: "por defecto se establezca
+                 un tiempo determinado de duración... más por el tema de los videos"). Prellenado
+                 con el valor por defecto para no obligar a pensar en esto en cada subida — solo
+                 hace falta tocarlo cuando un video dura más o menos que eso. -->
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <label for="duracion_segundos_nuevo" class="text-[11px] font-bold text-slate-400 whitespace-nowrap">Duración (s)</label>
+                <input type="number" id="duracion_segundos_nuevo" name="duracion_segundos" value="{{ duracion_por_defecto }}" min="{{ duracion_minima }}" max="{{ duracion_maxima }}" title="Segundos que se muestra este archivo antes de pasar al siguiente — para video, iguala la duración del clip." class="w-20 text-xs p-2.5 border border-slate-700 rounded-xl bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+            </div>
+            <!-- 🔊 "Reproducir con sonido" (pedido de Tomás, 13/09/2026: que se decida al cargar
+                 el video, no con un botón que la persona que ve el login tenga que encontrar).
+                 Solo aplica a video — se deja marcable siempre por si se sube video, pero no
+                 tiene efecto en imagen. Nota: el navegador de quien ve el login puede igual
+                 bloquear el autoplay con sonido en su primera visita; si eso pasa, el video
+                 sigue reproduciéndose en silencio (nunca se congela) y la persona puede activar
+                 el sonido con un clic. -->
+            <label class="flex items-center gap-2 flex-shrink-0 text-[11px] font-bold text-slate-400 cursor-pointer" title="Solo aplica a video. El navegador de quien ve el login puede igual bloquear el autoplay con sonido en su primera visita.">
+                <input type="checkbox" name="reproducir_con_sonido" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-fuchsia-600 focus:ring-fuchsia-500">
+                Reproducir con sonido (video)
+            </label>
             <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg shadow-fuchsia-500/20 text-xs transition-all flex items-center justify-center gap-2 active:scale-95 whitespace-nowrap">
                 <i class="fa-solid fa-upload"></i> Agregar al fondo
             </button>
         </form>
-        <p class="text-[10px] text-slate-500 -mt-4">Imagen (JPG, PNG, GIF, WEBP) o video corto (MP4, MOV, WEBM) — máximo 60 MB. Entre más liviano, más rápido carga el login.</p>
+        <p class="text-[10px] text-slate-500 -mt-4">Imagen (JPG, PNG, GIF, WEBP) o video corto (MP4, MOV, WEBM) — máximo 60 MB. Entre más liviano, más rápido carga el login. "Duración" es cuánto se queda en pantalla antes de rotar al siguiente (para video, iguala la duración del clip para que no se corte ni se repita antes de tiempo). "Reproducir con sonido" solo aplica a video — si el navegador de la visita bloquea el autoplay con sonido, el video se reproduce en silencio y queda un botón para activarlo con un clic.</p>
 
         <!-- LISTADO -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-6">
@@ -111,10 +130,32 @@
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full {% if item.estado == 'activo' %}bg-emerald-500/10 text-emerald-300 border border-emerald-500/30{% else %}bg-slate-700 text-slate-400 border border-slate-600{% endif %}">
                                 {{ 'Activo (rotando)' if item.estado == 'activo' else 'Pausado' }}
                             </span>
+                            {% if item.tipo == 'video' %}
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full {% if item.reproducir_con_sonido %}bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30{% else %}bg-slate-700 text-slate-400 border border-slate-600{% endif %}">
+                                <i class="fa-solid {{ 'fa-volume-high' if item.reproducir_con_sonido else 'fa-volume-xmark' }} mr-1"></i>{{ 'Con sonido' if item.reproducir_con_sonido else 'Silenciado' }}
+                            </span>
+                            {% endif %}
                         </div>
                         <p class="text-[10px] text-slate-500 mt-1">Agregado por {{ item.creado_por }} · {{ item.fecha_creacion }}</p>
+                        <!-- Duración editable por archivo (pedido de Tomás, 13/09/2026): se puede
+                             ajustar sin volver a subir el archivo — útil si un video quedó un
+                             poco corto o largo frente al valor con el que se subió. -->
+                        <form method="POST" action="{{ url_for('editar_duracion_fondo_login', item_id=item.id) }}" class="flex items-center gap-1.5 mt-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <label for="duracion_segundos_{{ item.id }}" class="text-[10px] font-bold text-slate-400 whitespace-nowrap">Duración (s)</label>
+                            <input type="number" id="duracion_segundos_{{ item.id }}" name="duracion_segundos" value="{{ item.duracion_segundos }}" min="{{ duracion_minima }}" max="{{ duracion_maxima }}" class="w-16 text-xs p-1.5 border border-slate-700 rounded-lg bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <button type="submit" title="Guardar duración" class="text-[10px] font-bold px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-fuchsia-600 text-slate-300 hover:text-white transition-all">Guardar</button>
+                        </form>
                     </div>
                     <div class="flex items-center gap-1.5 flex-shrink-0">
+                        {% if item.tipo == 'video' %}
+                        <form method="POST" action="{{ url_for('toggle_sonido_fondo_login', item_id=item.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" title="{{ 'Silenciar' if item.reproducir_con_sonido else 'Reproducir con sonido' }}" class="p-2 text-slate-400 hover:text-fuchsia-400 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all">
+                                <i class="fa-solid {{ 'fa-volume-high' if item.reproducir_con_sonido else 'fa-volume-xmark' }}"></i>
+                            </button>
+                        </form>
+                        {% endif %}
                         <form method="POST" action="{{ url_for('mover_fondo_login', item_id=item.id, direccion='subir') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <button type="submit" title="Subir en el orden" class="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-all"><i class="fa-solid fa-arrow-up"></i></button>
