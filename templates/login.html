@@ -34,8 +34,13 @@
          → Fondo de Login). Pegado al borde izquierdo de la pantalla, más ancho que la columna
          del login (60/40) para que no quede tanto espacio muerto alrededor de la tarjeta blanca.
          Oculto en celular a propósito: en pantalla angosta solo importa que el login cargue
-         rápido y sea fácil de usar; el panel es puramente decorativo. -->
-    <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0 bg-slate-950">
+         rápido y sea fácil de usar; el panel es puramente decorativo.
+         Fondo blanco (pedido de Tomás, 13/09/2026: antes era bg-slate-950 y con object-contain
+         dejaba una franja oscura visible cuando la imagen no llenaba todo el panel; con fondo
+         blanco esa franja pasa a ser neutral en vez de una barra oscura llamativa). Por eso
+         también se quitó el degradado oscuro que había encima (bg-gradient-to-t from-slate-950/50):
+         ya no tiene sentido contra un fondo blanco. -->
+    <div class="hidden md:block md:w-3/5 relative overflow-hidden flex-shrink-0 bg-white">
         {% for item in fondo_media %}
         <div class="fondo-login-slide absolute inset-0 transition-opacity duration-1000 {% if loop.first %}opacity-100{% else %}opacity-0{% endif %}">
             {% if item.tipo == 'video' %}
@@ -45,7 +50,32 @@
             {% endif %}
         </div>
         {% endfor %}
-        <div class="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent pointer-events-none"></div>
+
+        {% if fondo_media|length > 1 %}
+        <!-- Controles manuales del carrusel (pedido de Tomás, 13/09/2026: "agrega botones para
+             poder pasar las imagenes del carrusel"). Solo se imprimen si hay más de un archivo
+             activo — con uno solo no hay nada entre qué navegar. Los botones y los puntos llaman
+             a la misma función mostrar(indice) que usa la rotación automática (ver script al
+             final), y reinician el temporizador automático al usarse para que un clic manual no
+             se sienta "revertido" por la rotación un segundo después. -->
+        <button type="button" id="fondo-login-prev" aria-label="Imagen anterior"
+                class="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-white/80 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 010 1.06L8.06 11l4.73 4.71a.75.75 0 11-1.06 1.06l-5.25-5.25a.75.75 0 010-1.06l5.25-5.25a.75.75 0 011.06 0z" clip-rule="evenodd" />
+            </svg>
+        </button>
+        <button type="button" id="fondo-login-next" aria-label="Imagen siguiente"
+                class="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-white/80 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 010-1.06L11.94 9 7.21 4.29a.75.75 0 111.06-1.06l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 01-1.06 0z" clip-rule="evenodd" />
+            </svg>
+        </button>
+        <div id="fondo-login-puntos" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5">
+            {% for item in fondo_media %}
+            <button type="button" class="fondo-login-punto h-1.5 rounded-full transition-all {% if loop.first %}w-5 bg-[var(--marca-azul-primario)]{% else %}w-1.5 bg-slate-300{% endif %}" data-indice="{{ loop.index0 }}" aria-label="Ir a la imagen {{ loop.index }}"></button>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -129,21 +159,53 @@
 
     {% if fondo_media|length > 1 %}
     <script>
-        // 🎞️ Rotación simple del panel de marca (ver Fondo de Login) — sin librerías externas,
-        // solo alterna la opacidad entre slides cada 6 segundos. Si solo hay un archivo activo,
-        // este bloque ni siquiera se imprime (ver la condición Jinja de arriba) y el archivo
-        // se queda fijo, sin parpadeos.
+        // 🎞️ Rotación del panel de marca (ver Fondo de Login) — sin librerías externas, alterna
+        // la opacidad entre slides cada 6 segundos. Además soporta navegación manual (pedido de
+        // Tomás, 13/09/2026: "agrega botones para poder pasar las imagenes del carrusel") con
+        // flechas prev/next y puntos indicadores, reiniciando el temporizador automático cada vez
+        // que la persona navega a mano para que no se sienta "revertido" al segundo siguiente. Si
+        // solo hay un archivo activo, este bloque ni siquiera se imprime (ver la condición Jinja
+        // de arriba) y el archivo se queda fijo, sin parpadeos ni controles.
         (function () {
             var slides = document.querySelectorAll('.fondo-login-slide');
             if (slides.length < 2) return;
+            var puntos = document.querySelectorAll('.fondo-login-punto');
             var actual = 0;
-            setInterval(function () {
+            var intervaloId = null;
+
+            function mostrar(indice) {
                 slides[actual].classList.remove('opacity-100');
                 slides[actual].classList.add('opacity-0');
-                actual = (actual + 1) % slides.length;
+                puntos[actual] && puntos[actual].classList.remove('w-5', 'bg-[var(--marca-azul-primario)]');
+                puntos[actual] && puntos[actual].classList.add('w-1.5', 'bg-slate-300');
+
+                actual = ((indice % slides.length) + slides.length) % slides.length;
+
                 slides[actual].classList.remove('opacity-0');
                 slides[actual].classList.add('opacity-100');
-            }, 6000);
+                puntos[actual] && puntos[actual].classList.remove('w-1.5', 'bg-slate-300');
+                puntos[actual] && puntos[actual].classList.add('w-5', 'bg-[var(--marca-azul-primario)]');
+            }
+
+            function iniciarAutoRotacion() {
+                if (intervaloId) clearInterval(intervaloId);
+                intervaloId = setInterval(function () { mostrar(actual + 1); }, 6000);
+            }
+
+            function irManualmente(indice) {
+                mostrar(indice);
+                iniciarAutoRotacion(); // reinicia el conteo de 6s tras una acción manual
+            }
+
+            var btnPrev = document.getElementById('fondo-login-prev');
+            var btnNext = document.getElementById('fondo-login-next');
+            if (btnPrev) btnPrev.addEventListener('click', function () { irManualmente(actual - 1); });
+            if (btnNext) btnNext.addEventListener('click', function () { irManualmente(actual + 1); });
+            puntos.forEach(function (punto) {
+                punto.addEventListener('click', function () { irManualmente(parseInt(punto.dataset.indice, 10)); });
+            });
+
+            iniciarAutoRotacion();
         })();
     </script>
     {% endif %}
