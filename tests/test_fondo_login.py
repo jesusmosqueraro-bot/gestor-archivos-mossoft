@@ -88,6 +88,48 @@ def test_login_ignora_items_pausados(client, app):
     assert 'pausado.jpg' not in r.get_data(as_text=True)
 
 
+def test_panel_de_fondo_usa_fondo_blanco_en_vez_de_oscuro(client, app):
+    """Pedido de Tomás (13/09/2026): el panel se veía con una franja oscura visible cuando la
+    imagen no llenaba el espacio (bg-slate-950 + object-contain). Se cambió a fondo blanco.
+    Se revisa la clase del propio panel (no solo ausencia del texto en cualquier parte de la
+    página, ya que un comentario explicativo en el HTML puede mencionar el nombre de la clase
+    anterior sin que en realidad siga aplicada)."""
+    _crear_item_fondo(app)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'md:w-3/5 relative overflow-hidden flex-shrink-0 bg-white' in texto
+    assert 'md:w-3/5 relative overflow-hidden flex-shrink-0 bg-slate-950' not in texto
+
+
+def test_panel_de_fondo_con_un_solo_archivo_no_muestra_controles_de_navegacion(client, app):
+    """Con un único archivo activo no hay nada entre qué navegar, así que los botones/puntos no
+    deben imprimirse (evita controles inútiles y JS que rompa con listas de 1 elemento)."""
+    _crear_item_fondo(app)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'fondo-login-slide' in texto
+    assert 'fondo-login-prev' not in texto
+    assert 'fondo-login-next' not in texto
+    assert 'fondo-login-punto' not in texto
+
+
+def test_panel_de_fondo_con_varios_archivos_muestra_botones_y_puntos_de_navegacion(client, app):
+    """Pedido de Tomás (13/09/2026): 'agrega botones para poder pasar las imagenes del
+    carrusel'. Con más de un archivo activo deben aparecer las flechas prev/next y un punto
+    indicador por cada archivo."""
+    _crear_item_fondo(app, orden=0, url='https://res.cloudinary.com/demo/image/upload/uno.jpg')
+    _crear_item_fondo(app, orden=1, url='https://res.cloudinary.com/demo/image/upload/dos.jpg')
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'id="fondo-login-prev"' in texto
+    assert 'id="fondo-login-next"' in texto
+    assert texto.count('class="fondo-login-punto') == 2
+    assert 'irManualmente' in texto
+
+
 def test_estandar_no_puede_ver_fondo_login(client, sesion_usuario):
     r = client.get('/comunicados/fondo_login')
 
