@@ -203,12 +203,120 @@ def _agregar_cabeceras_seguridad(response):
         response.headers['Expires'] = '0'
     return response
 
+# 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
+# que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
+# vez de la IP cruda de Flask-Limiter, así el límite es por visitante real y no por el balanceador.
+#
+# 📦 Almacenamiento de los contadores: por defecto en memoria del proceso — con el único worker
+# gevent de este servicio (ver Procfile; necesario para Socket.IO, ver más abajo) el conteo en
+# memoria ya es exacto para una sola instancia. Si Render llega a correr más de una instancia/dyno
+# de este servicio, cada una contaría por su lado (el tope real sería más alto que el configurado),
+# de ahí que siga existiendo la opción de Redis compartido descrita abajo.
+#
+# Si en Render se agrega un addon de Redis y se define la variable de entorno RATELIMIT_STORAGE_URI
+# (o REDIS_URL, la que Render suele exponer para su addon "Key Value") con algo como
+# "redis://usuario:clave@host:puerto", los contadores pasan a vivir ahí — compartidos entre todos
+# los workers/instancias, sin ese margen de doble conteo. No hace falta tocar código para activarlo,
+# solo agregar la variable de entorno; sin ella, sigue funcionando igual que hasta ahora (memoria).
+_RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI') or os.environ.get('REDIS_URL') or "memory://"
+
+# 🔒 Hallazgo de auditoría de seguridad (06/09/2026): hasta ahora el límite de peticiones solo
+# existía en rutas puntuales (login, algunas de tareas) — el resto de la API no tenía ningún
+# tope. _LIMITE_GLOBAL_DEFAULT aplica un tope general a TODA la app (cualquier ruta que no
+# tenga ya su propio @limiter.limit más estricto) para frenar abuso/scraping/DoS básico sin
+# estorbar el uso normal: son números generosos porque la app hace polling de notificaciones y
+# tiempo real (ver tiempo_real.js) — el objetivo es un techo de seguridad, no limitar el uso
+# normal de un agente/admin trabajando.
+_LIMITE_GLOBAL_DEFAULT = ["300 per minute", "4000 per hour"]
+
+# 🐛 Corrección (13/09/2026, hallazgo de logs de producción en Render): "Flask-Limiter no se
+# dispara: el manejador CSRF (CSRFProtect) está interceptando los POST inválidos antes de que
+# Flask-Limiter registre el intento" — una ráfaga de 10 POST a /login sin token CSRF (o con uno
+# vencido) nunca hacía disparar el 429 de "5 per minute", sin importar cuántos se mandaran.
+#
+# Causa real (no es solo el orden de construcción de las extensiones): "@limiter.limit(...)"
+# usado como DECORADOR encima de una vista (como estaba antes en /login) solo cuenta/aplica ese
+# límite cuando la vista se EJECUTA de verdad — el chequeo vive DENTRO de la función que envuelve
+# a la vista, no en el before_request genérico de Flask-Limiter (ver
+# flask_limiter.extension.LimitDecorator.__call__/__filter_limits: los límites "decorados" se
+# excluyen a propósito del paso de middleware y se difieren a cuando la vista corre). Si
+# CSRFProtect corta la petición ANTES (por token CSRF faltante/vencido) — y eso pasa sin
+# importar si Limiter o CSRFProtect se construyó primero, porque el límite decorado nunca vive
+# en ese paso de middleware — la vista de /login nunca se ejecuta, y el límite específico de
+# "5 per minute" jamás se cuenta para esos intentos.
+#
+# Arreglo real: en vez de decorar la vista (ver /login, más abajo, que ya NO tiene
+# "@limiter.limit(...)"), el límite se aplica aquí mismo, como un "before_request" explícito
+# que usa "limiter.limit(...)" en su forma de GESTOR DE CONTEXTO ("with ...:", con
+# in_middleware=False) — así el conteo/bloqueo ocurre de inmediato para TODO POST a /login, se
+# valide o no después el CSRF. Este before_request se registra ANTES que CSRFProtect (más abajo)
+# para que corra primero.
+if Limiter:
+    try:
+        limiter = Limiter(
+            key_func=lambda: _obtener_ip_cliente(),
+            app=app,
+            storage_uri=_RATELIMIT_STORAGE_URI,
+            default_limits=_LIMITE_GLOBAL_DEFAULT,
+            # 🛟 in_memory_fallback_enabled: si Redis está configurado pero en algún momento no
+            # responde (se cae el addon, URL mal escrita, problema de red puntual), Flask-Limiter
+            # sigue limitando usando memoria local en vez de dejar pasar todo sin control
+            # (fail-open) o tumbar la petición con un error 500. Es puramente un respaldo — no
+            # reemplaza a Redis como fuente de verdad mientras esté disponible.
+            in_memory_fallback_enabled=True,
+        )
+        if _RATELIMIT_STORAGE_URI != "memory://":
+            print("🔒 Flask-Limiter usando almacenamiento compartido (Redis) para los límites de peticiones.")
+    except Exception as e:
+        # 🛟 Si la URL de Redis está mal escrita o hay cualquier otro problema al construir el
+        # limiter (no la conexión en sí, que se valida perezosamente en cada petición — de eso se
+        # encarga in_memory_fallback_enabled de arriba): no tiene sentido que la app entera falle
+        # por esto. Se cae a memoria (el comportamiento de siempre) y sigue arrancando normal.
+        print(f"⚠️ No se pudo inicializar Flask-Limiter con almacenamiento compartido ({e}); usando memoria como respaldo.")
+        limiter = Limiter(
+            key_func=lambda: _obtener_ip_cliente(),
+            app=app,
+            storage_uri="memory://",
+            default_limits=_LIMITE_GLOBAL_DEFAULT,
+        )
+
+    # 📡 Se exime del tope global a los archivos estáticos y al transporte de Socket.IO: ambos
+    # pueden generar ráfagas legítimas de peticiones (varios JS/CSS/imágenes en una sola carga
+    # de página, o el long-polling de Socket.IO si el navegador no logra abrir el websocket) que
+    # no son abuso — el tope de arriba apunta a las rutas de la aplicación en sí.
+    @limiter.request_filter
+    def _eximir_estaticos_y_socketio():
+        return request.path.startswith('/static/') or request.path.startswith('/socket.io')
+
+    # 🔒 5 intentos por minuto por IP para /login (antes 20): endurecido a pedido,
+    # específicamente contra fuerza bruta de contraseñas. Ver el comentario grande de arriba —
+    # esto reemplaza al antiguo "@limiter.limit('5 per minute', methods=['POST'])" que decoraba
+    # la vista de login() directamente (ese decorador seguía sin dispararse si CSRF cortaba la
+    # petición antes). Al usar limiter.limit(...) como gestor de contexto dentro de este
+    # before_request (registrado antes que CSRFProtect), el conteo pasa ANTES que cualquier
+    # validación de CSRF o de credenciales — si se supera el límite, RateLimitExceeded corta la
+    # petición aquí mismo y _manejar_limite_excedido (más abajo) responde el 429 en español.
+    @app.before_request
+    def _limitar_intentos_login():
+        if request.method == 'POST' and request.path == '/login':
+            with limiter.limit("5 per minute", key_func=lambda: _obtener_ip_cliente(), scope='login'):
+                pass
+else:
+    print("⚠️ flask_limiter no está instalado: no habrá límite de peticiones por minuto. Agrega Flask-Limiter a requirements.txt.")
+    class _LimiterExemptDummy:
+        def limit(self, *args, **kwargs):
+            def decorador(f):
+                return f
+            return decorador
+    limiter = _LimiterExemptDummy()
+
 # 🛡️ Protección CSRF real vía Flask-WTF. Todas las plantillas con formularios POST ya
 # incluyen (o se les agregó) el campo oculto csrf_token(); CSRFProtect valida ese token en
 # cada POST/PUT/PATCH/DELETE y registra csrf_token() como global de Jinja automáticamente.
 # Las dos únicas llamadas fetch() que no envían el token (incrementar_vista/descarga, meros
 # contadores de vistas/descargas sin impacto sensible) quedan exentas explícitamente donde
-# están definidas más abajo.
+# están definidas más abajo. Se registra DESPUÉS de Limiter (ver el comentario de arriba) para
+# que el before_request de Flask-Limiter corra primero.
 if CSRFProtect:
     csrf = CSRFProtect(app)
 
@@ -271,77 +379,6 @@ def _manejar_limite_excedido(e):
         return jsonify(error=mensaje), 429
     flash(mensaje, "error")
     return redirect(request.referrer or url_for('index')), 429
-
-# 🔒 Hallazgo QA H-08: límites de peticiones por minuto. Usa _obtener_ip_cliente (misma función
-# que ya usa el resto de la app para IP real detrás del proxy de Render vía X-Forwarded-For) en
-# vez de la IP cruda de Flask-Limiter, así el límite es por visitante real y no por el balanceador.
-#
-# 📦 Almacenamiento de los contadores: por defecto en memoria del proceso — con el único worker
-# gevent de este servicio (ver Procfile; necesario para Socket.IO, ver más abajo) el conteo en
-# memoria ya es exacto para una sola instancia. Si Render llega a correr más de una instancia/dyno
-# de este servicio, cada una contaría por su lado (el tope real sería más alto que el configurado),
-# de ahí que siga existiendo la opción de Redis compartido descrita abajo.
-#
-# Si en Render se agrega un addon de Redis y se define la variable de entorno RATELIMIT_STORAGE_URI
-# (o REDIS_URL, la que Render suele exponer para su addon "Key Value") con algo como
-# "redis://usuario:clave@host:puerto", los contadores pasan a vivir ahí — compartidos entre todos
-# los workers/instancias, sin ese margen de doble conteo. No hace falta tocar código para activarlo,
-# solo agregar la variable de entorno; sin ella, sigue funcionando igual que hasta ahora (memoria).
-_RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI') or os.environ.get('REDIS_URL') or "memory://"
-
-# 🔒 Hallazgo de auditoría de seguridad (06/09/2026): hasta ahora el límite de peticiones solo
-# existía en rutas puntuales (login, algunas de tareas) — el resto de la API no tenía ningún
-# tope. _LIMITE_GLOBAL_DEFAULT aplica un tope general a TODA la app (cualquier ruta que no
-# tenga ya su propio @limiter.limit más estricto) para frenar abuso/scraping/DoS básico sin
-# estorbar el uso normal: son números generosos porque la app hace polling de notificaciones y
-# tiempo real (ver tiempo_real.js) — el objetivo es un techo de seguridad, no limitar el uso
-# normal de un agente/admin trabajando.
-_LIMITE_GLOBAL_DEFAULT = ["300 per minute", "4000 per hour"]
-
-if Limiter:
-    try:
-        limiter = Limiter(
-            key_func=lambda: _obtener_ip_cliente(),
-            app=app,
-            storage_uri=_RATELIMIT_STORAGE_URI,
-            default_limits=_LIMITE_GLOBAL_DEFAULT,
-            # 🛟 in_memory_fallback_enabled: si Redis está configurado pero en algún momento no
-            # responde (se cae el addon, URL mal escrita, problema de red puntual), Flask-Limiter
-            # sigue limitando usando memoria local en vez de dejar pasar todo sin control
-            # (fail-open) o tumbar la petición con un error 500. Es puramente un respaldo — no
-            # reemplaza a Redis como fuente de verdad mientras esté disponible.
-            in_memory_fallback_enabled=True,
-        )
-        if _RATELIMIT_STORAGE_URI != "memory://":
-            print("🔒 Flask-Limiter usando almacenamiento compartido (Redis) para los límites de peticiones.")
-    except Exception as e:
-        # 🛟 Si la URL de Redis está mal escrita o hay cualquier otro problema al construir el
-        # limiter (no la conexión en sí, que se valida perezosamente en cada petición — de eso se
-        # encarga in_memory_fallback_enabled de arriba): no tiene sentido que la app entera falle
-        # por esto. Se cae a memoria (el comportamiento de siempre) y sigue arrancando normal.
-        print(f"⚠️ No se pudo inicializar Flask-Limiter con almacenamiento compartido ({e}); usando memoria como respaldo.")
-        limiter = Limiter(
-            key_func=lambda: _obtener_ip_cliente(),
-            app=app,
-            storage_uri="memory://",
-            default_limits=_LIMITE_GLOBAL_DEFAULT,
-        )
-
-    # 📡 Se exime del tope global a los archivos estáticos y al transporte de Socket.IO: ambos
-    # pueden generar ráfagas legítimas de peticiones (varios JS/CSS/imágenes en una sola carga
-    # de página, o el long-polling de Socket.IO si el navegador no logra abrir el websocket) que
-    # no son abuso — el tope de arriba apunta a las rutas de la aplicación en sí.
-    @limiter.request_filter
-    def _eximir_estaticos_y_socketio():
-        return request.path.startswith('/static/') or request.path.startswith('/socket.io')
-else:
-    print("⚠️ flask_limiter no está instalado: no habrá límite de peticiones por minuto. Agrega Flask-Limiter a requirements.txt.")
-    class _LimiterExemptDummy:
-        def limit(self, *args, **kwargs):
-            def decorador(f):
-                return f
-            return decorador
-    limiter = _LimiterExemptDummy()
 
 # 🔴 Inicialización de Socket.IO — ver el comentario junto al import de arriba. Cada pestaña
 # con sesión abierta se conecta sola (ver static/js/tiempo_real.js) y esta parte del servidor
@@ -12025,8 +12062,13 @@ def _render_login(**kwargs):
 # 🔒 5 intentos por minuto por IP (antes 20): endurecido a pedido, específicamente contra
 # fuerza bruta de contraseñas. Al superarlo, Flask-Limiter corta la petición ANTES de tocar la
 # base de datos y responde 429 (ver _manejar_limite_excedido, más abajo, para el mensaje).
+#
+# 🐛 (13/09/2026) Este límite YA NO se aplica con "@limiter.limit(...)" encima de la vista —
+# ver "_limitar_intentos_login" junto a la construcción de Limiter, más arriba en el archivo,
+# y su comentario para la explicación completa del hallazgo que esto corrige (un
+# "@limiter.limit(...)" decorando la vista solo cuenta cuando la vista se EJECUTA, así que una
+# ráfaga de POST sin token CSRF válido nunca llegaba a incrementar el contador).
 @app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute", methods=["POST"])
 def login():
     if request.method == 'POST':
         try:
