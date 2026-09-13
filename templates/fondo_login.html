@@ -47,6 +47,7 @@
         </div>
         <div class="flex items-center gap-2">
             {% include 'partials/logo_preventiva_nav.html' %}
+            {% with modulo='fondo_login' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
             {% include 'partials/perfil_boton.html' %}
             {% include 'partials/chat_boton.html' %}
             {% include 'partials/campanita.html' %}
@@ -160,5 +161,6 @@
     <script src="/static/js/notificaciones.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

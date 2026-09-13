@@ -54,6 +54,7 @@
             <div class="flex items-center gap-2">
                 {% include 'partials/logo_preventiva_nav.html' %}
                 {% include 'partials/buscador.html' %}
+                {% with modulo='papelera' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
                 {% include 'partials/historial_sesiones_boton.html' %}
                 {% include 'partials/seguridad_boton.html' %}
                 {% include 'partials/perfil_boton.html' %}
@@ -250,5 +251,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

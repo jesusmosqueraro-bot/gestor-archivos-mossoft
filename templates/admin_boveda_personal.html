@@ -46,6 +46,7 @@
             </h1>
         </div>
         {% include 'partials/logo_preventiva_nav.html' %}
+        {% with modulo='admin_boveda_personal' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
     </nav>
 
     <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
@@ -304,5 +305,6 @@
         document.getElementById('input-buscar-usuario').value = {{ usuario_buscado | tojson }};
         {% endif %}
     </script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

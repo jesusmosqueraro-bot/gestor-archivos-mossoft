@@ -49,6 +49,7 @@
         <div class="flex items-center gap-2">
             {% include 'partials/logo_preventiva_nav.html' %}
             {% include 'partials/buscador.html' %}
+                {% with modulo='diseno_modales' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
             {% include 'partials/historial_sesiones_boton.html' %}
             {% include 'partials/seguridad_boton.html' %}
             {% include 'partials/perfil_boton.html' %}
@@ -234,5 +235,6 @@
             actualizarTodo();
         })();
     </script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

@@ -59,6 +59,7 @@
                     <span class="hidden sm:inline">Ir a Inventario</span>
                 </a>
                 {% endif %}
+                {% with modulo='certificacion_devoluciones' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
                 {% include 'partials/perfil_boton.html' %}
                 {% include 'partials/chat_boton.html' %}
                 {% include 'partials/campanita.html' %}
@@ -292,5 +293,6 @@
             if (!marcado) { input.value = ''; }
         }
     </script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

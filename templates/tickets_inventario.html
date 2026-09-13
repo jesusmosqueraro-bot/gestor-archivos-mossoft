@@ -66,6 +66,7 @@
             </button>
             <div class="flex items-center gap-2">
                 {% include 'partials/buscador.html' %}
+                {% with modulo='tickets_inventario' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
                 {% include 'partials/historial_sesiones_boton.html' %}
                 {% include 'partials/seguridad_boton.html' %}
                 {% include 'partials/perfil_boton.html' %}
@@ -1607,5 +1608,6 @@
             });
         });
     </script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

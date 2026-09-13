@@ -52,6 +52,7 @@
                 </div>
             </div>
             {% include 'partials/logo_preventiva_nav.html' %}
+            {% with modulo='chat_bot' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
             {% if habilitado %}
             <button type="button" onclick="reiniciarConversacionBot()" title="Empezar una conversación nueva"
                     class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all">
@@ -113,5 +114,6 @@
     {% if habilitado %}
     <script src="/static/js/chat_bot.js"></script>
     {% endif %}
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

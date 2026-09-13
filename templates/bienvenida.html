@@ -73,6 +73,7 @@
                 <div class="flex items-center gap-2">
                     {% include 'partials/logo_preventiva_nav.html' %}
                     {% include 'partials/buscador.html' %}
+                {% with modulo='bienvenida' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
                     {% include 'partials/historial_sesiones_boton.html' %}
                     {% include 'partials/seguridad_boton.html' %}
                     {% include 'partials/chat_boton.html' %}
@@ -630,5 +631,6 @@
         }
     </script>
     {% endif %}
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

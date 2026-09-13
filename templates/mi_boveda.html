@@ -46,6 +46,7 @@
             </h1>
         </div>
         {% include 'partials/logo_preventiva_nav.html' %}
+        {% with modulo='mi_boveda' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
         <button onclick="abrirModalCrear()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all">
             <i class="fa-solid fa-plus"></i> Nueva entrada
         </button>
@@ -340,5 +341,6 @@
             }
         }
     </script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

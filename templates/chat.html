@@ -68,6 +68,7 @@
                 </form>
                 {% endif %}
                 {% include 'partials/logo_preventiva_nav.html' %}
+                {% with modulo='chat' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
                 {% include 'partials/perfil_boton.html' %}
                 {% include 'partials/campanita.html' %}
             </div>
@@ -237,5 +238,6 @@
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
     <script src="/static/js/chat.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

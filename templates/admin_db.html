@@ -51,6 +51,7 @@
         <div class="flex items-center gap-2">
             {% include 'partials/logo_preventiva_nav.html' %}
             {% include 'partials/buscador.html' %}
+                {% with modulo='admin_db' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
             {% include 'partials/historial_sesiones_boton.html' %}
             {% include 'partials/seguridad_boton.html' %}
             {% include 'partials/perfil_boton.html' %}
@@ -179,5 +180,6 @@
          static/js/tabla-interactiva.js. Aquí es aún más útil: cada tabla de la base de datos
          tiene sus propias columnas y su propia preferencia guardada (admin-db-{{ tabla }}). -->
     <script src="/static/js/tabla-interactiva.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>
