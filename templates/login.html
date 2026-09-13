@@ -2,9 +2,9 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkiv | Software de Gestión Documental y Archivo</title>
-    <!-- 🔎 SEO básico (pedido por Tomás, 05/09/2026): esta es la ÚNICA pantalla pública de Arkiv
+    <meta name="viewport" content="width=device-width, initial-scale=2.0">
+    <title>ARKIV | Software de Gestión Documental y Archivo</title>
+    <!-- 🔎 SEO básico (pedido por MOSQUERA, 05/09/2026): esta es la ÚNICA pantalla pública de Arkiv
          (todo lo demás vive detrás de @login_required y redirige aquí), así que es la única que
          tiene sentido posicionar en buscadores — de ahí que el title/description mencionen
          "gestión documental" y no cosas internas de la app. Ver también /robots.txt y
@@ -19,7 +19,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%230f172a'/><stop offset='100%' style='stop-color:%23020617'/></linearGradient><linearGradient id='plat' x1='0%' y1='0%' x2='0%' y2='100%'><stop offset='0%' style='stop-color:%23ffffff'/><stop offset='100%' style='stop-color:%23e2e8f0'/></linearGradient><linearGradient id='st' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%2394a3b8'/><stop offset='100%' style='stop-color:%2364748b'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><polygon points='50,16 18,78 30,78 50,52 70,78 82,78' fill='%231e293b'/><polygon points='50,16 18,78 32,78 50,42' fill='url(%23plat)'/><polygon points='50,16 82,78 68,78 50,42' fill='url(%23st)'/><polygon points='32,54 68,54 60,46 40,46' fill='%23020617'/><polygon points='34,52 66,52 60,46 40,46' fill='url(%23plat)'/><polygon points='50,28 58,40 50,52 42,40' fill='%230f172a' stroke='%23f8fafc' stroke-width='1.5'/><circle cx='50' cy='40' r='2.5' fill='%23f8fafc'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-    <!-- 🎨 Manual de marca de Preventiva Salud IPS (pedido por Tomás, 12/09/2026): tipografía
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (pedido por MOSQUERA, 12/09/2026): tipografía
          Montserrat + variables CSS con la paleta institucional — ver marca-institucional.css. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,7 +35,7 @@
          del login (60/40) para que no quede tanto espacio muerto alrededor de la tarjeta blanca.
          Oculto en celular a propósito: en pantalla angosta solo importa que el login cargue
          rápido y sea fácil de usar; el panel es puramente decorativo.
-         Fondo blanco (pedido de Tomás, 13/09/2026: antes era bg-slate-950 y con object-contain
+         Fondo blanco (pedido de MOSQUERA, 13/09/2026: antes era bg-slate-950 y con object-contain
          dejaba una franja oscura visible cuando la imagen no llenaba todo el panel; con fondo
          blanco esa franja pasa a ser neutral en vez de una barra oscura llamativa). Por eso
          también se quitó el degradado oscuro que había encima (bg-gradient-to-t from-slate-950/50):
@@ -52,7 +52,7 @@
         {% endfor %}
 
         {% if fondo_media|length > 1 %}
-        <!-- Controles manuales del carrusel (pedido de Tomás, 13/09/2026: "agrega botones para
+        <!-- Controles manuales del carrusel (pedido de MOSQUERA, 13/09/2026: "agrega botones para
              poder pasar las imagenes del carrusel"). Solo se imprimen si hay más de un archivo
              activo — con uno solo no hay nada entre qué navegar. Los botones y los puntos llaman
              a la misma función mostrar(indice) que usa la rotación automática (ver script al
@@ -89,8 +89,8 @@
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
             <!-- ENCABEZADO CON LOGO PRINCIPAL DE PREVENTIVA SALUD IPS (manual de marca, pedido
-                 por Tomás, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema.
-                 Pedido por Tomás (13/09/2026): que el logo lleve al sitio público de Preventiva
+                 por MOSQUERA, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema.
+                 Pedido por MOSQUERA (13/09/2026): que el logo lleve al sitio público de Preventiva
                  (https://preventivaips.com.co/) al hacer clic, en pestaña nueva. -->
             <div class="text-center mb-6">
                 <a href="https://preventivaips.com.co/" target="_blank" rel="noopener noreferrer" title="Ir al sitio de Preventiva Salud IPS" class="inline-block">
@@ -161,7 +161,7 @@
     <script>
         // 🎞️ Rotación del panel de marca (ver Fondo de Login) — sin librerías externas, alterna
         // la opacidad entre slides cada 6 segundos. Además soporta navegación manual (pedido de
-        // Tomás, 13/09/2026: "agrega botones para poder pasar las imagenes del carrusel") con
+        // MOSQUERA, 13/09/2026: "agrega botones para poder pasar las imagenes del carrusel") con
         // flechas prev/next y puntos indicadores, reiniciando el temporizador automático cada vez
         // que la persona navega a mano para que no se sienta "revertido" al segundo siguiente. Si
         // solo hay un archivo activo, este bloque ni siquiera se imprime (ver la condición Jinja
@@ -212,7 +212,7 @@
 
     <script>
         // 📍 Geolocalización de login (pedido de auditoría/seguridad de sedes; ajustado por
-        // Tomás, 12/09/2026: "asegura que el formulario espere... antes del submit"). Se pide
+        // MOSQUERA, 12/09/2026: "asegura que el formulario espere... antes del submit"). Se pide
         // el permiso apenas carga la página (para adelantar trabajo), pero además el envío del
         // formulario ahora ESPERA a que esa solicitud resuelva (o se agote un límite de 3s)
         // antes de dejar pasar el submit real — así los campos ocultos 'latitud'/'longitud' ya
