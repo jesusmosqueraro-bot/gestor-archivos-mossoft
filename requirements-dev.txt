@@ -3,3 +3,4 @@
 # imagen de producción por accidente.
 -r requirements.txt
 pytest==8.3.3
+pdfplumber
