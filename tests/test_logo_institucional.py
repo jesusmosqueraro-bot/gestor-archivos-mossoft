@@ -9,7 +9,18 @@ Cubre las CUATRO superficies donde se agregó:
 
 El archivo del logo vive en static/img/logo_preventiva.png y Flask lo sirve como cualquier otro
 estático; los PDF lo leen directo del disco (ver _pdf_encabezado_con_logo en app.py) así que estas
-pruebas también sirven de regresión si algún día se mueve o se borra sin querer ese archivo."""
+pruebas también sirven de regresión si algún día se mueve o se borra sin querer ese archivo.
+
+Además cubre el pedido de Tomás (13/09/2026): "que cada vez que se presione el logo de
+Preventiva... nos redirija a la pagina principal de preventiva https://preventivaips.com.co/...
+en todos los modulos". El logo aparece en CUATRO superficies web distintas (ninguna es
+realmente un modal: se revisó a fondo y el logo nunca aparece dentro de uno):
+  a) El parcial reusable templates/partials/logo_preventiva_nav.html, incluido en 31 plantillas.
+  b) El encabezado de /tickets/inventario (agregado a mano antes de existir el parcial).
+  c) El encabezado de /inventario/certificacion_devoluciones (ídem).
+  d) El logo grande y centrado de /login (antes de iniciar sesión).
+Las cuatro se envolvieron en <a href="https://preventivaips.com.co/" target="_blank"
+rel="noopener noreferrer"> para abrir en pestaña nueva sin cerrar la sesión activa en Arkiv."""
 import os
 
 
@@ -43,12 +54,49 @@ def test_pagina_de_inventario_incluye_el_logo_institucional(admin_session):
     texto = admin_session.get('/tickets/inventario').get_data(as_text=True)
     assert '/static/img/logo_preventiva.png' in texto
     assert 'Preventiva Salud IPS' in texto
+    # Este logo se agregó a mano (pedido de Tomás, 08/09/2026), antes de que existiera el
+    # parcial reusable, así que se enlazó por separado al pedirse el enlace (13/09/2026).
+    assert '<a href="https://preventivaips.com.co/"' in texto
+
+
+def test_el_logo_institucional_enlaza_al_sitio_publico_de_preventiva_en_todas_las_plantillas():
+    """Pedido de Tomás (13/09/2026): que el logo, en CUALQUIER módulo, lleve al sitio público de
+    Preventiva (https://preventivaips.com.co/) al hacer clic — antes era una insignia sin enlace
+    (un <div>). Como el badge es un único parcial reusable (templates/partials/
+    logo_preventiva_nav.html) incluido en las 31 plantillas que lo muestran, esta prueba lo
+    verifica una sola vez contra el parcial: cualquier plantilla que lo incluya hereda el enlace
+    automáticamente, sin tener que repetir esta prueba página por página."""
+    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'templates', 'partials', 'logo_preventiva_nav.html')
+    with open(ruta, encoding='utf-8') as f:
+        contenido = f.read()
+    assert '<a href="https://preventivaips.com.co/"' in contenido
+    assert 'target="_blank"' in contenido
+    assert 'rel="noopener noreferrer"' in contenido
+    assert '/static/img/logo_preventiva.png' in contenido
+
+
+def test_pagina_de_bienvenida_muestra_el_logo_ya_enlazado_al_sitio_publico(admin_session):
+    """Chequeo end-to-end (no solo estático): confirma que /bienvenida realmente renderiza el
+    enlace, no solo que el texto vive en el archivo fuente del parcial."""
+    texto = admin_session.get('/bienvenida').get_data(as_text=True)
+    assert '<a href="https://preventivaips.com.co/"' in texto
+    assert 'Preventiva Salud IPS' in texto
 
 
 def test_pagina_de_certificacion_de_devolucion_incluye_el_logo_institucional(admin_session):
     texto = admin_session.get('/inventario/certificacion_devoluciones').get_data(as_text=True)
     assert '/static/img/logo_preventiva.png' in texto
     assert 'Preventiva Salud IPS' in texto
+    assert '<a href="https://preventivaips.com.co/"' in texto
+
+
+def test_login_muestra_el_logo_ya_enlazado_al_sitio_publico(client):
+    """El logo grande y centrado de /login es un cuarto lugar independiente del parcial
+    reusable (no pasa por login la sesión aún), así que se enlazó por separado."""
+    texto = client.get('/login').get_data(as_text=True)
+    assert '<a href="https://preventivaips.com.co/"' in texto
+    assert 'target="_blank"' in texto
 
 
 def test_pdf_de_acta_de_asignacion_incrusta_el_logo(admin_session, app):
