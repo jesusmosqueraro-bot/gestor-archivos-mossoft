@@ -5,7 +5,14 @@
      blanca redondeada para que se vea como una insignia intencional sobre la barra oscura (y no
      se pierda sobre el fondo casi blanco de los temas Claro/Descanso, gracias al borde). Oculto
      en pantallas muy angostas (hidden sm:flex) para no apretar el resto de la barra en celular,
-     igual que ya hacen el texto de "Volver" y el rol de usuario en estas mismas barras. -->
-<div class="hidden sm:flex items-center bg-white rounded-xl px-2.5 py-1.5 border border-slate-200 shadow-sm shrink-0" title="Preventiva Salud IPS">
+     igual que ya hacen el texto de "Volver" y el rol de usuario en estas mismas barras.
+
+     Pedido por Tomás (13/09/2026): que el logo, en CUALQUIER módulo, lleve al sitio público de
+     Preventiva (https://preventivaips.com.co/) al hacer clic. target="_blank" + rel="noopener
+     noreferrer" para que se abra en una pestaña nueva y no saque al usuario de su sesión activa
+     en Arkiv. -->
+<a href="https://preventivaips.com.co/" target="_blank" rel="noopener noreferrer"
+   class="hidden sm:flex items-center bg-white rounded-xl px-2.5 py-1.5 border border-slate-200 shadow-sm shrink-0 hover:border-slate-300 transition-all"
+   title="Ir al sitio de Preventiva Salud IPS">
     <img src="/static/img/logo_preventiva.png" alt="Preventiva Salud IPS" class="h-6 w-auto object-contain">
-</div>
+</a>
