@@ -10514,7 +10514,14 @@ def _pdf_elemento_firma(url, estilos, ancho=None, alto=None, texto_si_falta='(Si
 def _pdf_tabla_encabezado_acta(acta_id, fecha_texto):
     """Casilla 'N° DE ACTA / FECHA (DD/MM/AAAA)' que va justo debajo del título — la numeración
     autoincrementable (INT, la propia llave primaria de la tabla) que pidió Tomás para poder
-    identificar cada acta, junto con la fecha, calcada del formato en papel de Preventiva IPS."""
+    identificar cada acta, junto con la fecha, calcada del formato en papel de Preventiva IPS.
+
+    🩹 (13/09/2026, reportado por Tomás con captura del PDF) La celda 'FECHA' quedaba con su
+    casilla de dato vacía debajo (DD/MM/AAAA sí traen su valor, pero 'FECHA' en sí no tiene un
+    valor propio que mostrar — es la etiqueta del grupo) — a simple vista se veía como un dato
+    faltante, resaltado en rojo por Tomás. Se une esa celda verticalmente con la de abajo
+    (SPAN), para que 'FECHA' quede centrada como el rótulo de las tres casillas DD/MM/AAAA a su
+    derecha, en vez de leerse como una casilla de dato en blanco."""
     from reportlab.platypus import Table, TableStyle
     from reportlab.lib import colors
     from reportlab.lib.units import cm
@@ -10533,6 +10540,7 @@ def _pdf_tabla_encabezado_acta(acta_id, fecha_texto):
         ('GRID', (0, 0), (-1, -1), 0.6, colors.HexColor('#0f172a')),
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
         ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('SPAN', (1, 0), (1, 1)),
     ]))
     return tabla
 
