@@ -10596,6 +10596,24 @@ def _pdf_texto_celda(valor, estilos):
     return Paragraph(texto, estilos['Normal'])
 
 
+def _pdf_pie_de_pagina_powered_by(canvas_obj, doc_obj):
+    """Pie de página institucional de las actas de asignación y devolución: 'Powered by MosSoft'
+    centrado al fondo de cada hoja (pedido de Tomás, 13/09/2026). Se engancha pasando esta función
+    como 'onFirstPage'/'onLaterPages' a doc.build(...) — a diferencia de agregarlo como un
+    Paragraph más al final de la lista de 'elementos', esto lo fija SIEMPRE al borde inferior
+    físico de la página (dentro del margen inferior ya reservado, bottomMargin=1.5cm, sin invadir
+    el contenido del acta), sin importar cuánto ocupe el acta ni si termina abarcando más de una
+    hoja."""
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    ancho_pagina, _alto_pagina = doc_obj.pagesize
+    canvas_obj.saveState()
+    canvas_obj.setFont('Helvetica', 7)
+    canvas_obj.setFillColor(colors.HexColor('#94a3b8'))
+    canvas_obj.drawCentredString(ancho_pagina / 2, 0.7 * cm, 'Powered by MosSoft')
+    canvas_obj.restoreState()
+
+
 def _campos_acta_asignacion(acta_id):
     """Devuelve el dict de campos ya resueltos para armar el PDF del acta de asignación
     'acta_id' guardada en 'actas_asignacion' (o None si no existe) — usado por la descarga bajo
@@ -10740,7 +10758,7 @@ def _pdf_bytes_acta_asignacion(campos):
     ]))
     elementos.append(tabla_firmas)
 
-    doc.build(elementos)
+    doc.build(elementos, onFirstPage=_pdf_pie_de_pagina_powered_by, onLaterPages=_pdf_pie_de_pagina_powered_by)
     salida.seek(0)
     return salida.read()
 
@@ -12124,7 +12142,7 @@ def _pdf_bytes_acta_devolucion(campos):
         tabla_firma_responsable.hAlign = 'CENTER'
         elementos.append(tabla_firma_responsable)
 
-    doc.build(elementos)
+    doc.build(elementos, onFirstPage=_pdf_pie_de_pagina_powered_by, onLaterPages=_pdf_pie_de_pagina_powered_by)
     salida.seek(0)
     return salida.read()
 
