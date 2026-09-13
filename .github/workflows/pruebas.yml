@@ -36,6 +36,38 @@ jobs:
           DESHABILITAR_RESPALDO_AUTOMATICO: '1'
         run: python -m pytest tests/ -v
 
+  # 🚀 Verifica que static/css/tailwind.min.css (el CSS compilado que reemplazó a
+  # cdn.tailwindcss.com, ver comentario junto al CSP en app.py) siga reflejando las clases que
+  # usan las plantillas. Como no hay ningún paso de build en Render — el .css compilado se sirve
+  # tal cual desde el repo — es fácil olvidarse de correr `npm run build:css` después de agregar
+  # una clase de Tailwind nueva en un template; si eso pasa, esa clase quedaría sin estilo en
+  # producción sin que nadie se diera cuenta. Este job recompila desde cero en un entorno limpio
+  # y falla el check del PR si el resultado no es BYTE A BYTE igual al que está commiteado.
+  css-tailwind-actualizado:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar Tailwind CLI
+        run: npm install
+
+      - name: Recompilar static/css/tailwind.min.css
+        run: npm run build:css
+
+      - name: Falla si el resultado no coincide con lo commiteado
+        run: |
+          if ! git diff --quiet -- static/css/tailwind.min.css; then
+            echo "::error::static/css/tailwind.min.css está desactualizado. Corre 'npm run build:css' localmente y sube el resultado."
+            git diff --stat -- static/css/tailwind.min.css
+            exit 1
+          fi
+
   # 🔒 Hallazgo de auditoría de seguridad (06/09/2026): no había ningún escaneo de
   # dependencias — pip-audit revisa requirements.txt contra la base de datos pública de
   # vulnerabilidades conocidas (OSV) en cada push/PR a main. Es un job aparte del de pytest de

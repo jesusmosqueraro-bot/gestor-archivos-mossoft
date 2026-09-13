@@ -1,0 +1,11 @@
+{
+  "name": "arkiv-tailwind-build",
+  "private": true,
+  "description": "Solo para compilar Tailwind CSS a un archivo estático (static/css/tailwind.min.css) antes de desplegar. Render no ejecuta ningún paso de build de Node — el archivo compilado se versiona en el repo y se sirve tal cual.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./static/css/tailwind-input.css -o ./static/css/tailwind.min.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.13"
+  }
+}

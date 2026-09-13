@@ -170,7 +170,12 @@ def _agregar_cabeceras_seguridad(response):
     # arriesgar romper funcionalidad fuera de esta ronda de correcciones.
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com "
+        # 🚀 cdn.tailwindcss.com salió de aquí (12/09/2026): ese script compilaba Tailwind EN EL
+        # NAVEGADOR en cada carga de página (la propia consola de Chrome lo advierte: "should
+        # not be used in production") — la causa principal reportada de lentitud. Ahora se sirve
+        # precompilado como /static/css/tailwind.min.css (ver tailwind.config.js/package.json),
+        # así que ya no hace falta permitirlo como script.
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com "
         "https://www.google.com https://www.gstatic.com; "
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "

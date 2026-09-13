@@ -14,6 +14,11 @@ __pycache__/
 # Variables de entorno locales, si alguna vez se usa un archivo .env
 .env
 
+# Dependencias de Node usadas SOLO para compilar Tailwind a static/css/tailwind.min.css
+# (ver package.json/tailwind.config.js) — Render no ejecuta npm, solo sirve el .css ya
+# compilado, así que node_modules nunca debe subirse al repo.
+node_modules/
+
 # Documentos de entrega/propuesta y mockups de diseño: no son parte de la app, se generan y
 # entregan por fuera (ver SendUserFile) — no deben vivir en este repo de código.
 /docs_entrega/

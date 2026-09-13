@@ -1,0 +1,10 @@
+/* Fuente para compilar static/css/tailwind.min.css con `npm run build:css` (ver tailwind.config.js
+   y package.json). Reemplaza a <script src="https://cdn.tailwindcss.com"> — ese script compilaba
+   Tailwind EN EL NAVEGADOR, en cada carga de página, lo cual era la causa principal de la lentitud
+   reportada (confirmado por la propia advertencia de consola de Chrome: "cdn.tailwindcss.com
+   should not be used in production"). Este archivo se compila UNA sola vez aquí y el resultado ya
+   minificado se sirve como un .css estático normal, sin recompilar nada en el navegador de quien
+   visita la página. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
