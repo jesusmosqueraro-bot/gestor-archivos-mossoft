@@ -59,9 +59,13 @@
         <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 sm:p-8 relative overflow-hidden border border-slate-100">
 
             <!-- ENCABEZADO CON LOGO PRINCIPAL DE PREVENTIVA SALUD IPS (manual de marca, pedido
-                 por Tomás, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema. -->
+                 por Tomás, 12/09/2026) centrado, con "Arkiv" como subtítulo del ecosistema.
+                 Pedido por Tomás (13/09/2026): que el logo lleve al sitio público de Preventiva
+                 (https://preventivaips.com.co/) al hacer clic, en pestaña nueva. -->
             <div class="text-center mb-6">
-                <img src="{{ url_for('static', filename='img/logo_preventiva.png') }}" alt="Preventiva Salud IPS" class="h-16 w-auto mx-auto mb-3">
+                <a href="https://preventivaips.com.co/" target="_blank" rel="noopener noreferrer" title="Ir al sitio de Preventiva Salud IPS" class="inline-block">
+                    <img src="{{ url_for('static', filename='img/logo_preventiva.png') }}" alt="Preventiva Salud IPS" class="h-16 w-auto mx-auto mb-3">
+                </a>
                 <div class="h-0.5 w-8 bg-[var(--marca-cian)]/40 mx-auto my-2 rounded-full"></div>
                 <p class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Arkiv · Ecosistema Digital Corporativo</p>
             </div>
