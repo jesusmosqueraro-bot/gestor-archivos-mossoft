@@ -118,19 +118,26 @@ def admin_session(client, app):
 @pytest.fixture
 def crear_usuario(app):
     """Inserta un usuario de prueba directo en la BD y devuelve su 'usuario'. Evita pasar por
-    el alta desde /usuarios (que ya tiene sus propias pruebas de validación aparte)."""
+    el alta desde /usuarios (que ya tiene sus propias pruebas de validación aparte).
+
+    acepto_tratamiento_datos=True por defecto: la enorme mayoría de las pruebas que usan este
+    fixture con un login real (POST /login) no tienen nada que ver con Habeas Data y asumían,
+    antes de que existiera ese gate, que nada más bloqueaba la navegación tras iniciar sesión
+    (ver tests/test_login.py). Para probar el gate en sí (tests/test_habeas_data.py), se llama
+    con acepto_tratamiento_datos=False."""
     contador = {'n': 0}
 
-    def _crear(usuario=None, password_hash='x', correo=None, rol='estandar', nombre='Persona de Prueba', telefono=None, cedula=None):
+    def _crear(usuario=None, password_hash='x', correo=None, rol='estandar', nombre='Persona de Prueba', telefono=None, cedula=None, acepto_tratamiento_datos=True):
         contador['n'] += 1
         usuario = usuario or f"usuarioprueba{contador['n']}"
         correo = correo or f"{usuario}@preventivaips.com.co"
+        fecha_acepto = '2026-01-01T00:00:00+00:00' if acepto_tratamiento_datos else None
         conn, db_type = app.get_db()
         cur = conn.cursor()
-        q = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+        q = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula, fecha_acepto_tratamiento_datos) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
              if db_type == 'postgres' else
-             "INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        cur.execute(q, (usuario, password_hash, correo, rol, nombre, telefono, cedula))
+             "INSERT INTO usuarios (usuario, password_hash, correo, rol, nombre, telefono, cedula, fecha_acepto_tratamiento_datos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        cur.execute(q, (usuario, password_hash, correo, rol, nombre, telefono, cedula, fecha_acepto))
         conn.commit()
         conn.close()
         return usuario

@@ -154,6 +154,7 @@ if _SENTRY_DSN:
     except Exception as _e:
         print(f"⚠️ SENTRY_DSN está configurada pero Sentry no se pudo inicializar ({_e}); "
               f"la app sigue funcionando normal, solo sin ese monitoreo.")
+
 # 🔐 SECRET_KEY: nunca debe tener un valor real escrito en el código (quedaría expuesto en GitHub).
 # Si no está seteada en las variables de entorno de Render, se genera una aleatoria en cada arranque.
 # Esto no causa fricción extra: las sesiones ya se invalidan en cada reinicio por SERVER_INSTANCE_ID (ver abajo).
@@ -709,6 +710,14 @@ ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', '
 # validar_instancia_y_sesion, se resuelve antes de llegar aquí).
 ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'cambiar_password_perfil', 'logout', 'static'}
 
+# 📜 Habeas Data (Ley 1581 de 2012): mismo mecanismo que las dos anteriores. Mientras
+# session['debe_aceptar_tratamiento_datos'] esté encendido, cualquier ruta que no sea la propia
+# pantalla de aceptación (o consultar la política, o cerrar sesión) redirige a
+# /aceptar-tratamiento-datos. Va primero en validar_instancia_y_sesion: no tiene sentido dejar
+# avanzar el flujo de cambio de contraseña/2FA obligatorios sin que la cuenta haya aceptado antes
+# la política de tratamiento de datos.
+ENDPOINTS_PERMITIDOS_TRATAMIENTO_DATOS_OBLIGATORIO = {'aceptar_tratamiento_datos', 'politica_tratamiento_datos', 'logout', 'static'}
+
 # 🔙 Hallazgo QA (05/09/2026): con la sesión ya iniciada, el botón "atrás" del navegador
 # podía volver a mostrar la pantalla de login (con las cabeceras Cache-Control: no-store de
 # _agregar_cabeceras_seguridad, el navegador SÍ vuelve a pedirle la página al servidor en vez
@@ -733,6 +742,8 @@ def validar_instancia_y_sesion():
             _registrar_actividad_usuario()
         if request.endpoint in ENDPOINTS_SOLO_SIN_SESION:
             return redirect(url_for('bienvenida'))
+        if session.get('debe_aceptar_tratamiento_datos') and request.endpoint not in ENDPOINTS_PERMITIDOS_TRATAMIENTO_DATOS_OBLIGATORIO:
+            return redirect(url_for('aceptar_tratamiento_datos'))
         if session.get('debe_cambiar_password') and request.endpoint not in ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO:
             return redirect(url_for('cambiar_password_perfil'))
         if session.get('debe_activar_2fa') and request.endpoint not in ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO:
@@ -1078,6 +1089,13 @@ def init_db():
                 # admin), para obligar a que la cambien en su próximo inicio de sesión antes de
                 # poder usar el resto de Arkiv. Se limpia a FALSE apenas la cambian.
                 "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN DEFAULT FALSE;",
+                # 📜 Habeas Data (Ley 1581 de 2012): fecha en que la cuenta aceptó la política de
+                # tratamiento de datos personales vigente en /politica-tratamiento-datos. NULL
+                # significa que todavía no la ha aceptado — validar_instancia_y_sesion() la manda
+                # a /aceptar-tratamiento-datos antes de dejarla usar el resto de la app (mismo
+                # mecanismo que debe_cambiar_password/debe_activar_2fa, ver ENDPOINTS_PERMITIDOS_*
+                # más abajo). Las cuentas que ya existían quedan en NULL hasta su próximo login.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS fecha_acepto_tratamiento_datos TIMESTAMP;",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'Incidente';",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_respuesta_limite VARCHAR(100);",
                 "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_resolucion_limite VARCHAR(100);",
@@ -1592,6 +1610,12 @@ def init_db():
             try:
                 # 🔒 Forzar cambio de contraseña. Ver comentario equivalente en la rama de Postgres.
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN debe_cambiar_password INTEGER DEFAULT 0;")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                # 📜 Habeas Data. Ver comentario equivalente en la rama de Postgres.
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN fecha_acepto_tratamiento_datos TEXT;")
                 conn.commit()
             except Exception:
                 pass
@@ -12652,8 +12676,9 @@ def login():
             try:
                 conn, db_type = get_db()
                 cursor = conn.cursor()
-                # foto_perfil se agrega AL FINAL (índice 9) para no correr los índices existentes.
-                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
+                # foto_perfil (índice 9) y fecha_acepto_tratamiento_datos (índice 10) se agregan
+                # AL FINAL para no correr los índices existentes.
+                query = "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil, fecha_acepto_tratamiento_datos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(%s))" if db_type == 'postgres' else "SELECT usuario, password_hash, rol, estado, tema, debe_cambiar_password, totp_habilitado, intentos_fallidos_login, bloqueado_por_intentos, foto_perfil, fecha_acepto_tratamiento_datos FROM usuarios WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))"
                 cursor.execute(query, (username,))
                 user = cursor.fetchone()
                 conn.close()
@@ -12712,6 +12737,7 @@ def login():
                             session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
                             session['debe_activar_2fa'] = False
                             session['foto_perfil'] = user[9] if len(user) > 9 else None
+                            session['debe_aceptar_tratamiento_datos'] = not (user[10] if len(user) > 10 else None)
                             registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso (dispositivo de confianza 2FA, no se pidió el código)", ip=ip_actual, dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                             registrar_geolocalizacion_login(user[0], ip_actual, request.form.get('latitud'), request.form.get('longitud'))
                             return redirect(url_for('bienvenida'))
@@ -12739,6 +12765,7 @@ def login():
                     # 🖼️ Foto de perfil: se cachea en la sesión para no consultar la BD en cada
                     # página solo para pintar el ícono del encabezado (ver partials/perfil_boton.html).
                     session['foto_perfil'] = user[9] if len(user) > 9 else None
+                    session['debe_aceptar_tratamiento_datos'] = not (user[10] if len(user) > 10 else None)
                     ip_actual_sin_2fa = _obtener_ip_cliente()
                     registrar_log(user[0], "Inicio de Sesión", "Inicio de sesión exitoso", ip=ip_actual_sin_2fa, dispositivo=_detectar_dispositivo(request.headers.get('User-Agent', '')))
                     registrar_geolocalizacion_login(user[0], ip_actual_sin_2fa, request.form.get('latitud'), request.form.get('longitud'))
@@ -12791,8 +12818,9 @@ def login_2fa():
 
         conn, db_type = get_db()
         cursor = conn.cursor()
-        # foto_perfil se agrega AL FINAL (índice 6) para no correr los índices existentes.
-        query = "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil FROM usuarios WHERE usuario = ?"
+        # foto_perfil (índice 6) y fecha_acepto_tratamiento_datos (índice 7) se agregan AL FINAL
+        # para no correr los índices existentes.
+        query = "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil, fecha_acepto_tratamiento_datos FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT usuario, rol, estado, tema, debe_cambiar_password, totp_secret, foto_perfil, fecha_acepto_tratamiento_datos FROM usuarios WHERE usuario = ?"
         cursor.execute(query, (usuario_pendiente,))
         user = cursor.fetchone()
         conn.close()
@@ -12832,6 +12860,7 @@ def login_2fa():
             session['debe_activar_2fa'] = False
             # 🖼️ Foto de perfil: se cachea en la sesión (ver login() más arriba).
             session['foto_perfil'] = user[6] if len(user) > 6 else None
+            session['debe_aceptar_tratamiento_datos'] = not (user[7] if len(user) > 7 else None)
             detalle = "Inicio de sesión exitoso (código de respaldo 2FA)" if via_respaldo else "Inicio de sesión exitoso (verificación en dos pasos)"
             ip_actual = _obtener_ip_cliente()
             dispositivo_actual = _detectar_dispositivo(request.headers.get('User-Agent', ''))
@@ -12867,6 +12896,51 @@ def login_2fa():
         error = "El código ingresado no es válido. Verifica la hora de tu dispositivo o usa un código de respaldo."
 
     return render_template('login_2fa.html', error=error)
+
+
+@app.route('/politica-tratamiento-datos')
+def politica_tratamiento_datos():
+    """Página pública (no exige sesión) con la política de tratamiento de datos personales.
+    Enlazada desde /aceptar-tratamiento-datos y desde login.html, para que cualquiera pueda
+    consultarla sin tener que iniciar sesión primero."""
+    return render_template('politica_tratamiento_datos.html')
+
+
+@app.route('/aceptar-tratamiento-datos', methods=['GET', 'POST'])
+@login_required
+def aceptar_tratamiento_datos():
+    """📜 Habeas Data (Ley 1581 de 2012): puerta obligatoria para cualquier cuenta cuyo
+    fecha_acepto_tratamiento_datos siga en NULL (ver ENDPOINTS_PERMITIDOS_TRATAMIENTO_DATOS_
+    OBLIGATORIO / validar_instancia_y_sesion). No se puede aceptar 'en nombre de' nadie más: solo
+    queda disponible para la propia cuenta ya autenticada. Si la cuenta ya había aceptado
+    (ej. alguien vuelve a esta URL a propósito), se la manda directo al panel principal."""
+    if not session.get('debe_aceptar_tratamiento_datos'):
+        return redirect(url_for('bienvenida'))
+
+    error = None
+    if request.method == 'POST':
+        if request.form.get('acepto') != 'on':
+            error = "Debes marcar la casilla de aceptación para continuar."
+        else:
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            try:
+                ahora = datetime.now(timezone.utc).isoformat()
+                q_upd = "UPDATE usuarios SET fecha_acepto_tratamiento_datos = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET fecha_acepto_tratamiento_datos = ? WHERE usuario = ?"
+                cursor.execute(q_upd, (ahora, session.get('username')))
+                conn.commit()
+                session['debe_aceptar_tratamiento_datos'] = False
+                registrar_log(session.get('username'), "Habeas Data", "Aceptó la política de tratamiento de datos personales.", ip=_obtener_ip_cliente())
+                conn.close()
+                return redirect(url_for('bienvenida'))
+            except Exception as e:
+                conn.rollback()
+                conn.close()
+                print(f"Error registrando aceptación de tratamiento de datos: {e}")
+                error = "No se pudo registrar la aceptación. Intenta de nuevo."
+
+    return render_template('aceptar_tratamiento_datos.html', error=error)
+
 
 # 📊 RUTAS DE MÉTRICAS
 @app.route('/incrementar_vista/<galeria_id>', methods=['POST'])

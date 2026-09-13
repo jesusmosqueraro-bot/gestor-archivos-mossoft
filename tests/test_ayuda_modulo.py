@@ -87,6 +87,11 @@ PLANTILLAS_SIN_AYUDA_ESPERADAS = {
     'perfil_2fa.html',
     'perfil_datos.html',
     'recuperar.html',
+    # 🔒 Habeas Data (Ley 1581 de 2012): igual que cambiar_password.html/login_2fa.html, son
+    # pasos obligatorios de un flujo de sesión/legal, no un módulo operativo — no les aplica el
+    # botón de ayuda.
+    'aceptar_tratamiento_datos.html',
+    'politica_tratamiento_datos.html',
 }
 
 
