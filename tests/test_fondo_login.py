@@ -8,13 +8,22 @@ import io
 import cloudinary.uploader
 
 
-def _crear_item_fondo(app, tipo='imagen', url='https://res.cloudinary.com/demo/image/upload/v1/fake.jpg', estado='activo', orden=0):
+def _crear_item_fondo(app, tipo='imagen', url='https://res.cloudinary.com/demo/image/upload/v1/fake.jpg', estado='activo', orden=0,
+                       duracion_segundos=None, reproducir_con_sonido=False):
     conn, db_type = app.get_db()
     cur = conn.cursor()
-    q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
-         if db_type == 'postgres' else
-         "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    cur.execute(q, (tipo, url, 'fake_public_id', orden, estado, '2026-09-03 10:00:00', 'admin'))
+    if duracion_segundos is None:
+        # Sin pasar la columna en el INSERT a propósito: así se prueba el DEFAULT 6 real de la
+        # base de datos, no un valor que Python decida.
+        q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, reproducir_con_sonido) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+             if db_type == 'postgres' else
+             "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, reproducir_con_sonido) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        cur.execute(q, (tipo, url, 'fake_public_id', orden, estado, '2026-09-03 10:00:00', 'admin', reproducir_con_sonido))
+    else:
+        q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, duracion_segundos, reproducir_con_sonido) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+             if db_type == 'postgres' else
+             "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, duracion_segundos, reproducir_con_sonido) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        cur.execute(q, (tipo, url, 'fake_public_id', orden, estado, '2026-09-03 10:00:00', 'admin', duracion_segundos, reproducir_con_sonido))
     item_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
     conn.commit()
     conn.close()
@@ -221,3 +230,194 @@ def test_fondo_login_tiene_boton_de_tema_claro_oscuro(admin_session):
 
     assert 'action="/perfil/tema"' in texto
     assert 'fa-sun' in texto or 'fa-moon' in texto
+
+
+# ⏱️ Duración por archivo (pedido de Tomás, 13/09/2026: "habilitemos un campo... por defecto
+# se establezca un tiempo determinado de duración en segundos. Más por el tema de los videos").
+
+def test_login_usa_6_segundos_por_defecto_si_no_se_configuro_duracion(client, app):
+    _crear_item_fondo(app)  # sin duracion_segundos: usa el DEFAULT 6 real de la tabla
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'data-duracion-ms="6000"' in texto
+
+
+def test_login_usa_la_duracion_personalizada_de_cada_archivo(client, app):
+    _crear_item_fondo(app, duracion_segundos=15)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'data-duracion-ms="15000"' in texto
+
+
+def test_admin_fondo_login_muestra_campo_de_duracion_con_valor_por_defecto(admin_session):
+    """El formulario de subida trae el campo de duración prellenado con el valor por defecto,
+    para no obligar a pensar en esto en cada subida."""
+    texto = admin_session.get('/comunicados/fondo_login').get_data(as_text=True)
+
+    assert 'name="duracion_segundos"' in texto
+    assert 'id="duracion_segundos_nuevo" name="duracion_segundos" value="6"' in texto
+
+
+def test_subir_fondo_login_guarda_la_duracion_enviada(admin_session, app, monkeypatch):
+    monkeypatch.setattr(cloudinary.uploader, 'upload', lambda *a, **k: {
+        'secure_url': 'https://res.cloudinary.com/demo/image/upload/duracion.jpg', 'public_id': 'duracion_id'
+    })
+
+    admin_session.post('/comunicados/fondo_login/subir',
+                        data={'archivo': (io.BytesIO(b'contenido falso'), 'foto.jpg'), 'duracion_segundos': '20'},
+                        content_type='multipart/form-data')
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT duracion_segundos FROM login_fondo_media WHERE url = ?", ('https://res.cloudinary.com/demo/image/upload/duracion.jpg',))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 20
+
+
+def test_subir_fondo_login_usa_duracion_por_defecto_si_el_valor_es_invalido(admin_session, app, monkeypatch):
+    """Un valor vacío, no numérico o fuera de rango (0, negativo, absurdamente alto) no debe
+    rechazar la subida — el archivo ya se subió a Cloudinary — sino usar el valor por defecto."""
+    monkeypatch.setattr(cloudinary.uploader, 'upload', lambda *a, **k: {
+        'secure_url': 'https://res.cloudinary.com/demo/image/upload/invalida.jpg', 'public_id': 'invalida_id'
+    })
+
+    admin_session.post('/comunicados/fondo_login/subir',
+                        data={'archivo': (io.BytesIO(b'contenido falso'), 'foto.jpg'), 'duracion_segundos': 'no-es-un-numero'},
+                        content_type='multipart/form-data')
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT duracion_segundos FROM login_fondo_media WHERE url = ?", ('https://res.cloudinary.com/demo/image/upload/invalida.jpg',))
+    fila = cur.fetchone()
+    conn.close()
+    assert fila[0] == 6
+
+
+def test_editar_duracion_fondo_login_actualiza_el_valor(admin_session, app):
+    item_id = _crear_item_fondo(app)
+
+    admin_session.post(f'/comunicados/fondo_login/{item_id}/duracion', data={'duracion_segundos': '30'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT duracion_segundos FROM login_fondo_media WHERE id = ?", (item_id,))
+    duracion = cur.fetchone()[0]
+    conn.close()
+    assert duracion == 30
+
+
+def test_editar_duracion_fondo_login_valor_fuera_de_rango_usa_default(admin_session, app):
+    item_id = _crear_item_fondo(app, duracion_segundos=15)
+
+    admin_session.post(f'/comunicados/fondo_login/{item_id}/duracion', data={'duracion_segundos': '99999'})
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT duracion_segundos FROM login_fondo_media WHERE id = ?", (item_id,))
+    duracion = cur.fetchone()[0]
+    conn.close()
+    assert duracion == 6
+
+
+def test_estandar_no_puede_editar_duracion_de_fondo_login(client, sesion_usuario, app):
+    item_id = _crear_item_fondo(app)
+
+    r = client.post(f'/comunicados/fondo_login/{item_id}/duracion', data={'duracion_segundos': '30'})
+
+    assert r.status_code in (302, 403)
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT duracion_segundos FROM login_fondo_media WHERE id = ?", (item_id,))
+    duracion = cur.fetchone()[0]
+    conn.close()
+    assert duracion == 6  # sin cambios
+
+
+# 🔊 "Reproducir con sonido" (pedido de Tomás, 13/09/2026: "que el tema de dar sonido o no, se
+# haga directamente cuando se carga el video al sistema").
+
+def test_login_video_sin_reproducir_con_sonido_trae_data_intenta_sonido_en_0(client, app):
+    _crear_item_fondo(app, tipo='video', url='https://res.cloudinary.com/demo/video/upload/v1/clip.mp4')
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'data-intenta-sonido="0"' in texto
+
+
+def test_login_video_con_reproducir_con_sonido_trae_data_intenta_sonido_en_1(client, app):
+    _crear_item_fondo(app, tipo='video', url='https://res.cloudinary.com/demo/video/upload/v1/clip.mp4', reproducir_con_sonido=True)
+
+    texto = client.get('/login').get_data(as_text=True)
+
+    assert 'data-intenta-sonido="1"' in texto
+
+
+def test_admin_fondo_login_muestra_casilla_de_reproducir_con_sonido(admin_session):
+    texto = admin_session.get('/comunicados/fondo_login').get_data(as_text=True)
+
+    assert 'name="reproducir_con_sonido"' in texto
+
+
+def test_subir_fondo_login_video_guarda_reproducir_con_sonido_marcado(admin_session, app, monkeypatch):
+    monkeypatch.setattr(cloudinary.uploader, 'upload_large', lambda *a, **k: {
+        'secure_url': 'https://res.cloudinary.com/demo/video/upload/con_sonido.mp4', 'public_id': 'con_sonido_id'
+    })
+
+    admin_session.post('/comunicados/fondo_login/subir',
+                        data={'archivo': (io.BytesIO(b'contenido falso'), 'clip.mp4'), 'reproducir_con_sonido': 'on'},
+                        content_type='multipart/form-data')
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT reproducir_con_sonido FROM login_fondo_media WHERE url = ?", ('https://res.cloudinary.com/demo/video/upload/con_sonido.mp4',))
+    fila = cur.fetchone()
+    conn.close()
+    assert bool(fila[0]) is True
+
+
+def test_subir_fondo_login_sin_marcar_sonido_queda_silenciado_por_defecto(admin_session, app, monkeypatch):
+    monkeypatch.setattr(cloudinary.uploader, 'upload_large', lambda *a, **k: {
+        'secure_url': 'https://res.cloudinary.com/demo/video/upload/silenciado.mp4', 'public_id': 'silenciado_id'
+    })
+
+    admin_session.post('/comunicados/fondo_login/subir',
+                        data={'archivo': (io.BytesIO(b'contenido falso'), 'clip.mp4')},
+                        content_type='multipart/form-data')
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT reproducir_con_sonido FROM login_fondo_media WHERE url = ?", ('https://res.cloudinary.com/demo/video/upload/silenciado.mp4',))
+    fila = cur.fetchone()
+    conn.close()
+    assert bool(fila[0]) is False
+
+
+def test_toggle_sonido_fondo_login_activa_y_desactiva(admin_session, app):
+    item_id = _crear_item_fondo(app, tipo='video', url='https://res.cloudinary.com/demo/video/upload/v1/toggle.mp4')
+
+    admin_session.post(f'/comunicados/fondo_login/{item_id}/sonido')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT reproducir_con_sonido FROM login_fondo_media WHERE id = ?", (item_id,))
+    assert bool(cur.fetchone()[0]) is True
+    conn.close()
+
+    admin_session.post(f'/comunicados/fondo_login/{item_id}/sonido')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT reproducir_con_sonido FROM login_fondo_media WHERE id = ?", (item_id,))
+    assert bool(cur.fetchone()[0]) is False
+    conn.close()
+
+
+def test_admin_fondo_login_muestra_boton_de_sonido_solo_para_video(admin_session, app):
+    _crear_item_fondo(app, tipo='video', url='https://res.cloudinary.com/demo/video/upload/v1/con_boton.mp4', orden=0)
+    _crear_item_fondo(app, tipo='imagen', url='https://res.cloudinary.com/demo/image/upload/v1/sin_boton.jpg', orden=1)
+
+    texto = admin_session.get('/comunicados/fondo_login').get_data(as_text=True)
+
+    assert 'toggle_sonido_fondo_login' in texto or '/sonido' in texto
+    assert texto.count('fa-volume-xmark') >= 1 or texto.count('fa-volume-high') >= 1
