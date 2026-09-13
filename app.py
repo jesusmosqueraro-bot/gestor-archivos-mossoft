@@ -846,8 +846,16 @@ def init_db():
             # acceso). Administrable desde Novedades y Comunicados → "Fondo de Login" — ver
             # _fondo_login_activo(). 'orden' decide en qué secuencia rotan los activos; 'estado'
             # deja pausar un archivo sin borrarlo (y perder su historial/URL de Cloudinary).
+            # 'duracion_segundos' (pedido de Tomás, 13/09/2026): cuántos segundos se muestra ESTE
+            # archivo antes de pasar al siguiente — sobre todo pensado para video, donde antes
+            # quedaba fijo en 6s para todos por igual sin importar cuánto durara el clip real.
+            # 'reproducir_con_sonido' (mismo día): si un video debe intentar reproducirse CON
+            # sonido en vez de silenciado — se decide al subirlo, no con un botón que la persona
+            # que ve el login tenga que encontrar y presionar. Los navegadores igual pueden
+            # bloquear el autoplay con sonido en la primera visita (ver _fondo_login_activo/
+            # login.html) — este campo es la intención del admin, no una garantía del navegador.
             cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
-                id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, url TEXT NOT NULL, public_id VARCHAR(200), orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo', fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL
+                id SERIAL PRIMARY KEY, tipo VARCHAR(20) NOT NULL, url TEXT NOT NULL, public_id VARCHAR(200), orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo', fecha_creacion VARCHAR(100) NOT NULL, creado_por VARCHAR(100) NOT NULL, duracion_segundos INTEGER DEFAULT 6, reproducir_con_sonido BOOLEAN DEFAULT FALSE
             )''')
             # 🗂️ Catálogo administrable de Tipos de activo (Portátil, Impresora, Servidor...),
             # inspirado en el módulo de Solvyx: cada tipo tiene una key estable, una etiqueta
@@ -1306,7 +1314,13 @@ def init_db():
                 # 📍 Igual que arriba pero al crear la cuenta: si el formulario mandó la ubicación
                 # detectada, ¿esa coordenada cayó dentro del radio de la Sede que quedó asignada?
                 # NULL si no había ubicación o la Sede asignada no tiene coordenadas cargadas.
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede_dentro_de_radio BOOLEAN;"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sede_dentro_de_radio BOOLEAN;",
+                # ⏱️ Duración (segundos) de cada archivo del panel de marca del login antes de
+                # rotar al siguiente (pedido de Tomás, 13/09/2026) — ver comentario junto al
+                # CREATE TABLE de login_fondo_media. 6 por defecto para no cambiar el ritmo de
+                # los archivos que ya existían antes de este campo.
+                "ALTER TABLE login_fondo_media ADD COLUMN IF NOT EXISTS duracion_segundos INTEGER DEFAULT 6;",
+                "ALTER TABLE login_fondo_media ADD COLUMN IF NOT EXISTS reproducir_con_sonido BOOLEAN DEFAULT FALSE;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1394,7 +1408,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_id INTEGER NOT NULL, asignado_a TEXT NOT NULL, firma_url TEXT, firma_asigna_url TEXT, descripcion_breve TEXT, fecha TEXT NOT NULL, generado_por TEXT NOT NULL, FOREIGN KEY(activo_id) REFERENCES activos_inventario(id) ON DELETE CASCADE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS login_fondo_media (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, url TEXT NOT NULL, public_id TEXT, orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo', fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, url TEXT NOT NULL, public_id TEXT, orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo', fecha_creacion TEXT NOT NULL, creado_por TEXT NOT NULL, duracion_segundos INTEGER DEFAULT 6, reproducir_con_sonido INTEGER DEFAULT 0
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, etiqueta TEXT NOT NULL, icono TEXT DEFAULT 'box', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
@@ -1619,7 +1633,9 @@ def init_db():
                 "ALTER TABLE ticket_configuraciones ADD COLUMN radio_metros REAL DEFAULT 200;",
                 "ALTER TABLE login_geolocalizacion ADD COLUMN sede TEXT;",
                 "ALTER TABLE login_geolocalizacion ADD COLUMN dentro_de_sede INTEGER;",
-                "ALTER TABLE usuarios ADD COLUMN sede_dentro_de_radio INTEGER;"
+                "ALTER TABLE usuarios ADD COLUMN sede_dentro_de_radio INTEGER;",
+                "ALTER TABLE login_fondo_media ADD COLUMN duracion_segundos INTEGER DEFAULT 6;",
+                "ALTER TABLE login_fondo_media ADD COLUMN reproducir_con_sonido INTEGER DEFAULT 0;"
             ]:
                 try:
                     cursor.execute(col_sede_sql)
@@ -3797,13 +3813,16 @@ def ver_fondo_login():
     cursor = conn.cursor()
     items = []
     try:
-        cursor.execute("SELECT id, tipo, url, orden, estado, fecha_creacion, creado_por FROM login_fondo_media ORDER BY orden ASC, id ASC")
+        cursor.execute("SELECT id, tipo, url, orden, estado, fecha_creacion, creado_por, duracion_segundos, reproducir_con_sonido FROM login_fondo_media ORDER BY orden ASC, id ASC")
         items = [{'id': r[0], 'tipo': r[1], 'url': r[2], 'orden': r[3], 'estado': r[4],
-                  'fecha_creacion': r[5], 'creado_por': r[6]} for r in cursor.fetchall()]
+                  'fecha_creacion': r[5], 'creado_por': r[6], 'duracion_segundos': r[7] or DURACION_FONDO_LOGIN_POR_DEFECTO,
+                  'reproducir_con_sonido': bool(r[8])} for r in cursor.fetchall()]
     except Exception as e:
         print(f"⚠️ Error consultando el fondo de login: {e}")
     conn.close()
-    return render_template('fondo_login.html', items=items)
+    return render_template('fondo_login.html', items=items,
+                            duracion_por_defecto=DURACION_FONDO_LOGIN_POR_DEFECTO,
+                            duracion_minima=DURACION_FONDO_LOGIN_MINIMA, duracion_maxima=DURACION_FONDO_LOGIN_MAXIMA)
 
 
 @app.route('/comunicados/fondo_login/subir', methods=['POST'])
@@ -3816,16 +3835,26 @@ def subir_fondo_login():
         flash(error, "error")
         return redirect(url_for('ver_fondo_login'))
 
+    # ⏱️ Duración en segundos (pedido de Tomás, 13/09/2026): si el campo viene vacío o con un
+    # valor inválido, se usa el valor por defecto en vez de rechazar la subida — el archivo ya
+    # se subió a Cloudinary, así que no tiene sentido descartarlo solo por esto.
+    duracion_segundos = _normalizar_duracion_fondo_login(request.form.get('duracion_segundos'))
+    # 🔊 "Reproducir con sonido" (pedido de Tomás, mismo día: "que el tema de dar sonido... se
+    # haga directamente cuando se carga el video al sistema") — se decide aquí, al subir el
+    # archivo, no con un botón que la persona que ve /login tenga que encontrar y presionar.
+    # Solo aplica a video; para imagen simplemente no se usa en ningún lado.
+    reproducir_con_sonido = request.form.get('reproducir_con_sonido') == 'on'
+
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM login_fondo_media")
         siguiente_orden = cursor.fetchone()[0] + 1
         fecha_act = obtener_fecha_actual()
-        q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, 'activo', %s, %s)"
+        q = ("INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, duracion_segundos, reproducir_con_sonido) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s)"
              if db_type == 'postgres' else
-             "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, 'activo', ?, ?)")
-        cursor.execute(q, (tipo, url, public_id, siguiente_orden, fecha_act, session.get('username')))
+             "INSERT INTO login_fondo_media (tipo, url, public_id, orden, estado, fecha_creacion, creado_por, duracion_segundos, reproducir_con_sonido) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?)")
+        cursor.execute(q, (tipo, url, public_id, siguiente_orden, fecha_act, session.get('username'), duracion_segundos, reproducir_con_sonido))
         conn.commit()
         registrar_log(session.get('username'), "Fondo de Login", f"Se agregó un(a) {tipo} nuevo al panel de marca del login ('{archivo.filename}')")
         flash("Archivo agregado al fondo de login.", "exito")
@@ -3913,6 +3942,58 @@ def mover_fondo_login(item_id, direccion):
         print(f"Error reordenando el fondo de login: {e}")
     conn.close()
     return redirect(url_for('ver_fondo_login'))
+
+
+@app.route('/comunicados/fondo_login/<int:item_id>/duracion', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def editar_duracion_fondo_login(item_id):
+    """Cambia cuántos segundos se queda en pantalla ESTE archivo antes de rotar al siguiente
+    (pedido de Tomás, 13/09/2026) — separado de subir_fondo_login para poder ajustarlo sin
+    tener que volver a subir el archivo (por ejemplo, si un video quedó un poco corto/largo)."""
+    duracion_segundos = _normalizar_duracion_fondo_login(request.form.get('duracion_segundos'))
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"UPDATE login_fondo_media SET duracion_segundos = {ph} WHERE id = {ph}", (duracion_segundos, item_id))
+        conn.commit()
+        registrar_log(session.get('username'), "Fondo de Login", f"Se cambió la duración del archivo #{item_id} a {duracion_segundos}s")
+        flash("Duración actualizada.", "exito")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error actualizando la duración del fondo de login {item_id}: {e}")
+        flash("No se pudo actualizar la duración.", "error")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
+
+
+@app.route('/comunicados/fondo_login/<int:item_id>/sonido', methods=['POST'])
+@login_required
+@agente_o_admin_required
+def toggle_sonido_fondo_login(item_id):
+    """Activa/desactiva que ESTE video intente reproducirse con sonido en el login (pedido de
+    Tomás, 13/09/2026: decidirlo al cargar el video, no con un botón que la persona que ve
+    /login tenga que encontrar). Solo tiene efecto visible en video — se puede togglear en
+    imagen igual (no rompe nada), pero login.html lo ignora para 'imagen'."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    try:
+        cursor.execute(f"SELECT reproducir_con_sonido FROM login_fondo_media WHERE id = {ph}", (item_id,))
+        row = cursor.fetchone()
+        if row:
+            nuevo_valor = not bool(row[0])
+            cursor.execute(f"UPDATE login_fondo_media SET reproducir_con_sonido = {ph} WHERE id = {ph}", (nuevo_valor, item_id))
+            conn.commit()
+            registrar_log(session.get('username'), "Fondo de Login",
+                          f"Se {'activó' if nuevo_valor else 'desactivó'} el sonido del archivo #{item_id}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error cambiando el sonido del fondo de login {item_id}: {e}")
+    conn.close()
+    return redirect(url_for('ver_fondo_login'))
+
 
 @app.route('/comunicados/<int:com_id>/lecturas')
 @login_required
@@ -6128,6 +6209,29 @@ def _subir_firma_desde_dataurl(data_url):
 EXTENSIONES_FONDO_LOGIN_IMAGEN = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
 EXTENSIONES_FONDO_LOGIN_VIDEO = {'mp4', 'mov', 'webm'}
 TAMANO_MAXIMO_FONDO_LOGIN = 60 * 1024 * 1024  # 60 MB: de sobra para un video corto de marca bien comprimido
+# ⏱️ Duración (segundos) que cada archivo del panel se queda en pantalla antes de rotar al
+# siguiente (pedido de Tomás, 13/09/2026: "agrega un campo... por defecto un tiempo determinado
+# de duración... más por el tema de los videos" — antes quedaba fijo en 6s para todos, sin
+# importar si el archivo era una imagen o un video de otra duración). DURACION_FONDO_LOGIN_POR_DEFECTO
+# se usa tanto para prellenar el campo del formulario como para los archivos que ya existían
+# antes de este campo (ver la migración de duracion_segundos junto al CREATE TABLE). Los límites
+# evitan un valor absurdo (0s que nunca se alcanza a ver, o hipotéticamente días enteros).
+DURACION_FONDO_LOGIN_POR_DEFECTO = 6
+DURACION_FONDO_LOGIN_MINIMA = 1
+DURACION_FONDO_LOGIN_MAXIMA = 120
+
+
+def _normalizar_duracion_fondo_login(valor):
+    """Convierte lo que llegue del formulario a un entero de segundos válido, o devuelve el
+    valor por defecto si viene vacío/no numérico/fuera de rango — nunca deja pasar algo que
+    rompa la rotación del panel (0s, negativos, texto)."""
+    try:
+        segundos = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return DURACION_FONDO_LOGIN_POR_DEFECTO
+    if segundos < DURACION_FONDO_LOGIN_MINIMA or segundos > DURACION_FONDO_LOGIN_MAXIMA:
+        return DURACION_FONDO_LOGIN_POR_DEFECTO
+    return segundos
 
 def _subir_fondo_login(file):
     """Sube una imagen o video corto para el panel de marca del login. Devuelve
@@ -12476,8 +12580,9 @@ def _fondo_login_activo():
     try:
         conn, db_type = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT tipo, url FROM login_fondo_media WHERE estado = 'activo' ORDER BY orden ASC, id ASC")
-        filas = [{'tipo': t, 'url': u} for t, u in cursor.fetchall()]
+        cursor.execute("SELECT tipo, url, duracion_segundos, reproducir_con_sonido FROM login_fondo_media WHERE estado = 'activo' ORDER BY orden ASC, id ASC")
+        filas = [{'tipo': t, 'url': u, 'duracion_segundos': d or DURACION_FONDO_LOGIN_POR_DEFECTO,
+                  'reproducir_con_sonido': bool(s)} for t, u, d, s in cursor.fetchall()]
         conn.close()
         return filas
     except Exception as e:
