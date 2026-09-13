@@ -129,6 +129,31 @@ except Exception:
     anthropic = None
 
 app = Flask(__name__)
+
+# 🩺 Monitoreo de errores (opcional, 13/09/2026): hoy, si algo falla en producción, el traceback
+# solo queda en los logs de Render (nadie se entera hasta que un usuario reporta el problema).
+# Si se define SENTRY_DSN en las variables de entorno de Render, cada excepción no manejada (un
+# error 500) se envía también a Sentry en tiempo real, con alerta. Sin esa variable, este bloque
+# no hace absolutamente nada — cero riesgo para quien no lo configure. `sentry-sdk` es una
+# dependencia opcional (ver requirements.txt): si no está instalada, también se ignora en
+# silencio en vez de tumbar el arranque de la app.
+_SENTRY_DSN = os.environ.get('SENTRY_DSN')
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            integrations=[FlaskIntegration()],
+            # No se envía el cuerpo de las peticiones (podría incluir credenciales de la
+            # bóveda, notas de PQRS, datos de salud, etc.) — solo metadata del error.
+            send_default_pii=False,
+            traces_sample_rate=0.0,
+        )
+        print("✅ Sentry inicializado: las excepciones no manejadas se reportarán en tiempo real.")
+    except Exception as _e:
+        print(f"⚠️ SENTRY_DSN está configurada pero Sentry no se pudo inicializar ({_e}); "
+              f"la app sigue funcionando normal, solo sin ese monitoreo.")
 # 🔐 SECRET_KEY: nunca debe tener un valor real escrito en el código (quedaría expuesto en GitHub).
 # Si no está seteada en las variables de entorno de Render, se genera una aleatoria en cada arranque.
 # Esto no causa fricción extra: las sesiones ya se invalidan en cada reinicio por SERVER_INSTANCE_ID (ver abajo).

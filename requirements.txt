@@ -10,19 +10,28 @@ Flask==3.1.3
 Werkzeug==3.1.8
 Flask-WTF==1.2.1
 gunicorn==26.2.0
-psycopg2-binary
-cloudinary
-requests
-cryptography
-bleach
-tinycss2
-reportlab
-Pillow
-openpyxl
+# 📌 Fijadas (13/09/2026): estaban sin versión, así que un build nuevo en Render podía traer sin
+# avisar una versión mayor con cambios de comportamiento. Se fijan a las versiones ya instaladas
+# y probadas contra la suite completa en este momento. `pip-audit` (job "auditoria-dependencias")
+# sigue corriendo en cada push para detectar si alguna de estas queda con una vulnerabilidad
+# conocida y hay que subirle la versión a propósito.
+psycopg2-binary==2.9.13
+cloudinary==1.46.2
+requests==2.34.2
+cryptography==50.0.1
+bleach==6.4.0
+tinycss2==1.5.1
+reportlab==5.0.1
+Pillow==12.3.0
+openpyxl==3.1.5
 pyotp==2.10.0
-anthropic
+anthropic==1.5.0
 Flask-Limiter==3.8.0
 redis==5.0.8
 Flask-SocketIO==5.6.1
 gevent==26.8.0
 gevent-websocket==0.10.1
+# 🩺 Opcional: solo se activa si se define SENTRY_DSN en Render (ver comentario junto a
+# sentry_sdk.init en app.py). Si esta librería llegara a faltar, el arranque no se cae —
+# el bloque de inicialización lo captura y sigue sin ese monitoreo.
+sentry-sdk[flask]==2.19.2
