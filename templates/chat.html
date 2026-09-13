@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/tema-claro.css">
     <link rel="stylesheet" href="/static/css/tema-descanso.css">
     <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
-         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+         MOSQUERA, 12/09/2026) — ver static/css/marca-institucional.css. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -53,7 +53,7 @@
             </div>
             <div class="flex items-center gap-2">
                 {% if rol == 'admin' %}
-                <!-- 🔐 Interruptor general (pedido por Tomás): habilita/deshabilita, para TODAS
+                <!-- 🔐 Interruptor general (pedido por MOSQUERA): habilita/deshabilita, para TODAS
                      las cuentas 'estandar' a la vez, el acceso al Asistente de Chat guiado por
                      menú (ver chat_permiso_estandar() en app.py). No afecta este Chat Interno,
                      que sigue siendo exclusivo de admin/agente. -->
@@ -87,7 +87,7 @@
                 <div class="px-4 py-3 border-b border-slate-800/80">
                     <h2 class="text-xs font-bold text-white uppercase tracking-wider">Conversaciones</h2>
                 </div>
-                <!-- 🔎 Buscar por nombre o usuario (pedido por Tomás): filtra la lista de abajo al
+                <!-- 🔎 Buscar por nombre o usuario (pedido por MOSQUERA): filtra la lista de abajo al
                      momento, sin recargar nada — ver filtrarContactosChat() en chat.js. -->
                 <div class="px-3 py-2.5 border-b border-slate-800/60">
                     <div class="relative">
@@ -97,7 +97,7 @@
                                class="w-full pl-8 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
                     </div>
                 </div>
-                <!-- 🟢🔴 Filtro por estado (pedido por Tomás): En línea / Desconectados / Todos —
+                <!-- 🟢🔴 Filtro por estado (pedido por MOSQUERA): En línea / Desconectados / Todos —
                      no golpea al servidor, filtra en el momento sobre 'data-en-linea' (ver
                      filtrarPorEstadoChat() en chat.js). -->
                 <div class="px-3 py-2 border-b border-slate-800/60 flex items-center gap-1.5">
@@ -136,7 +136,7 @@
                                         {{ c.nombre[:1] | upper }}
                                     {% endif %}
                                 </div>
-                                <!-- 🟢🔴 En línea/desconectado (pedido por Tomás): basado en actividad
+                                <!-- 🟢🔴 En línea/desconectado (pedido por MOSQUERA): basado en actividad
                                      reciente, no en una conexión de socket — ver _esta_en_linea en
                                      app.py. Se refresca sola cada POLL_CONTACTOS_MS junto con el resto
                                      de la barra de contactos (ver cargarContactosChat en chat.js). -->
@@ -151,7 +151,7 @@
                             </div>
                             <span class="badge-contacto-chat hidden bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 flex-shrink-0">0</span>
                         </button>
-                        <!-- ⭐📌 Favorito/Anclar (pedido por Tomás): preferencia personal de quien la
+                        <!-- ⭐📌 Favorito/Anclar (pedido por MOSQUERA): preferencia personal de quien la
                              marca — ver alternarFavoritoChat()/alternarAncladoChat() en chat.js. -->
                         <div class="flex flex-col items-center justify-center gap-1 px-2 flex-shrink-0">
                             <button type="button" class="btn-favorito-chat w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-700/60 transition-colors {{ 'text-amber-400' if c.favorito else 'text-slate-600' }}"
@@ -192,7 +192,7 @@
                 </div>
                 <div id="error-chat" class="hidden px-5 py-2 text-[11px] text-rose-400 bg-rose-500/10 border-t border-rose-500/20"></div>
                 <form id="form-enviar-chat" onsubmit="return enviarMensajeChat(event)" class="border-t border-slate-800/80 p-3">
-                    <!-- 📎 Adjuntos (pedido por Tomás): clip para elegir archivo, o pegar (Ctrl+V) una
+                    <!-- 📎 Adjuntos (pedido por MOSQUERA): clip para elegir archivo, o pegar (Ctrl+V) una
                          imagen copiada directo en el cuadro de texto — ver _seleccionarAdjuntoChat/
                          _pegarEnMensajeChat en chat.js. Un mensaje puede llevar texto, adjunto, o ambos. -->
                     <div id="previsualizacion-adjunto-chat" class="hidden mb-2 flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-300">
