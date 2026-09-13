@@ -19,6 +19,9 @@ __pycache__/
 # compilado, así que node_modules nunca debe subirse al repo.
 node_modules/
 
+# Parches de entrega generados con git format-patch: son artefactos temporales de entrega,
+# no deben quedar commiteados en el repo (paso una vez y hubo que borrarlos a mano).
+*.patch
 # Documentos de entrega/propuesta y mockups de diseño: no son parte de la app, se generan y
 # entregan por fuera (ver SendUserFile) — no deben vivir en este repo de código.
 /docs_entrega/
