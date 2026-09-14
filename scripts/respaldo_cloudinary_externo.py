@@ -175,16 +175,26 @@ def main():
                 copiados += 1
                 print(f"✅ {recurso['public_id']} → {clave}")
             except Exception as e:
-                # Diagnóstico temporal: access_mode/type/created_at no son sensibles (no son
-                # credenciales ni URLs) y ayudan a distinguir la causa más probable de un 404 al
-                # descargar secure_url — un recurso con access_mode="authenticated" (entrega
-                # restringida, necesita URL firmada) o type distinto de "upload" (no debería pasar
-                # por el filtro de listar_recursos_cloudinary, pero se confirma aquí igual).
+                # Diagnóstico temporal (paso 2): el primer intento mostró access_mode=None para
+                # los 11 recursos que fallan, pero eso es ambiguo — el endpoint de LISTADO
+                # (api.resources) puede simplemente no incluir ese campo por defecto, sin que
+                # signifique que el recurso sea público. Para saberlo con certeza, se hace además
+                # una consulta puntual (api.resource, no api.resources) sobre ESE recurso — ese
+                # endpoint sí siempre incluye access_mode. Ninguno de los campos impresos es
+                # sensible (no son credenciales ni URLs completas).
                 print(
                     f"⚠️ Error respaldando '{recurso['public_id']}' ({resource_type}): {e} "
-                    f"[access_mode={recurso.get('access_mode')!r} type={recurso.get('type')!r} "
-                    f"created_at={recurso.get('created_at')!r}]"
+                    f"[claves_del_listado={sorted(recurso.keys())!r}]"
                 )
+                try:
+                    detalle = cloudinary.api.resource(recurso['public_id'], resource_type=resource_type)
+                    print(
+                        f"   ↳ Detalle puntual de '{recurso['public_id']}': "
+                        f"access_mode={detalle.get('access_mode')!r} type={detalle.get('type')!r} "
+                        f"status={detalle.get('status')!r} bytes={detalle.get('bytes')!r}"
+                    )
+                except Exception as e2:
+                    print(f"   ↳ La consulta puntual también falló para '{recurso['public_id']}': {e2}")
                 fallidos += 1
 
     guardar_manifiesto(s3, config, manifiesto)
