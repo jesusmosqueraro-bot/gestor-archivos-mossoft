@@ -175,7 +175,16 @@ def main():
                 copiados += 1
                 print(f"✅ {recurso['public_id']} → {clave}")
             except Exception as e:
-                print(f"⚠️ Error respaldando '{recurso['public_id']}' ({resource_type}): {e}")
+                # Diagnóstico temporal: access_mode/type/created_at no son sensibles (no son
+                # credenciales ni URLs) y ayudan a distinguir la causa más probable de un 404 al
+                # descargar secure_url — un recurso con access_mode="authenticated" (entrega
+                # restringida, necesita URL firmada) o type distinto de "upload" (no debería pasar
+                # por el filtro de listar_recursos_cloudinary, pero se confirma aquí igual).
+                print(
+                    f"⚠️ Error respaldando '{recurso['public_id']}' ({resource_type}): {e} "
+                    f"[access_mode={recurso.get('access_mode')!r} type={recurso.get('type')!r} "
+                    f"created_at={recurso.get('created_at')!r}]"
+                )
                 fallidos += 1
 
     guardar_manifiesto(s3, config, manifiesto)
