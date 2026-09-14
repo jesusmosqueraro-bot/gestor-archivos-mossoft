@@ -4,3 +4,10 @@
 -r requirements.txt
 pytest==8.3.3
 pdfplumber
+
+# 📦 Respaldo externo (scripts/respaldo_db_externo.py, scripts/respaldo_cloudinary_externo.py):
+# el cliente de AWS S3 (también habla con Backblaze B2, que es S3-compatible) que usan esos
+# scripts para subir los respaldos. Solo hace falta para probarlos (tests/test_respaldo_externo.py)
+# y para el job de GitHub Actions que los corre de verdad (.github/workflows/respaldo-externo.yml)
+# — nunca se usa dentro de la app de Flask en Render, por eso vive aquí y no en requirements.txt.
+boto3==1.43.93
