@@ -1,0 +1,88 @@
+name: Respaldo externo (DB + Cloudinary)
+
+# 🛡️ Copia de seguridad de Arkiv totalmente independiente de Render, Neon y Cloudinary: si
+# cualquiera de esos tres tuviera un problema (cuenta perdida, facturación, borrado accidental),
+# esta copia sigue existiendo en un bucket S3-compatible aparte (AWS S3 o Backblaze B2 — ver
+# scripts/respaldo_db_externo.py para la explicación de por qué el mismo script sirve para
+# cualquiera de los dos). Corre en GitHub Actions, no en el propio servidor de Arkiv, para no
+# competir por recursos con el tráfico real ni depender de que Render esté disponible.
+#
+# Requiere estos secrets configurados en GitHub → Settings → Secrets and variables → Actions
+# (nunca se escriben en el código ni se le piden a Claude — los agrega quien tenga acceso al
+# repositorio):
+#   DATABASE_URL                    Cadena de conexión de Postgres (Neon).
+#   RESPALDO_S3_BUCKET               Nombre del bucket destino.
+#   RESPALDO_S3_ACCESS_KEY_ID         Access key del bucket.
+#   RESPALDO_S3_SECRET_ACCESS_KEY     Secret key del bucket.
+#   RESPALDO_S3_ENDPOINT_URL          (opcional) Endpoint S3-compatible; vacío = AWS S3.
+#                                     Backblaze B2: https://s3.<region>.backblazeb2.com
+#   RESPALDO_S3_REGION                (opcional) Default 'us-east-1'.
+#   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET   (las mismas que usa Render)
+#
+# Ver scripts/README_RESPALDO_EXTERNO.md para la guía completa de configuración (crear el
+# bucket, generar las llaves, y agregar los secrets).
+on:
+  schedule:
+    # Todas las horas en UTC. Colombia (UTC-5) no tiene horario de verano, así que la
+    # diferencia es siempre fija.
+    - cron: '0 7 * * *'   # Respaldo de la base de datos: todos los días 07:00 UTC = 2:00 a.m. Colombia.
+    - cron: '30 7 * * 0'  # Respaldo de Cloudinary: domingos 07:30 UTC = 2:30 a.m. Colombia (pesado, 1 vez/semana).
+  workflow_dispatch: {}    # Permite correrlo manualmente (ej. antes de un simulacro de restauración).
+
+jobs:
+  respaldo-base-de-datos:
+    # El respaldo de Cloudinary corre aparte (siguiente job) para que un video grande no
+    # retrase ni arriesgue el respaldo diario de la base de datos.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 7 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar cliente de Postgres (pg_dump) y boto3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          pip install boto3==1.43.93
+
+      - name: Generar y subir el respaldo
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESPALDO_S3_BUCKET: ${{ secrets.RESPALDO_S3_BUCKET }}
+          RESPALDO_S3_ACCESS_KEY_ID: ${{ secrets.RESPALDO_S3_ACCESS_KEY_ID }}
+          RESPALDO_S3_SECRET_ACCESS_KEY: ${{ secrets.RESPALDO_S3_SECRET_ACCESS_KEY }}
+          RESPALDO_S3_ENDPOINT_URL: ${{ secrets.RESPALDO_S3_ENDPOINT_URL }}
+          RESPALDO_S3_REGION: ${{ secrets.RESPALDO_S3_REGION }}
+        run: python scripts/respaldo_db_externo.py
+
+  respaldo-cloudinary:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 7 * * 0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install boto3==1.43.93 cloudinary==1.46.2 requests==2.34.2
+
+      - name: Espejar los archivos de Cloudinary al bucket
+        env:
+          RESPALDO_S3_BUCKET: ${{ secrets.RESPALDO_S3_BUCKET }}
+          RESPALDO_S3_ACCESS_KEY_ID: ${{ secrets.RESPALDO_S3_ACCESS_KEY_ID }}
+          RESPALDO_S3_SECRET_ACCESS_KEY: ${{ secrets.RESPALDO_S3_SECRET_ACCESS_KEY }}
+          RESPALDO_S3_ENDPOINT_URL: ${{ secrets.RESPALDO_S3_ENDPOINT_URL }}
+          RESPALDO_S3_REGION: ${{ secrets.RESPALDO_S3_REGION }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: python scripts/respaldo_cloudinary_externo.py
