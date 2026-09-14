@@ -697,9 +697,12 @@ if not RECAPTCHA_SECRET_KEY:
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # 🔒 Endpoints a los que SÍ puede entrar un usuario marcado con "debe cambiar su contraseña",
-# aunque todavía no la haya cambiado: la propia página/acción de cambio, cerrar sesión, y los
-# archivos estáticos (CSS/JS/imágenes) que esa página necesita para verse bien.
-ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', 'logout', 'static'}
+# aunque todavía no la haya cambiado: la propia página/acción de cambio, cerrar sesión, los
+# archivos estáticos (CSS/JS/imágenes) que esa página necesita para verse bien, y (bug del
+# 14/09/2026, ver más abajo) la pantalla de aceptación de tratamiento de datos, para no pelearse
+# con ENDPOINTS_PERMITIDOS_TRATAMIENTO_DATOS_OBLIGATORIO cuando una cuenta tiene ambas puertas
+# pendientes a la vez.
+ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', 'aceptar_tratamiento_datos', 'logout', 'static'}
 
 # 🔒 Hallazgo QA H-05 (30/08/2026): admin y agente manejan datos de toda la organización
 # (bóveda de accesos, gestor de archivos, base de datos), así que su 2FA ya no es opcional.
@@ -707,8 +710,9 @@ ENDPOINTS_PERMITIDOS_CAMBIO_PASSWORD_OBLIGATORIO = {'cambiar_password_perfil', '
 # session['debe_activar_2fa'] esté encendido, cualquier ruta que no sea la propia activación
 # de 2FA (o cerrar sesión) redirige a /perfil/2fa. Se incluye cambiar_password_perfil por si
 # una cuenta recién creada por un admin tiene AMBAS pendientes a la vez (esa, al ir primero en
-# validar_instancia_y_sesion, se resuelve antes de llegar aquí).
-ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'cambiar_password_perfil', 'logout', 'static'}
+# validar_instancia_y_sesion, se resuelve antes de llegar aquí), y por la misma razón (bug del
+# 14/09/2026, ver más abajo) también aceptar_tratamiento_datos.
+ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'cambiar_password_perfil', 'aceptar_tratamiento_datos', 'logout', 'static'}
 
 # 📜 Habeas Data (Ley 1581 de 2012): mismo mecanismo que las dos anteriores. Mientras
 # session['debe_aceptar_tratamiento_datos'] esté encendido, cualquier ruta que no sea la propia
@@ -716,6 +720,19 @@ ENDPOINTS_PERMITIDOS_2FA_OBLIGATORIO = {'perfil_2fa', 'perfil_2fa_confirmar', 'c
 # /aceptar-tratamiento-datos. Va primero en validar_instancia_y_sesion: no tiene sentido dejar
 # avanzar el flujo de cambio de contraseña/2FA obligatorios sin que la cuenta haya aceptado antes
 # la política de tratamiento de datos.
+#
+# 🐛 Bug (14/09/2026): una cuenta con ESTA puerta Y la de cambio de contraseña pendientes A LA VEZ
+# (el caso normal de cualquier cuenta que ya existía antes de este parche: todas quedaron con
+# fecha_acepto_tratamiento_datos en NULL) quedaba en bucle infinito de redirecciones. Pasaba
+# porque esta puerta manda a /aceptar-tratamiento-datos, pero ENDPOINTS_PERMITIDOS_CAMBIO_
+# PASSWORD_OBLIGATORIO no incluía esa ruta — así que la siguiente revisión (cambio de
+# contraseña) sacaba de ahí a la persona hacia /perfil/cambiar_password, y ESA ruta tampoco
+# estaba en la lista de permitidos de ESTA puerta, así que se le volvía a mandar para acá:
+# ping-pong infinito entre las dos pantallas hasta que el navegador se rendía con
+# ERR_TOO_MANY_REDIRECTS, sin que ninguna de las dos llegara a cargar. Se corrigió agregando
+# 'aceptar_tratamiento_datos' a las otras dos listas de permitidos (arriba), para que esta puerta
+# —que va primero— se resuelva por completo antes de que las otras dos tengan oportunidad de
+# redirigir a ningún lado.
 ENDPOINTS_PERMITIDOS_TRATAMIENTO_DATOS_OBLIGATORIO = {'aceptar_tratamiento_datos', 'politica_tratamiento_datos', 'logout', 'static'}
 
 # 🔙 Hallazgo QA (05/09/2026): con la sesión ya iniciada, el botón "atrás" del navegador
