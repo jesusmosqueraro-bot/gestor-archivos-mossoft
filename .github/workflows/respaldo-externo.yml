@@ -60,7 +60,17 @@ jobs:
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update
           sudo apt-get install -y postgresql-client-18
+          # El paquete "postgresql-client-18" instala su pg_dump en /usr/lib/postgresql/18/bin,
+          # SIN reemplazar el /usr/bin/pg_dump por defecto (que sigue siendo el 16 de Ubuntu).
+          # Anteponemos esa carpeta al PATH de los pasos siguientes de este job para que el
+          # "pg_dump" que se ejecuta después sea realmente el 18, no el que ya viene instalado.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
           pip install boto3==1.43.93
+
+      - name: Verificar version de pg_dump
+        # Paso de diagnóstico: si algún día esto vuelve a fallar por versión, este log deja ver
+        # de inmediato qué pg_dump se está usando en vez de tener que adivinarlo.
+        run: pg_dump --version
 
       - name: Generar y subir el respaldo
         env:
