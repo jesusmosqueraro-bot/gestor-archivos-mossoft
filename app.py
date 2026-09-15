@@ -1240,6 +1240,18 @@ def init_db():
                 # actas_recibido_biomedico. Al asignar uno de estos activos, el modal pide además
                 # la dirección de entrega y la firma del paciente/cuidador que lo recibió.
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS es_biomedico BOOLEAN DEFAULT FALSE;",
+                # 🦺 Categoría especial (SST / Ambiental / Laboratorio Clínico) — pedido por Tomás
+                # (15/09/2026): misma idea que es_biomedico (marca manual, no depende del
+                # catálogo de Tipos de activo) pero para estas otras 3 áreas, con el mismo flujo
+                # de "acta de recibido a domicilio" (ver TEXTOS_CATEGORIA_ESPECIAL y
+                # _categoria_especial_activo). Un activo es de una sola categoría a la vez:
+                # 'biomedico' (via es_biomedico) o una de CATEGORIAS_ESPECIALES_NUEVAS aquí.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS categoria_especial VARCHAR(20);",
+                # 🦺 Discriminador de categoría en el historial de actas de recibido (antes solo
+                # existía para biomédicos; ahora también sst/ambiental/laboratorio). Las filas ya
+                # existentes (todas biomédicas, de antes de este cambio) quedan cubiertas por el
+                # DEFAULT.
+                "ALTER TABLE actas_recibido_biomedico ADD COLUMN IF NOT EXISTS categoria VARCHAR(20) DEFAULT 'biomedico';",
                 # 🔒 Estado 'Devolución' (pedido por Tomás): un activo que entra a este estado
                 # (a mano desde Editar Activo, o automáticamente al certificar su devolución en
                 # /inventario/<id>/confirmar_devolucion) queda con 'asignado_a' vacío y con esta
@@ -1817,6 +1829,24 @@ def init_db():
             ]:
                 try:
                     cursor.execute(col_biomedico_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            # 🦺 Categoría especial (SST/Ambiental/Laboratorio Clínico) y su discriminador en el
+            # historial de actas de recibido. Ver comentario equivalente en la rama de Postgres.
+            for col_categoria_especial_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN categoria_especial TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_categoria_especial_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+            for col_categoria_acta_sql in [
+                "ALTER TABLE actas_recibido_biomedico ADD COLUMN categoria TEXT DEFAULT 'biomedico';"
+            ]:
+                try:
+                    cursor.execute(col_categoria_acta_sql)
                     conn.commit()
                 except Exception:
                     pass
@@ -9741,7 +9771,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -9811,6 +9841,7 @@ def ver_inventario():
         'tipo_costo': r[14], 'costo_compra': _decimal_a_float(r[15]), 'costo_alquiler_mensual': _decimal_a_float(r[16]),
         'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]), 'fecha_devolucion': r[19],
         'accesorios_asignados': r[20] or '', 'accesorio_otro_detalle': r[21] or '',
+        'categoria_especial': r[22],
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -10494,18 +10525,87 @@ def _id_de_usuario(usuario_exacto):
 
 RELACIONES_RESPONSABLE_ACTA = ('paciente', 'cuidador', 'otro')
 
+# 🦺 Categorías especiales de insumos (SST/Ambiental/Laboratorio Clínico) — pedido por Tomás,
+# 15/09/2026, "las mismas opciones" que ya existían para biomédicos (checkbox + acta de recibido
+# con dirección y firma). A diferencia de 'es_biomedico' (booleano, con su propio flujo intacto
+# de arriba a abajo para no arriesgar nada de lo ya probado), estas 3 categorías comparten UNA
+# sola columna nueva en activos_inventario ('categoria_especial', texto nulo) y el MISMO
+# mecanismo de acta de recibido (tabla actas_recibido_biomedico, ahora con una columna
+# 'categoria' para distinguir de cuál se trata) — solo cambia el vocabulario/textos, no la
+# mecánica. Un activo es de una sola categoría a la vez: biomédico O una de estas tres, nunca
+# varias (ver el checkbox mutuamente excluyente en tickets_inventario.html).
+CATEGORIAS_ESPECIALES_NUEVAS = ('sst', 'ambiental', 'laboratorio')
+RELACIONES_RESPONSABLE_ACTA_GENERICA = ('colaborador', 'contratista', 'otro')
+TEXTOS_CATEGORIA_ESPECIAL = {
+    'biomedico': {
+        'nombre': 'Equipo Biomédico',
+        'intro_acta': ('Constancia de entrega a domicilio de un equipo biomédico, con la firma de '
+                        'quien lo recibió, para efectos de trazabilidad en caso de pérdida o daño del equipo.'),
+        'etiqueta_relacion': 'Relación con el paciente',
+        'relaciones_validas': RELACIONES_RESPONSABLE_ACTA,
+        'relaciones_texto': {'paciente': 'Paciente', 'cuidador': 'Cuidador/a', 'otro': 'Responsable'},
+        'texto_devolucion_familiar': 'familiar/cuidador del paciente',
+    },
+    'sst': {
+        'nombre': 'Insumo de SST',
+        'intro_acta': ('Constancia de entrega de un insumo o equipo de Seguridad y Salud en el Trabajo, '
+                        'con la firma de quien lo recibió.'),
+        'etiqueta_relacion': 'Relación con la entrega',
+        'relaciones_validas': RELACIONES_RESPONSABLE_ACTA_GENERICA,
+        'relaciones_texto': {'colaborador': 'Colaborador', 'contratista': 'Contratista / Proveedor', 'otro': 'Responsable'},
+        'texto_devolucion_familiar': 'responsable de la entrega',
+    },
+    'ambiental': {
+        'nombre': 'Insumo Ambiental',
+        'intro_acta': ('Constancia de entrega de un insumo o equipo de gestión Ambiental, '
+                        'con la firma de quien lo recibió.'),
+        'etiqueta_relacion': 'Relación con la entrega',
+        'relaciones_validas': RELACIONES_RESPONSABLE_ACTA_GENERICA,
+        'relaciones_texto': {'colaborador': 'Colaborador', 'contratista': 'Contratista / Proveedor', 'otro': 'Responsable'},
+        'texto_devolucion_familiar': 'responsable de la entrega',
+    },
+    'laboratorio': {
+        'nombre': 'Insumo de Laboratorio Clínico',
+        'intro_acta': ('Constancia de entrega de un equipo o insumo de Laboratorio Clínico, '
+                        'con la firma de quien lo recibió.'),
+        'etiqueta_relacion': 'Relación con la entrega',
+        'relaciones_validas': RELACIONES_RESPONSABLE_ACTA_GENERICA,
+        'relaciones_texto': {'colaborador': 'Colaborador', 'contratista': 'Contratista / Proveedor', 'otro': 'Responsable'},
+        'texto_devolucion_familiar': 'responsable de la entrega',
+    },
+}
+
+
+def _categoria_especial_activo(es_biomedico, categoria_especial):
+    """Resuelve la categoría 'efectiva' de un activo para efectos de acta de recibido/variante de
+    texto: 'biomedico' si está marcado como tal (con prioridad, igual que antes de este cambio),
+    si no la de 'categoria_especial' si es una de las 3 nuevas y válidas, o None si no aplica
+    ninguna (activo de TI normal)."""
+    if es_biomedico:
+        return 'biomedico'
+    if categoria_especial in CATEGORIAS_ESPECIALES_NUEVAS:
+        return categoria_especial
+    return None
+
 
 def _registrar_acta_recibido_biomedico(activo_id, form, creador, conn, cursor, db_type):
-    """Si el activo se marcó como biomédico ('es_biomedico') y el formulario trae los datos de
-    la entrega a domicilio (quién recibió, dirección, firma), guarda un registro HISTÓRICO en
+    """Si el activo se marcó como biomédico ('es_biomedico') o con una de las categorías nuevas
+    ('categoria_especial': SST/Ambiental/Laboratorio) y el formulario trae los datos de la
+    entrega (quién recibió, dirección, firma), guarda un registro HISTÓRICO en
     'actas_recibido_biomedico' — a diferencia de 'firma_asignacion_url' en activos_inventario
     (que solo guarda la última firma y se sobreescribe en cada reasignación), aquí queda una fila
     nueva por cada entrega, con qué responder si el equipo se pierde o se daña más adelante.
     Devuelve (categoria, mensaje) listo para flash(), o (None, None) si esta vez no se intentó
     registrar ninguna acta (el checkbox no estaba marcado, o los campos del acta quedaron
     vacíos)."""
-    if form.get('es_biomedico') not in ('on', '1', 'true'):
+    es_biomedico_marcado = form.get('es_biomedico') in ('on', '1', 'true')
+    es_categoria_especial_marcada = form.get('es_categoria_especial') in ('on', '1', 'true')
+    categoria_especial_form = (form.get('categoria_especial') or '').strip() if es_categoria_especial_marcada else None
+    categoria = _categoria_especial_activo(es_biomedico_marcado, categoria_especial_form)
+    if not categoria:
         return None, None
+
+    textos = TEXTOS_CATEGORIA_ESPECIAL[categoria]
 
     nombre_responsable = (form.get('acta_nombre_responsable') or '').strip()
     relacion_responsable = (form.get('acta_relacion_responsable') or '').strip()
@@ -10515,13 +10615,13 @@ def _registrar_acta_recibido_biomedico(activo_id, form, creador, conn, cursor, d
     firma_dataurl = form.get('acta_firma_dataurl') or ''
 
     if not any([nombre_responsable, direccion_entrega, firma_dataurl]):
-        return None, None  # activo marcado como biomédico, pero no se diligenció ningún acta esta vez
+        return None, None  # activo marcado con esta categoría, pero no se diligenció ningún acta esta vez
 
     if not (nombre_responsable and direccion_entrega and firma_dataurl):
         return 'error', ("El activo se guardó, pero el ACTA DE RECIBIDO no: para registrarla hacen falta "
                           "el nombre de quien recibe, la dirección de entrega y su firma.")
 
-    if relacion_responsable not in RELACIONES_RESPONSABLE_ACTA:
+    if relacion_responsable not in textos['relaciones_validas']:
         relacion_responsable = 'otro'
 
     firma_url, error_firma = _subir_firma_desde_dataurl(firma_dataurl)
@@ -10530,20 +10630,20 @@ def _registrar_acta_recibido_biomedico(activo_id, form, creador, conn, cursor, d
 
     try:
         q_ins = ("INSERT INTO actas_recibido_biomedico (activo_id, nombre_responsable, relacion_responsable, "
-                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por) "
-                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por, categoria) "
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" if db_type == 'postgres' else
                  "INSERT INTO actas_recibido_biomedico (activo_id, nombre_responsable, relacion_responsable, "
-                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por) "
-                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                 "documento_responsable, telefono_contacto, direccion_entrega, firma_url, fecha, creado_por, categoria) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         cursor.execute(q_ins, (activo_id, nombre_responsable, relacion_responsable, documento_responsable,
-                                telefono_contacto, direccion_entrega, firma_url, obtener_fecha_actual(), creador))
+                                telefono_contacto, direccion_entrega, firma_url, obtener_fecha_actual(), creador, categoria))
         conn.commit()
         registrar_log(creador, "Inventario de Activos",
-                      f"Acta de recibido registrada para el activo #{activo_id} (biomédico) — recibió: "
+                      f"Acta de recibido registrada para el activo #{activo_id} ({textos['nombre']}) — recibió: "
                       f"{nombre_responsable} ({relacion_responsable}), en {direccion_entrega}.")
     except Exception as e:
         conn.rollback()
-        print(f"⚠️ Error guardando acta de recibido biomédico (activo #{activo_id}): {e}")
+        print(f"⚠️ Error guardando acta de recibido (activo #{activo_id}): {e}")
         return 'error', "El activo se guardó, pero no se pudo registrar el acta de recibido. Intenta de nuevo."
 
     return 'exito', f"Acta de recibido registrada: {nombre_responsable} ({relacion_responsable}) en {direccion_entrega}."
@@ -10839,14 +10939,14 @@ def _campos_acta_asignacion(acta_id):
         q = ("SELECT a.asignado_a, a.firma_url, a.firma_asigna_url, a.descripcion_breve, a.fecha, "
              "a.generado_por, u.nombre, "
              "i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, i.sede, i.area, i.proveedor, "
-             "i.estado, i.es_biomedico "
+             "i.estado, i.es_biomedico, i.categoria_especial "
              "FROM actas_asignacion a JOIN activos_inventario i ON i.id = a.activo_id "
              "LEFT JOIN usuarios u ON u.usuario = a.generado_por WHERE a.id = %s"
              if db_type == 'postgres' else
              "SELECT a.asignado_a, a.firma_url, a.firma_asigna_url, a.descripcion_breve, a.fecha, "
              "a.generado_por, u.nombre, "
              "i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, i.sede, i.area, i.proveedor, "
-             "i.estado, i.es_biomedico "
+             "i.estado, i.es_biomedico, i.categoria_especial "
              "FROM actas_asignacion a JOIN activos_inventario i ON i.id = a.activo_id "
              "LEFT JOIN usuarios u ON u.usuario = a.generado_por WHERE a.id = ?")
         cursor.execute(q, (acta_id,))
@@ -10860,13 +10960,14 @@ def _campos_acta_asignacion(acta_id):
         return None
 
     (asignado_a, firma_url, firma_asigna_url, descripcion_breve, fecha, generado_por, generado_por_nombre,
-     placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, estado, es_biomedico) = fila
+     placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, estado, es_biomedico,
+     categoria_especial) = fila
     return {
         'numero_acta': acta_id, 'fecha': fecha, 'responsable_asignacion': generado_por_nombre or generado_por,
         'asignado_a': asignado_a, 'sede': sede, 'area': area, 'tipo_activo': tipo_activo, 'marca': marca,
         'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie, 'proveedor': proveedor,
         'descripcion_breve': descripcion_breve, 'firma_asigna_url': firma_asigna_url, 'firma_url': firma_url,
-        'es_biomedico': bool(es_biomedico),
+        'es_biomedico': bool(es_biomedico), 'categoria_especial': categoria_especial,
     }
 
 
@@ -10891,13 +10992,15 @@ def _pdf_bytes_acta_asignacion(campos):
     descripcion_breve = campos['descripcion_breve']
     firma_asigna_url, firma_url = campos['firma_asigna_url'], campos['firma_url']
     es_biomedico = campos['es_biomedico']
+    categoria_especial_campo = campos.get('categoria_especial')
+    categoria_campo = _categoria_especial_activo(es_biomedico, categoria_especial_campo)
 
     salida = io.BytesIO()
     doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
                              leftMargin=2 * cm, rightMargin=2 * cm)
     estilos = getSampleStyleSheet()
     estilo_clausula = _pdf_clausula_style(estilos)
-    variante = "de Equipo Biomédico" if es_biomedico else "de Activos de TI"
+    variante = f"de {TEXTOS_CATEGORIA_ESPECIAL[categoria_campo]['nombre']}" if categoria_campo else "de Activos de TI"
 
     elementos = [
         _pdf_encabezado_con_logo(f"FORMATO DE ACTA DE ASIGNACIÓN {variante.upper()}", estilos),
@@ -11017,9 +11120,9 @@ def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, fir
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q = ("SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico "
+        q = ("SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico, categoria_especial "
              "FROM activos_inventario WHERE id = %s" if db_type == 'postgres' else
-             "SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico "
+             "SELECT nombre, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico, categoria_especial "
              "FROM activos_inventario WHERE id = ?")
         cursor.execute(q, (activo_id,))
         fila = cursor.fetchone()
@@ -11030,7 +11133,7 @@ def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, fir
     if not fila:
         registrar_correo_log(correo_destino, asunto, 'asignacion', 'error', f"Activo {activo_id} no encontrado")
         return
-    placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico = fila
+    placa, tipo_activo, marca, modelo, numero_serie, sede, area, proveedor, es_biomedico, categoria_especial = fila
     campos = {
         # 📅 Mismo formato que obtener_fecha_actual() (usado en TODO el resto de la app para
         # guardar fechas) — antes se armaba aparte con strftime('%Y-%m-%d'), sin hora, lo que
@@ -11040,7 +11143,7 @@ def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, fir
         'asignado_a': asignado_a, 'sede': sede, 'area': area, 'tipo_activo': tipo_activo, 'marca': marca,
         'modelo': modelo, 'placa': placa, 'numero_serie': numero_serie, 'proveedor': proveedor,
         'descripcion_breve': None, 'firma_asigna_url': _resolver_firma_de_usuario(creador),
-        'firma_url': firma_asignacion_url, 'es_biomedico': bool(es_biomedico),
+        'firma_url': firma_asignacion_url, 'es_biomedico': bool(es_biomedico), 'categoria_especial': categoria_especial,
     }
     try:
         pdf_bytes = _pdf_bytes_acta_asignacion(campos)
@@ -11070,10 +11173,10 @@ def listar_actas_recibido(activo_id):
     cursor = conn.cursor()
     try:
         q = ("SELECT id, nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, "
-             "direccion_entrega, firma_url, fecha, creado_por FROM actas_recibido_biomedico "
+             "direccion_entrega, firma_url, fecha, creado_por, categoria FROM actas_recibido_biomedico "
              "WHERE activo_id = %s ORDER BY id DESC" if db_type == 'postgres' else
              "SELECT id, nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, "
-             "direccion_entrega, firma_url, fecha, creado_por FROM actas_recibido_biomedico "
+             "direccion_entrega, firma_url, fecha, creado_por, categoria FROM actas_recibido_biomedico "
              "WHERE activo_id = ? ORDER BY id DESC")
         cursor.execute(q, (activo_id,))
         filas = cursor.fetchall()
@@ -11084,7 +11187,8 @@ def listar_actas_recibido(activo_id):
 
     actas = [{
         'id': f[0], 'nombre_responsable': f[1], 'relacion_responsable': f[2], 'documento_responsable': f[3] or '',
-        'telefono_contacto': f[4] or '', 'direccion_entrega': f[5], 'firma_url': f[6], 'fecha': f[7], 'creado_por': f[8]
+        'telefono_contacto': f[4] or '', 'direccion_entrega': f[5], 'firma_url': f[6], 'fecha': f[7], 'creado_por': f[8],
+        'categoria': f[9] or 'biomedico',
     } for f in filas]
     return jsonify({'actas': actas})
 
@@ -11100,11 +11204,11 @@ def acta_recibido_pdf(acta_id):
     cursor = conn.cursor()
     try:
         q = ("SELECT a.nombre_responsable, a.relacion_responsable, a.documento_responsable, a.telefono_contacto, "
-             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie "
+             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, a.categoria "
              "FROM actas_recibido_biomedico a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = %s"
              if db_type == 'postgres' else
              "SELECT a.nombre_responsable, a.relacion_responsable, a.documento_responsable, a.telefono_contacto, "
-             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie "
+             "a.direccion_entrega, a.firma_url, a.fecha, a.creado_por, i.nombre, i.tipo_activo, i.marca, i.modelo, i.numero_serie, a.categoria "
              "FROM actas_recibido_biomedico a JOIN activos_inventario i ON i.id = a.activo_id WHERE a.id = ?")
         cursor.execute(q, (acta_id,))
         fila = cursor.fetchone()
@@ -11117,7 +11221,8 @@ def acta_recibido_pdf(acta_id):
         return redirect(url_for('ver_inventario'))
 
     (nombre_responsable, relacion_responsable, documento_responsable, telefono_contacto, direccion_entrega,
-     firma_url, fecha, creado_por, placa, tipo_activo, marca, modelo, numero_serie) = fila
+     firma_url, fecha, creado_por, placa, tipo_activo, marca, modelo, numero_serie, categoria) = fila
+    textos_categoria = TEXTOS_CATEGORIA_ESPECIAL.get(categoria or 'biomedico', TEXTOS_CATEGORIA_ESPECIAL['biomedico'])
 
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
@@ -11129,15 +11234,12 @@ def acta_recibido_pdf(acta_id):
     doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
                              leftMargin=2 * cm, rightMargin=2 * cm)
     estilos = getSampleStyleSheet()
-    relaciones_texto = {'paciente': 'Paciente', 'cuidador': 'Cuidador/a', 'otro': 'Responsable'}
+    relaciones_texto = textos_categoria['relaciones_texto']
 
     elementos = [
-        Paragraph("Arkiv &mdash; Acta de Recibido de Equipo Biomédico", estilos['Title']),
+        Paragraph(f"Arkiv &mdash; Acta de Recibido de {textos_categoria['nombre']}", estilos['Title']),
         Spacer(1, 0.3 * cm),
-        Paragraph(
-            "Constancia de entrega a domicilio de un equipo biomédico, con la firma de quien lo recibió, "
-            "para efectos de trazabilidad en caso de pérdida o daño del equipo.", estilos['Normal']
-        ),
+        Paragraph(textos_categoria['intro_acta'], estilos['Normal']),
         Spacer(1, 0.6 * cm),
     ]
 
@@ -11160,7 +11262,7 @@ def acta_recibido_pdf(acta_id):
 
     datos_responsable = [
         ['Recibió (nombre)', nombre_responsable],
-        ['Relación con el paciente', relaciones_texto.get(relacion_responsable, relacion_responsable)],
+        [textos_categoria['etiqueta_relacion'], relaciones_texto.get(relacion_responsable, relacion_responsable)],
         ['Documento de identidad', documento_responsable or '-'],
         ['Teléfono de contacto', telefono_contacto or '-'],
         ['Dirección de entrega', direccion_entrega],
@@ -11231,6 +11333,13 @@ def crear_activo():
     tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario(request.form)
     firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
+    # 🦺 Categoría especial (SST/Ambiental/Laboratorio Clínico) — mutuamente excluyente con
+    # es_biomedico (ver TEXTOS_CATEGORIA_ESPECIAL / _categoria_especial_activo).
+    categoria_especial = None
+    if not es_biomedico and request.form.get('es_categoria_especial') in ('on', '1', 'true'):
+        categoria_especial_form = (request.form.get('categoria_especial') or '').strip()
+        if categoria_especial_form in CATEGORIAS_ESPECIALES_NUEVAS:
+            categoria_especial = categoria_especial_form
     accesorios_asignados = _accesorios_marcados(request.form)
     accesorio_otro_detalle, error_otro_accesorio = _detalle_otro_accesorio(request.form)
     if error_otro_accesorio:
@@ -11271,10 +11380,10 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                      if db_type == 'postgres' else
-                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle))
+                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial))
             nuevo_activo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
@@ -11332,6 +11441,13 @@ def editar_activo(activo_id):
     firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
     firma_asignacion_fecha = obtener_fecha_actual() if firma_asignacion_url else None
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
+    # 🦺 Categoría especial (SST/Ambiental/Laboratorio Clínico) — mutuamente excluyente con
+    # es_biomedico (ver TEXTOS_CATEGORIA_ESPECIAL / _categoria_especial_activo).
+    categoria_especial = None
+    if not es_biomedico and request.form.get('es_categoria_especial') in ('on', '1', 'true'):
+        categoria_especial_form = (request.form.get('categoria_especial') or '').strip()
+        if categoria_especial_form in CATEGORIAS_ESPECIALES_NUEVAS:
+            categoria_especial = categoria_especial_form
     accesorios_asignados = _accesorios_marcados(request.form)
     accesorio_otro_detalle, error_otro_accesorio = _detalle_otro_accesorio(request.form)
     if error_otro_accesorio:
@@ -11385,8 +11501,8 @@ def editar_activo(activo_id):
                 flash("El activo se guardó como 'Disponible' en vez de 'Asignado' porque no se indicó a quién "
                       "se le asigna (campo 'Asignado a' vacío). Edítalo y completa ese campo para dejarlo asignado.", "error")
 
-            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph} WHERE id = {ph}"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, activo_id))
+            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph}, categoria_especial = {ph} WHERE id = {ph}"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, activo_id))
             conn.commit()
             edicion_exitosa = True
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
@@ -11653,14 +11769,14 @@ def certificacion_devoluciones():
     cursor = conn.cursor()
     pendientes = []
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
-        for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle in cursor.fetchall():
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle, categoria_especial FROM activos_inventario WHERE estado = 'Asignado' AND COALESCE(eliminado, 0) = 0 ORDER BY asignado_a ASC")
+        for aid, nombre, tipo_activo, marca, modelo, numero_serie, asignado_a, sede, es_biomedico, accesorios_asignados, accesorio_otro_detalle, categoria_especial in cursor.fetchall():
             if busqueda and busqueda not in f"{_texto_busqueda_persona_libre(asignado_a, mapa_cedulas_asignado)} {nombre or ''}".lower():
                 continue
             pendientes.append({
                 'id': aid, 'nombre': nombre, 'tipo_activo': tipo_activo, 'marca': marca,
                 'modelo': modelo, 'numero_serie': numero_serie, 'asignado_a': asignado_a, 'sede': sede,
-                'es_biomedico': bool(es_biomedico),
+                'es_biomedico': bool(es_biomedico), 'categoria_especial': categoria_especial,
                 # 🎒 Solo los accesorios que quedaron marcados al asignar (no todo el catálogo) —
                 # es lo que se le pide confirmar a quien certifica la devolución. Ver
                 # ACCESORIOS_ACTIVO/_accesorios_lista_desde_csv y confirmar_devolucion_activo.
@@ -11792,7 +11908,7 @@ def confirmar_devolucion_activo(activo_id):
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
     try:
-        cursor.execute(f"SELECT nombre, asignado_a, estado, es_biomedico FROM activos_inventario WHERE id = {ph} AND COALESCE(eliminado, 0) = 0", (activo_id,))
+        cursor.execute(f"SELECT nombre, asignado_a, estado, es_biomedico, categoria_especial FROM activos_inventario WHERE id = {ph} AND COALESCE(eliminado, 0) = 0", (activo_id,))
         row = cursor.fetchone()
         if not row:
             flash("El activo indicado no existe o fue eliminado.", "error")
@@ -11810,7 +11926,7 @@ def confirmar_devolucion_activo(activo_id):
                   "activo y define quién lo tiene asignado (o cambia su estado a 'Disponible' si en realidad "
                   "no está asignado a nadie) y vuelve a intentar.", "error")
         else:
-            nombre_activo, colaborador, _, es_biomedico = row
+            nombre_activo, colaborador, _, es_biomedico, categoria_especial = row
             fecha_act = obtener_fecha_actual()
             # 🖊️ Firmas de "quien entrega" y "quien certifica" (pedido de Tomás, 06/09/2026): se
             # resuelven solas, igual que en el acta de asignación — nadie tiene que dibujar/subir
@@ -11820,11 +11936,14 @@ def confirmar_devolucion_activo(activo_id):
             # traiga — en ese caso, simplemente no hay firma que resolver.
             firma_entrega_url = _resolver_firma_para_asignacion(colaborador)
             firma_certifica_url = _resolver_firma_de_usuario(usuario)
-            # 👪 Familiar/cuidador: solo aplica a equipos BIOMÉDICOS entregados a domicilio (igual
-            # que el acta de recibido) — si el activo no es biomédico, se ignora cualquier dato
-            # que hubiera llegado en esos campos, aunque el formulario los mande por error.
+            # 👪 Familiar/cuidador (o responsable de la entrega, en SST/Ambiental/Laboratorio):
+            # solo aplica a activos con categoría especial marcada (biomédico o una de
+            # CATEGORIAS_ESPECIALES_NUEVAS), igual que el acta de recibido — si el activo no
+            # tiene ninguna categoría especial, se ignora cualquier dato que hubiera llegado en
+            # esos campos, aunque el formulario los mande por error.
+            categoria_devolucion = _categoria_especial_activo(es_biomedico, categoria_especial)
             firma_familiar_url = None
-            if es_biomedico:
+            if categoria_devolucion:
                 if firma_familiar_dataurl:
                     firma_familiar_url, error_familiar = _subir_firma_desde_dataurl(firma_familiar_dataurl)
                     if error_familiar:
@@ -12017,7 +12136,7 @@ def _campos_acta_devolucion(devolucion_id):
              "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico, "
              "d.estado, d.firma_colaborador, d.fecha_firma_colaborador, "
              "d.firma_ti, d.fecha_firma_ti, ti.nombre, ti.cedula, ti.rol, "
-             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol "
+             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol, a.categoria_especial "
              "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id "
              "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por "
              "LEFT JOIN usuarios ti ON ti.id = d.ti_usuario_id "
@@ -12028,7 +12147,7 @@ def _campos_acta_devolucion(devolucion_id):
              "a.nombre, a.tipo_activo, a.marca, a.modelo, a.numero_serie, a.sede, a.area, a.es_biomedico, "
              "d.estado, d.firma_colaborador, d.fecha_firma_colaborador, "
              "d.firma_ti, d.fecha_firma_ti, ti.nombre, ti.cedula, ti.rol, "
-             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol "
+             "d.firma_gh, d.fecha_firma_gh, gh.nombre, gh.cedula, gh.rol, a.categoria_especial "
              "FROM inventario_devoluciones d JOIN activos_inventario a ON a.id = d.activo_id "
              "LEFT JOIN usuarios u ON u.usuario = d.confirmado_por "
              "LEFT JOIN usuarios ti ON ti.id = d.ti_usuario_id "
@@ -12047,7 +12166,7 @@ def _campos_acta_devolucion(devolucion_id):
      nombre_familiar, firma_familiar_url, confirmado_por_nombre, placa, tipo_activo, marca, modelo,
      numero_serie, sede, area, es_biomedico, estado_paz_y_salvo, firma_colaborador, fecha_firma_colaborador,
      firma_ti, fecha_firma_ti, ti_nombre, ti_cedula, ti_rol,
-     firma_gh, fecha_firma_gh, gh_nombre, gh_cedula, gh_rol) = fila
+     firma_gh, fecha_firma_gh, gh_nombre, gh_cedula, gh_rol, categoria_especial) = fila
     return {
         'acta_generada': bool(acta_generada),
         'numero_acta': devolucion_id, 'fecha': fecha, 'responsable_devolucion': confirmado_por_nombre or confirmado_por,
@@ -12056,6 +12175,7 @@ def _campos_acta_devolucion(devolucion_id):
         'sede': sede, 'area': area, 'observaciones': observaciones,
         'firma_entrega_url': firma_entrega_url, 'firma_familiar_url': firma_familiar_url,
         'firma_certifica_url': firma_certifica_url, 'es_biomedico': bool(es_biomedico),
+        'categoria_especial': categoria_especial,
         # 🖊️ Paz y salvo de 3 firmas — 'estado' es None para cualquier devolución certificada
         # antes de este flujo (ver _pdf_bytes_acta_devolucion: en ese caso el PDF no cambia en
         # nada frente a como era antes). 'cargo' no existe como campo propio en 'usuarios' —
@@ -12228,13 +12348,14 @@ def _pdf_bytes_acta_devolucion(campos):
     firma_entrega_url, firma_familiar_url, firma_certifica_url = (
         campos['firma_entrega_url'], campos['firma_familiar_url'], campos['firma_certifica_url'])
     es_biomedico = campos['es_biomedico']
+    categoria_devolucion = _categoria_especial_activo(es_biomedico, campos.get('categoria_especial'))
 
     salida = io.BytesIO()
     doc = SimpleDocTemplate(salida, pagesize=letter, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
                              leftMargin=2 * cm, rightMargin=2 * cm)
     estilos = getSampleStyleSheet()
     estilo_clausula = _pdf_clausula_style(estilos)
-    variante = "de Equipo Biomédico" if es_biomedico else "de Activos de TI"
+    variante = f"de {TEXTOS_CATEGORIA_ESPECIAL[categoria_devolucion]['nombre']}" if categoria_devolucion else "de Activos de TI"
 
     elementos = [
         _pdf_encabezado_con_logo(f"FORMATO DE ACTA DE DEVOLUCIÓN {variante.upper()}", estilos),
@@ -12248,9 +12369,10 @@ def _pdf_bytes_acta_devolucion(campos):
         ['Colaborador que entrega', _pdf_texto_celda(colaborador, estilos)],
     ]
     # 🩹 (pedido de Tomás, 08/09/2026) La fila "Familiar/cuidador responsable" solo aplica a
-    # equipos BIOMÉDICOS entregados a domicilio — en un activo de TI siempre salía vacía ("-"),
-    # puro ruido en el acta. Se omite por completo cuando el activo no es biomédico.
-    if es_biomedico:
+    # activos con categoría especial marcada (biomédico, o desde el 15/09/2026 también
+    # SST/Ambiental/Laboratorio) — en un activo de TI siempre salía vacía ("-"), puro ruido en
+    # el acta. Se omite por completo cuando el activo no tiene ninguna categoría especial.
+    if categoria_devolucion:
         datos_devolucion.append(['Familiar/cuidador responsable', _pdf_texto_celda(nombre_familiar or '-', estilos)])
     tabla_devolucion = Table(datos_devolucion, colWidths=[5.5 * cm, 10.5 * cm])
     tabla_devolucion.setStyle(TableStyle([
@@ -12294,8 +12416,9 @@ def _pdf_bytes_acta_devolucion(campos):
         "bajo la custodia del responsable de recepción. En caso de existir faltantes o daños no "
         "reportados previamente, se adelantarán las disposiciones que dicte el Reglamento Interno "
         "de Trabajo de la institución."
-        + (" Para el servicio de Atención Domiciliaria se firma corresponsabilidad del "
-           "familiar/cuidador del paciente." if es_biomedico else "")
+        + (f" Para el servicio de Atención Domiciliaria se firma corresponsabilidad del "
+           f"{TEXTOS_CATEGORIA_ESPECIAL[categoria_devolucion]['texto_devolucion_familiar']}."
+           if categoria_devolucion else "")
     )
     elementos += [Paragraph(clausula, estilo_clausula), Spacer(1, 0.5 * cm)]
 
@@ -12312,12 +12435,13 @@ def _pdf_bytes_acta_devolucion(campos):
         elementos += _pdf_bloque_firmas_paz_y_salvo(campos, estilos)
     else:
         # 🩹 (pedido de Tomás, 08/09/2026) Misma corrección que arriba: la firma del
-        # familiar/cuidador solo tiene sentido para equipos BIOMÉDICOS entregados a domicilio —
-        # en un activo de TI ya no se muestra ni la columna ni el "(No aplica...)" de relleno,
-        # solo la firma del colaborador que entrega, centrada a todo el ancho (igual que la
-        # firma de quien certifica, más abajo).
+        # familiar/cuidador solo tiene sentido para activos con categoría especial marcada
+        # (biomédico, o desde el 15/09/2026 también SST/Ambiental/Laboratorio) entregados a
+        # domicilio — en un activo de TI ya no se muestra ni la columna ni el "(No aplica...)"
+        # de relleno, solo la firma del colaborador que entrega, centrada a todo el ancho
+        # (igual que la firma de quien certifica, más abajo).
         firma_entrega = _pdf_elemento_firma(firma_entrega_url, estilos)
-        if es_biomedico:
+        if categoria_devolucion:
             firma_familiar = _pdf_elemento_firma(firma_familiar_url, estilos, texto_si_falta='(No firmó familiar/cuidador)')
             tabla_firmas_fila1 = Table(
                 [[firma_entrega, firma_familiar],
