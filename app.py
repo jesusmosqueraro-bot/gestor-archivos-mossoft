@@ -2075,6 +2075,40 @@ def init_db():
                 siguiente_orden_bio += 1
         conn.commit()
 
+        # 🦺 Suma al catálogo de Tipos de activo insumos/material de SST, Ambiental y Laboratorio
+        # Clínico (pedido por Tomás, 15/09/2026) — mismo mecanismo idempotente que los
+        # dispositivos biomédicos de arriba: corre en cada arranque, pero solo agrega una 'key'
+        # si todavía no existe, así que es seguro correrlo una y otra vez sin duplicar nada.
+        # 'Centrífuga' no se repite aquí porque ya existe en el bloque biomédico de arriba
+        # (key 'CENTRIFUGE') — un mismo activo físico no necesita dos entradas de catálogo.
+        tipos_sst_ambiental_lab_a_sincronizar = [
+            # SST (Seguridad y Salud en el Trabajo)
+            ('SST_EPP', 'Elementos de Protección Personal (EPP)', 'hard-hat'),
+            ('SST_BOTIQUIN', 'Botiquín de Primeros Auxilios', 'briefcase-medical'),
+            ('SST_EXTINTOR', 'Extintor / Equipo Contra Incendios', 'fire-extinguisher'),
+            ('SST_CAMILLA', 'Camilla de Rescate / Emergencias', 'truck-medical'),
+            # Ambiental
+            ('AMB_RESIDUOS', 'Punto Ecológico / Residuos Peligrosos', 'biohazard'),
+            ('AMB_RECICLAJE', 'Punto de Reciclaje', 'recycle'),
+            ('AMB_DERRAMES', 'Kit Antiderrames', 'oil-can'),
+            ('AMB_PTAR', 'Gestión Ambiental / Agua (PTAR)', 'leaf'),
+            # Laboratorio Clínico
+            ('LAB_EQUIPO', 'Equipo de Laboratorio Clínico', 'flask-vial'),
+            ('LAB_MUESTRAS', 'Tubos y Recipientes de Muestra', 'vial'),
+            ('LAB_REACTIVOS', 'Reactivos Químicos de Laboratorio', 'flask'),
+            ('LAB_CADENA_FRIO', 'Nevera / Cadena de Frío (Laboratorio)', 'snowflake'),
+        ]
+        q_check_tipo_sal = "SELECT id FROM tipos_activo_catalogo WHERE UPPER(key) = UPPER(%s)" if db_type == 'postgres' else "SELECT id FROM tipos_activo_catalogo WHERE UPPER(key) = UPPER(?)"
+        q_ins_tipo_sal = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (?, ?, ?, ?)"
+        cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_activo_catalogo")
+        siguiente_orden_sal = cursor.fetchone()[0] + 1
+        for key_sal, etiqueta_sal, icono_sal in tipos_sst_ambiental_lab_a_sincronizar:
+            cursor.execute(q_check_tipo_sal, (key_sal,))
+            if not cursor.fetchone():
+                cursor.execute(q_ins_tipo_sal, (key_sal, etiqueta_sal, icono_sal, siguiente_orden_sal))
+                siguiente_orden_sal += 1
+        conn.commit()
+
         # 🩺 Sincroniza el catálogo de especialidades con la lista real de Preventiva. A
         # diferencia del seed de aplicativos (que solo corre si la tabla está vacía), esta
         # sincronización corre SIEMPRE en cada arranque, pero es idempotente: cada nombre se
@@ -4268,7 +4302,11 @@ ICONOS_TIPO_ACTIVO = ['desktop', 'laptop', 'print', 'display', 'mobile-screen', 
                       'gauge-high', 'droplet', 'elevator', 'lightbulb', 'soap', 'mask-ventilator', 'water',
                       'heart', 'bed-pulse', 'microscope', 'eye', 'heart-pulse', 'smog', 'square', 'snowflake',
                       'fingerprint', 'magnet', 'stethoscope', 'temperature-three-quarters', 'circle-notch',
-                      'bandage', 'wand-magic-sparkles', 'lungs']
+                      'bandage', 'wand-magic-sparkles', 'lungs',
+                      # 🦺 SST / Ambiental / Laboratorio Clínico (pedido por Tomás, 15/09/2026) —
+                      # ver el bloque de sincronización de tipos_activo_catalogo en init_db().
+                      'hard-hat', 'briefcase-medical', 'fire-extinguisher', 'truck-medical',
+                      'biohazard', 'recycle', 'oil-can', 'leaf', 'flask-vial', 'vial', 'flask']
 MOTIVOS_REEMPLAZO_ACTIVO = [
     {'clave': 'Equipo dañado', 'icono': 'screwdriver-wrench', 'descripcion': 'No funciona o requiere reparación mayor'},
     {'clave': 'Renovación', 'icono': 'arrows-rotate', 'descripcion': 'Reemplazo por uno más nuevo o mejor'},
