@@ -170,15 +170,16 @@
                                 <i class="fa-solid fa-check mr-1"></i>Confirmar devolución
                             </button>
                         </div>
-                        {% if p.es_biomedico %}
-                        <!-- 👪 Equipo biomédico entregado a domicilio: el formato en papel de Preventiva
-                             IPS trae una firma de "Familiar/cuidador responsable" además de la del
-                             colaborador — se captura aquí, en el momento de certificar la devolución,
-                             igual que la firma del acta de recibido. Solo aparece para activos marcados
-                             como biomédicos; en TI no aplica. -->
+                        {% if p.es_biomedico or p.categoria_especial %}
+                        <!-- 👪 Equipo biomédico (o, desde el 15/09/2026, insumo de SST/Ambiental/
+                             Laboratorio Clínico) entregado a domicilio: el formato en papel de
+                             Preventiva IPS trae una firma de "Familiar/cuidador responsable" además de
+                             la del colaborador — se captura aquí, en el momento de certificar la
+                             devolución, igual que la firma del acta de recibido. Solo aparece para
+                             activos con alguna categoría especial marcada; en TI no aplica. -->
                         <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-2.5">
-                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1.5"><i class="fa-solid fa-kit-medical mr-1 text-rose-400"></i>Familiar/cuidador responsable (opcional)</p>
-                            <input type="text" name="nombre_familiar" placeholder="Nombre del familiar/cuidador" class="w-full mb-1.5 px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-[11px] text-white focus:outline-none focus:border-teal-500">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1.5"><i class="fa-solid {{ 'fa-kit-medical text-rose-400' if p.es_biomedico else 'fa-hard-hat text-amber-400' }} mr-1"></i>{{ 'Familiar/cuidador responsable' if p.es_biomedico else 'Responsable de la entrega' }} (opcional)</p>
+                            <input type="text" name="nombre_familiar" placeholder="{{ 'Nombre del familiar/cuidador' if p.es_biomedico else 'Nombre de quien recibió' }}" class="w-full mb-1.5 px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-[11px] text-white focus:outline-none focus:border-teal-500">
                             <div class="flex items-center justify-between mb-1">
                                 <p class="text-[9px] font-bold text-slate-400 uppercase">Firma</p>
                                 <div class="flex gap-1">
@@ -281,9 +282,11 @@
     <script src="/static/js/atajos_teclado.js"></script>
     <script src="/static/js/firma-digital.js"></script>
     <script>
-        // 👪 Firma de familiar/cuidador (solo pendientes biomédicos) — un widget de firma por
-        // cada fila que trae la sección, identificado por el id del activo.
-        {{ (pendientes | selectattr('es_biomedico') | map(attribute='id') | list) | tojson }}
+        // 👪 Firma de familiar/cuidador o responsable de la entrega (pendientes con alguna
+        // categoría especial marcada: biomédico, o SST/Ambiental/Laboratorio) — un widget de
+        // firma por cada fila que trae la sección, identificado por el id del activo.
+        {{ ((pendientes | selectattr('es_biomedico') | map(attribute='id') | list)
+            + (pendientes | selectattr('categoria_especial') | map(attribute='id') | list)) | tojson }}
             .forEach(function (id) { inicializarFirmaDigital('firma-familiar-' + id); });
 
         // 🎒 "Otro" en Accesorios que regresaron (pedido por Tomás, 08/09/2026): el campo de

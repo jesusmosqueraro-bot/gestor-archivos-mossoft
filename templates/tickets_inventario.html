@@ -316,7 +316,7 @@
                     {% if activos %}
                         {% for a in activos %}
                         <tr class="hover:bg-slate-800/40 transition-colors">
-                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}{% if a.es_biomedico %} <i class="fa-solid fa-kit-medical text-rose-400 ml-1" title="Activo biomédico"></i>{% endif %}</td>
+                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}{% if a.es_biomedico %} <i class="fa-solid fa-kit-medical text-rose-400 ml-1" title="Activo biomédico"></i>{% elif a.categoria_especial %} <i class="fa-solid fa-hard-hat text-amber-400 ml-1" title="{{ {'sst': 'Insumo de SST', 'ambiental': 'Insumo Ambiental', 'laboratorio': 'Insumo de Laboratorio Clínico'}.get(a.categoria_especial, 'Categoría especial') }}"></i>{% endif %}</td>
                             <td class="py-3.5 px-3">{{ a.tipo_activo }}</td>
                             <td class="py-3.5 px-3 text-slate-400">{{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}</td>
                             <td class="py-3.5 px-3 font-mono text-slate-500">{{ a.numero_serie or '-' }}</td>
@@ -515,46 +515,60 @@
                         </div>
                         <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
                             <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
-                                <input type="checkbox" name="es_biomedico" id="input-activo-biomedico" onchange="actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                <input type="checkbox" name="es_biomedico" id="input-activo-biomedico" onchange="if(this.checked){document.getElementById('input-activo-categoria-especial').checked=false;} actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
                                 <i class="fa-solid fa-kit-medical text-rose-400"></i> Es un activo biomédico (bomba de infusión y similares)
                             </label>
-                            <div id="seccion-acta-recibido" class="hidden mt-3 space-y-2 border-t border-slate-700/60 pt-3">
-                                <p class="text-[10px] text-slate-500">Si este equipo se está entregando a domicilio (paciente o cuidador), registra aquí el acta de recibido — queda un historial aparte por cada entrega, con la dirección y la firma de quien lo recibió, útil si el equipo se pierde o se daña.</p>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <input type="text" name="acta_nombre_responsable" id="input-acta-nombre" placeholder="Nombre de quien recibe" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                    <select name="acta_relacion_responsable" id="input-acta-relacion" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                        <option value="paciente">Paciente</option>
-                                        <option value="cuidador">Cuidador/a</option>
-                                        <option value="otro">Otro responsable</option>
-                                    </select>
-                                    <input type="text" name="acta_documento_responsable" id="input-acta-documento" placeholder="Documento de identidad (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                    <input type="text" name="acta_telefono_contacto" id="input-acta-telefono" placeholder="Teléfono de contacto (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
-                                </div>
-                                <textarea name="acta_direccion_entrega" id="input-acta-direccion" rows="2" placeholder="Dirección de entrega (domicilio del paciente)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
-
-                                <div>
-                                    <div class="flex items-center justify-between mb-1">
-                                        <p class="text-[10px] font-bold text-slate-300 uppercase">Firma de quien recibe</p>
-                                        <div class="flex gap-1">
-                                            <button type="button" id="firma-acta-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
-                                            <button type="button" id="firma-acta-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
-                                        </div>
-                                    </div>
-                                    <div id="firma-acta-panel-dibujar">
-                                        <canvas id="firma-acta-canvas" width="380" height="110" class="w-full bg-white rounded-lg border border-slate-700" style="height:110px; touch-action: none;"></canvas>
-                                        <button type="button" id="firma-acta-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
-                                    </div>
-                                    <div id="firma-acta-panel-subir" class="hidden">
-                                        <input type="file" id="firma-acta-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
-                                        <img id="firma-acta-preview" class="hidden mt-1.5 max-h-24 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
-                                    </div>
-                                    <input type="hidden" name="acta_firma_dataurl" id="firma-acta-input">
-                                </div>
-
-                                <button type="button" onclick="abrirModalActasRecibido()" id="btn-ver-actas-recibido" class="hidden w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
-                                    <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de este activo
-                                </button>
+                        </div>
+                        <!-- 🦺 Categoría especial de SST/Ambiental/Laboratorio (pedido por Tomás,
+                             15/09/2026): checkbox análogo al de biomédico de arriba — igual que ese,
+                             al marcarlo revela la MISMA sección de "acta de recibido" (comparten los
+                             campos acta_*; un activo es de una categoría a la vez, así que se
+                             excluyen mutuamente entre sí en la casilla). -->
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                <input type="checkbox" name="es_categoria_especial" id="input-activo-categoria-especial" onchange="if(this.checked){document.getElementById('input-activo-biomedico').checked=false;} actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                <i class="fa-solid fa-hard-hat text-amber-400"></i> Es un insumo de SST, Ambiental o Laboratorio Clínico
+                            </label>
+                            <div id="seccion-categoria-especial-valor" class="hidden mt-2">
+                                <select name="categoria_especial" id="input-categoria-especial-valor" onchange="actualizarSeccionActaRecibido()" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="sst">SST (Seguridad y Salud en el Trabajo)</option>
+                                    <option value="ambiental">Ambiental</option>
+                                    <option value="laboratorio">Laboratorio Clínico</option>
+                                </select>
                             </div>
+                        </div>
+                        <div id="seccion-acta-recibido" class="hidden bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 space-y-2">
+                            <p class="text-[10px] text-slate-500" id="texto-intro-acta-recibido"></p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input type="text" name="acta_nombre_responsable" id="input-acta-nombre" placeholder="Nombre de quien recibe" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <select name="acta_relacion_responsable" id="input-acta-relacion" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></select>
+                                <input type="text" name="acta_documento_responsable" id="input-acta-documento" placeholder="Documento de identidad (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <input type="text" name="acta_telefono_contacto" id="input-acta-telefono" placeholder="Teléfono de contacto (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <textarea name="acta_direccion_entrega" id="input-acta-direccion" rows="2" placeholder="Dirección de entrega" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <p class="text-[10px] font-bold text-slate-300 uppercase">Firma de quien recibe</p>
+                                    <div class="flex gap-1">
+                                        <button type="button" id="firma-acta-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
+                                        <button type="button" id="firma-acta-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
+                                    </div>
+                                </div>
+                                <div id="firma-acta-panel-dibujar">
+                                    <canvas id="firma-acta-canvas" width="380" height="110" class="w-full bg-white rounded-lg border border-slate-700" style="height:110px; touch-action: none;"></canvas>
+                                    <button type="button" id="firma-acta-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                                </div>
+                                <div id="firma-acta-panel-subir" class="hidden">
+                                    <input type="file" id="firma-acta-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
+                                    <img id="firma-acta-preview" class="hidden mt-1.5 max-h-24 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
+                                </div>
+                                <input type="hidden" name="acta_firma_dataurl" id="firma-acta-input">
+                            </div>
+
+                            <button type="button" onclick="abrirModalActasRecibido()" id="btn-ver-actas-recibido" class="hidden w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de este activo
+                            </button>
                         </div>
                     </div>
 
@@ -987,6 +1001,8 @@
             document.getElementById('input-activo-costo-alquiler').value = '';
             actualizarCampoCostoInventario();
             document.getElementById('input-activo-biomedico').checked = false;
+            document.getElementById('input-activo-categoria-especial').checked = false;
+            document.getElementById('input-categoria-especial-valor').value = 'sst';
             {% for ac in accesorios_activo %}
             document.getElementById('input-accesorio-{{ ac.clave }}').checked = false;
             {% endfor %}
@@ -1024,6 +1040,8 @@
             document.getElementById('input-activo-costo-alquiler').value = activo.costo_alquiler_mensual != null ? activo.costo_alquiler_mensual : '';
             actualizarCampoCostoInventario();
             document.getElementById('input-activo-biomedico').checked = !!activo.es_biomedico;
+            document.getElementById('input-activo-categoria-especial').checked = !activo.es_biomedico && !!activo.categoria_especial;
+            document.getElementById('input-categoria-especial-valor').value = activo.categoria_especial || 'sst';
             // 🎒 Marca las casillas de accesorios que ya estaban guardadas para este activo
             // (texto separado por comas en 'accesorios_asignados', ver _accesorios_marcados).
             var _accesoriosActivo = (activo.accesorios_asignados || '').split(',');
@@ -1073,15 +1091,56 @@
         var activoActualIdParaActas = null;
         var firmaActaWidget = null;
 
+        // 🦺 Textos y opciones de "Relación" del acta de recibido, según la categoría marcada —
+        // biomédico sigue igual que siempre (paciente/cuidador, entrega a domicilio); SST/
+        // Ambiental/Laboratorio usan un vocabulario genérico (colaborador/contratista) y no
+        // asumen que la entrega es en la casa de un paciente. Ver TEXTOS_CATEGORIA_ESPECIAL en
+        // app.py — este mapa en JS es solo para el formulario, la fuente de verdad es el backend.
+        var TEXTOS_ACTA_RECIBIDO_JS = {
+            biomedico: {
+                intro: 'Si este equipo se está entregando a domicilio (paciente o cuidador), registra aquí el acta de recibido — queda un historial aparte por cada entrega, con la dirección y la firma de quien lo recibió, útil si el equipo se pierde o se daña.',
+                relaciones: [['paciente', 'Paciente'], ['cuidador', 'Cuidador/a'], ['otro', 'Otro responsable']]
+            },
+            sst: {
+                intro: 'Registra aquí el acta de recibido de este insumo de SST — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            },
+            ambiental: {
+                intro: 'Registra aquí el acta de recibido de este insumo Ambiental — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            },
+            laboratorio: {
+                intro: 'Registra aquí el acta de recibido de este insumo de Laboratorio Clínico — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            }
+        };
+
+        function _categoriaActaActiva() {
+            if (document.getElementById('input-activo-biomedico').checked) return 'biomedico';
+            if (document.getElementById('input-activo-categoria-especial').checked) {
+                return document.getElementById('input-categoria-especial-valor').value || 'sst';
+            }
+            return null;
+        }
+
         function actualizarSeccionActaRecibido() {
-            const marcado = document.getElementById('input-activo-biomedico').checked;
+            const categoria = _categoriaActaActiva();
+            const marcado = !!categoria;
             document.getElementById('seccion-acta-recibido').classList.toggle('hidden', !marcado);
+            document.getElementById('seccion-categoria-especial-valor').classList.toggle('hidden', !document.getElementById('input-activo-categoria-especial').checked);
             document.getElementById('btn-ver-actas-recibido').classList.toggle('hidden', !(marcado && activoActualIdParaActas));
+            if (marcado) {
+                const textos = TEXTOS_ACTA_RECIBIDO_JS[categoria] || TEXTOS_ACTA_RECIBIDO_JS.sst;
+                document.getElementById('texto-intro-acta-recibido').textContent = textos.intro;
+                const selectRelacion = document.getElementById('input-acta-relacion');
+                selectRelacion.innerHTML = textos.relaciones.map(function (r) {
+                    return '<option value="' + r[0] + '">' + r[1] + '</option>';
+                }).join('');
+            }
         }
 
         function limpiarFormularioActaRecibido() {
             document.getElementById('input-acta-nombre').value = '';
-            document.getElementById('input-acta-relacion').value = 'paciente';
             document.getElementById('input-acta-documento').value = '';
             document.getElementById('input-acta-telefono').value = '';
             document.getElementById('input-acta-direccion').value = '';
