@@ -9744,10 +9744,43 @@ def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
     }
 
 
-@app.route('/tablero-ejecutivo')
+@app.route('/tablero-ejecutivo', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def tablero_ejecutivo():
+    # 📊 Alta rápida de un tablero de Power BI desde el propio Tablero Ejecutivo (pedido:
+    # "poder visualizar y cargar estos" sin salir de esta página ni pasar por /admin/db).
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    if request.method == 'POST' and request.form.get('accion') == 'agregar_powerbi':
+        titulo = request.form.get('titulo', '').strip()
+        embed_url = request.form.get('embed_url', '').strip()
+        categoria = request.form.get('categoria', '').strip() or 'General'
+        descripcion = request.form.get('descripcion', '').strip()
+        roles_permitidos = request.form.get('roles_permitidos', '').strip() or 'admin'
+        if titulo and embed_url:
+            query = (
+                "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (%s, %s, %s, %s, %s)"
+                if db_type == 'postgres' else
+                "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (?, ?, ?, ?, ?)"
+            )
+            cursor.execute(query, (titulo, descripcion, categoria, embed_url, roles_permitidos))
+            conn.commit()
+            registrar_log(session['username'], "Tablero Power BI agregado", f"Título: {titulo}")
+        conn.close()
+        return redirect(url_for('tablero_ejecutivo'))
+
+    cursor.execute(
+        "SELECT id, titulo, descripcion, categoria, embed_url, roles_permitidos FROM reportes_powerbi WHERE activo = TRUE ORDER BY fecha_publicacion DESC"
+        if db_type == 'postgres' else
+        "SELECT id, titulo, descripcion, categoria, embed_url, roles_permitidos FROM reportes_powerbi WHERE activo = 1 ORDER BY fecha_publicacion DESC"
+    )
+    tableros_powerbi = [
+        {'id': f[0], 'titulo': f[1], 'descripcion': f[2], 'categoria': f[3], 'embed_url': f[4], 'roles_permitidos': f[5]}
+        for f in cursor.fetchall()
+    ]
+    conn.close()
+
     # 🔎 Mismo filtro de fecha/mes/agente que /tickets/indicadores (ver _resolver_filtros_indicadores)
     # — así lo que Tomás/gerencia filtra en Indicadores se puede reflejar también aquí, acotando
     # los indicadores de Tickets del tablero al mismo período/agente elegido.
@@ -9757,6 +9790,7 @@ def tablero_ejecutivo():
         'tablero_ejecutivo.html',
         filtro_mes=mes, filtro_fecha_inicio=fecha_inicio or '', filtro_fecha_fin=fecha_fin or '',
         filtro_agente=agente or '', opciones_meses=_opciones_meses_filtro(), opciones_agentes=_opciones_agentes_filtro(),
+        tableros_powerbi=tableros_powerbi,
         **datos
     )
 
