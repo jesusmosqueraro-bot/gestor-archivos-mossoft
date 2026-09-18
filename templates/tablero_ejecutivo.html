@@ -250,6 +250,7 @@
             <!-- Formulario de carga (oculto por defecto) -->
             <form id="form-agregar-powerbi" method="POST" action="{{ url_for('tablero_ejecutivo') }}"
                   class="hidden mb-5 bg-slate-900/60 border border-slate-700/60 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="accion" value="agregar_powerbi">
                 <input type="text" name="titulo" placeholder="Título del tablero" required
                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
