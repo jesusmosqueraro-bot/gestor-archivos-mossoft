@@ -9750,23 +9750,39 @@ def _calcular_tablero_ejecutivo(fecha_inicio=None, fecha_fin=None, agente=None):
 def tablero_ejecutivo():
     # 📊 Alta rápida de un tablero de Power BI desde el propio Tablero Ejecutivo (pedido:
     # "poder visualizar y cargar estos" sin salir de esta página ni pasar por /admin/db).
+    # roles_permitidos viene de un <select multiple> con los 4 roles reales de Gestión de
+    # Usuarios (ver ROLES_ETIQUETAS más abajo) — se unen con coma para guardarlos en el mismo
+    # formato que ya usa listar_powerbi/ver_powerbi (roles_permitidos.split(',')).
     conn, db_type = get_db()
     cursor = conn.cursor()
-    if request.method == 'POST' and request.form.get('accion') == 'agregar_powerbi':
+    accion = request.form.get('accion') if request.method == 'POST' else None
+
+    if accion in ('agregar_powerbi', 'editar_powerbi'):
         titulo = request.form.get('titulo', '').strip()
         embed_url = request.form.get('embed_url', '').strip()
         categoria = request.form.get('categoria', '').strip() or 'General'
         descripcion = request.form.get('descripcion', '').strip()
-        roles_permitidos = request.form.get('roles_permitidos', '').strip() or 'admin'
+        roles_permitidos = ','.join(request.form.getlist('roles_permitidos')) or 'admin'
+
         if titulo and embed_url:
-            query = (
-                "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (%s, %s, %s, %s, %s)"
-                if db_type == 'postgres' else
-                "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (?, ?, ?, ?, ?)"
-            )
-            cursor.execute(query, (titulo, descripcion, categoria, embed_url, roles_permitidos))
+            if accion == 'agregar_powerbi':
+                query = (
+                    "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (%s, %s, %s, %s, %s)"
+                    if db_type == 'postgres' else
+                    "INSERT INTO reportes_powerbi (titulo, descripcion, categoria, embed_url, roles_permitidos) VALUES (?, ?, ?, ?, ?)"
+                )
+                cursor.execute(query, (titulo, descripcion, categoria, embed_url, roles_permitidos))
+                registrar_log(session['username'], "Tablero Power BI agregado", f"Título: {titulo}")
+            else:
+                tablero_id = request.form.get('tablero_id', '').strip()
+                query = (
+                    "UPDATE reportes_powerbi SET titulo = %s, descripcion = %s, categoria = %s, embed_url = %s, roles_permitidos = %s WHERE id = %s"
+                    if db_type == 'postgres' else
+                    "UPDATE reportes_powerbi SET titulo = ?, descripcion = ?, categoria = ?, embed_url = ?, roles_permitidos = ? WHERE id = ?"
+                )
+                cursor.execute(query, (titulo, descripcion, categoria, embed_url, roles_permitidos, tablero_id))
+                registrar_log(session['username'], "Tablero Power BI editado", f"ID: {tablero_id} · Título: {titulo}")
             conn.commit()
-            registrar_log(session['username'], "Tablero Power BI agregado", f"Título: {titulo}")
         conn.close()
         return redirect(url_for('tablero_ejecutivo'))
 
