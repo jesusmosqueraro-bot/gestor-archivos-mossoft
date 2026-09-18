@@ -215,7 +215,9 @@ def _agregar_cabeceras_seguridad(response):
         # botón de vista previa de un PDF se veía en blanco (no se había notado porque
         # el resto de la app no depende de esto). 'self' queda por si el día de mañana
         # se enruta algún iframe a través de una ruta propia (como /pdf_proxy).
-        "frame-src 'self' https://www.google.com https://res.cloudinary.com; "
+        # 📊 app.powerbi.com: visor embebido de tableros de Power BI ("Publish to Web")
+        # en /indicadores/powerbi/<id> (ver powerbi_visor.html).
+        "frame-src 'self' https://www.google.com https://res.cloudinary.com https://app.powerbi.com; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
@@ -797,6 +799,13 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id SERIAL PRIMARY KEY, galeria_id VARCHAR(50) REFERENCES galerias(id) ON DELETE CASCADE, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original VARCHAR(255) NOT NULL DEFAULT '', estado VARCHAR(50) DEFAULT 'activo'
+            )''')
+            # 📊 Catálogo de tableros de Power BI embebidos en /indicadores/powerbi
+            # (ver listar_powerbi/ver_powerbi). roles_permitidos es texto separado por
+            # comas ('admin,agente') en vez de un "rol mínimo": en Arkiv los roles no
+            # tienen jerarquía, así que se compara con "in" en vez de con un umbral.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS reportes_powerbi (
+                id SERIAL PRIMARY KEY, titulo VARCHAR(150) NOT NULL, descripcion TEXT, categoria VARCHAR(50) DEFAULT 'General', embed_url TEXT NOT NULL, roles_permitidos VARCHAR(200) NOT NULL DEFAULT 'admin', fecha_publicacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP, activo BOOLEAN DEFAULT TRUE
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, accion VARCHAR(100) NOT NULL, detalles TEXT, fecha VARCHAR(100) NOT NULL
@@ -1418,6 +1427,10 @@ def init_db():
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS archivos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, galeria_id TEXT, filename TEXT, url_archivo TEXT NOT NULL DEFAULT '', nombre_original TEXT NOT NULL DEFAULT '', estado TEXT DEFAULT 'activo', FOREIGN KEY(galeria_id) REFERENCES galerias(id) ON DELETE CASCADE
+            )''')
+            # 📊 Ver comentario equivalente en la rama Postgres arriba.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS reportes_powerbi (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL, descripcion TEXT, categoria TEXT DEFAULT 'General', embed_url TEXT NOT NULL, roles_permitidos TEXT NOT NULL DEFAULT 'admin', fecha_publicacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP, activo BOOLEAN DEFAULT 1
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, accion TEXT NOT NULL, detalles TEXT, fecha TEXT NOT NULL
@@ -2857,7 +2870,8 @@ def visor_db():
         'usuarios', 'galerias', 'archivos', 'logs', 'credenciales', 'comunicados',
         'tickets', 'tickets_comentarios', 'tickets_adjuntos', 'conocimiento_articulos',
         'ticket_configuraciones', 'activos_inventario', 'inventario_devoluciones', 'aplicativos_catalogo',
-        'credenciales_colaboradores', 'login_fondo_media', 'chat_mensajes', 'chat_canal_visto'
+        'credenciales_colaboradores', 'login_fondo_media', 'chat_mensajes', 'chat_canal_visto',
+        'reportes_powerbi'
     ]
     if tabla_seleccionada not in tablas_permitidas:
         tabla_seleccionada = 'usuarios'
@@ -16646,6 +16660,54 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
         'top_usuarios_labels': [u for u, _ in top_usuarios],
         'top_usuarios_valores': [c for _, c in top_usuarios],
     }
+
+
+@app.route('/indicadores/powerbi')
+@login_required
+def listar_powerbi():
+    """Catálogo de tableros de Power BI embebidos (Publish to Web) visibles según el rol
+    del usuario en sesión. Las filas se administran hoy desde /admin/db (tabla
+    reportes_powerbi), sin un formulario dedicado."""
+    rol_actual = session.get('rol', 'estandar')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, titulo, descripcion, categoria, roles_permitidos FROM reportes_powerbi WHERE activo = TRUE ORDER BY fecha_publicacion DESC"
+        if db_type == 'postgres' else
+        "SELECT id, titulo, descripcion, categoria, roles_permitidos FROM reportes_powerbi WHERE activo = 1 ORDER BY fecha_publicacion DESC"
+    )
+    filas = cursor.fetchall()
+    conn.close()
+
+    reportes = [
+        {'id': f[0], 'titulo': f[1], 'descripcion': f[2], 'categoria': f[3]}
+        for f in filas
+        if rol_actual in (f[4] or '').split(',')
+    ]
+    return render_template('powerbi_lista.html', reportes=reportes)
+
+
+@app.route('/indicadores/powerbi/<int:id>')
+@login_required
+def ver_powerbi(id):
+    """Visor embebido de un tablero de Power BI puntual (ver listar_powerbi)."""
+    rol_actual = session.get('rol', 'estandar')
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    query = (
+        "SELECT id, titulo, descripcion, embed_url, roles_permitidos FROM reportes_powerbi WHERE id = %s AND activo = TRUE"
+        if db_type == 'postgres' else
+        "SELECT id, titulo, descripcion, embed_url, roles_permitidos FROM reportes_powerbi WHERE id = ? AND activo = 1"
+    )
+    cursor.execute(query, (id,))
+    fila = cursor.fetchone()
+    conn.close()
+
+    if not fila or rol_actual not in (fila[4] or '').split(','):
+        return redirect(url_for('listar_powerbi'))
+
+    reporte = {'id': fila[0], 'titulo': fila[1], 'descripcion': fila[2], 'embed_url': fila[3]}
+    return render_template('powerbi_visor.html', reporte=reporte)
 
 
 @app.route('/admin/geolocalizacion')
