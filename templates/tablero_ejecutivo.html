@@ -241,34 +241,53 @@
                 <h3 class="text-sm font-bold text-white flex items-center gap-2">
                     <i class="fa-solid fa-chart-pie text-purple-400"></i> Tableros Power BI
                 </h3>
-                <button type="button" onclick="document.getElementById('form-agregar-powerbi').classList.toggle('hidden')"
+                <button type="button" onclick="abrirFormularioPowerBI()"
                         class="text-xs font-bold text-purple-400 hover:text-purple-300 flex items-center gap-1.5">
                     <i class="fa-solid fa-plus"></i> Cargar tablero
                 </button>
             </div>
 
-            <!-- Formulario de carga (oculto por defecto) -->
+            <!-- Formulario de carga/edición (oculto por defecto; se reutiliza para editar) -->
             <form id="form-agregar-powerbi" method="POST" action="{{ url_for('tablero_ejecutivo') }}"
                   class="hidden mb-5 bg-slate-900/60 border border-slate-700/60 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <input type="hidden" name="accion" value="agregar_powerbi">
-                <input type="text" name="titulo" placeholder="Título del tablero" required
+                <input type="hidden" id="powerbi-accion" name="accion" value="agregar_powerbi">
+                <input type="hidden" id="powerbi-id" name="tablero_id" value="">
+                <p id="powerbi-form-titulo" class="sm:col-span-2 text-xs font-bold text-purple-300 -mb-1">Nuevo tablero</p>
+                <input type="text" id="powerbi-titulo" name="titulo" placeholder="Título del tablero" required
                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
-                <input type="text" name="categoria" placeholder="Categoría (SST, Financiero, Calidad...)"
+                <input type="text" id="powerbi-categoria" name="categoria" placeholder="Categoría (SST, Financiero, Calidad...)"
                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500">
-                <input type="text" name="roles_permitidos" placeholder="Roles con acceso (admin,agente)" value="admin"
-                       class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500">
-                <input type="text" name="descripcion" placeholder="Descripción breve (opcional)"
+
+                <!-- 👥 Roles reales de Gestión de Usuarios (ver ROLES_ETIQUETAS / usuarios.html) —
+                     desplegable de selección múltiple en vez de texto libre, para no depender de
+                     que alguien escriba bien el nombre exacto del rol. -->
+                <select id="powerbi-roles" name="roles_permitidos" multiple size="4"
+                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white">
+                    <option value="admin" selected>Administrador</option>
+                    <option value="agente">Agente</option>
+                    <option value="gestion_humana">Gestión Humana</option>
+                    <option value="estandar">Estándar</option>
+                </select>
+
+                <input type="text" id="powerbi-descripcion" name="descripcion" placeholder="Descripción breve (opcional)"
                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
-                <input type="url" name="embed_url" placeholder="Enlace de inserción de Power BI (Publish to Web)" required
+                <input type="url" id="powerbi-embed-url" name="embed_url" placeholder="Enlace de inserción de Power BI (Publish to Web)" required
                        class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
-                <div class="sm:col-span-2 flex items-center justify-between gap-2">
+                <div class="sm:col-span-2 flex items-center justify-between gap-2 flex-wrap">
                     <p class="text-[11px] text-slate-500">
                         En Power BI: Archivo → Publicar en la Web → copia el enlace de inserción.
+                        Ctrl/Cmd+clic para elegir varios roles.
                     </p>
-                    <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-4 py-2 rounded-xl">
-                        Guardar
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="document.getElementById('form-agregar-powerbi').classList.add('hidden')"
+                                class="text-xs font-bold text-slate-400 hover:text-slate-300 px-3 py-2">
+                            Cancelar
+                        </button>
+                        <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-4 py-2 rounded-xl">
+                            Guardar
+                        </button>
+                    </div>
                 </div>
             </form>
 
@@ -280,15 +299,21 @@
             {% else %}
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {% for t in tableros_powerbi %}
-                <button type="button" onclick="mostrarTableroPowerBI('{{ t.embed_url }}', '{{ t.titulo|e }}')"
-                        class="text-left bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-purple-500/50 rounded-2xl p-4 transition-all">
-                    <div class="flex items-center gap-2 mb-1.5">
-                        <i class="fa-solid fa-chart-pie text-purple-400 text-xs"></i>
-                        <span class="text-[11px] uppercase tracking-wide text-slate-400">{{ t.categoria }}</span>
-                    </div>
-                    <h4 class="text-sm font-bold text-white">{{ t.titulo }}</h4>
-                    {% if t.descripcion %}<p class="text-xs text-slate-400 mt-1">{{ t.descripcion }}</p>{% endif %}
-                </button>
+                <div class="relative group bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-purple-500/50 rounded-2xl p-4 transition-all">
+                    <button type="button" onclick="editarTableroPowerBI({{ t.id }}, '{{ t.titulo|e }}', '{{ (t.categoria or '')|e }}', '{{ (t.descripcion or '')|e }}', '{{ t.embed_url|e }}', '{{ t.roles_permitidos|e }}')"
+                            title="Editar" class="absolute top-3 right-3 text-slate-500 hover:text-purple-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i class="fa-solid fa-pen text-xs"></i>
+                    </button>
+                    <button type="button" onclick="mostrarTableroPowerBI('{{ t.embed_url }}', '{{ t.titulo|e }}')"
+                            class="text-left w-full pr-5">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <i class="fa-solid fa-chart-pie text-purple-400 text-xs"></i>
+                            <span class="text-[11px] uppercase tracking-wide text-slate-400">{{ t.categoria }}</span>
+                        </div>
+                        <h4 class="text-sm font-bold text-white">{{ t.titulo }}</h4>
+                        {% if t.descripcion %}<p class="text-xs text-slate-400 mt-1">{{ t.descripcion }}</p>{% endif %}
+                    </button>
+                </div>
                 {% endfor %}
             </div>
 
@@ -304,6 +329,8 @@
                             frameborder="0" allowfullscreen class="border-0"></iframe>
                 </div>
             </div>
+            {% endif %}
+
             <script>
                 function mostrarTableroPowerBI(url, titulo) {
                     document.getElementById('visor-powerbi-iframe').src = url;
@@ -311,8 +338,43 @@
                     document.getElementById('visor-powerbi').classList.remove('hidden');
                     document.getElementById('visor-powerbi').scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
+
+                function _resetSeleccionRoles(valores) {
+                    // Marca en el <select multiple> solo los roles recibidos (separados por coma).
+                    const seleccionados = (valores || 'admin').split(',');
+                    document.querySelectorAll('#powerbi-roles option').forEach(function (opt) {
+                        opt.selected = seleccionados.includes(opt.value);
+                    });
+                }
+
+                function abrirFormularioPowerBI() {
+                    // Modo "Nuevo tablero": limpia el formulario por si quedó algo de una edición anterior.
+                    document.getElementById('powerbi-form-titulo').textContent = 'Nuevo tablero';
+                    document.getElementById('powerbi-accion').value = 'agregar_powerbi';
+                    document.getElementById('powerbi-id').value = '';
+                    document.getElementById('powerbi-titulo').value = '';
+                    document.getElementById('powerbi-categoria').value = '';
+                    document.getElementById('powerbi-descripcion').value = '';
+                    document.getElementById('powerbi-embed-url').value = '';
+                    _resetSeleccionRoles('admin');
+                    document.getElementById('form-agregar-powerbi').classList.remove('hidden');
+                    document.getElementById('form-agregar-powerbi').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+
+                function editarTableroPowerBI(id, titulo, categoria, descripcion, embedUrl, rolesPermitidos) {
+                    // Reutiliza el mismo formulario de arriba, pero en modo edición (accion=editar_powerbi + tablero_id).
+                    document.getElementById('powerbi-form-titulo').textContent = 'Editar tablero';
+                    document.getElementById('powerbi-accion').value = 'editar_powerbi';
+                    document.getElementById('powerbi-id').value = id;
+                    document.getElementById('powerbi-titulo').value = titulo;
+                    document.getElementById('powerbi-categoria').value = categoria;
+                    document.getElementById('powerbi-descripcion').value = descripcion;
+                    document.getElementById('powerbi-embed-url').value = embedUrl;
+                    _resetSeleccionRoles(rolesPermitidos);
+                    document.getElementById('form-agregar-powerbi').classList.remove('hidden');
+                    document.getElementById('form-agregar-powerbi').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
             </script>
-            {% endif %}
         </div>
 
     </main>
