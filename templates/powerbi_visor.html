@@ -78,6 +78,18 @@
         </div>
         {% endif %}
 
+        <!-- 📐 Ancho ampliado del visor (pedido por Tomás, 19/09/2026, con capturas mostrando el
+             recuadro deseado): en monitores anchos, <main> (max-w-7xl, el ancho normal de lectura
+             del resto de la página — descripción, aviso de bloqueado) dejaba el tablero embebido
+             mucho más angosto que la ventana, con franjas en blanco a los lados. Misma técnica de
+             "full-bleed breakout" ya usada para las tablas de Usuarios/Inventario/Tickets (ver
+             templates/tickets_inventario.html): SOLO este contenedor se "escapa" del ancho de
+             <main> con width 100vw (relativo al viewport, no al padre) + left 50% + translate
+             -50%, que lo centra en la pantalla sin importar el ancho de <main>. Se usó
+             max-w-[1800px] (como templates/admin_db.html) en vez de los 1600px de las tablas,
+             porque aquí no hay ninguna otra razón para limitar el ancho — el reporte es el único
+             contenido de la página. -->
+        <div class="w-screen max-w-[1800px] relative left-1/2 -translate-x-1/2 px-4 sm:px-6 lg:px-8">
         <div class="relative w-full bg-slate-800 rounded-2xl shadow-md overflow-hidden border border-slate-700/60 h-[82vh]">
             <!-- 🔄 Overlay de carga (reportado por Tomás, 19/09/2026 - video adjunto: "un bug al
                  hacer uso de este boton buscar, no cargan de manera correcta los tableros aqui").
@@ -106,6 +118,7 @@
                 class="border-0"
                 onload="var ov = document.getElementById('overlay-carga-powerbi'); if (ov) { ov.style.opacity = '0'; setTimeout(function () { ov.style.display = 'none'; }, 300); }">
             </iframe>
+        </div>
         </div>
     </main>
 
