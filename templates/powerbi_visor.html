@@ -78,8 +78,24 @@
         </div>
         {% endif %}
 
-        <div class="w-full bg-slate-800 rounded-2xl shadow-md overflow-hidden border border-slate-700/60 h-[82vh]">
+        <div class="relative w-full bg-slate-800 rounded-2xl shadow-md overflow-hidden border border-slate-700/60 h-[82vh]">
+            <!-- 🔄 Overlay de carga (reportado por Tomás, 19/09/2026 - video adjunto: "un bug al
+                 hacer uso de este boton buscar, no cargan de manera correcta los tableros aqui").
+                 Verificación frame a frame del video: el tablero SÍ termina cargando bien tanto
+                 entrando desde una tarjeta de esta lista como desde un resultado del buscador
+                 global -el mismo destello ocurre en ambos casos-, pero apenas navega el navegador
+                 Power BI muestra un instante SU PROPIO ícono genérico sobre fondo blanco, sin
+                 ningún texto, antes de su "Cargando datos..." — y ese instante en blanco, sin
+                 marca ni mensaje, es lo que se ve/parece un tablero roto. Este overlay (con estilo
+                 propio de Arkiv) tapa justo ese instante y desaparece solo al evento 'load' del
+                 iframe (o a los 8s como red de seguridad, ver el script debajo del <main>) para
+                 que nunca se quede pegado si el embebido tardara más de lo normal. -->
+            <div id="overlay-carga-powerbi" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-800 transition-opacity duration-300">
+                <i class="fa-solid fa-chart-pie fa-spin text-3xl text-blue-400"></i>
+                <p class="text-sm text-slate-400">Cargando tablero, un momento...</p>
+            </div>
             <iframe
+                id="iframe-powerbi-visor"
                 title="{{ reporte.titulo }}"
                 width="100%"
                 height="100%"
@@ -87,10 +103,23 @@
                 frameborder="0"
                 allow="fullscreen"
                 allowfullscreen
-                class="border-0">
+                class="border-0"
+                onload="var ov = document.getElementById('overlay-carga-powerbi'); if (ov) { ov.style.opacity = '0'; setTimeout(function () { ov.style.display = 'none'; }, 300); }">
             </iframe>
         </div>
     </main>
+
+    <script>
+        // Red de seguridad del overlay de arriba: si el iframe nunca dispara 'load' (embebido
+        // caído, red muy lenta, etc.) no lo dejamos tapando el tablero para siempre.
+        setTimeout(function () {
+            var ov = document.getElementById('overlay-carga-powerbi');
+            if (ov && ov.style.display !== 'none') {
+                ov.style.opacity = '0';
+                setTimeout(function () { ov.style.display = 'none'; }, 300);
+            }
+        }, 8000);
+    </script>
 
     {% if es_admin %}
     <!-- MODAL EDITAR TABLERO -->
