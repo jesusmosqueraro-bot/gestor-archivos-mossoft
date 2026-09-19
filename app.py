@@ -17438,6 +17438,17 @@ def buscar_global_api():
     # 19/09/2026: también la ve quien tenga el permiso extra 'devoluciones' (ver
     # MODULOS_ASIGNABLES/certificacion_devolucion_required), típicamente una cuenta 'estandar'.
     puede_ver_devoluciones = rol in ROLES_CERTIFICACION_DEVOLUCION or usuario_tiene_modulo('devoluciones')
+    # 🔎 Recorrido completo del aplicativo (pedido de Tomás, 19/09/2026: "haz que los módulos
+    # que aun no están en el botón Buscar en Arkiv... este botón debe funcionar de manera
+    # transversal siempre para que todo cambio se pueda buscar aquí, adicional, incluye los
+    # tableros o presentaciones de Power Bi y todos los cambios en el sistema de Respaldo, en
+    # el Backup de la DB") — se agregan las 3 categorías que quedaban afuera: Indicadores/Power
+    # BI (usa exactamente la misma regla que listar_powerbi()/ver_powerbi()), Auditoría y Logs +
+    # Log de Correos Enviados (usa exactamente la misma regla que auditoria_o_extra_required), y
+    # Respaldos de Base de Datos (los archivos en sí, no una tabla — ver bloque más abajo).
+    tiene_extra_reportes = usuario_tiene_modulo('reportes')
+    tiene_extra_auditoria = usuario_tiene_modulo('auditoria')
+    es_superadmin = usuario == 'admin'
     # 🪪 Para las categorías "Inventario de Activos" y "Certificación de Devoluciones", cuyo
     # 'asignado_a'/'colaborador' es texto libre sin cédula propia — resuelve la cédula del
     # 'usuario' entre paréntesis si lo hay, para que buscar por cédula también funcione aquí
@@ -17812,6 +17823,105 @@ def buscar_global_api():
                     })
         except Exception as e:
             print(f"⚠️ Error buscando en certificación de devoluciones (buscador global): {e}")
+
+    # --- Indicadores / Power BI (tableros embebidos, ver listar_powerbi()/ver_powerbi()): sin
+    # tarjeta propia en Inicio hoy, así que para quien tenga el permiso extra 'reportes' este
+    # buscador es la ÚNICA forma de encontrar un tablero puntual sin memorizar la URL. Replica
+    # EXACTAMENTE la misma regla de visibilidad de ver_powerbi(): se ve si tiene el permiso
+    # extra 'reportes' O su rol está en 'roles_permitidos' de ese tablero puntual; y si está
+    # bloqueado (activo = FALSE) solo lo ve un admin (igual que el propio visor).
+    try:
+        cursor.execute("SELECT id, titulo, descripcion, categoria, roles_permitidos, activo FROM reportes_powerbi ORDER BY id DESC")
+        contador = 0
+        for (pb_id, pb_titulo, pb_descripcion, pb_categoria, pb_roles, pb_activo) in cursor.fetchall():
+            if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                break
+            activo_bool = bool(pb_activo) if pb_activo is not None else True
+            tiene_acceso_reporte = tiene_extra_reportes or rol in (pb_roles or '').split(',')
+            if not tiene_acceso_reporte or (not activo_bool and not es_admin):
+                continue
+            if q_norm in normalizar(f"{pb_titulo} {pb_descripcion or ''} {pb_categoria or ''}"):
+                contador += 1
+                resultados.append({
+                    'categoria': 'Indicadores / Power BI',
+                    'titulo': pb_titulo,
+                    'subtitulo': (pb_categoria or 'General') + (' · Bloqueado' if not activo_bool else ''),
+                    'url': url_for('ver_powerbi', id=pb_id)
+                })
+    except Exception as e:
+        print(f"⚠️ Error buscando en indicadores de Power BI (buscador global): {e}")
+
+    # --- Auditoría y Logs + Log de Correos Enviados (misma regla que auditoria_o_extra_required:
+    # admin/agente por rol, o el permiso extra 'auditoria'). Esto también cubre, sin ningún
+    # código adicional, "todos los cambios en el sistema de Respaldo": cada acción de Respaldos
+    # (generar, eliminar, cambiar la frecuencia automática) ya queda registrada como una fila más
+    # de 'logs' vía registrar_log(), así que aparece aquí igual que cualquier otra acción
+    # auditada. LIMIT 500 en SQL, igual que Geolocalización y Chat, para no escanear todo el
+    # historial en cada tecla. ---
+    if tiene_extra_auditoria:
+        try:
+            nombres_logs = _mapa_nombres_usuarios()
+            cursor.execute(
+                "SELECT l.usuario, l.accion, l.detalles, l.fecha FROM logs l ORDER BY l.id DESC LIMIT 500"
+            )
+            contador = 0
+            for (lg_usuario, lg_accion, lg_detalles, lg_fecha) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                nombre_lg = _nombre_para_mostrar(lg_usuario, nombres_logs)
+                if q_norm in normalizar(f"{lg_accion} {lg_detalles or ''} {lg_usuario or ''} {nombre_lg}"):
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Auditoría y Logs',
+                        'titulo': lg_accion,
+                        'subtitulo': f"{nombre_lg} · {lg_fecha}",
+                        'url': url_for('ver_logs', q=lg_accion)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en logs de auditoría (buscador global): {e}")
+
+        try:
+            cursor.execute(
+                "SELECT destinatario, asunto, tipo, estado, fecha FROM correos_log ORDER BY id DESC LIMIT 500"
+            )
+            contador = 0
+            for (cl_destinatario, cl_asunto, cl_tipo, cl_estado, cl_fecha) in cursor.fetchall():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if q_norm in normalizar(f"{cl_destinatario} {cl_asunto or ''} {cl_tipo or ''} {cl_estado or ''}"):
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Log de Correos Enviados',
+                        'titulo': cl_asunto or '(Sin asunto)',
+                        'subtitulo': f"{cl_destinatario} · {cl_estado}",
+                        'url': url_for('ver_logs_correos', q=cl_destinatario)
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en el log de correos enviados (buscador global): {e}")
+
+    # --- Respaldos de Base de Datos (solo la cuenta super-admin LITERAL 'admin', igual que
+    # ver_respaldos()/superadmin_required): no hay una tabla en la base de datos con el
+    # historial de respaldos — son archivos .json en disco (ver _listar_respaldos()) — así que
+    # esta categoría busca sobre esa misma lista de archivos en vez de una consulta SQL. Cubre
+    # "el Backup de la DB" en sí (encontrar un respaldo puntual por nombre/fecha/tipo); los
+    # CAMBIOS al sistema de Respaldo (generar, eliminar, cambiar frecuencia) ya se cubren arriba,
+    # en "Auditoría y Logs", porque esas acciones quedan registradas ahí. ---
+    if es_superadmin:
+        try:
+            contador = 0
+            for respaldo in _listar_respaldos():
+                if contador >= LIMITE_RESULTADOS_POR_CATEGORIA_BUSCADOR:
+                    break
+                if q_norm in normalizar(f"{respaldo['nombre']} {respaldo['tipo']} {respaldo['fecha']}"):
+                    contador += 1
+                    resultados.append({
+                        'categoria': 'Respaldos de Base de Datos',
+                        'titulo': respaldo['nombre'],
+                        'subtitulo': f"{respaldo['tipo']} · {respaldo['fecha']}",
+                        'url': url_for('ver_respaldos')
+                    })
+        except Exception as e:
+            print(f"⚠️ Error buscando en respaldos de base de datos (buscador global): {e}")
 
     # --- Usuarios (solo rol admin — y la cuenta 'admin' literal se oculta al resto de admins) ---
     if es_admin:
