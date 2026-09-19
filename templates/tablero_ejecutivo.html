@@ -299,22 +299,63 @@
             {% else %}
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {% for t in tableros_powerbi %}
-                <div class="relative group bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-purple-500/50 rounded-2xl p-4 transition-all">
-                    <button type="button" onclick="editarTableroPowerBI({{ t.id }}, '{{ t.titulo|e }}', '{{ (t.categoria or '')|e }}', '{{ (t.descripcion or '')|e }}', '{{ t.embed_url|e }}', '{{ t.roles_permitidos|e }}')"
-                            title="Editar" class="absolute top-3 right-3 text-slate-500 hover:text-purple-300 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <i class="fa-solid fa-pen text-xs"></i>
-                    </button>
+                <div class="relative bg-slate-900/60 hover:bg-slate-900 border {% if not t.activo %}border-amber-500/40{% else %}border-slate-700/60 hover:border-purple-500/50{% endif %} rounded-2xl p-4 transition-all">
+                    <!-- 🛠️ Controles SIEMPRE visibles (pedido por Tomás, 19/09/2026: "no visualizo
+                         los botones editar" — antes el lápiz solo aparecía al pasar el mouse por
+                         encima de la tarjeta, con opacity-0/group-hover, y era fácil no notarlo).
+                         Toda esta página ya es @admin_required, no hace falta chequear rol de nuevo. -->
+                    <div class="absolute top-3 right-3 flex items-center gap-2.5 bg-slate-950/40 rounded-lg px-1.5 py-1">
+                        <button type="button" onclick="editarTableroPowerBI({{ t.id }}, '{{ t.titulo|e }}', '{{ (t.categoria or '')|e }}', '{{ (t.descripcion or '')|e }}', '{{ t.embed_url|e }}', '{{ t.roles_permitidos|e }}')"
+                                title="Editar" class="text-slate-300 hover:text-purple-300">
+                            <i class="fa-solid fa-pen text-xs"></i>
+                        </button>
+                        <form method="POST" action="{{ url_for('alternar_powerbi', id=t.id) }}" class="inline leading-none">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="next" value="tablero_ejecutivo"/>
+                            {% if t.activo %}
+                            <button type="submit" title="Bloquear tablero" class="text-slate-300 hover:text-amber-300"><i class="fa-solid fa-lock text-xs"></i></button>
+                            {% else %}
+                            <button type="submit" title="Desbloquear tablero" class="text-slate-300 hover:text-emerald-300"><i class="fa-solid fa-lock-open text-xs"></i></button>
+                            {% endif %}
+                        </form>
+                        <button type="button" onclick="confirmarEliminarPowerBI({{ t.id }}, '{{ t.titulo|e }}')"
+                                title="Eliminar" class="text-slate-300 hover:text-rose-300">
+                            <i class="fa-solid fa-trash text-xs"></i>
+                        </button>
+                    </div>
                     <button type="button" onclick="mostrarTableroPowerBI('{{ t.embed_url }}', '{{ t.titulo|e }}')"
-                            class="text-left w-full pr-5">
-                        <div class="flex items-center gap-2 mb-1.5">
+                            class="text-left w-full pr-24">
+                        <div class="flex items-center gap-2 mb-1.5 flex-wrap">
                             <i class="fa-solid fa-chart-pie text-purple-400 text-xs"></i>
                             <span class="text-[11px] uppercase tracking-wide text-slate-400">{{ t.categoria }}</span>
+                            {% if not t.activo %}
+                            <span class="text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded-full px-1.5 py-0.5">Bloqueado</span>
+                            {% endif %}
                         </div>
                         <h4 class="text-sm font-bold text-white">{{ t.titulo }}</h4>
                         {% if t.descripcion %}<p class="text-xs text-slate-400 mt-1">{{ t.descripcion }}</p>{% endif %}
                     </button>
                 </div>
                 {% endfor %}
+            </div>
+
+            <!-- MODAL CONFIRMAR ELIMINAR TABLERO -->
+            <div id="modal-eliminar-tablero" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+                <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
+                    <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                        <h3 class="text-base font-bold text-white">Eliminar tablero</h3>
+                        <button onclick="cerrarModalEliminarPowerBI()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <p class="text-sm text-slate-300 mb-4">
+                        ¿Eliminar <span id="eliminar-tablero-titulo" class="font-bold text-white"></span> definitivamente? Esta acción no se puede deshacer.
+                    </p>
+                    <form id="form-eliminar-tablero" method="POST" action="" class="flex justify-end gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="hidden" name="next" value="tablero_ejecutivo"/>
+                        <button type="button" onclick="cerrarModalEliminarPowerBI()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                        <button type="submit" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold shadow-lg shadow-rose-500/25">Sí, eliminar</button>
+                    </form>
+                </div>
             </div>
 
             <!-- Visor embebido: se rellena al hacer clic en un tablero de arriba -->
@@ -373,6 +414,19 @@
                     _resetSeleccionRoles(rolesPermitidos);
                     document.getElementById('form-agregar-powerbi').classList.remove('hidden');
                     document.getElementById('form-agregar-powerbi').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+
+                function confirmarEliminarPowerBI(id, titulo) {
+                    document.getElementById('eliminar-tablero-titulo').textContent = '"' + titulo + '"';
+                    document.getElementById('form-eliminar-tablero').action = '/indicadores/powerbi/' + id + '/eliminar';
+                    var modal = document.getElementById('modal-eliminar-tablero');
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                }
+                function cerrarModalEliminarPowerBI() {
+                    var modal = document.getElementById('modal-eliminar-tablero');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
                 }
             </script>
         </div>
