@@ -154,6 +154,15 @@
             </button>
         </div>
 
+        <!-- 📐 Ancho ampliado SOLO de la tabla (pedido por Tomás, 19/09/2026: "que se pueda
+             visualizar mejor... algo como esta la tabla de los tickets"). Misma técnica de
+             "full-bleed breakout" que ya usa la tabla de Tickets (ver templates/tickets.html):
+             <main> se queda en max-w-7xl (ancho normal de lectura para el resto de la página —
+             encabezado, filtros), y SOLO el contenedor de la tabla se "escapa" de ese ancho con
+             width 100vw (relativo al viewport, no al padre) + left 50% + translate -50%, que la
+             centra en la pantalla sin importar el ancho de <main>. max-w-[1600px] limita qué
+             tanto crece en monitores enormes. -->
+        <div class="w-screen max-w-[1600px] relative left-1/2 -translate-x-1/2 px-4 sm:px-6 lg:px-8">
         <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-xs">
@@ -327,6 +336,7 @@
                     </tbody>
                 </table>
             </div>
+        </div>
         </div>
     </main>
 
