@@ -318,7 +318,16 @@
                         <tr class="hover:bg-slate-800/40 transition-colors">
                             <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}{% if a.es_biomedico %} <i class="fa-solid fa-kit-medical text-rose-400 ml-1" title="Activo biomédico"></i>{% elif a.categoria_especial %} <i class="fa-solid fa-hard-hat text-amber-400 ml-1" title="{{ {'sst': 'Insumo de SST', 'ambiental': 'Insumo Ambiental', 'laboratorio': 'Insumo de Laboratorio Clínico'}.get(a.categoria_especial, 'Categoría especial') }}"></i>{% endif %}</td>
                             <td class="py-3.5 px-3">{{ a.tipo_activo }}</td>
-                            <td class="py-3.5 px-3 text-slate-400">{{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}</td>
+                            <td class="py-3.5 px-3 text-slate-400">
+                                {{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}
+                                <!-- 💻 Especificaciones técnicas (RAM/disco), si se cargaron —
+                                     ver comentario en el formulario de Nuevo/Editar Activo. -->
+                                {% if a.ram_gb or a.disco_gb %}
+                                <div class="text-[10px] text-slate-500 mt-0.5 whitespace-nowrap">
+                                    {% if a.ram_gb %}RAM {{ a.ram_gb }}GB{% if a.tipo_ram %} {{ a.tipo_ram }}{% endif %}{% endif %}{% if a.ram_gb and a.disco_gb %} · {% endif %}{% if a.disco_gb %}{{ a.tipo_disco or 'Disco' }} {{ a.disco_gb }}GB{% endif %}
+                                </div>
+                                {% endif %}
+                            </td>
                             <td class="py-3.5 px-3 font-mono text-slate-500">{{ a.numero_serie or '-' }}</td>
                             <td class="py-3.5 px-3">
                                 {% if a.estado == 'Disponible' %}
@@ -472,6 +481,46 @@
                         <div>
                             <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
                             <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+
+                        <!-- 💻 Especificaciones técnicas del equipo (pedido por Tomás, 19/09/2026):
+                             RAM/disco quedan como número + una lista de sugerencias (datalist) para
+                             no forzar valores fijos, ya que un equipo puede traer cualquier
+                             cantidad de GB; tipo de RAM y tipo de disco sí son listas cerradas
+                             (select) porque solo existen unos pocos valores válidos — ver
+                             TIPOS_RAM_ACTIVO/TIPOS_DISCO_ACTIVO en app.py. Todo opcional. -->
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <p class="text-slate-400 font-bold mb-2 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-microchip mr-1 text-orange-400"></i>Especificaciones técnicas (opcional)</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">RAM (GB)</label>
+                                    <input type="number" name="ram_gb" id="input-activo-ram-gb" min="1" step="1" list="lista-ram-gb" placeholder="Ej: 16" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <datalist id="lista-ram-gb">
+                                        <option value="4"><option value="8"><option value="12"><option value="16"><option value="32"><option value="64">
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Tipo de RAM</label>
+                                    <select name="tipo_ram" id="input-activo-tipo-ram" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="">Sin especificar</option>
+                                        {% for tr in ['DDR3', 'DDR4', 'DDR5'] %}<option value="{{ tr }}">{{ tr }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Disco duro (GB)</label>
+                                    <input type="number" name="disco_gb" id="input-activo-disco-gb" min="1" step="1" list="lista-disco-gb" placeholder="Ej: 512" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <datalist id="lista-disco-gb">
+                                        <option value="120"><option value="128"><option value="240"><option value="256"><option value="480"><option value="512"><option value="1000"><option value="2000">
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Tipo de disco</label>
+                                    <select name="tipo_disco" id="input-activo-tipo-disco" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="">Sin especificar</option>
+                                        {% for td in ['SSD', 'HDD'] %}<option value="{{ td }}">{{ td }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- 📐 Sede/Área/Proveedor, Costo y Biomédico se movieron de la columna
@@ -1046,6 +1095,10 @@
             document.getElementById('input-activo-marca').value = '';
             document.getElementById('input-activo-modelo').value = '';
             document.getElementById('input-activo-serie').value = '';
+            document.getElementById('input-activo-ram-gb').value = '';
+            document.getElementById('input-activo-tipo-ram').value = '';
+            document.getElementById('input-activo-disco-gb').value = '';
+            document.getElementById('input-activo-tipo-disco').value = '';
             document.getElementById('input-activo-asignado').value = '';
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
@@ -1088,6 +1141,10 @@
             document.getElementById('input-activo-marca').value = activo.marca || '';
             document.getElementById('input-activo-modelo').value = activo.modelo || '';
             document.getElementById('input-activo-serie').value = activo.numero_serie || '';
+            document.getElementById('input-activo-ram-gb').value = activo.ram_gb != null ? activo.ram_gb : '';
+            document.getElementById('input-activo-tipo-ram').value = activo.tipo_ram || '';
+            document.getElementById('input-activo-disco-gb').value = activo.disco_gb != null ? activo.disco_gb : '';
+            document.getElementById('input-activo-tipo-disco').value = activo.tipo_disco || '';
             document.getElementById('input-activo-asignado').value = activo.asignado_a || '';
             document.getElementById('input-activo-cedula-buscar').value = '';
             document.getElementById('mensaje-busqueda-cedula').textContent = '';
