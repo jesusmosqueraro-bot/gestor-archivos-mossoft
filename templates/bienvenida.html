@@ -223,8 +223,10 @@
                 </div>
             </a>
 
-            {% if rol in ['admin', 'agente', 'gestion_humana'] %}
-            <!-- 3.5 Certificación de Devolución de Activos (Admin/Agente/Gestión Humana) -->
+            {% if rol in ['admin', 'agente', 'gestion_humana'] or usuario_tiene_modulo('devoluciones') %}
+            <!-- 3.5 Certificación de Devolución de Activos (Admin/Agente/Gestión Humana por su
+            rol; el resto solo si se le concedió el módulo 'devoluciones' como permiso extra
+            desde Gestión de Usuarios — pedido de Tomás, 19/09/2026, ver MODULOS_ASIGNABLES). -->
             <a href="{{ url_for('certificacion_devoluciones') }}" class="group card-acento-teal bg-slate-900/80 border border-slate-800 hover:border-teal-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
