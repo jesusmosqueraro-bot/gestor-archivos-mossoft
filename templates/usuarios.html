@@ -174,6 +174,13 @@
                             <th class="px-4 py-3">Correo Electrónico</th>
                             <th class="px-4 py-3">Teléfono</th>
                             <th class="px-4 py-3">Rol / Estado</th>
+                            {# 🧩 Columna "Módulos" (pedido por Tomás, 19/09/2026: "aun no veo que permisos o
+                               modulos tiene cada usuario creado") — de un vistazo, sin abrir el modal de
+                               edición: admin/agente ven "Todos (rol)" porque ROLES_CON_ACCESO_OPERATIVO ya les
+                               da acceso completo (por eso su checklist de "Acceso extra a módulos" se ve
+                               vacío al editar — no es un bug, ese checklist es solo para módulos EXTRA sobre
+                               el rol); el resto ve un ícono por cada módulo extra que sí tenga concedido. #}
+                            <th class="px-4 py-3">Módulos</th>
                             <th class="px-4 py-3 text-right">Acciones</th>
                         </tr>
                     </thead>
@@ -215,6 +222,29 @@
                                     {% endif %}
                                 </div>
                             </td>
+                            <td class="px-4 py-3">
+                                {% set tiene_acceso_por_rol = u[3] in ('admin', 'agente') %}
+                                {% if tiene_acceso_por_rol %}
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" title="Acceso completo a todos los módulos operativos por su Rol de Acceso — no necesita permisos extra">
+                                    <i class="fa-solid fa-circle-check"></i> Todos (rol)
+                                </span>
+                                {% else %}
+                                    {% set extra_de_esta_fila = modulos_extra_desde_texto(u[12]) %}
+                                    {% if extra_de_esta_fila %}
+                                    <div class="flex flex-wrap gap-1 max-w-[140px]">
+                                        {% for m in MODULOS_ASIGNABLES %}
+                                            {% if m.clave in extra_de_esta_fila %}
+                                            <span class="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="{{ m.etiqueta }}">
+                                                <i class="fa-solid {{ m.icono }}"></i>
+                                            </span>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                    {% else %}
+                                    <span class="text-slate-600 italic text-[10px]">Sin extras</span>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
                             <td class="px-4 py-3 text-right">
                                 {# 🛡️ Se amplió de "u[3] == 'admin'" a "in ('admin', 'agente')": ahora que los
                                    agentes también entran a esta vista, la fila de OTRA cuenta admin/agente
@@ -226,6 +256,16 @@
                                 {% set es_cuenta_protegida = (u[3] in ('admin', 'agente') and u[1] != session.get('username') and session.get('username') != 'admin') %}
                                 {% set es_admin_sesion = (session.get('rol') == 'admin') %}
                                 <div class="flex items-center justify-end gap-2">
+                                    {# 👁️ "Ver Permisos" (pedido por Tomás, 19/09/2026): a diferencia del lápiz de
+                                       Editar, este botón es de solo lectura y queda visible para cualquiera que
+                                       entra a esta vista (admin y agente por igual, sin importar si la fila es
+                                       una cuenta protegida) — responde exactamente a "ver que permisos o modulos
+                                       tiene cada usuario creado", módulo por módulo, sin tener que abrir el
+                                       modal de edición ni adivinar por qué el checklist de un admin/agente se ve
+                                       vacío. #}
+                                    <button onclick='abrirModalVerPermisos({{ u[1] | tojson }}, {{ (u[5] or "") | tojson }}, {{ u[3] | tojson }}, {{ (u[12] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-violet-400 transition-colors" title="Ver permisos y módulos">
+                                        <i class="fa-solid fa-shield-halved"></i>
+                                    </button>
                                     {% if es_cuenta_protegida %}
                                     <span class="p-1.5 text-slate-700" title="Solo el super-admin puede modificar a otro administrador o agente">
                                         <i class="fa-solid fa-lock"></i>
@@ -374,6 +414,35 @@
                     <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Cargar usuarios
                 </button>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal Ver Permisos (solo lectura) — pedido por Tomás, 19/09/2026: "aun no veo que permisos
+         o modulos tiene cada usuario creado". Muestra, módulo por módulo (MODULOS_ASIGNABLES), si
+         esta cuenta puede entrar y por qué: por su Rol de Acceso (admin/agente ya ven todo, ver
+         ROLES_CON_ACCESO_OPERATIVO) o por un permiso extra puntual concedido desde "Editar
+         Usuario". No es una copia 1:1 del árbol jerárquico de otro sistema (Enkube/kubApp) que
+         Tomás mostró como ejemplo — Arkiv no maneja sub-permisos dentro de cada módulo hoy, así
+         que la lista queda plana a propósito, pero en un solo lugar dedicado y sin adivinar. -->
+    <div id="modalVerPermisos" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-start justify-center p-4 overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative my-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-violet-400"></i>
+                    Permisos de <span id="permisos-nombre-usuario" class="text-violet-300"></span>
+                </h3>
+                <button onclick="cerrarModalVerPermisos()" class="text-slate-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div id="permisos-banner-rol" class="hidden mb-4 px-3.5 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold flex items-start gap-2">
+                <i class="fa-solid fa-circle-info mt-0.5"></i>
+                <span>Esta cuenta tiene acceso completo a todos los módulos operativos por su Rol de Acceso — por eso no necesita (ni tiene marcado) ningún permiso extra puntual.</span>
+            </div>
+
+            <p class="text-[10px] text-slate-500 mb-3">Módulo por módulo, si esta cuenta puede entrar y por qué:</p>
+            <ul id="permisos-lista-modulos" class="space-y-1.5"></ul>
         </div>
     </div>
 
@@ -876,6 +945,40 @@
             document.getElementById('modalEditarUsuario').classList.remove('hidden');
         }
         function cerrarModalEditarUsuario() { document.getElementById('modalEditarUsuario').classList.add('hidden'); }
+
+        // 👁️ "Ver Permisos" (pedido por Tomás, 19/09/2026: "aun no veo que permisos o modulos
+        // tiene cada usuario creado"). CATALOGO_MODULOS_ASIGNABLES es el mismo MODULOS_ASIGNABLES
+        // de app.py, volcado una sola vez aquí (no depende de ningún usuario en particular) para
+        // no tener que ir al servidor cada vez que se abre el modal de una fila distinta.
+        const CATALOGO_MODULOS_ASIGNABLES = {{ MODULOS_ASIGNABLES | tojson }};
+        const ROLES_CON_ACCESO_OPERATIVO_JS = ['admin', 'agente'];
+
+        function abrirModalVerPermisos(username, nombre, rol, modulosExtraTexto) {
+            document.getElementById('permisos-nombre-usuario').textContent = nombre || username;
+            var tieneAccesoPorRol = ROLES_CON_ACCESO_OPERATIVO_JS.indexOf(rol) !== -1;
+            document.getElementById('permisos-banner-rol').classList.toggle('hidden', !tieneAccesoPorRol);
+            var clavesExtra = (modulosExtraTexto || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);
+            var lista = document.getElementById('permisos-lista-modulos');
+            lista.innerHTML = '';
+            CATALOGO_MODULOS_ASIGNABLES.forEach(function(m) {
+                var tienePermisoExtra = clavesExtra.indexOf(m.clave) !== -1;
+                var concedido = tieneAccesoPorRol || tienePermisoExtra;
+                var li = document.createElement('li');
+                li.className = 'flex items-center gap-2.5 text-xs px-3 py-2 rounded-xl border ' +
+                    (concedido ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-500');
+                var motivo = '';
+                if (tieneAccesoPorRol) { motivo = 'por rol'; }
+                else if (tienePermisoExtra) { motivo = 'permiso extra'; }
+                li.innerHTML =
+                    '<i class="fa-solid ' + (concedido ? 'fa-check text-emerald-400' : 'fa-xmark text-slate-700') + ' w-4 text-center"></i>' +
+                    '<i class="fa-solid ' + m.icono + ' text-slate-400 w-4 text-center"></i>' +
+                    '<span class="flex-1">' + m.etiqueta + '</span>' +
+                    (motivo ? '<span class="text-[9px] uppercase tracking-wider text-slate-500">' + motivo + '</span>' : '');
+                lista.appendChild(li);
+            });
+            document.getElementById('modalVerPermisos').classList.remove('hidden');
+        }
+        function cerrarModalVerPermisos() { document.getElementById('modalVerPermisos').classList.add('hidden'); }
 
         // 🔎 Filtro rápido por cédula/nombre + especialidad/rol/estado sobre la tabla ya cargada
         // — no hace falta ir al servidor, el listado completo ya está en la página, así que se
