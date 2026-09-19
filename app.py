@@ -1974,6 +1974,14 @@ def init_db():
             except Exception:
                 pass
 
+            # 🖼️ Ícono subido para un Tipo de activo. Ver comentario equivalente en la rama de
+            # Postgres (junto a MODULOS_ASIGNABLES/tipos_activo_catalogo).
+            try:
+                cursor.execute("ALTER TABLE tipos_activo_catalogo ADD COLUMN icono_url TEXT;")
+                conn.commit()
+            except Exception:
+                pass
+
         # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
         # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
         # consulta. Con pocos cientos de filas eso no se nota, pero 'logs', 'tickets' y
@@ -6464,6 +6472,39 @@ def _subir_foto_perfil(file):
     except Exception as e:
         print(f"⚠️ Error subiendo foto de perfil: {e}")
         return None, 'No se pudo subir la imagen. Intenta de nuevo.'
+
+
+# 🖼️ ÍCONO PERSONALIZADO PARA UN TIPO DE ACTIVO (Inventario) — pedido por Tomás, 19/09/2026:
+# "que [el botón para agregar Tipo] a su vez, pueda cargar iconos relacionados cuando se
+# agregue". Alternativa a elegir un ícono de la lista fija ICONOS_TIPO_ACTIVO (ver
+# crear_tipo_activo_catalogo): mismos formatos/tamaño máximo que la foto de perfil, pero sin
+# recorte a rostro (es un ícono/logo, no una cara) — 'fit' con relleno transparente-safe a
+# 128×128, suficiente para un ícono pero liviano.
+TAMANO_MAXIMO_ICONO_TIPO_ACTIVO = 2 * 1024 * 1024  # 2 MB — de sobra para un ícono/logo.
+
+def _subir_icono_tipo_activo(file):
+    """Sube el ícono de un Tipo de activo a Cloudinary. Devuelve (url, None) si todo sale bien,
+    (None, None) si no se adjuntó ningún archivo (el ícono es opcional — se sigue pudiendo elegir
+    uno de Font Awesome en su lugar), o (None, mensaje_error) si el archivo no es una imagen
+    válida, supera el tamaño máximo, o falla la subida."""
+    if not file or not file.filename:
+        return None, None
+    if '.' not in file.filename or file.filename.rsplit('.', 1)[1].lower() not in EXTENSIONES_FOTO_PERFIL:
+        return None, 'Formato de imagen no permitido. Usa JPG, PNG, GIF o WEBP.'
+    file.stream.seek(0, os.SEEK_END)
+    tamano = file.stream.tell()
+    file.stream.seek(0)
+    if tamano > TAMANO_MAXIMO_ICONO_TIPO_ACTIVO:
+        return None, 'La imagen no puede superar 2 MB.'
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file, resource_type="image", use_filename=True, unique_filename=True, timeout=60,
+            transformation=[{'width': 128, 'height': 128, 'crop': 'fit'}]
+        )
+        return upload_result['secure_url'], None
+    except Exception as e:
+        print(f"⚠️ Error subiendo ícono de tipo de activo: {e}")
+        return None, 'No se pudo subir el ícono. Intenta de nuevo.'
 
 
 # ✍️ FIRMA DIGITAL (dibujada a mano o subida como imagen, ver static/js/firma-digital.js) — se
@@ -11843,27 +11884,68 @@ def reemplazar_activo(activo_id):
 
 # 🗂️ CATÁLOGO DE TIPOS DE ACTIVO (administrable desde el modal "Tipos de activo" de
 # Inventario — key, etiqueta visible, ícono y orden). Reemplaza la lista fija TIPOS_ACTIVO.
+#
+# 🖼️ Ícono subido (pedido por Tomás, 19/09/2026): 'icono_archivo' es opcional — si llega y es una
+# imagen válida, se sube a Cloudinary y su URL (icono_url) gana sobre el ícono de Font Awesome
+# elegido en 'icono' en cualquier lugar que muestre el tipo; si no llega ningún archivo (o falla
+# la subida), el tipo se crea igual con el ícono de Font Awesome como siempre.
+#
+# 🆕 Alta rápida sin salir del formulario "Nuevo/Editar Activo" (pedido por Tomás, 19/09/2026: un
+# botón "+" junto al campo Tipo, para no perder lo ya escrito en ese formulario yendo hasta el
+# modal completo de Tipos de activo): si 'origen' viene en 'rapido', esta misma ruta responde en
+# JSON en vez de redirigir — ver el fetch() en tickets_inventario.html.
 @app.route('/tickets/inventario/tipos/crear', methods=['POST'])
 @login_required
 @admin_required
 def crear_tipo_activo_catalogo():
+    origen_rapido = request.form.get('origen') == 'rapido'
     key = re.sub(r'[^A-Z0-9_]', '', request.form.get('key', '').strip().upper())
     etiqueta = request.form.get('etiqueta', '').strip()
     icono = (request.form.get('icono', '').strip() or 'box')
-    if key and etiqueta:
-        conn, db_type = get_db()
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_activo_catalogo")
-            siguiente_orden = cursor.fetchone()[0] + 1
-            q = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (%s, %s, %s, %s)" if db_type == 'postgres' else "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden) VALUES (?, ?, ?, ?)"
-            cursor.execute(q, (key, etiqueta, icono, siguiente_orden))
-            conn.commit()
-            registrar_log(session.get('username'), "Catálogo de Tipos de Activo", f"Se agregó el tipo '{etiqueta}' ({key})")
-        except Exception as e:
-            conn.rollback()
-            print(f"⚠️ Error agregando tipo de activo '{etiqueta}': {e}")
+
+    if not key or not etiqueta:
+        if origen_rapido:
+            return jsonify({'success': False, 'error': 'La key y la etiqueta son obligatorias.'}), 400
+        return redirect(url_for('ver_inventario'))
+
+    icono_url, error_icono = _subir_icono_tipo_activo(request.files.get('icono_archivo'))
+    if error_icono:
+        if origen_rapido:
+            return jsonify({'success': False, 'error': error_icono}), 400
+        flash(f"El tipo no se pudo crear: {error_icono}", "error")
+        return redirect(url_for('ver_inventario'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    tipo_id = None
+    try:
+        cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_activo_catalogo")
+        siguiente_orden = cursor.fetchone()[0] + 1
+        if db_type == 'postgres':
+            q = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden, icono_url) VALUES (%s, %s, %s, %s, %s) RETURNING id"
+            cursor.execute(q, (key, etiqueta, icono, siguiente_orden, icono_url))
+            tipo_id = cursor.fetchone()[0]
+        else:
+            q = "INSERT INTO tipos_activo_catalogo (key, etiqueta, icono, orden, icono_url) VALUES (?, ?, ?, ?, ?)"
+            cursor.execute(q, (key, etiqueta, icono, siguiente_orden, icono_url))
+            tipo_id = cursor.lastrowid
+        conn.commit()
+        registrar_log(session.get('username'), "Catálogo de Tipos de Activo", f"Se agregó el tipo '{etiqueta}' ({key})" + (" con ícono personalizado" if icono_url else ""))
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠️ Error agregando tipo de activo '{etiqueta}': {e}")
         conn.close()
+        if origen_rapido:
+            return jsonify({'success': False, 'error': 'No se pudo guardar el tipo. Puede que la key ya exista.'}), 400
+        flash("No se pudo guardar el tipo. Puede que la key ya exista.", "error")
+        return redirect(url_for('ver_inventario'))
+    conn.close()
+
+    if origen_rapido:
+        return jsonify({
+            'success': True, 'id': tipo_id, 'key': key, 'etiqueta': etiqueta,
+            'icono': icono, 'icono_url': icono_url,
+        })
     return redirect(url_for('ver_inventario'))
 
 
@@ -14689,13 +14771,16 @@ def _catalogo_tipos_activo_activos():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, key, etiqueta, icono, orden FROM tipos_activo_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, etiqueta ASC")
+        cursor.execute("SELECT id, key, etiqueta, icono, orden, icono_url FROM tipos_activo_catalogo WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, etiqueta ASC")
         filas = cursor.fetchall()
     except Exception as e:
         print(f"⚠️ Error listando catálogo de tipos de activo: {e}")
         filas = []
     conn.close()
-    return [{'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0} for f in filas]
+    return [
+        {'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0, 'icono_url': f[5] if len(f) > 5 else None}
+        for f in filas
+    ]
 
 
 def _catalogo_tipos_activo_todos():
@@ -14704,13 +14789,16 @@ def _catalogo_tipos_activo_todos():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, key, etiqueta, icono, orden, estado FROM tipos_activo_catalogo ORDER BY orden ASC, etiqueta ASC")
+        cursor.execute("SELECT id, key, etiqueta, icono, orden, estado, icono_url FROM tipos_activo_catalogo ORDER BY orden ASC, etiqueta ASC")
         filas = cursor.fetchall()
     except Exception as e:
         print(f"⚠️ Error listando catálogo de tipos de activo: {e}")
         filas = []
     conn.close()
-    return [{'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0, 'estado': f[5] or 'activo'} for f in filas]
+    return [
+        {'id': f[0], 'key': f[1], 'etiqueta': f[2], 'icono': f[3] or 'box', 'orden': f[4] or 0, 'estado': f[5] or 'activo', 'icono_url': f[6] if len(f) > 6 else None}
+        for f in filas
+    ]
 
 
 @app.route('/credenciales/colaboradores')
