@@ -548,3 +548,63 @@ def test_busqueda_global_incluye_devoluciones_con_el_permiso_extra(client, app, 
 
     categorias = {res['categoria'] for res in r.get_json()['resultados']}
     assert 'Certificación de Devoluciones' in categorias
+
+
+# ---------------------------------------------------------------------------
+# 8) Visibilidad en Gestión de Usuarios (pedido por Tomás, 19/09/2026: mandó capturas de
+#    "Modificar Usuario" para una cuenta real con rol Agente, con TODAS las casillas de "Acceso
+#    extra a módulos" sin marcar, y dijo "aun no veo que permisos o modulos tiene cada usuario
+#    creado"). Investigación: no es un bug de guardado — un Agente ya entra a todo por
+#    ROLES_CON_ACCESO_OPERATIVO (ver usuario_tiene_modulo), así que ese checklist de EXTRAS queda
+#    vacío a propósito. Lo que hacía falta era mostrarlo explícito: columna "Módulos" en la tabla
+#    + modal "Ver Permisos" por fila, ambos con el mismo mensaje "Todos (rol)" / "por rol".
+# ---------------------------------------------------------------------------
+
+def _guardar_modulos_extra(app, usuario, texto):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = "UPDATE usuarios SET modulos_extra = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET modulos_extra = ? WHERE usuario = ?"
+    cur.execute(q, (texto, usuario))
+    conn.commit()
+    conn.close()
+
+
+def test_tabla_usuarios_muestra_todos_rol_para_agente_aunque_no_tenga_extras(admin_session, app, crear_usuario):
+    """El caso real que reportó Tomás (cuenta rol Agente, sin ningún permiso extra marcado): la
+    tabla debe dejar clarísimo que esa cuenta igual tiene acceso completo por su rol, en vez de
+    verse como si no tuviera nada."""
+    crear_usuario(usuario='agente_sin_extras', rol='agente')
+    html = admin_session.get('/usuarios').get_data(as_text=True)
+    assert 'Todos (rol)' in html
+    assert 'Acceso completo a todos los módulos operativos por su Rol de Acceso' in html
+
+
+def test_tabla_usuarios_muestra_iconos_de_los_modulos_extra_concedidos(admin_session, app, crear_usuario):
+    usuario = crear_usuario(usuario='estandar_con_extras', rol='estandar')
+    _guardar_modulos_extra(app, usuario, 'inventario,reportes')
+
+    html = admin_session.get('/usuarios').get_data(as_text=True)
+
+    assert 'title="Inventario de Activos"' in html
+    assert 'title="Indicadores / Power BI"' in html
+    # No debe marcar de regalo un módulo que esta cuenta no tiene.
+    assert 'title="Bóveda de Accesos"' not in html
+
+
+def test_tabla_usuarios_muestra_sin_extras_cuando_la_cuenta_no_tiene_nada(admin_session, app, crear_usuario):
+    crear_usuario(usuario='estandar_sin_nada', rol='estandar')
+    html = admin_session.get('/usuarios').get_data(as_text=True)
+    assert 'Sin extras' in html
+
+
+def test_tabla_usuarios_incluye_el_boton_ver_permisos_con_los_datos_del_usuario(admin_session, app, crear_usuario):
+    usuario = crear_usuario(usuario='estandar_ver_permisos', rol='estandar')
+    _guardar_modulos_extra(app, usuario, 'galerias')
+
+    html = admin_session.get('/usuarios').get_data(as_text=True)
+
+    assert 'abrirModalVerPermisos(' in html
+    assert '"estandar_ver_permisos"' in html
+    assert '"galerias"' in html
+    assert 'id="modalVerPermisos"' in html
+    assert 'CATALOGO_MODULOS_ASIGNABLES' in html
