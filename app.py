@@ -2901,6 +2901,16 @@ MODULOS_ASIGNABLES = [
      'descripcion': 'Subir, editar y eliminar instructivos y sus imágenes.'},
     {'clave': 'vencimientos', 'etiqueta': 'Vencimiento de Documentos', 'icono': 'fa-calendar-days',
      'descripcion': 'Ver el panel de vencimiento de documentos de colaboradores.'},
+    # 🧩 Agregado 19/09/2026 (segunda ronda de permisos por módulo, pedido junto con la gestión
+    # de tableros de Power BI): igual que los demás, solo agrega acceso — ver
+    # listar_powerbi/ver_powerbi, que ya combinaban visibilidad por rol vía roles_permitidos con
+    # esta bandera. Tickets/Soporte TI e Inventario de Tareas (también mencionados como ejemplo
+    # por Tomás) quedan pendientes a propósito: son módulos mucho más grandes (30+ rutas, varias
+    # ya con lógica propia de "ser agente" como tomar/asignar tickets) y abrirlos módulo por
+    # módulo necesita su propio análisis para no aflojar sin querer algo más sensible — ver nota
+    # en claude/estado-produccion-2026-09-13.md.
+    {'clave': 'reportes', 'etiqueta': 'Indicadores / Power BI', 'icono': 'fa-chart-pie',
+     'descripcion': 'Ver el catálogo de tableros de Power BI publicados en Indicadores.'},
 ]
 CLAVES_MODULOS_ASIGNABLES = tuple(m['clave'] for m in MODULOS_ASIGNABLES)
 
@@ -3191,13 +3201,20 @@ COLORES_MODAL_POR_DEFECTO = {
         'fondo': '#ffffff',
         'borde': '#e2e8f0',
         'texto': '#1e293b',
-        'texto_secundario': '#64748b',
+        # 🔎 Contraste (pedido por Tomás, 19/09/2026 - video adjunto: "corrige el contraste
+        # general de textos secundarios dentro de modales"): antes #64748b, que sobre fondo
+        # blanco apenas pasa 4.5:1 (el mínimo AA) y en texto pequeño (text-[10px]/text-xs, muy
+        # usado en los modales) queda al límite. #475569 sube el contraste a ~7.5:1 sin cambiar
+        # el tono (mismo gris-azulado de la paleta, solo más oscuro).
+        'texto_secundario': '#475569',
     },
     'descanso': {
         'fondo': '#e8e2d5',
         'borde': '#ded9c9',
         'texto': '#3a322e',
-        'texto_secundario': '#605b5a',
+        # 🔎 Mismo ajuste de contraste que 'claro' de arriba, pero sobre el fondo beige/sepia de
+        # este tema: antes #605b5a, ahora #4a423c (mismo tono tostado, más oscuro).
+        'texto_secundario': '#4a423c',
     },
 }
 
@@ -15825,13 +15842,17 @@ def editar_usuario(usuario_id):
 
         es_superadmin = (session.get('username') == 'admin')
 
-        # 🛡️ Solo la cuenta 'admin' (super-admin) puede editar los datos (correo, rol o
-        # contraseña) de una cuenta con rol 'admin' o 'agente' — incluida la PROPIA cuenta de
-        # quien edita. Esto protege a las cuentas admin/agente frente a sus pares (y frente a
-        # sí mismas): un admin o agente comprometido o malicioso ya no puede tomar control de
-        # otra cuenta admin/agente, ni cambiarse sus propias credenciales desde este panel.
-        # Un admin/agente (no super-admin) solo puede editar cuentas con rol 'estandar'.
-        if rol_target in ('admin', 'agente') and not es_superadmin:
+        # 🛡️ Edición de Nombres/datos por Admin (pedido por Tomás, 19/09/2026): un 'admin'
+        # cualquiera SÍ puede editar los datos (nombre, correo, teléfono, cédula, especialidad,
+        # contraseña, módulos extra) de cuentas 'agente' y 'estandar' — antes esta ruta también
+        # bloqueaba 'agente', obligando a pasar por el super-admin para algo tan simple como
+        # corregirle el nombre a un agente. Lo que SIGUE estrictamente reservado al super-admin
+        # (la cuenta 'admin', ver es_superadmin arriba) es tocar OTRA cuenta con rol 'admin' —
+        # incluida la propia cuenta de quien edita, que sigue gestionándose desde /perfil y no
+        # desde este panel. Así un admin no puede tomar control de otra cuenta admin ni de la
+        # suya propia por aquí, pero ya no necesita al super-admin para mantener al día los
+        # datos de su equipo de soporte (agente) o de un colaborador (estandar).
+        if rol_target == 'admin' and not es_superadmin:
             conn.close()
             return redirect(url_for('gestion_usuarios'))
 
@@ -16850,8 +16871,16 @@ def _datos_geolocalizacion(f_usuario='', f_fecha_inicio='', f_fecha_fin=''):
 def listar_powerbi():
     """Catálogo de tableros de Power BI embebidos (Publish to Web) visibles según el rol
     del usuario en sesión. Las filas se administran hoy desde /admin/db (tabla
-    reportes_powerbi), sin un formulario dedicado."""
+    reportes_powerbi) o desde el propio Tablero Ejecutivo (agregar/editar), sin un formulario
+    dedicado en esta pantalla.
+
+    🧩 'reportes' (pedido por Tomás, 19/09/2026): además del filtro por roles_permitidos de
+    siempre (por tablero), quien tenga el permiso EXTRA 'reportes' (ver MODULOS_ASIGNABLES) ve
+    TODOS los tableros activos sin importar qué roles se le hayan marcado a cada uno — pensado
+    para un colaborador puntual al que se le da acceso a "Indicadores/Power BI" como módulo
+    completo, igual que ya se hace con Inventario/Comunicados/etc."""
     rol_actual = session.get('rol', 'estandar')
+    tiene_extra_reportes = usuario_tiene_modulo('reportes')
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute(
@@ -16865,7 +16894,7 @@ def listar_powerbi():
     reportes = [
         {'id': f[0], 'titulo': f[1], 'descripcion': f[2], 'categoria': f[3]}
         for f in filas
-        if rol_actual in (f[4] or '').split(',')
+        if tiene_extra_reportes or rol_actual in (f[4] or '').split(',')
     ]
     return render_template('powerbi_lista.html', reportes=reportes)
 
@@ -16873,24 +16902,121 @@ def listar_powerbi():
 @app.route('/indicadores/powerbi/<int:id>')
 @login_required
 def ver_powerbi(id):
-    """Visor embebido de un tablero de Power BI puntual (ver listar_powerbi)."""
+    """Visor embebido de un tablero de Power BI puntual (ver listar_powerbi).
+
+    🛠️ Gestión de Tableros (pedido por Tomás, 19/09/2026 - video adjunto): un 'admin' ve el
+    tablero aunque esté bloqueado (activo = FALSE) — antes esta consulta lo excluía igual que a
+    cualquier otro rol, así que ni siquiera el admin podía revisar/reactivar uno bloqueado desde
+    aquí — y recibe los controles superiores (Editar/Bloquear-Desbloquear/Eliminar, ver
+    powerbi_visor.html y las rutas editar_powerbi_visor/alternar_powerbi/eliminar_powerbi más
+    abajo). Para cualquier otro rol, un tablero bloqueado sigue sin existir (mismo redirect de
+    siempre)."""
     rol_actual = session.get('rol', 'estandar')
+    es_admin = (rol_actual == 'admin')
+    tiene_extra_reportes = usuario_tiene_modulo('reportes')
     conn, db_type = get_db()
     cursor = conn.cursor()
     query = (
-        "SELECT id, titulo, descripcion, embed_url, roles_permitidos FROM reportes_powerbi WHERE id = %s AND activo = TRUE"
+        "SELECT id, titulo, descripcion, embed_url, roles_permitidos, categoria, activo FROM reportes_powerbi WHERE id = %s"
         if db_type == 'postgres' else
-        "SELECT id, titulo, descripcion, embed_url, roles_permitidos FROM reportes_powerbi WHERE id = ? AND activo = 1"
+        "SELECT id, titulo, descripcion, embed_url, roles_permitidos, categoria, activo FROM reportes_powerbi WHERE id = ?"
     )
     cursor.execute(query, (id,))
     fila = cursor.fetchone()
     conn.close()
 
-    if not fila or rol_actual not in (fila[4] or '').split(','):
+    if not fila:
         return redirect(url_for('listar_powerbi'))
 
-    reporte = {'id': fila[0], 'titulo': fila[1], 'descripcion': fila[2], 'embed_url': fila[3]}
-    return render_template('powerbi_visor.html', reporte=reporte)
+    activo = bool(fila[6]) if fila[6] is not None else True
+    tiene_acceso = tiene_extra_reportes or rol_actual in (fila[4] or '').split(',')
+    if not tiene_acceso or (not activo and not es_admin):
+        return redirect(url_for('listar_powerbi'))
+
+    reporte = {
+        'id': fila[0], 'titulo': fila[1], 'descripcion': fila[2], 'embed_url': fila[3],
+        'roles_permitidos': fila[4] or '', 'categoria': fila[5] or 'General', 'activo': activo,
+    }
+    return render_template('powerbi_visor.html', reporte=reporte, es_admin=es_admin)
+
+
+@app.route('/indicadores/powerbi/<int:id>/editar', methods=['POST'])
+@login_required
+@admin_required
+def editar_powerbi_visor(id):
+    """Edita título/descripción/categoría/URL de un tablero desde su propio visor (ver
+    powerbi_visor.html) sin sacar al admin a Tablero Ejecutivo — misma tabla/columnas que
+    tablero_ejecutivo(accion='editar_powerbi'), solo que esta ruta vuelve al visor en vez de a
+    /tablero-ejecutivo, para no romper el flujo de "estoy viendo este tablero y lo corrijo"."""
+    titulo = request.form.get('titulo', '').strip()
+    embed_url = request.form.get('embed_url', '').strip()
+    categoria = request.form.get('categoria', '').strip() or 'General'
+    descripcion = request.form.get('descripcion', '').strip()
+    roles_permitidos = ','.join(request.form.getlist('roles_permitidos')) or 'admin'
+
+    if titulo and embed_url:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        query = (
+            "UPDATE reportes_powerbi SET titulo = %s, descripcion = %s, categoria = %s, embed_url = %s, roles_permitidos = %s WHERE id = %s"
+            if db_type == 'postgres' else
+            "UPDATE reportes_powerbi SET titulo = ?, descripcion = ?, categoria = ?, embed_url = ?, roles_permitidos = ? WHERE id = ?"
+        )
+        cursor.execute(query, (titulo, descripcion, categoria, embed_url, roles_permitidos, id))
+        conn.commit()
+        registrar_log(session['username'], "Tablero Power BI editado", f"ID: {id} · Título: {titulo}")
+        conn.close()
+    else:
+        flash("Título y URL de embebido son obligatorios.", "error")
+
+    return redirect(url_for('ver_powerbi', id=id))
+
+
+@app.route('/indicadores/powerbi/<int:id>/alternar', methods=['POST'])
+@login_required
+@admin_required
+def alternar_powerbi(id):
+    """Bloquea/desbloquea un tablero (columna 'activo'): un tablero bloqueado deja de aparecer
+    en el catálogo (listar_powerbi) y en el visor para cualquiera que no sea admin — ver el
+    chequeo de 'activo' en ver_powerbi arriba."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT titulo, activo FROM reportes_powerbi WHERE id = %s" if db_type == 'postgres' else "SELECT titulo, activo FROM reportes_powerbi WHERE id = ?"
+    cursor.execute(q_sel, (id,))
+    fila = cursor.fetchone()
+    if fila:
+        nuevo_activo = not bool(fila[1])
+        q_upd = "UPDATE reportes_powerbi SET activo = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE reportes_powerbi SET activo = ? WHERE id = ?"
+        cursor.execute(q_upd, (nuevo_activo, id))
+        conn.commit()
+        registrar_log(
+            session['username'],
+            "Tablero Power BI bloqueado" if not nuevo_activo else "Tablero Power BI desbloqueado",
+            f"ID: {id} · Título: {fila[0]}",
+        )
+    conn.close()
+    return redirect(url_for('ver_powerbi', id=id))
+
+
+@app.route('/indicadores/powerbi/<int:id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def eliminar_powerbi(id):
+    """Borra definitivamente el registro del tablero (tras confirmación en el propio modal del
+    visor, ver powerbi_visor.html) — a diferencia de Bloquear/Desbloquear, esto no se puede
+    deshacer, así que no queda "papelera" para Power BI."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q_sel = "SELECT titulo FROM reportes_powerbi WHERE id = %s" if db_type == 'postgres' else "SELECT titulo FROM reportes_powerbi WHERE id = ?"
+    cursor.execute(q_sel, (id,))
+    fila = cursor.fetchone()
+    if fila:
+        q_del = "DELETE FROM reportes_powerbi WHERE id = %s" if db_type == 'postgres' else "DELETE FROM reportes_powerbi WHERE id = ?"
+        cursor.execute(q_del, (id,))
+        conn.commit()
+        registrar_log(session['username'], "Tablero Power BI eliminado", f"ID: {id} · Título: {fila[0]}")
+    conn.close()
+    return redirect(url_for('listar_powerbi'))
 
 
 @app.route('/admin/geolocalizacion')
