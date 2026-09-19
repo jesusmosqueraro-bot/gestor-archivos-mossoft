@@ -6,8 +6,10 @@
 // Archivos, Bóveda de Accesos, Mi Bóveda Personal, Accesos de Colaboradores, Inventario de
 // Activos, Proveedores, Áreas, Sedes, Categorías de Solicitudes, Mis Tareas, Actas de Recibido
 // Biomédico, Plantillas de Solicitud, Vencimiento de Documentos, Certificación de Devoluciones,
-// Usuarios, Geolocalización de Accesos y Chat Interno (Canal General + los mensajes directos
-// propios).
+// Usuarios, Geolocalización de Accesos, Chat Interno (Canal General + los mensajes directos
+// propios), Indicadores / Power BI, Auditoría y Logs, Log de Correos Enviados y Respaldos de
+// Base de Datos (19/09/2026 — recorrido completo del aplicativo pedido por Tomás: el buscador
+// debe funcionar de manera transversal para TODO lo que exista en Arkiv).
 
 var _buscadorGlobalTimeout = null;
 var _buscadorGlobalUltimaConsulta = '';
@@ -57,7 +59,11 @@ var _ICONOS_CATEGORIA_BUSCADOR = {
     'Certificación de Devoluciones': 'fa-rotate-left',
     'Usuarios': 'fa-users',
     'Geolocalización de Accesos': 'fa-map-location-dot',
-    'Chat Interno': 'fa-comment-dots'
+    'Chat Interno': 'fa-comment-dots',
+    'Indicadores / Power BI': 'fa-chart-pie',
+    'Auditoría y Logs': 'fa-clipboard-list',
+    'Log de Correos Enviados': 'fa-envelope-circle-check',
+    'Respaldos de Base de Datos': 'fa-database'
 };
 
 function _renderResultadosBuscadorGlobal(data) {
