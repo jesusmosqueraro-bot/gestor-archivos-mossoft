@@ -15398,7 +15398,10 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     crear_usuario_rapido_inventario), para no mantener dos copias de las mismas reglas de
     negocio (usuario único generado, contraseña mínima, correo válido, cédula sin duplicar).
     'datos' trae las claves primer_nombre/segundo_nombre/primer_apellido/segundo_apellido/
-    password/email/telefono/cedula/especialidad/rol/firma_dataurl. Devuelve (error, nuevo_user,
+    password/email/telefono/cedula/especialidad/rol/firma_dataurl/modulos_extra (esta última,
+    opcional, una lista de claves de MODULOS_ASIGNABLES — permiso EXTRA sobre el rol, igual que en
+    editar_usuario(); cualquier clave que no exista en el catálogo se descarta en silencio, y si no
+    se manda nada la cuenta queda sin módulos extra, como hasta ahora). Devuelve (error, nuevo_user,
     nombre_completo, firma_url) — error es None si todo salió bien; NO hace conn.close() (lo
     decide quien llama, según si sigue usando la conexión después)."""
     primer_nombre = (datos.get('primer_nombre') or '').strip()
@@ -15458,13 +15461,21 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     if error_firma:
         return error_firma, None, None, None
 
+    # 🧩 Módulos extra desde el propio alta (pedido por Tomás, 19/09/2026: "cuando se cree un
+    # usuario, se indique si se requiere habilitar módulos adicionales... a usuarios estandar u
+    # agentes etc") — mismo permiso EXTRA sobre el rol que ya existía solo en editar_usuario(),
+    # ahora también disponible desde el formulario de creación para no obligar a crear la cuenta
+    # y de inmediato tener que editarla para conceder el acceso. Se descarta cualquier clave que
+    # no exista en MODULOS_ASIGNABLES.
+    modulos_extra_texto = ','.join(m for m in (datos.get('modulos_extra') or []) if m in CLAVES_MODULOS_ASIGNABLES) or None
+
     try:
         nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
         nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
         nuevo_hash = generate_password_hash(nuevo_pass)
-        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s)" if db_type == 'postgres' else
-                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?)")
-        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url))
+        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?, ?)")
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url, modulos_extra_texto))
         conn.commit()
         registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
 
@@ -15532,6 +15543,11 @@ def gestion_usuarios():
             nuevo_rol = 'estandar'
         if nuevo_rol == 'admin' and session.get('username') != 'admin':
             nuevo_rol = 'estandar'
+        # 🧩 Módulos extra desde el propio formulario de alta (ver _crear_usuario_interno) — se
+        # guarda también en form_data para que, si el alta falla por otro motivo (correo
+        # inválido, contraseña corta, etc.), el formulario se vuelva a mostrar con las mismas
+        # casillas ya marcadas en vez de perderlas.
+        modulos_extra_marcados = request.form.getlist('modulos_extra')
         form_data = {
             'primer_nombre': (request.form.get('primer_nombre') or '').strip(),
             'segundo_nombre': (request.form.get('segundo_nombre') or '').strip(),
@@ -15543,6 +15559,7 @@ def gestion_usuarios():
             'cedula': (request.form.get('cedula') or '').strip() or None,
             'especialidad': (request.form.get('especialidad') or '').strip() or None,
             'sede': (request.form.get('sede') or '').strip() or None,
+            'modulos_extra': modulos_extra_marcados,
         }
         error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
             {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl'),
