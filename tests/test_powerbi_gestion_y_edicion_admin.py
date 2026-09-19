@@ -339,3 +339,34 @@ def test_visor_powerbi_overlay_tambien_se_ve_para_un_rol_no_admin_con_acceso(cli
     html = client.get(f'/indicadores/powerbi/{tablero_id}').get_data(as_text=True)
     assert 'id="overlay-carga-powerbi"' in html
     assert 'id="iframe-powerbi-visor"' in html
+
+
+# ---------------------------------------------------------------------------
+# "Ajustar a la página" atascado en un zoom minúsculo: Tomás reportó, con un SEGUNDO video
+# adjunto el mismo día, que el overlay de carga de arriba ya funciona bien (el tablero SÍ carga),
+# pero una vez cargado, Power BI lo dibuja como una miniatura diminuta (13% de zoom visto en el
+# video) en una esquina del recuadro, y ni la rueda de zoom ni el botón "Ajustar a la página" del
+# propio Power BI lo corrigen. Es contenido de otro origen (Microsoft) dentro del <iframe> — no
+# podemos leer ni ejecutar nada dentro de su documento — pero Power BI calcula ese ajuste una sola
+# vez, la primera vez que su documento recibe un evento 'resize', y si le llega mientras el layout
+# de esta página todavía se está acomodando se queda con esa medida mala para siempre. La
+# corrección: forzar, desde afuera, que el propio elemento <iframe> reciba un cambio real de
+# tamaño (lo que el navegador traduce automáticamente en un evento 'resize' genuino dentro de su
+# documento interno, sin necesitar acceso same-origin) un momento después de que cargue, de nuevo
+# más tarde como red de seguridad, y otra vez si la persona redimensiona la ventana.
+# ---------------------------------------------------------------------------
+
+def test_visor_powerbi_fuerza_un_reajuste_del_iframe_tras_cargar(admin_session, app):
+    tablero_id = _crear_tablero(app)
+    html = admin_session.get(f'/indicadores/powerbi/{tablero_id}').get_data(as_text=True)
+    assert 'forzarReajustePowerBI' in html
+    # Se dispara tras el evento 'load' del iframe (dos intentos espaciados)...
+    assert "iframe.addEventListener('load'" in html
+    # ...con una red de seguridad si ese 'load' nunca llegara a tiempo...
+    assert '8500' in html
+    # ...y también si la persona redimensiona la ventana del navegador después.
+    assert "window.addEventListener('resize'" in html
+    # El propio mecanismo del reajuste: cambiar el alto real del iframe y devolverlo, para que el
+    # navegador le dispare un 'resize' genuino a su documento interno.
+    assert "iframe.style.height = 'calc(100% - 1px)'" in html
+    assert "iframe.style.height = '100%'" in html
