@@ -2863,7 +2863,13 @@ ROLES_CERTIFICACION_DEVOLUCION = ('admin', 'agente', 'gestion_humana')
 def certificacion_devolucion_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if session.get('rol') not in ROLES_CERTIFICACION_DEVOLUCION: return redirect(url_for('index'))
+        # 🧩 19/09/2026: además de ROLES_CERTIFICACION_DEVOLUCION, también entra quien recibió el
+        # permiso extra 'devoluciones' (ver MODULOS_ASIGNABLES) — típicamente una cuenta
+        # 'estandar'. usuario_tiene_modulo() ya resuelve sola admin/agente por
+        # ROLES_CON_ACCESO_OPERATIVO, así que esta condición no le quita ni le agrega nada a
+        # quien ya entraba por rol.
+        if session.get('rol') not in ROLES_CERTIFICACION_DEVOLUCION and not usuario_tiene_modulo('devoluciones'):
+            return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -2927,6 +2933,19 @@ MODULOS_ASIGNABLES = [
     # en claude/estado-produccion-2026-09-13.md.
     {'clave': 'reportes', 'etiqueta': 'Indicadores / Power BI', 'icono': 'fa-chart-pie',
      'descripcion': 'Ver el catálogo de tableros de Power BI publicados en Indicadores.'},
+    # 🧩 Agregado 19/09/2026 (tercera ronda): pedido explícito de Tomás — "poder asignar a un
+    # usuario que se esta creando, acceso al modulo de devoluciones, y el usuario tendra rol
+    # estandar, solo no habilites los modulos manejados o controlados por el agente usuario
+    # AdminMaster". Da acceso a /inventario/certificacion_devoluciones (ver
+    # certificacion_devolucion_required más abajo, que ahora acepta este permiso extra ADEMÁS de
+    # ROLES_CERTIFICACION_DEVOLUCION) para certificar devoluciones de activos sin necesitar rol
+    # 'agente' ni 'gestion_humana'. A propósito NO extiende el flujo de paz y salvo de 3 firmas:
+    # firmar_paz_y_salvo_devolucion sigue validando ROLES_FIRMA_TI_PAZ_Y_SALVO/ROLES_FIRMA_GH_
+    # PAZ_Y_SALVO por ROL, sin mirar este permiso extra — así una cuenta 'estandar' con este
+    # módulo puede certificar la devolución en sí, pero no puede firmar los pasos de Soporte TI o
+    # Gestión Humana del paz y salvo, que siguen siendo exclusivos de esos roles.
+    {'clave': 'devoluciones', 'etiqueta': 'Certificación de Devoluciones', 'icono': 'fa-id-card-clip',
+     'descripcion': 'Certificar la devolución de activos del Inventario (sin poder firmar los pasos de Soporte TI o Gestión Humana del paz y salvo).'},
 ]
 CLAVES_MODULOS_ASIGNABLES = tuple(m['clave'] for m in MODULOS_ASIGNABLES)
 
@@ -17416,7 +17435,9 @@ def buscar_global_api():
     # 🔁 Certificación de Devoluciones la puede ver también el rol "Gestión Humana", no solo
     # admin/agente — usa su propio set de roles (ROLES_CERTIFICACION_DEVOLUCION) en vez de
     # es_soporte para no ocultársela a Gestión Humana ni mostrársela a quien no debería verla.
-    puede_ver_devoluciones = rol in ROLES_CERTIFICACION_DEVOLUCION
+    # 19/09/2026: también la ve quien tenga el permiso extra 'devoluciones' (ver
+    # MODULOS_ASIGNABLES/certificacion_devolucion_required), típicamente una cuenta 'estandar'.
+    puede_ver_devoluciones = rol in ROLES_CERTIFICACION_DEVOLUCION or usuario_tiene_modulo('devoluciones')
     # 🪪 Para las categorías "Inventario de Activos" y "Certificación de Devoluciones", cuyo
     # 'asignado_a'/'colaborador' es texto libre sin cédula propia — resuelve la cédula del
     # 'usuario' entre paréntesis si lo hay, para que buscar por cédula también funcione aquí
