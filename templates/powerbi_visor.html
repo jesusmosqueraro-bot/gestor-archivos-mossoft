@@ -26,9 +26,40 @@
             <div class="h-6 w-px bg-slate-700"></div>
             <h1 class="text-lg font-bold text-white flex items-center gap-2">
                 <i class="fa-solid fa-chart-pie text-blue-400"></i> {{ reporte.titulo }}
+                {% if not reporte.activo %}
+                <span class="text-[10px] font-bold uppercase tracking-wide bg-rose-500/15 text-rose-300 border border-rose-500/30 rounded-full px-2 py-0.5">Bloqueado</span>
+                {% endif %}
             </h1>
         </div>
         <div class="flex items-center gap-2">
+            {% if es_admin %}
+            <!-- 🛠️ Controles de administración del tablero (pedido por Tomás, 19/09/2026 - video
+                 adjunto): editar, bloquear/desbloquear y eliminar, todos solo-admin (el backend en
+                 app.py también exige @admin_required en cada ruta, esto es solo para no mostrar
+                 botones que igual serían rechazados). -->
+            <button onclick="abrirModalEditarPowerBI()" title="Editar tablero" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-pen"></i>
+                <span class="hidden sm:inline">Editar</span>
+            </button>
+            <form method="POST" action="{{ url_for('alternar_powerbi', id=reporte.id) }}" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                {% if reporte.activo %}
+                <button type="submit" title="Bloquear tablero" class="bg-amber-600/80 hover:bg-amber-500 text-white p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                    <i class="fa-solid fa-lock"></i>
+                    <span class="hidden sm:inline">Bloquear</span>
+                </button>
+                {% else %}
+                <button type="submit" title="Desbloquear tablero" class="bg-emerald-600/80 hover:bg-emerald-500 text-white p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                    <i class="fa-solid fa-lock-open"></i>
+                    <span class="hidden sm:inline">Desbloquear</span>
+                </button>
+                {% endif %}
+            </form>
+            <button onclick="abrirModalEliminarPowerBI()" title="Eliminar tablero" class="bg-rose-600/80 hover:bg-rose-500 text-white p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-trash"></i>
+                <span class="hidden sm:inline">Eliminar</span>
+            </button>
+            {% endif %}
             {% include 'partials/logo_preventiva_nav.html' %}
             {% include 'partials/perfil_boton.html' %}
         </div>
@@ -40,17 +71,105 @@
         <p class="text-sm text-slate-400">{{ reporte.descripcion }}</p>
         {% endif %}
 
-        <div class="w-full bg-slate-800 rounded-2xl shadow-md overflow-hidden border border-slate-700/60" style="height: 80vh;">
+        {% if not reporte.activo and es_admin %}
+        <div class="bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-2xl p-4 text-sm flex items-start gap-2.5">
+            <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+            <span>Este tablero está bloqueado: solo tú (administrador) puedes verlo. El resto de usuarios no lo ve en el catálogo ni puede abrir este enlace hasta que lo desbloquees.</span>
+        </div>
+        {% endif %}
+
+        <div class="w-full bg-slate-800 rounded-2xl shadow-md overflow-hidden border border-slate-700/60 h-[82vh]">
             <iframe
                 title="{{ reporte.titulo }}"
                 width="100%"
                 height="100%"
                 src="{{ reporte.embed_url }}"
                 frameborder="0"
+                allow="fullscreen"
                 allowfullscreen
                 class="border-0">
             </iframe>
         </div>
     </main>
+
+    {% if es_admin %}
+    <!-- MODAL EDITAR TABLERO -->
+    <div id="modal-editar-powerbi" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Editar tablero</h3>
+                <button onclick="cerrarModalEditarPowerBI()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form method="POST" action="{{ url_for('editar_powerbi_visor', id=reporte.id) }}" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="titulo" value="{{ reporte.titulo|e }}" placeholder="Título del tablero" required
+                       class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
+                <input type="text" name="categoria" value="{{ reporte.categoria|e }}" placeholder="Categoría (SST, Financiero, Calidad...)"
+                       class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500">
+                <select name="roles_permitidos" id="editar-powerbi-roles" multiple size="4"
+                        class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white">
+                    <option value="admin">Administrador</option>
+                    <option value="agente">Agente</option>
+                    <option value="gestion_humana">Gestión Humana</option>
+                    <option value="estandar">Estándar</option>
+                </select>
+                <textarea name="descripcion" rows="2" placeholder="Descripción breve (opcional)"
+                          class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">{{ reporte.descripcion or '' }}</textarea>
+                <input type="url" name="embed_url" value="{{ reporte.embed_url|e }}" placeholder="Enlace de inserción de Power BI (Publish to Web)" required
+                       class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 sm:col-span-2">
+                <p class="text-[11px] text-slate-500 sm:col-span-2">Ctrl/Cmd+clic para elegir varios roles. Cambiar la URL de inserción no afecta el resto del tablero.</p>
+                <div class="sm:col-span-2 flex justify-end gap-2 mt-2">
+                    <button type="button" onclick="cerrarModalEditarPowerBI()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMAR ELIMINAR -->
+    <div id="modal-eliminar-powerbi" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white">Eliminar tablero</h3>
+                <button onclick="cerrarModalEliminarPowerBI()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-sm text-slate-300 mb-4">
+                ¿Eliminar <span class="font-bold text-white">"{{ reporte.titulo }}"</span> definitivamente? Esta acción no se puede deshacer.
+            </p>
+            <form method="POST" action="{{ url_for('eliminar_powerbi', id=reporte.id) }}" class="flex justify-end gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="button" onclick="cerrarModalEliminarPowerBI()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold shadow-lg shadow-rose-500/25">Sí, eliminar</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function abrirModalEditarPowerBI() {
+            var roles = "{{ reporte.roles_permitidos|e }}".split(',').map(function (r) { return r.trim(); });
+            document.querySelectorAll('#editar-powerbi-roles option').forEach(function (opcion) {
+                opcion.selected = roles.indexOf(opcion.value) !== -1;
+            });
+            var modal = document.getElementById('modal-editar-powerbi');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function cerrarModalEditarPowerBI() {
+            var modal = document.getElementById('modal-editar-powerbi');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+        function abrirModalEliminarPowerBI() {
+            var modal = document.getElementById('modal-eliminar-powerbi');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function cerrarModalEliminarPowerBI() {
+            var modal = document.getElementById('modal-eliminar-powerbi');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+    </script>
+    {% endif %}
 </body>
 </html>
