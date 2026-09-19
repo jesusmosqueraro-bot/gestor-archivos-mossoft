@@ -121,6 +121,57 @@
         }, 8000);
     </script>
 
+    <script>
+        // 🔧 "Ajustar a la página" atascado en un zoom minúsculo, ej. 13% (reportado por Tomás,
+        // video adjunto, 19/09/2026 - segundo video del mismo día): el tablero SÍ carga (esto ya
+        // no es el bug de arriba), pero Power BI lo dibuja como una miniatura diminuta en una
+        // esquina, y ni mover la rueda de zoom ni volver a apretar "Ajustar a la página" lo
+        // corrigen. Power BI (contenido de otro origen dentro del <iframe>, que no podemos leer
+        // ni tocar directamente) calcula ese ajuste UNA sola vez, la primera vez que su propio
+        // documento recibe un evento 'resize' — y si ese primer resize le llega mientras el
+        // layout de ESTA página todavía se está asentando (fuentes web todavía cargando, la
+        // unidad `vh` del contenedor recalculándose, etc.), se queda con esa medida equivocada
+        // para siempre: los controles del propio Power BI reaplican ese mismo cálculo guardado,
+        // no vuelven a medir el contenedor real.
+        //
+        // No podemos ejecutar nada DENTRO del documento del iframe (same-origin lo impide), pero
+        // SÍ podemos forzar que su propio <iframe> reciba un evento 'resize' genuino y correcto
+        // desde afuera: cambiar por un instante el tamaño real del elemento <iframe> hace que el
+        // navegador le dispare ese evento a su documento interno exactamente como si la persona
+        // hubiera redimensionado la ventana — sin tocar nada de Microsoft ni saltarnos same-origin.
+        (function () {
+            var iframe = document.getElementById('iframe-powerbi-visor');
+            if (!iframe) return;
+
+            function forzarReajustePowerBI() {
+                iframe.style.height = 'calc(100% - 1px)';
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        iframe.style.height = '100%';
+                    });
+                });
+            }
+
+            // Dos intentos espaciados tras la carga: el primero ya alcanza casi siempre, el
+            // segundo es red de seguridad por si el layout de la página todavía se estuviera
+            // acomodando (p. ej. una fuente web que termina de cargar tarde).
+            iframe.addEventListener('load', function () {
+                setTimeout(forzarReajustePowerBI, 700);
+                setTimeout(forzarReajustePowerBI, 2200);
+            });
+            // Si el 'load' del iframe nunca llega a dispararse a tiempo (ver la red de seguridad
+            // del overlay arriba), igual vale la pena intentar el reajuste una vez pasados los 8s.
+            setTimeout(forzarReajustePowerBI, 8500);
+
+            // Si la persona cambia el tamaño de la ventana del navegador (o gira el celular),
+            // Power BI también debería volver a recalcular su ajuste con la medida nueva.
+            window.addEventListener('resize', function () {
+                clearTimeout(window._arkivPowerbiResizeDebounce);
+                window._arkivPowerbiResizeDebounce = setTimeout(forzarReajustePowerBI, 300);
+            });
+        })();
+    </script>
+
     {% if es_admin %}
     <!-- MODAL EDITAR TABLERO -->
     <div id="modal-editar-powerbi" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
