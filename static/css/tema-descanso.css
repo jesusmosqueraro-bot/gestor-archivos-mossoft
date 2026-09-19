@@ -233,3 +233,24 @@ html[data-theme="descanso"] .pagina-acento-teal .bg-slate-900\/80,
 html[data-theme="descanso"] .pagina-acento-teal .bg-slate-900\/60    { background-color: #e6e1d2 !important; }
 html[data-theme="descanso"] .pagina-acento-teal .border-slate-700\/60,
 html[data-theme="descanso"] .pagina-acento-teal .border-slate-800    { border-color: #d2cebc !important; }
+
+/* 🔘 Botón "X" de cerrar modales. Ver comentario equivalente en tema-claro.css — mismo problema
+   (dependía del texto secundario personalizable) y misma solución (placa fija que no depende de
+   --modal-descanso-texto-secundario), pero aquí con un ícono "blanco hueso" sobre una placa
+   tostada oscura, para que se note sobre el fondo beige/sepia claro del modal en este tema. */
+html[data-theme="descanso"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-xmark),
+html[data-theme="descanso"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-times) {
+    color: #f7f2e7 !important;
+    background-color: #6b5f52 !important;
+    border-radius: 9999px !important;
+    padding: 0.3rem 0.45rem !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+html[data-theme="descanso"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-xmark):hover,
+html[data-theme="descanso"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-times):hover {
+    color: #fffaf0 !important;
+    background-color: #574d42 !important;
+}

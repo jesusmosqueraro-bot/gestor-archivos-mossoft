@@ -335,3 +335,32 @@ html[data-theme="claro"] .pagina-acento-teal .bg-slate-900\/80,
 html[data-theme="claro"] .pagina-acento-teal .bg-slate-900\/60    { background-color: #eaeeef !important; }
 html[data-theme="claro"] .pagina-acento-teal .border-slate-700\/60,
 html[data-theme="claro"] .pagina-acento-teal .border-slate-800    { border-color: #cdd6d9 !important; }
+
+/* 🔘 Botón "X" de cerrar modales (pedido por Tomás, 19/09/2026 — video adjunto: el ícono
+   quedaba prácticamente invisible en tema claro). Antes tomaba el mismo color que el texto
+   secundario PERSONALIZABLE de los modales (--modal-claro-texto-secundario, ver
+   partials/colores_modal_personalizados.html vía marca-institucional.css) — si ese color se
+   ajusta muy claro desde /admin/diseno, el botón de cerrar deja de verse. Aquí se le da un
+   tratamiento propio y fijo, que NO depende de esa variable: una placa circular gris claro
+   (se distingue del fondo blanco/pastel del modal) con un ícono oscuro bien definido encima.
+   Selector: cualquier botón con la clase 'hover:text-white' (la que usan TODOS los botones de
+   cerrar modal de la app, ver grep de fa-xmark en templates/) que contenga un ícono
+   fa-xmark/fa-times, dentro de un modal (wrapper "fixed inset-0"). Gana por especificidad
+   (3 selectores de tipo html/div/button + :has) sobre la regla de .text-slate-400 de
+   marca-institucional.css, sin importar el orden de carga de las hojas. */
+html[data-theme="claro"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-xmark),
+html[data-theme="claro"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-times) {
+    color: #1e293b !important;
+    background-color: #e2e8f0 !important;
+    border-radius: 9999px !important;
+    padding: 0.3rem 0.45rem !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+html[data-theme="claro"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-xmark):hover,
+html[data-theme="claro"] div[class*="fixed inset-0"] button.hover\:text-white:has(> i.fa-times):hover {
+    color: #0f172a !important;
+    background-color: #cbd5e1 !important;
+}
