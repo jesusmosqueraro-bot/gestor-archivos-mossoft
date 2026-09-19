@@ -382,7 +382,13 @@ else:
 # función de abajo SE LLAMA (en cada request), no cuando se define, así que el orden no importa.
 @app.context_processor
 def _inyectar_colores_modal():
-    return dict(colores_modal=_colores_modal_actuales())
+    # 🏢 logo_institucional_url (19/09/2026): la URL vigente del logo institucional para
+    # cualquier <img> del sistema (barra de navegación, login, encabezados) — la personalizada
+    # desde /admin/diseno si existe, o si no, el archivo estático de siempre. Se resuelve aquí
+    # (no en cada plantilla) para que TODAS las plantillas que muestran el logo lo hagan siempre
+    # de la misma fuente, sin repetir la lógica de "¿hay una personalizada?" en cada una.
+    return dict(colores_modal=_colores_modal_actuales(),
+                logo_institucional_url=(_logo_institucional_url_actual() or url_for('static', filename='img/logo_preventiva.png')))
 
 
 # 🖼️ Red de seguridad para el 413 "Request Entity Too Large": la causa real que reportó Tomás
@@ -3321,6 +3327,60 @@ def _guardar_colores_modal(form):
     return resultado
 
 
+# 🏢 Logo institucional y marca de agua personalizables desde /admin/diseno (pedido de Tomás,
+# 19/09/2026: "habilita... una opción para cambiar el ícono de preventiva cuando se desee o
+# cuando se cambie de Sociedad, y... la opción de cambiar la marca de agua a las imágenes",
+# aclarado por él mismo vía pregunta: el logo debe aplicar en TODO el sistema (barra de
+# navegación, login, encabezado de las actas en PDF y la marca de agua), y "la marca de agua"
+# se refiere puntualmente a la que se agregó unas horas antes en las actas de Asignación/
+# Devolución — ver _pdf_marca_agua_logo más abajo). Mismo mecanismo de configuracion_app que los
+# colores de arriba: sin personalizar nada, la app sigue viéndose exactamente igual que hoy (el
+# logo de Preventiva Salud IPS de siempre, static/img/logo_preventiva.png).
+CLAVE_LOGO_INSTITUCIONAL = 'logo_institucional_url'
+CLAVE_MARCA_AGUA_ACTAS = 'marca_agua_actas_url'
+
+TAMANO_MAXIMO_IMAGEN_INSTITUCIONAL = 3 * 1024 * 1024  # 3 MB — de sobra para un logo/marca de agua.
+
+
+def _logo_institucional_url_actual():
+    """URL de Cloudinary del logo institucional personalizado (o None si nadie lo ha cambiado
+    todavía y sigue vigente el logo de fábrica de Preventiva Salud IPS)."""
+    return _config_app_valor(CLAVE_LOGO_INSTITUCIONAL) or None
+
+
+def _marca_agua_actas_url_actual():
+    """URL de Cloudinary de la marca de agua personalizada de las actas (o None si nadie la ha
+    cambiado todavía — en ese caso reutiliza el logo institucional vigente, ver
+    _marca_agua_actas_fuente_pdf)."""
+    return _config_app_valor(CLAVE_MARCA_AGUA_ACTAS) or None
+
+
+def _subir_imagen_institucional(file):
+    """Sube a Cloudinary una imagen institucional (el nuevo logo, o la nueva marca de agua de las
+    actas — mismo mecanismo para las dos, ver _subir_icono_tipo_activo para el mismo patrón ya
+    usado con los íconos de Tipo de activo). Devuelve (url, None) si todo sale bien, o
+    (None, mensaje_error) si no se adjuntó archivo, el formato no es válido, supera el tamaño
+    máximo, o falla la subida."""
+    if not file or not file.filename:
+        return None, 'No se adjuntó ningún archivo.'
+    if '.' not in file.filename or file.filename.rsplit('.', 1)[1].lower() not in EXTENSIONES_FOTO_PERFIL:
+        return None, 'Formato de imagen no permitido. Usa JPG, PNG, GIF o WEBP.'
+    file.stream.seek(0, os.SEEK_END)
+    tamano = file.stream.tell()
+    file.stream.seek(0)
+    if tamano > TAMANO_MAXIMO_IMAGEN_INSTITUCIONAL:
+        return None, 'La imagen no puede superar 3 MB.'
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file, resource_type="image", use_filename=True, unique_filename=True, timeout=60,
+            transformation=[{'width': 600, 'height': 600, 'crop': 'fit'}]
+        )
+        return upload_result['secure_url'], None
+    except Exception as e:
+        print(f"⚠️ Error subiendo imagen institucional: {e}")
+        return None, 'No se pudo subir la imagen. Intenta de nuevo.'
+
+
 def _chat_estandar_habilitado():
     """True si un admin habilitó el asistente de Chat (por menú, ver módulo del bot más abajo)
     para las cuentas con rol 'estandar'. Apagado por defecto: hasta que un admin lo prenda a
@@ -3729,10 +3789,15 @@ if os.environ.get('DESHABILITAR_RESPALDO_AUTOMATICO') != '1':
 @admin_required
 @superadmin_required
 def ver_diseno_modales():
-    """Pantalla de personalización de colores de modales (pedido por Tomás, 12/09/2026) — mismo
-    nivel de acceso que Respaldos/Gestor de BD (@superadmin_required: ni siquiera otros admins
-    la ven), porque cambia la apariencia de TODA la plataforma para TODOS los usuarios."""
-    return render_template('diseno_modales.html', colores=_colores_modal_actuales())
+    """Pantalla de personalización de colores de modales (pedido por Tomás, 12/09/2026), del logo
+    institucional y de la marca de agua de las actas (pedido de Tomás, 19/09/2026) — mismo nivel
+    de acceso que Respaldos/Gestor de BD (@superadmin_required: ni siquiera otros admins la ven),
+    porque cambia la apariencia de TODA la plataforma para TODOS los usuarios."""
+    return render_template(
+        'diseno_modales.html', colores=_colores_modal_actuales(),
+        logo_institucional_url_personalizado=_logo_institucional_url_actual(),
+        marca_agua_actas_url_personalizada=_marca_agua_actas_url_actual(),
+    )
 
 
 @app.route('/admin/diseno/guardar', methods=['POST'])
@@ -3754,6 +3819,71 @@ def restablecer_diseno_modales():
     _guardar_config_app(CLAVE_COLORES_MODAL, json.dumps(COLORES_MODAL_POR_DEFECTO))
     registrar_log(session.get('username'), "Diseño de Modales", "Colores de los modales restablecidos a los valores de fábrica")
     flash("Colores de los modales restablecidos a los valores originales.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
+
+
+# 🏢 Logo institucional y marca de agua de las actas — mismo candado que el resto de /admin/diseno
+# (@superadmin_required: cambia la apariencia de TODA la plataforma para TODOS los usuarios, así
+# que ni siquiera otros administradores pueden tocarlo, no solo el creador del contenido).
+@app.route('/admin/diseno/logo/guardar', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def guardar_logo_institucional():
+    url, error = _subir_imagen_institucional(request.files.get('logo_archivo'))
+    if error:
+        flash(error, 'error')
+        return redirect(url_for('ver_diseno_modales'))
+    _guardar_config_app(CLAVE_LOGO_INSTITUCIONAL, url)
+    # 🧹 Las cachés en memoria de los PDF de actas están indexadas por fuente (URL/ruta) — ver
+    # _logo_institucional_fuente_pdf/_marca_agua_actas_fuente_pdf — así que un logo NUEVO ya
+    # resuelve a una fuente distinta sola; limpiarlas aquí solo evita que se acumulen entradas
+    # de logos viejos en la memoria del proceso mientras siga corriendo.
+    _LOGO_INSTITUCIONAL_HEADER_CACHE.clear()
+    _MARCA_AGUA_LOGO_CACHE.clear()
+    registrar_log(session.get('username'), "Diseño de Modales", "Logo institucional actualizado")
+    flash("Logo institucional actualizado. Ya se ve así en toda la plataforma: barra de navegación, inicio de sesión y el encabezado de las actas de Asignación/Devolución en PDF.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
+
+
+@app.route('/admin/diseno/logo/restablecer', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def restablecer_logo_institucional():
+    _guardar_config_app(CLAVE_LOGO_INSTITUCIONAL, '')
+    _LOGO_INSTITUCIONAL_HEADER_CACHE.clear()
+    _MARCA_AGUA_LOGO_CACHE.clear()
+    registrar_log(session.get('username'), "Diseño de Modales", "Logo institucional restablecido al de Preventiva Salud IPS")
+    flash("Logo institucional restablecido al de Preventiva Salud IPS.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
+
+
+@app.route('/admin/diseno/marca-agua/guardar', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def guardar_marca_agua_actas():
+    url, error = _subir_imagen_institucional(request.files.get('marca_agua_archivo'))
+    if error:
+        flash(error, 'error')
+        return redirect(url_for('ver_diseno_modales'))
+    _guardar_config_app(CLAVE_MARCA_AGUA_ACTAS, url)
+    _MARCA_AGUA_LOGO_CACHE.clear()
+    registrar_log(session.get('username'), "Diseño de Modales", "Marca de agua de las actas de Asignación/Devolución actualizada")
+    flash("Marca de agua de las actas de Asignación y Devolución actualizada.", "exito")
+    return redirect(url_for('ver_diseno_modales'))
+
+
+@app.route('/admin/diseno/marca-agua/restablecer', methods=['POST'])
+@login_required
+@admin_required
+@superadmin_required
+def restablecer_marca_agua_actas():
+    _guardar_config_app(CLAVE_MARCA_AGUA_ACTAS, '')
+    _MARCA_AGUA_LOGO_CACHE.clear()
+    registrar_log(session.get('username'), "Diseño de Modales", "Marca de agua de las actas restablecida (vuelve a usar el logo institucional vigente)")
+    flash("Marca de agua de las actas restablecida: ahora vuelve a usar el logo institucional vigente.", "exito")
     return redirect(url_for('ver_diseno_modales'))
 
 
@@ -11196,22 +11326,72 @@ def _pdf_tabla_encabezado_acta(acta_id, fecha_texto):
 _RUTA_LOGO_PREVENTIVA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'img', 'logo_preventiva.png')
 
 
+def _logo_institucional_fuente_pdf():
+    """Fuente (URL de Cloudinary si se personalizó desde /admin/diseno, o si no, la ruta local
+    por defecto) del logo institucional para los PDF de actas — se usa tanto para el encabezado
+    tipo membrete (_pdf_encabezado_con_logo) como, si no hay una marca de agua propia configurada,
+    para la marca de agua (ver _marca_agua_actas_fuente_pdf)."""
+    return _config_app_valor(CLAVE_LOGO_INSTITUCIONAL) or _RUTA_LOGO_PREVENTIVA
+
+
+def _marca_agua_actas_fuente_pdf():
+    """Fuente de la marca de agua de las actas: la imagen que se haya subido puntualmente para
+    eso (/admin/diseno), o si no, la misma fuente que el logo institucional vigente — así nunca
+    hace falta subir dos imágenes distintas si basta con reutilizar una sola."""
+    return _config_app_valor(CLAVE_MARCA_AGUA_ACTAS) or _logo_institucional_fuente_pdf()
+
+
+def _cargar_imagen_reader_desde_fuente(fuente):
+    """Carga 'fuente' (una URL http(s) de Cloudinary, o una ruta local en disco) como
+    reportlab.lib.utils.ImageReader en modo RGBA. Devuelve None si la fuente no se pudo leer
+    (URL caída, archivo movido/faltante, etc.) — quien llama debe seguir funcionando sin logo
+    antes que tumbar la generación del PDF por esto."""
+    try:
+        from PIL import Image as PILImage
+        from reportlab.lib.utils import ImageReader
+        if fuente.startswith('http://') or fuente.startswith('https://'):
+            import requests
+            resp = requests.get(fuente, timeout=10)
+            resp.raise_for_status()
+            imagen_pil = PILImage.open(io.BytesIO(resp.content)).convert('RGBA')
+        else:
+            imagen_pil = PILImage.open(fuente).convert('RGBA')
+        return ImageReader(imagen_pil)
+    except Exception as e:
+        print(f"⚠️ No se pudo cargar la imagen institucional '{fuente}': {e}")
+        return None
+
+
+# 🗄️ Cacheada por FUENTE (no una sola clave fija): en cuanto se sube un logo distinto desde
+# /admin/diseno, la fuente configurada cambia sola y esta caché simplemente resuelve una entrada
+# nueva — las entradas de logos anteriores quedan sin usarse en memoria (insignificante, son
+# imágenes pequeñas) hasta que el proceso se reinicie.
+_LOGO_INSTITUCIONAL_HEADER_CACHE = {}
+
+
 def _pdf_encabezado_con_logo(titulo_texto, estilos):
-    """Encabezado tipo membrete para las actas (asignación/devolución): el logo de Preventiva
-    Salud IPS a la izquierda y el título del acta a la derecha — imitando el papel membretado de
-    la institución (pedido de Tomás, 08/09/2026: 'darle una estructura más profesional'). Si el
-    archivo del logo no está disponible por algún motivo (no llegó a desplegarse, ruta movida),
-    se omite en silencio y el PDF sigue generándose solo con el título — nunca debe tumbar la
-    descarga ni el envío por correo del acta."""
+    """Encabezado tipo membrete para las actas (asignación/devolución): el logo institucional a
+    la izquierda (el personalizado desde /admin/diseno si existe, o si no, el de Preventiva Salud
+    IPS de siempre) y el título del acta a la derecha — imitando el papel membretado de la
+    institución (pedido de Tomás, 08/09/2026: 'darle una estructura más profesional'). Si la
+    imagen no está disponible por algún motivo (URL caída, archivo movido), se omite en silencio
+    y el PDF sigue generándose solo con el título — nunca debe tumbar la descarga ni el envío por
+    correo del acta."""
     from reportlab.platypus import Table, TableStyle, Paragraph, Image
     from reportlab.lib.units import cm
     celda_titulo = Paragraph(titulo_texto, estilos['Title'])
+    fuente = _logo_institucional_fuente_pdf()
+    if fuente in _LOGO_INSTITUCIONAL_HEADER_CACHE:
+        lector = _LOGO_INSTITUCIONAL_HEADER_CACHE[fuente]
+    else:
+        lector = _cargar_imagen_reader_desde_fuente(fuente)
+        _LOGO_INSTITUCIONAL_HEADER_CACHE[fuente] = lector
     logo = None
-    if os.path.exists(_RUTA_LOGO_PREVENTIVA):
+    if lector is not None:
         try:
-            logo = Image(_RUTA_LOGO_PREVENTIVA, width=3.3 * cm, height=1.43 * cm)
+            logo = Image(lector, width=3.3 * cm, height=1.43 * cm)
         except Exception as e:
-            print(f"⚠️ No se pudo incrustar el logo de Preventiva en el PDF del acta: {e}")
+            print(f"⚠️ No se pudo incrustar el logo institucional en el PDF del acta: {e}")
     if logo is None:
         return celda_titulo
     tabla = Table([[logo, celda_titulo]], colWidths=[3.7 * cm, 13.3 * cm])
@@ -11264,50 +11444,62 @@ def _pdf_pie_de_pagina_powered_by(canvas_obj, doc_obj):
 
 # 💧 Marca de agua institucional en las actas de Asignación y Devolución (pedido de Tomás,
 # 19/09/2026, con dos capturas de referencia mostrando el logo de Preventiva Salud IPS centrado
-# y casi transparente sobre la hoja, como el watermark clásico de Word). El PNG real
-# (static/img/logo_preventiva.png) NO tiene canal alfa (se guardó en modo RGB, fondo blanco), así
-# que se le agrega uno en memoria, reducido a ~8% de opacidad, la primera vez que hace falta —
-# _MARCA_AGUA_LOGO_CACHE evita reabrir/reprocesar el archivo en cada PDF generado.
+# y casi transparente sobre la hoja, como el watermark clásico de Word — y, unas horas después,
+# ampliado para poder subir una imagen propia desde /admin/diseno en vez de que quede fija en el
+# código, ver _marca_agua_actas_fuente_pdf). La imagen de origen (por defecto,
+# static/img/logo_preventiva.png; o la subida a Cloudinary) puede no traer canal alfa (el PNG de
+# fábrica se guardó en modo RGB, fondo blanco), así que se le agrega uno en memoria, reducido a
+# ~5% de opacidad, la primera vez que hace falta — _MARCA_AGUA_LOGO_CACHE (cacheada por FUENTE,
+# no una sola clave fija) evita reabrir/reprocesar la imagen en cada PDF generado, y resuelve sola
+# una entrada nueva en cuanto la fuente configurada cambia.
 _MARCA_AGUA_LOGO_CACHE = {}
 
 
 def _marca_agua_logo_imagen_reader():
-    """Devuelve (cacheado en memoria del proceso) un reportlab.lib.utils.ImageReader del logo
-    institucional con un canal alfa reducido, listo para dibujarse como marca de agua. Si el
-    archivo no existe o algo falla al procesarlo, devuelve None — la marca de agua simplemente no
-    se dibuja; nunca debe romper la generación de un acta por esto."""
-    if 'reader' in _MARCA_AGUA_LOGO_CACHE:
-        return _MARCA_AGUA_LOGO_CACHE['reader']
+    """Devuelve (cacheado en memoria del proceso, por fuente) un reportlab.lib.utils.ImageReader
+    de la marca de agua vigente de las actas, con un canal alfa reducido, listo para dibujarse. Si
+    la fuente no se pudo cargar, devuelve None — la marca de agua simplemente no se dibuja; nunca
+    debe romper la generación de un acta por esto."""
+    fuente = _marca_agua_actas_fuente_pdf()
+    if fuente in _MARCA_AGUA_LOGO_CACHE:
+        return _MARCA_AGUA_LOGO_CACHE[fuente]
     lector = None
     try:
         from PIL import Image as PILImage
         from reportlab.lib.utils import ImageReader
-        ruta_logo = os.path.join(app.root_path, 'static', 'img', 'logo_preventiva.png')
-        logo = PILImage.open(ruta_logo).convert('RGBA')
+        if fuente.startswith('http://') or fuente.startswith('https://'):
+            import requests
+            resp = requests.get(fuente, timeout=10)
+            resp.raise_for_status()
+            logo = PILImage.open(io.BytesIO(resp.content)).convert('RGBA')
+        else:
+            logo = PILImage.open(fuente).convert('RGBA')
         canal_alfa = logo.split()[3].point(lambda p: int(p * 0.05))
         logo.putalpha(canal_alfa)
         lector = ImageReader(logo)
     except Exception as e:
         print(f"⚠️ No se pudo preparar la marca de agua institucional para los PDFs de actas: {e}")
-    _MARCA_AGUA_LOGO_CACHE['reader'] = lector
+    _MARCA_AGUA_LOGO_CACHE[fuente] = lector
     return lector
 
 
 def _pdf_marca_agua_logo(canvas_obj, doc_obj):
-    """Dibuja el logo de Preventiva Salud IPS como marca de agua tenue, centrada en la hoja. Se
-    engancha igual que _pdf_pie_de_pagina_powered_by (onFirstPage/onLaterPages de doc.build): al
-    dibujarse directo sobre el canvas ANTES de que reportlab pinte los 'elementos' (tablas, texto)
-    de esa misma página, queda visualmente DEBAJO del contenido del acta, tal como se ve en las
-    capturas de referencia de Tomás."""
+    """Dibuja la marca de agua institucional vigente, tenue y centrada en la hoja. Se engancha
+    igual que _pdf_pie_de_pagina_powered_by (onFirstPage/onLaterPages de doc.build): al dibujarse
+    directo sobre el canvas ANTES de que reportlab pinte los 'elementos' (tablas, texto) de esa
+    misma página, queda visualmente DEBAJO del contenido del acta, tal como se ve en las capturas
+    de referencia de Tomás."""
     imagen = _marca_agua_logo_imagen_reader()
     if imagen is None:
         return
     from reportlab.lib.units import cm
     ancho_pagina, alto_pagina = doc_obj.pagesize
-    # 221x96 es el tamaño real de static/img/logo_preventiva.png — se mantiene esa proporción
-    # (96/221) para que la marca de agua no salga estirada/deformada.
+    # La proporción real de la imagen (ancho×alto en píxeles) se lee de la propia imagen en vez
+    # de asumir un tamaño fijo — así una marca de agua personalizada, subida con otras
+    # proporciones a las del logo de fábrica (221×96), no sale estirada/deformada.
+    ancho_px, alto_px = imagen.getSize()
     ancho_marca = 10 * cm
-    alto_marca = ancho_marca * (96 / 221)
+    alto_marca = ancho_marca * (alto_px / ancho_px) if ancho_px else ancho_marca * (96 / 221)
     x = (ancho_pagina - ancho_marca) / 2
     y = (alto_pagina - alto_marca) / 2
     canvas_obj.saveState()
