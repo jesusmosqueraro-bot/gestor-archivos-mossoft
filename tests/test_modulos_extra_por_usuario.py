@@ -310,3 +310,97 @@ def test_tipos_de_activo_sigue_siendo_solo_lectura_para_estandar_con_inventario_
 def test_tipos_de_activo_conserva_los_controles_para_admin(admin_session):
     html = admin_session.get('/tickets/inventario').get_data(as_text=True)
     assert 'Agregar tipo' in html
+
+
+# ---------------------------------------------------------------------------
+# 8) Módulos extra también desde el ALTA (pedido por Tomás, 19/09/2026: "no visualizo los
+#    botones o los permisos o modulos que se pueden habilitar para la creacion de usuarios...
+#    cuando se cree un usuario, se indique si se requiere habilitar módulos adicionales"). El
+#    checklist ya existía en Editar Usuario; se agregó también al modal "Registrar Usuario" para
+#    no obligar a crear la cuenta y de inmediato tener que editarla solo para conceder el acceso.
+# ---------------------------------------------------------------------------
+
+def _crear_especialidad(app, nombre='Auxiliar de Prueba Modulos'):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = ("INSERT INTO especialidades_catalogo (nombre, estado) VALUES (%s, 'activo')"
+         if db_type == 'postgres' else
+         "INSERT INTO especialidades_catalogo (nombre, estado) VALUES (?, 'activo')")
+    cur.execute(q, (nombre,))
+    conn.commit()
+    conn.close()
+    return nombre
+
+
+def test_modal_registrar_usuario_tambien_incluye_el_checklist_de_modulos(admin_session):
+    html = admin_session.get('/usuarios').get_data(as_text=True)
+    # Debe aparecer una vez en "Registrar Usuario" y otra vez en "Editar Usuario" (dos modales
+    # independientes en la misma página, cada uno con su propio checklist).
+    assert html.count('Acceso extra a módulos') == 2
+    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes'):
+        assert html.count(f'value="{clave}"') == 2
+
+
+def test_registrar_usuario_guarda_los_modulos_extra_marcados(admin_session, app):
+    especialidad = _crear_especialidad(app)
+    r = admin_session.post('/usuarios', data={
+        'primer_nombre': 'Nueva', 'primer_apellido': 'ConModulos',
+        'email': 'nueva.conmodulos@preventivaips.com.co', 'password': 'ClaveValida123',
+        'especialidad': especialidad, 'rol': 'estandar',
+        'modulos_extra': ['inventario', 'comunicados'],
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    guardado = _modulos_extra_guardados(app, _usuario_por_correo(app, 'nueva.conmodulos@preventivaips.com.co'))
+    assert set(guardado.split(',')) == {'inventario', 'comunicados'}
+
+
+def test_registrar_usuario_descarta_claves_que_no_existen_en_el_catalogo(admin_session, app):
+    especialidad = _crear_especialidad(app, 'Auxiliar Claves Invalidas')
+    r = admin_session.post('/usuarios', data={
+        'primer_nombre': 'Nueva', 'primer_apellido': 'ClaveInventada',
+        'email': 'nueva.claveinventada@preventivaips.com.co', 'password': 'ClaveValida123',
+        'especialidad': especialidad, 'rol': 'estandar',
+        'modulos_extra': ['inventario', 'algo_inventado_a_mano'],
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    guardado = _modulos_extra_guardados(app, _usuario_por_correo(app, 'nueva.claveinventada@preventivaips.com.co'))
+    assert guardado == 'inventario'
+
+
+def test_registrar_usuario_sin_marcar_ningun_modulo_los_deja_vacios(admin_session, app):
+    especialidad = _crear_especialidad(app, 'Auxiliar Sin Modulos')
+    r = admin_session.post('/usuarios', data={
+        'primer_nombre': 'Nueva', 'primer_apellido': 'SinModulos',
+        'email': 'nueva.sinmodulos@preventivaips.com.co', 'password': 'ClaveValida123',
+        'especialidad': especialidad, 'rol': 'estandar',
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    guardado = _modulos_extra_guardados(app, _usuario_por_correo(app, 'nueva.sinmodulos@preventivaips.com.co'))
+    assert guardado in (None, '')
+
+
+def test_registrar_usuario_desde_carga_masiva_no_recibe_modulos_extra(admin_session, app):
+    """La carga masiva y el alta rápida desde Inventario no exponen el checklist (no tiene
+    sentido pedirlo ahí): confirma que _crear_usuario_interno sigue dejando modulos_extra vacío
+    cuando 'datos' no trae esa clave, sin que la nueva funcionalidad rompa esos otros dos flujos."""
+    r = admin_session.post('/tickets/inventario/usuarios/crear_rapido', data={
+        'primer_nombre': 'Rapido', 'primer_apellido': 'SinModulos',
+        'email': 'rapido.sinmodulos@preventivaips.com.co',
+        'especialidad': 'No Existe Pero No Es Obligatoria',
+    })
+    data = r.get_json()
+    assert data['ok'] is True
+    guardado = _modulos_extra_guardados(app, data['usuario'])
+    assert guardado in (None, '')
+
+
+def _usuario_por_correo(app, correo):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT usuario FROM usuarios WHERE correo = ?", (correo,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
