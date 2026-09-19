@@ -69,20 +69,21 @@ def test_la_tabla_usuarios_tiene_la_columna_modulos_extra(app):
 # 2) Catálogo expuesto a las plantillas
 # ---------------------------------------------------------------------------
 
-def test_modulos_asignables_catalog_tiene_las_siete_claves_esperadas(app):
-    # 🧩 19/09/2026 (segunda ronda de permisos por módulo): se agregó 'reportes' (Indicadores /
-    # Power BI) al catálogo original de seis. Ver comentario junto a MODULOS_ASIGNABLES en app.py.
+def test_modulos_asignables_catalog_tiene_las_ocho_claves_esperadas(app):
+    # 🧩 19/09/2026 (tercera ronda de permisos por módulo): se agregó 'devoluciones'
+    # (Certificación de Devoluciones) al catálogo, que ya traía 'reportes' de la ronda anterior.
+    # Ver comentario junto a MODULOS_ASIGNABLES en app.py.
     claves = set(app.CLAVES_MODULOS_ASIGNABLES)
     assert claves == {
         'comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos',
-        'reportes',
+        'reportes', 'devoluciones',
     }
 
 
 def test_modal_editar_usuario_incluye_el_checklist_de_modulos(admin_session):
     html = admin_session.get('/usuarios').get_data(as_text=True)
     assert 'Acceso extra a módulos' in html
-    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes'):
+    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes', 'devoluciones'):
         assert f'value="{clave}"' in html
     assert 'edit-modulo-extra' in html
 
@@ -127,6 +128,7 @@ def test_el_permiso_extra_es_puntual_no_abre_otros_modulos(client, app, crear_us
     ('auditoria', '/logs'),
     ('galerias', '/subir'),
     ('vencimientos', '/vencimientos'),
+    ('devoluciones', '/inventario/certificacion_devoluciones'),
 ])
 def test_cada_modulo_del_catalogo_concede_su_propia_ruta(client, app, crear_usuario, clave, ruta):
     usuario = crear_usuario(usuario=f'estandar_{clave}', rol='estandar')
@@ -337,7 +339,7 @@ def test_modal_registrar_usuario_tambien_incluye_el_checklist_de_modulos(admin_s
     # Debe aparecer una vez en "Registrar Usuario" y otra vez en "Editar Usuario" (dos modales
     # independientes en la misma página, cada uno con su propio checklist).
     assert html.count('Acceso extra a módulos') == 2
-    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes'):
+    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes', 'devoluciones'):
         assert html.count(f'value="{clave}"') == 2
 
 
@@ -404,3 +406,114 @@ def _usuario_por_correo(app, correo):
     row = cur.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# 9) Módulo 'devoluciones' (pedido por Tomás, 19/09/2026, tercera ronda): "requiero poder
+#    asignar módulos específicos a los usuarios cuando se crean, ejemplo poder asignar a un
+#    usuario que se esta creando, acceso al modulo de devoluciones, y el usuario tendra rol
+#    estandar, solo no habilites los modulos manejados o controlados por el agente usuario
+#    AdminMaster." Da acceso a /inventario/certificacion_devoluciones (ver
+#    certificacion_devolucion_required) sin necesitar rol 'agente' ni 'gestion_humana' — pero,
+#    a propósito, NO extiende el paso de firma de Soporte TI/Gestión Humana del flujo de paz y
+#    salvo de 3 firmas, que sigue siendo exclusivo de esos roles.
+# ---------------------------------------------------------------------------
+
+def _crear_activo_asignado(app, nombre='Portátil Devoluciones', asignado_a='Colaborador De Prueba'):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    q = ("INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, fecha_creacion, creado_por) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+         if db_type == 'postgres' else
+         "INSERT INTO activos_inventario (nombre, tipo_activo, estado, asignado_a, fecha_creacion, creado_por) VALUES (?, ?, ?, ?, ?, ?)")
+    cur.execute(q, (nombre, 'Portátil', 'Asignado', asignado_a, '2026-09-01 09:00:00', 'admin'))
+    activo_id = cur.fetchone()[0] if db_type == 'postgres' else cur.lastrowid
+    conn.commit()
+    conn.close()
+    return activo_id
+
+
+def test_estandar_sin_devoluciones_sigue_bloqueado_de_certificacion(client, app, crear_usuario):
+    usuario = crear_usuario(rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar')
+
+    r = client.get('/inventario/certificacion_devoluciones')
+
+    assert r.status_code in (302, 403)
+
+
+def test_bienvenida_muestra_tarjeta_de_devoluciones_solo_con_el_permiso_extra(client, app, crear_usuario):
+    usuario = crear_usuario(usuario='certifica_devoluciones', rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['devoluciones'])
+    html = client.get('/bienvenida').get_data(as_text=True)
+    assert 'Certificar devoluciones' in html
+
+    otro = crear_usuario(usuario='no_certifica_devoluciones', rol='estandar')
+    _sesion_como(client, app, otro, 'estandar', modulos_extra=[])
+    html2 = client.get('/bienvenida').get_data(as_text=True)
+    assert 'Certificar devoluciones' not in html2
+
+
+def test_estandar_con_devoluciones_puede_certificar_una_devolucion(client, app, crear_usuario):
+    usuario = crear_usuario(usuario='certifica_devoluciones_2', rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['devoluciones'])
+    activo_id = _crear_activo_asignado(app)
+
+    r = client.post(f'/inventario/{activo_id}/confirmar_devolucion', data={'observaciones': 'Todo en orden'})
+
+    assert r.status_code == 302
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado FROM activos_inventario WHERE id = ?", (activo_id,))
+    (estado,) = cur.fetchone()
+    cur.execute("SELECT confirmado_por FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    (confirmado_por,) = cur.fetchone()
+    conn.close()
+    assert estado == 'Devolución'
+    assert confirmado_por == usuario
+
+
+def test_estandar_con_devoluciones_no_puede_firmar_el_paz_y_salvo_de_ti_ni_gh(client, app, crear_usuario):
+    """El permiso extra 'devoluciones' da acceso al módulo (certificar la devolución en sí),
+    pero NO a los pasos de Soporte TI o Gestión Humana del paz y salvo de 3 firmas — esos siguen
+    siendo exclusivos de esos roles (ROLES_FIRMA_TI_PAZ_Y_SALVO/ROLES_FIRMA_GH_PAZ_Y_SALVO no
+    miran usuario_tiene_modulo), tal como pidió Tomás explícitamente."""
+    usuario = crear_usuario(usuario='certifica_sin_firmar', rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['devoluciones'])
+    activo_id = _crear_activo_asignado(app, nombre='Portátil Paz Y Salvo')
+
+    client.post(f'/inventario/{activo_id}/confirmar_devolucion', data={
+        'firma_colaborador_dataurl': 'data:image/png;base64,ABC',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, estado FROM inventario_devoluciones WHERE activo_id = ?", (activo_id,))
+    devolucion_id, estado = cur.fetchone()
+    conn.close()
+    assert estado == 'pendiente_ti'
+
+    r_ti = client.post(f'/inventario/certificacion_devoluciones/{devolucion_id}/firmar', data={
+        'rol_firma': 'ti', 'firma_dataurl': 'data:image/png;base64,XYZ',
+    }, follow_redirects=True)
+    assert 'Solo un usuario de Soporte TI' in r_ti.get_data(as_text=True)
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT estado FROM inventario_devoluciones WHERE id = ?", (devolucion_id,))
+    (estado_tras_intento,) = cur.fetchone()
+    conn.close()
+    assert estado_tras_intento == 'pendiente_ti'
+
+
+def test_busqueda_global_incluye_devoluciones_con_el_permiso_extra(client, app, crear_usuario):
+    usuario = crear_usuario(usuario='busca_devoluciones', rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['devoluciones'])
+    activo_id = _crear_activo_asignado(app, nombre='Portátil Buscable En Devoluciones', asignado_a='Persona Buscable Devolucion')
+    # El buscador global busca en el HISTORIAL ya confirmado (inventario_devoluciones), no en
+    # los pendientes — así que primero se certifica la devolución con este mismo permiso extra.
+    client.post(f'/inventario/{activo_id}/confirmar_devolucion', data={})
+
+    r = client.get('/buscar/api?q=Buscable')
+
+    categorias = {res['categoria'] for res in r.get_json()['resultados']}
+    assert 'Certificación de Devoluciones' in categorias
