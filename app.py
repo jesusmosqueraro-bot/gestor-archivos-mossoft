@@ -1420,7 +1420,18 @@ def init_db():
                 # gana sobre 'icono' en cualquier lugar que muestre el ícono del tipo (ver
                 # crear_tipo_activo_catalogo/_subir_icono_tipo_activo más abajo); si es NULL, se
                 # sigue usando 'icono' exactamente como antes — ningún tipo existente cambia.
-                "ALTER TABLE tipos_activo_catalogo ADD COLUMN IF NOT EXISTS icono_url TEXT;"
+                "ALTER TABLE tipos_activo_catalogo ADD COLUMN IF NOT EXISTS icono_url TEXT;",
+                # 💻 Especificaciones técnicas del equipo (RAM, tipo de RAM, disco y tipo de disco)
+                # — pedido por Tomás, 19/09/2026, para dejar registradas las capacidades del PC
+                # directamente en el activo, sin depender de las Observaciones en texto libre.
+                # Todo opcional y queda en NULL para los activos que ya existían. ram_gb/disco_gb
+                # son enteros (GB); tipo_ram/tipo_disco se validan contra una lista fija en el
+                # backend antes de guardarse (ver TIPOS_RAM_ACTIVO/TIPOS_DISCO_ACTIVO más abajo),
+                # así la columna nunca debería tener basura aunque el tipo SQL sea texto libre.
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS ram_gb INTEGER;",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_ram VARCHAR(10);",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS disco_gb INTEGER;",
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_disco VARCHAR(10);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1981,6 +1992,20 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+
+            # 💻 Especificaciones técnicas del equipo (RAM, tipo de RAM, disco y tipo de disco).
+            # Ver comentario equivalente en la rama de Postgres.
+            for col_specs_sql in [
+                "ALTER TABLE activos_inventario ADD COLUMN ram_gb INTEGER;",
+                "ALTER TABLE activos_inventario ADD COLUMN tipo_ram TEXT;",
+                "ALTER TABLE activos_inventario ADD COLUMN disco_gb INTEGER;",
+                "ALTER TABLE activos_inventario ADD COLUMN tipo_disco TEXT;"
+            ]:
+                try:
+                    cursor.execute(col_specs_sql)
+                    conn.commit()
+                except Exception:
+                    pass
 
         # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
         # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
@@ -4485,6 +4510,13 @@ MAX_ADJUNTOS_TICKET = 5
 # su siguiente estado real: Disponible, Mantenimiento, Baja...).
 ESTADOS_ACTIVO = ['Disponible', 'Asignado', 'Mantenimiento', 'Baja', 'Perdido', 'Devolución']
 TIPOS_ACTIVO = ['Computador de Escritorio', 'Portátil', 'Impresora', 'Monitor', 'Teléfono/Celular', 'Servidor', 'Red (Switch/Router/AP)', 'Otro']
+# 💻 Especificaciones técnicas opcionales de un activo (RAM/disco) — pedido por Tomás,
+# 19/09/2026, para dejar registradas las capacidades del PC en el propio formulario de
+# Inventario en vez de anotarlas en Observaciones. 'tipo_ram'/'tipo_disco' se validan contra
+# estas listas en crear_activo/editar_activo antes de guardarse (cualquier otro valor recibido
+# se descarta y queda en NULL); 'ram_gb'/'disco_gb' son enteros positivos en GB.
+TIPOS_RAM_ACTIVO = ['DDR3', 'DDR4', 'DDR5']
+TIPOS_DISCO_ACTIVO = ['SSD', 'HDD']
 # 🎒 Accesorios que pueden entregarse junto con un activo al asignarlo (pedido por Tomás):
 # checklist simple para dejar constancia de qué llevaba el equipo. La misma lista de claves se
 # reutiliza al certificar la devolución (ver inventario_certificacion.html/
@@ -10044,7 +10076,7 @@ def ver_inventario():
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, ram_gb, tipo_ram, disco_gb, tipo_disco FROM activos_inventario WHERE eliminado = 0 ORDER BY id DESC")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Error consultando inventario: {e}")
@@ -10115,6 +10147,7 @@ def ver_inventario():
         'firma_asignacion_url': r[17], 'es_biomedico': bool(r[18]), 'fecha_devolucion': r[19],
         'accesorios_asignados': r[20] or '', 'accesorio_otro_detalle': r[21] or '',
         'categoria_especial': r[22],
+        'ram_gb': r[23], 'tipo_ram': r[24], 'disco_gb': r[25], 'tipo_disco': r[26],
         'adjuntos': adjuntos_por_activo.get(r[0], []),
         'trazabilidad': trazabilidad_por_activo.get(r[0], []),
         'tickets_historial': tickets_por_activo.get(r[0], [])
@@ -10612,6 +10645,30 @@ def _parsear_datos_costo_inventario(form):
     costo_compra = _valor_numerico(form.get('costo_compra')) if tipo_costo == 'propio' else None
     costo_alquiler_mensual = _valor_numerico(form.get('costo_alquiler_mensual')) if tipo_costo == 'alquilado' else None
     return tipo_costo, costo_compra, costo_alquiler_mensual
+
+
+def _parsear_specs_tecnicas_activo(form):
+    """Lee y valida ram_gb/tipo_ram/disco_gb/tipo_disco del formulario de crear/editar activo
+    (pedido por Tomás, 19/09/2026, para registrar las capacidades del PC). Todo es opcional: un
+    valor en blanco o que no pase la validación simplemente queda en None en vez de rechazar el
+    guardado completo del activo — mismo criterio permisivo que _parsear_datos_costo_inventario."""
+    def _entero_positivo(valor_raw):
+        valor_raw = (valor_raw or '').strip()
+        if not valor_raw:
+            return None
+        try:
+            numero = int(float(valor_raw))
+        except ValueError:
+            return None
+        return numero if numero > 0 else None
+
+    ram_gb = _entero_positivo(form.get('ram_gb'))
+    tipo_ram = (form.get('tipo_ram') or '').strip().upper()
+    tipo_ram = tipo_ram if tipo_ram in TIPOS_RAM_ACTIVO else None
+    disco_gb = _entero_positivo(form.get('disco_gb'))
+    tipo_disco = (form.get('tipo_disco') or '').strip().upper()
+    tipo_disco = tipo_disco if tipo_disco in TIPOS_DISCO_ACTIVO else None
+    return ram_gb, tipo_ram, disco_gb, tipo_disco
 
 
 def _totales_costos_inventario(activos):
@@ -11604,6 +11661,7 @@ def crear_activo():
     proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
     proveedor = proveedor if proveedor in proveedores_validos else None
     tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario(request.form)
+    ram_gb, tipo_ram, disco_gb, tipo_disco = _parsear_specs_tecnicas_activo(request.form)
     firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
     # 🦺 Categoría especial (SST/Ambiental/Laboratorio Clínico) — mutuamente excluyente con
@@ -11653,10 +11711,10 @@ def crear_activo():
                 conn.close()
                 return redirect(url_for('ver_inventario', error_placa=nombre))
 
-            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
+            q_ins = ("INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, ram_gb, tipo_ram, disco_gb, tipo_disco) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
                      if db_type == 'postgres' else
-                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial))
+                     "INSERT INTO activos_inventario (nombre, tipo_activo, marca, modelo, numero_serie, estado, asignado_a, sede, area, proveedor, observaciones, fecha_creacion, creado_por, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, ram_gb, tipo_ram, disco_gb, tipo_disco) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            cursor.execute(q_ins, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, fecha_act, usuario, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, ram_gb, tipo_ram, disco_gb, tipo_disco))
             nuevo_activo_id = cursor.fetchone()[0] if db_type == 'postgres' else cursor.lastrowid
             conn.commit()
             registrar_log(usuario, "Inventario de Activos", f"Se registró el activo '{nombre}' [{tipo_activo}]")
@@ -11711,6 +11769,7 @@ def editar_activo(activo_id):
     proveedores_validos = [p['nombre'] for p in _config_ticket_lista('proveedor')]
     proveedor = proveedor if proveedor in proveedores_validos else None
     tipo_costo, costo_compra, costo_alquiler_mensual = _parsear_datos_costo_inventario(request.form)
+    ram_gb, tipo_ram, disco_gb, tipo_disco = _parsear_specs_tecnicas_activo(request.form)
     firma_asignacion_url = _resolver_firma_para_asignacion(asignado_a)
     firma_asignacion_fecha = obtener_fecha_actual() if firma_asignacion_url else None
     es_biomedico = request.form.get('es_biomedico') in ('on', '1', 'true')
@@ -11774,8 +11833,8 @@ def editar_activo(activo_id):
                 flash("El activo se guardó como 'Disponible' en vez de 'Asignado' porque no se indicó a quién "
                       "se le asigna (campo 'Asignado a' vacío). Edítalo y completa ese campo para dejarlo asignado.", "error")
 
-            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph}, categoria_especial = {ph} WHERE id = {ph}"
-            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, activo_id))
+            q_upd = f"UPDATE activos_inventario SET nombre = {ph}, tipo_activo = {ph}, marca = {ph}, modelo = {ph}, numero_serie = {ph}, estado = {ph}, asignado_a = {ph}, sede = {ph}, area = {ph}, proveedor = {ph}, observaciones = {ph}, tipo_costo = {ph}, costo_compra = {ph}, costo_alquiler_mensual = {ph}, firma_asignacion_url = {ph}, firma_asignacion_fecha = {ph}, es_biomedico = {ph}, fecha_devolucion = {ph}, accesorios_asignados = {ph}, accesorio_otro_detalle = {ph}, categoria_especial = {ph}, ram_gb = {ph}, tipo_ram = {ph}, disco_gb = {ph}, tipo_disco = {ph} WHERE id = {ph}"
+            cursor.execute(q_upd, (nombre, tipo_activo, marca or None, modelo or None, numero_serie or None, estado, asignado_a or None, sede, area, proveedor, observaciones or None, tipo_costo, costo_compra, costo_alquiler_mensual, firma_asignacion_url, firma_asignacion_fecha, es_biomedico, fecha_devolucion, accesorios_asignados, accesorio_otro_detalle, categoria_especial, ram_gb, tipo_ram, disco_gb, tipo_disco, activo_id))
             conn.commit()
             edicion_exitosa = True
             registrar_log(session.get('username'), "Inventario de Activos", f"Se editó el activo #{activo_id} ('{nombre}')")
