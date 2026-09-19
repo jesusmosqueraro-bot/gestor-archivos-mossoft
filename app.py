@@ -1406,7 +1406,13 @@ def init_db():
                 # CREATE TABLE de login_fondo_media. 6 por defecto para no cambiar el ritmo de
                 # los archivos que ya existían antes de este campo.
                 "ALTER TABLE login_fondo_media ADD COLUMN IF NOT EXISTS duracion_segundos INTEGER DEFAULT 6;",
-                "ALTER TABLE login_fondo_media ADD COLUMN IF NOT EXISTS reproducir_con_sonido BOOLEAN DEFAULT FALSE;"
+                "ALTER TABLE login_fondo_media ADD COLUMN IF NOT EXISTS reproducir_con_sonido BOOLEAN DEFAULT FALSE;",
+                # 🧩 Módulos extra por usuario (pedido por Tomás, 19/09/2026): permiso EXTRA sobre
+                # el rol, para que Gestión de Usuarios pueda darle a una cuenta acceso a un módulo
+                # puntual (ej. Inventario) sin ascenderla de rol. Texto plano con las claves
+                # separadas por coma (ver MODULOS_ASIGNABLES/CLAVES_MODULOS_ASIGNABLES/
+                # _modulos_extra_de_usuario más abajo) — nunca le QUITA nada a lo que el rol ya da.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS modulos_extra TEXT;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1949,6 +1955,13 @@ def init_db():
             # en la rama de Postgres.
             try:
                 cursor.execute("ALTER TABLE usuarios ADD COLUMN ultima_actividad TEXT;")
+                conn.commit()
+            except Exception:
+                pass
+
+            # 🧩 Módulos extra por usuario. Ver comentario equivalente en la rama de Postgres.
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN modulos_extra TEXT;")
                 conn.commit()
             except Exception:
                 pass
@@ -2857,6 +2870,112 @@ _CARGO_LEGIBLE_POR_ROL = {
     'estandar': 'Colaborador',
 }
 
+# 🧩 MÓDULOS ASIGNABLES POR USUARIO (pedido por Tomás, 19/09/2026): "Quiero poder que el módulo
+# de usuario pueda indicar qué módulo o modal se le puede asignar a los usuarios, dado se
+# requiera alguna configuración específica." Esto es un permiso EXTRA sobre el rol — SOLO agrega
+# acceso a un módulo puntual, nunca le quita nada a nadie que ya lo tuviera por su rol (admin y
+# agente, ver ROLES_CON_ACCESO_OPERATIVO, ya ven todos estos módulos por rol y no se ven
+# afectados por esto). Pensado para el caso real que motivó el pedido: un colaborador con rol
+# 'estandar' (o 'gestion_humana') que necesita entrar a UN módulo puntual (ej. Inventario) sin
+# ascenderlo de rol. Se administra desde el modal "Editar Usuario" en Gestión de Usuarios (ver
+# editar_usuario) con un checklist por módulo — de momento a nivel de módulo completo; más
+# adelante se puede afinar a nivel de acción puntual dentro de cada módulo si hace falta.
+#
+# Deliberadamente NO incluye: Chat (ya tiene su propio interruptor global, ver
+# chat_permiso_estandar), Tickets/Soporte TI (tareas/SLA/indicadores — demasiado ligado a "ser
+# agente" como para cederlo módulo por módulo), Papelera (mezcla elementos de varios módulos a la
+# vez, incluida la recuperación/destrucción definitiva), Gestión de Usuarios y todo lo que ya es
+# exclusivo de administrador o super-admin (Gestor de BD, Respaldos, Tablero Ejecutivo,
+# Geolocalización, catálogo de Tipos de Activo) — esos siguen siendo tan sensibles que no
+# conviene abrirlos por este mecanismo de autoservicio.
+MODULOS_ASIGNABLES = [
+    {'clave': 'comunicados', 'etiqueta': 'Comunicados', 'icono': 'fa-bullhorn',
+     'descripcion': 'Publicar y administrar comunicados del muro, el fondo de inicio de sesión y su cumplimiento.'},
+    {'clave': 'inventario', 'etiqueta': 'Inventario de Activos', 'icono': 'fa-boxes-stacked',
+     'descripcion': 'Registrar, asignar, editar y generar las actas de los activos del Inventario.'},
+    {'clave': 'boveda_accesos', 'etiqueta': 'Bóveda de Accesos', 'icono': 'fa-vault',
+     'descripcion': 'Ver y administrar credenciales, altas de colaboradores y aplicativos de la Bóveda de Accesos.'},
+    {'clave': 'auditoria', 'etiqueta': 'Auditoría y Logs', 'icono': 'fa-clipboard-list',
+     'descripcion': 'Consultar y exportar los registros de auditoría y el log de correos enviados.'},
+    {'clave': 'galerias', 'etiqueta': 'Galerías / Instructivos', 'icono': 'fa-images',
+     'descripcion': 'Subir, editar y eliminar instructivos y sus imágenes.'},
+    {'clave': 'vencimientos', 'etiqueta': 'Vencimiento de Documentos', 'icono': 'fa-calendar-days',
+     'descripcion': 'Ver el panel de vencimiento de documentos de colaboradores.'},
+]
+CLAVES_MODULOS_ASIGNABLES = tuple(m['clave'] for m in MODULOS_ASIGNABLES)
+
+
+def _modulos_extra_desde_texto(texto):
+    """Convierte el texto plano guardado en usuarios.modulos_extra (claves separadas por coma)
+    en una lista, descartando cualquier clave que ya no exista en el catálogo (por si se quita un
+    módulo de MODULOS_ASIGNABLES más adelante, una fila vieja no debe romper nada)."""
+    if not texto:
+        return []
+    return [c.strip() for c in texto.split(',') if c.strip() in CLAVES_MODULOS_ASIGNABLES]
+
+
+def _modulos_extra_de_usuario(usuario_exacto):
+    """Consulta directa a BD (a propósito NO reutiliza ninguna tupla posicional de login() /
+    login_2fa(): son 3 SELECT distintos con distinto orden/longitud de columnas, así que
+    enganchar una columna más ahí sería frágil) para poblar session['modulos_extra'] en el
+    momento de iniciar sesión."""
+    if not usuario_exacto:
+        return []
+    try:
+        conn, db_type = get_db()
+        cursor = conn.cursor()
+        q = "SELECT modulos_extra FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT modulos_extra FROM usuarios WHERE usuario = ?"
+        cursor.execute(q, (usuario_exacto,))
+        row = cursor.fetchone()
+        conn.close()
+        return _modulos_extra_desde_texto(row[0] if row else None)
+    except Exception as e:
+        print(f"⚠️ Error consultando módulos extra de '{usuario_exacto}': {e}")
+        return []
+
+
+def usuario_tiene_modulo(clave_modulo):
+    """True si la sesión actual puede entrar al módulo `clave_modulo`: ya sea porque su ROL le da
+    acceso operativo completo (admin/agente, ver ROLES_CON_ACCESO_OPERATIVO), o porque se le
+    concedió ese módulo puntual como permiso EXTRA desde Gestión de Usuarios — ver
+    MODULOS_ASIGNABLES arriba. Se expone también a las plantillas Jinja (ver el
+    context_processor _inyectar_modulos_extra) para ocultar/mostrar tarjetas y controles."""
+    if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+        return True
+    return clave_modulo in (session.get('modulos_extra') or [])
+
+
+def modulo_o_acceso_operativo_required(*claves_modulo):
+    """Fábrica de decorador (se usa siempre junto a @login_required, igual que
+    agente_o_admin_required): con una sola clave protege un módulo puntual (ej. 'inventario');
+    con varias, protege un endpoint que comparten varios módulos (ej. la búsqueda de usuarios,
+    que usan tanto Inventario como Bóveda de Accesos) exigiendo tener AL MENOS UNO de ellos."""
+    def decorador(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not any(usuario_tiene_modulo(c) for c in claves_modulo):
+                return redirect(url_for('index'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorador
+
+
+comunicados_o_extra_required = modulo_o_acceso_operativo_required('comunicados')
+inventario_o_extra_required = modulo_o_acceso_operativo_required('inventario')
+boveda_accesos_o_extra_required = modulo_o_acceso_operativo_required('boveda_accesos')
+auditoria_o_extra_required = modulo_o_acceso_operativo_required('auditoria')
+galerias_o_extra_required = modulo_o_acceso_operativo_required('galerias')
+vencimientos_o_extra_required = modulo_o_acceso_operativo_required('vencimientos')
+# 🔎 Endpoint compartido (búsqueda de usuarios por cédula/nombre): lo usan tanto el modal de
+# asignación de Inventario como Altas de Credenciales / Bóveda Personal.
+inventario_o_boveda_o_extra_required = modulo_o_acceso_operativo_required('inventario', 'boveda_accesos')
+
+
+@app.context_processor
+def _inyectar_modulos_extra():
+    return dict(usuario_tiene_modulo=usuario_tiene_modulo, MODULOS_ASIGNABLES=MODULOS_ASIGNABLES)
+
+
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
 @app.route('/admin/db', methods=['GET', 'POST'])
 @login_required
@@ -3747,7 +3866,7 @@ def ver_comunicados():
 
 @app.route('/comunicados/crear', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def crear_comunicado():
     titulo = request.form.get('titulo', '').strip()
     # 📝 El contenido llega como HTML del editor de texto enriquecido (Quill) — se limpia
@@ -3825,7 +3944,7 @@ def crear_comunicado():
 
 @app.route('/comunicados/editar/<int:com_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def editar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -3895,7 +4014,7 @@ def editar_comunicado(com_id):
 
 @app.route('/comunicados/archivar/<int:com_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def archivar_comunicado(com_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -3921,7 +4040,7 @@ def archivar_comunicado(com_id):
 
 @app.route('/comunicados/eliminar/<int:com_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def eliminar_comunicado(com_id):
     # El propio botón en comunicados.html pregunta "¿Enviar este comunicado a la papelera?",
     # así que esto debe ser un envío a la papelera (estado='eliminado'), no un borrado
@@ -3956,7 +4075,7 @@ def eliminar_comunicado(com_id):
 # aunque su tabla (login_fondo_media) y su plantilla son propias — ver _fondo_login_activo().
 @app.route('/comunicados/fondo_login')
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def ver_fondo_login():
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -3976,7 +4095,7 @@ def ver_fondo_login():
 
 @app.route('/comunicados/fondo_login/subir', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def subir_fondo_login():
     archivo = request.files.get('archivo')
     tipo, url, public_id, error = _subir_fondo_login(archivo)
@@ -4017,7 +4136,7 @@ def subir_fondo_login():
 
 @app.route('/comunicados/fondo_login/<int:item_id>/toggle', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def toggle_fondo_login(item_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -4039,7 +4158,7 @@ def toggle_fondo_login(item_id):
 
 @app.route('/comunicados/fondo_login/<int:item_id>/eliminar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def eliminar_fondo_login(item_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -4066,7 +4185,7 @@ def eliminar_fondo_login(item_id):
 
 @app.route('/comunicados/fondo_login/<int:item_id>/mover/<direccion>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def mover_fondo_login(item_id, direccion):
     """Sube o baja un archivo en el orden de rotación, intercambiando su 'orden' con el del
     vecino inmediato — mismo patrón que el reordenamiento de Tipos de Activo del Inventario."""
@@ -4095,7 +4214,7 @@ def mover_fondo_login(item_id, direccion):
 
 @app.route('/comunicados/fondo_login/<int:item_id>/duracion', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def editar_duracion_fondo_login(item_id):
     """Cambia cuántos segundos se queda en pantalla ESTE archivo antes de rotar al siguiente
     (pedido de Tomás, 13/09/2026) — separado de subir_fondo_login para poder ajustarlo sin
@@ -4119,7 +4238,7 @@ def editar_duracion_fondo_login(item_id):
 
 @app.route('/comunicados/fondo_login/<int:item_id>/sonido', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def toggle_sonido_fondo_login(item_id):
     """Activa/desactiva que ESTE video intente reproducirse con sonido en el login (pedido de
     Tomás, 13/09/2026: decidirlo al cargar el video, no con un botón que la persona que ve
@@ -4146,7 +4265,7 @@ def toggle_sonido_fondo_login(item_id):
 
 @app.route('/comunicados/<int:com_id>/lecturas')
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def lecturas_comunicado(com_id):
     """JSON con quién (de las cuentas activas) ya leyó este comunicado y quién falta —
     usado por el modal de "Ver lecturas" en el muro de Comunicados. Incluye la cédula de quien
@@ -4175,7 +4294,7 @@ def lecturas_comunicado(com_id):
 
 @app.route('/comunicados/<int:com_id>/lecturas/exportar_csv')
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def exportar_lecturas_comunicado(com_id):
     """CSV de quién ha leído este comunicado (nombre, cédula, usuario, fecha) — quien falta por
     leer no tiene fecha de lectura, así que no aplica a este export (ver panel de Cumplimiento
@@ -4212,7 +4331,7 @@ def exportar_lecturas_comunicado(com_id):
 
 @app.route('/comunicados/cumplimiento')
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def cumplimiento_comunicados():
     """Panel de cumplimiento de lectura: de un vistazo, qué % de las cuentas activas ya leyó
     cada comunicado activo y quién falta — sin tener que abrir el modal de cada uno por
@@ -4227,7 +4346,7 @@ def cumplimiento_comunicados():
 
 @app.route('/comunicados/<int:com_id>/recordatorio', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@comunicados_o_extra_required
 def enviar_recordatorio_comunicado(com_id):
     """Envía ahora mismo (a demanda) el recordatorio de lectura pendiente para un comunicado
     puntual — no hay que esperar a que se cumplan las horas del aviso automático."""
@@ -9815,7 +9934,7 @@ def tablero_ejecutivo():
 # quién/qué sede están asignados. Reutiliza las Sedes configuradas en /tickets/configuracion.
 @app.route('/tickets/inventario')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def ver_inventario():
     q_estado = request.args.get('estado', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
@@ -10055,7 +10174,7 @@ def _filtros_inventario_desde_query():
 
 @app.route('/tickets/inventario/plantilla_xlsx')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def inventario_plantilla_xlsx():
     """Plantilla descargable para la carga masiva: mismas columnas que espera
     importar_inventario_xlsx, con una fila de ejemplo para que quede claro el formato esperado
@@ -10090,7 +10209,7 @@ def inventario_plantilla_xlsx():
 
 @app.route('/tickets/inventario/importar_xlsx', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def importar_inventario_xlsx():
     """Carga masiva de activos desde un archivo .xlsx con el formato de COLUMNAS_INVENTARIO_XLSX.
     Cada fila se valida con las MISMAS reglas que crear_activo (placa única y obligatoria, tipo/
@@ -10229,7 +10348,7 @@ def importar_inventario_xlsx():
 
 @app.route('/tickets/inventario/exportar_csv')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def inventario_exportar_csv():
     activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
 
@@ -10263,7 +10382,7 @@ def inventario_exportar_csv():
 
 @app.route('/tickets/inventario/exportar_xlsx')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def inventario_exportar_xlsx():
     activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
 
@@ -10307,7 +10426,7 @@ def inventario_exportar_xlsx():
 
 @app.route('/tickets/inventario/exportar_pdf')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def inventario_exportar_pdf():
     activos = _consultar_activos_inventario_filtrados(*_filtros_inventario_desde_query())
     totales = _totales_costos_inventario(activos)
@@ -10755,7 +10874,7 @@ def _registrar_acta_asignacion(activo_id, form, creador, conn, cursor, db_type, 
 
 @app.route('/tickets/inventario/<int:activo_id>/actas_asignacion')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def listar_actas_asignacion(activo_id):
     """JSON con el historial de actas de asignación de un activo — usado por el modal 'Actas de
     asignación' en Inventario. Devuelve TODAS las actas del activo (no solo la más reciente): cada
@@ -11145,7 +11264,7 @@ def _pdf_bytes_acta_asignacion(campos):
 
 @app.route('/tickets/inventario/actas_asignacion/<int:acta_id>/pdf')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def acta_asignacion_pdf(acta_id):
     """Genera el PDF formal del acta de asignación (formato tipo Preventiva IPS: N° de acta,
     fecha, cláusula de compromiso y firmas) — constancia de que tal activo (de TI o Biomédico,
@@ -11227,7 +11346,7 @@ def _enviar_formulario_asignacion_por_correo(activo_id, asignado_a, creador, fir
 
 @app.route('/tickets/inventario/<int:activo_id>/actas')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def listar_actas_recibido(activo_id):
     """JSON con el historial de actas de recibido de un activo biomédico — usado por el modal
     'Actas de recibido' en Inventario. A propósito devuelve TODAS las actas del activo (no solo
@@ -11259,7 +11378,7 @@ def listar_actas_recibido(activo_id):
 
 @app.route('/tickets/inventario/actas/<int:acta_id>/pdf')
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def acta_recibido_pdf(acta_id):
     """Genera el PDF formal del acta de recibido — el documento que queda como constancia física
     de que tal persona (paciente o cuidador) recibió tal equipo biomédico en tal dirección, con
@@ -11369,7 +11488,7 @@ def acta_recibido_pdf(acta_id):
 
 @app.route('/tickets/inventario/nuevo', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def crear_activo():
     nombre = request.form.get('nombre', '').strip()
     tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
@@ -11476,7 +11595,7 @@ def crear_activo():
 
 @app.route('/tickets/inventario/<int:activo_id>/editar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def editar_activo(activo_id):
     nombre = request.form.get('nombre', '').strip()
     tipo_activo = request.form.get('tipo_activo', 'Otro').strip()
@@ -11616,7 +11735,7 @@ def eliminar_activo(activo_id):
 # hilo de a quién le está llegando el equipo nuevo. Inspirado en el flujo de Solvyx.
 @app.route('/tickets/inventario/<int:activo_id>/reemplazar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def reemplazar_activo(activo_id):
     motivo = request.form.get('motivo', '').strip()
     notas = request.form.get('notas', '').strip()
@@ -11771,7 +11890,7 @@ def reordenar_tipo_activo_catalogo(tipo_id):
 # Reutiliza el mismo subidor de Cloudinary que ya usan los adjuntos de tickets.
 @app.route('/tickets/inventario/<int:activo_id>/adjuntar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def adjuntar_archivo_inventario(activo_id):
     archivos = request.files.getlist('adjuntos')
     subidos = _subir_adjuntos_ticket(archivos)
@@ -11794,7 +11913,7 @@ def adjuntar_archivo_inventario(activo_id):
 
 @app.route('/tickets/inventario/adjunto/<int:adjunto_id>/eliminar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def eliminar_adjunto_inventario(adjunto_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -12975,6 +13094,7 @@ def login():
                             session['logged_in'] = True
                             session['username'] = user[0]
                             session['rol'] = user[2]
+                            session['modulos_extra'] = _modulos_extra_de_usuario(user[0])
                             session['instance_id'] = SERVER_INSTANCE_ID
                             session['tema'] = user[4] or 'oscuro'
                             session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
@@ -12999,6 +13119,7 @@ def login():
                     session['logged_in'] = True
                     session['username'] = user[0]
                     session['rol'] = user[2]
+                    session['modulos_extra'] = _modulos_extra_de_usuario(user[0])
                     session['instance_id'] = SERVER_INSTANCE_ID
                     session['tema'] = user[4] or 'oscuro'
                     session['debe_cambiar_password'] = bool(user[5]) if len(user) > 5 else False
@@ -13096,6 +13217,7 @@ def login_2fa():
             session['logged_in'] = True
             session['username'] = user[0]
             session['rol'] = user[1]
+            session['modulos_extra'] = _modulos_extra_de_usuario(user[0])
             session['instance_id'] = SERVER_INSTANCE_ID
             session['tema'] = user[3] or 'oscuro'
             session['debe_cambiar_password'] = bool(user[4])
@@ -13261,7 +13383,7 @@ def _exportar_csv_personas(nombre_archivo, filas):
 
 @app.route('/galerias/<galeria_id>/vistas')
 @login_required
-@agente_o_admin_required
+@galerias_o_extra_required
 def vistas_galeria(galeria_id):
     """JSON con quién ha visto este instructivo (nombre, cédula y fecha de la primera vista) —
     usado por el modal "Ver vistas" en el Gestor de Instructivos. Restringido a agente/admin,
@@ -13291,7 +13413,7 @@ def vistas_galeria(galeria_id):
 
 @app.route('/galerias/<galeria_id>/vistas/exportar_csv')
 @login_required
-@agente_o_admin_required
+@galerias_o_extra_required
 def exportar_vistas_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -13619,7 +13741,7 @@ def _puede_gestionar_credencial_item(propietario, visibilidad, username, rol):
 # 🔑 MÓDULO BÓVEDA DE CREDENCIALES
 @app.route('/credenciales')
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def ver_credenciales():
     # 🔐 Aviso perezoso de rotación de contraseñas vencida — ver _revisar_recordatorios_rotacion().
     _revisar_recordatorios_rotacion()
@@ -13722,7 +13844,7 @@ def ver_credenciales():
 
 @app.route('/credenciales/<int:cred_id>/revelar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def revelar_credencial(cred_id):
     """Descifra el contenido sensible de un ítem de la bóveda a demanda, y deja constancia en el
     log general (con credencial_id) de quién lo consultó/copió y cuándo — la base de la
@@ -13771,7 +13893,7 @@ def revelar_credencial(cred_id):
 
 @app.route('/credenciales/<int:cred_id>/historial')
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def historial_credencial(cred_id):
     """Lista (sin descifrar ninguna clave) las entradas del historial de contraseñas anteriores
     de una credencial — quién la cambió y cuándo. Cada clave puntual solo se descifra a demanda
@@ -13802,7 +13924,7 @@ def historial_credencial(cred_id):
 
 @app.route('/credenciales/historial/<int:historial_id>/revelar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def revelar_historial_credencial(historial_id):
     """Descifra puntualmente UNA clave anterior del historial (nunca la lista completa de una
     vez), dejando el mismo rastro de auditoría que revelar_credencial."""
@@ -13831,7 +13953,7 @@ def revelar_historial_credencial(historial_id):
 
 @app.route('/credenciales/auditoria')
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def auditoria_credenciales():
     """Panel de auditoría de la bóveda: estado de rotación de cada credencial activa (según su
     política opcional) y el historial reciente de consultas/copias de claves — quién, cuál
@@ -13873,7 +13995,7 @@ def auditoria_credenciales():
 
 @app.route('/credenciales/crear', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def crear_credencial():
     servicio = request.form.get('servicio', '').strip()
     url = request.form.get('url', '').strip()
@@ -13932,7 +14054,7 @@ def crear_credencial():
 
 @app.route('/credenciales/editar/<int:cred_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def editar_credencial(cred_id):
     servicio = request.form.get('servicio', '').strip()
     url = request.form.get('url', '').strip()
@@ -14010,7 +14132,7 @@ def editar_credencial(cred_id):
 
 @app.route('/credenciales/eliminar/<int:cred_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def eliminar_credencial(cred_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -14374,7 +14496,7 @@ def admin_boveda_personal_items(usuario):
 
 @app.route('/credenciales/<int:cred_id>/compartidos')
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def compartidos_credencial(cred_id):
     """Lista con quién está compartido puntualmente un ítem personal — visible para cualquiera
     que ya pueda ver el ítem (dueño, compartidos, y admin), para que quede claro quién más
@@ -14407,7 +14529,7 @@ def compartidos_credencial(cred_id):
 
 @app.route('/credenciales/<int:cred_id>/compartir', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def compartir_credencial(cred_id):
     """Comparte puntualmente un ítem 'personal' con otro miembro activo del equipo de soporte
     (admin/agente) — solo el dueño del ítem o un admin pueden hacerlo. Un ítem 'equipo' no
@@ -14457,7 +14579,7 @@ def compartir_credencial(cred_id):
 
 @app.route('/credenciales/<int:cred_id>/descompartir', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def descompartir_credencial(cred_id):
     """Quita la compartición puntual de un ítem personal con un usuario dado — solo el dueño o
     un admin pueden hacerlo."""
@@ -14563,7 +14685,7 @@ def _catalogo_tipos_activo_todos():
 
 @app.route('/credenciales/colaboradores')
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def ver_credenciales_colaboradores():
     q_busqueda = request.args.get('q', '').strip().lower()
     f_aplicativo = request.args.get('aplicativo', '').strip()
@@ -14662,7 +14784,7 @@ def ver_credenciales_colaboradores():
 
 @app.route('/credenciales/colaboradores/crear', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def crear_credencial_colaborador():
     """Da de alta una credencial por cada aplicativo seleccionado, para el mismo colaborador y
     con los mismos datos compartidos (contraseña, fechas, analista, capacitado por, medio de
@@ -14728,7 +14850,7 @@ def crear_credencial_colaborador():
 
 @app.route('/credenciales/colaboradores/<int:reg_id>/editar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def editar_credencial_colaborador(reg_id):
     """Edita los datos de una fila existente de Altas de Credenciales (colaborador, aplicativo,
     fechas, analista, solicitante, capacitador, medio de envío). La contraseña es opcional: si el
@@ -14774,7 +14896,7 @@ def editar_credencial_colaborador(reg_id):
 
 @app.route('/credenciales/colaboradores/<int:reg_id>/eliminar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def eliminar_credencial_colaborador(reg_id):
     """Elimina PERMANENTEMENTE una fila de Altas de Credenciales — a diferencia de
     'Deshabilitar' (que solo marca el acceso como inactivo y lo mantiene en el historial), esto
@@ -14803,7 +14925,7 @@ def eliminar_credencial_colaborador(reg_id):
 
 @app.route('/credenciales/colaboradores/<int:reg_id>/deshabilitar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def deshabilitar_credencial_colaborador(reg_id):
     try:
         conn, db_type = get_db()
@@ -14825,7 +14947,7 @@ def deshabilitar_credencial_colaborador(reg_id):
 
 @app.route('/credenciales/colaboradores/<int:reg_id>/reactivar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def reactivar_credencial_colaborador(reg_id):
     """Vuelve a 'activo' una fila de Altas de Credenciales que había quedado 'deshabilitado' —
     flujo simétrico al de deshabilitar. Limpia fecha_deshabilitacion/deshabilitado_por para que
@@ -14855,7 +14977,7 @@ def reactivar_credencial_colaborador(reg_id):
 
 @app.route('/credenciales/colaboradores/<int:reg_id>/revelar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def revelar_credencial_colaborador(reg_id):
     """Descifra a demanda la clave de una credencial de colaborador puntual y deja constancia
     en el log general de quién la consultó/copió — misma idea que /credenciales/<id>/revelar
@@ -14885,7 +15007,7 @@ def revelar_credencial_colaborador(reg_id):
 
 @app.route('/credenciales/colaboradores/aplicativos/crear', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def crear_aplicativo_catalogo():
     nombre = request.form.get('nombre', '').strip()
     if nombre:
@@ -14905,7 +15027,7 @@ def crear_aplicativo_catalogo():
 
 @app.route('/credenciales/colaboradores/aplicativos/<int:app_id>/eliminar', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@boveda_accesos_o_extra_required
 def eliminar_aplicativo_catalogo(app_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -15316,9 +15438,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -15479,7 +15601,7 @@ def usuarios_importar_xlsx():
 
 @app.route('/tickets/inventario/usuarios/crear_rapido', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@inventario_o_extra_required
 def crear_usuario_rapido_inventario():
     """Alta rápida de usuario desde el modal de asignación de Inventario: si la persona a quien
     se le va a asignar un activo todavía no tiene cuenta en Arkiv, esto evita salir a Gestión de
@@ -15541,7 +15663,7 @@ def admin_desactivar_2fa(usuario):
 
 @app.route('/usuarios/buscar_cedula')
 @login_required
-@agente_o_admin_required
+@inventario_o_boveda_o_extra_required
 def buscar_usuario_por_cedula():
     """Busca una cuenta de Arkiv por número de cédula — usado desde el buscador rápido del
     Inventario de Activos para llenar 'Asignado a' sin tener que escribir el nombre completo de
@@ -15573,7 +15695,7 @@ def buscar_usuario_por_cedula():
 
 @app.route('/usuarios/buscar')
 @login_required
-@agente_o_admin_required
+@inventario_o_boveda_o_extra_required
 def buscar_usuarios():
     """Coincidencia PARCIAL por nombre, usuario o cédula (a diferencia de buscar_usuario_por_cedula,
     que exige la cédula completa) — usado por el campo "Colaborador" de Altas de Credenciales, la
@@ -15678,6 +15800,17 @@ def editar_usuario(usuario_id):
         elif quitar_firma:
             firma_final = None
 
+        # 🧩 Módulos extra (pedido por Tomás, 19/09/2026): permiso EXTRA sobre el rol — esta
+        # lista SOLO agrega acceso a módulos puntuales (ver MODULOS_ASIGNABLES/usuario_tiene_
+        # modulo más arriba), nunca le quita a nadie lo que su rol ya le da. Admin y Agente ya
+        # ven todos estos módulos por ROLES_CON_ACCESO_OPERATIVO, así que marcarles casillas no
+        # les cambia nada; esto sirve sobre todo para un colaborador 'estandar' o
+        # 'gestion_humana' que necesita entrar a UN módulo puntual sin ascenderlo de rol. Se
+        # descarta cualquier clave que no esté en el catálogo (por si llega un valor manipulado
+        # a mano en el POST).
+        modulos_extra_marcados = request.form.getlist('modulos_extra')
+        modulos_extra_texto = ','.join(m for m in modulos_extra_marcados if m in CLAVES_MODULOS_ASIGNABLES)
+
         # 🪪 Solo se valida la unicidad de la cédula cuando el admin la está CAMBIANDO
         # activamente a un valor distinto del que este usuario ya tenía — así una pareja de
         # cuentas que ya compartía cédula desde antes de esta validación puede seguir
@@ -15720,12 +15853,12 @@ def editar_usuario(usuario_id):
             nuevo_hash = generate_password_hash(nueva_pass)
             # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
             # aquí, se obliga a cambiarla en su próximo inicio de sesión.
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, debe_cambiar_password = 1 WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, debe_cambiar_password = 1 WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
@@ -15972,7 +16105,7 @@ def desbloquear_intentos_usuario(usuario_id):
 # 📑 RUTA /LOGS CON FILTROS
 @app.route('/logs')
 @login_required
-@agente_o_admin_required
+@auditoria_o_extra_required
 def ver_logs():
     q_usuario = request.args.get('usuario', '').strip()
     q_accion = request.args.get('accion', '').strip()
@@ -16067,7 +16200,7 @@ def ver_logs():
 # 📊 EXPORTAR AUDITORÍA A EXCEL / CSV
 @app.route('/exportar_logs_csv')
 @login_required
-@agente_o_admin_required
+@auditoria_o_extra_required
 def exportar_logs_csv():
     q_usuario = request.args.get('usuario', '').strip()
     q_accion = request.args.get('accion', '').strip()
@@ -16131,7 +16264,7 @@ def exportar_logs_csv():
 # guardan en ningún lado desde que se generan en /recuperar (ver registrar_correo_log).
 @app.route('/logs/correos')
 @login_required
-@agente_o_admin_required
+@auditoria_o_extra_required
 def ver_logs_correos():
     q_destinatario = request.args.get('destinatario', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
@@ -16190,7 +16323,7 @@ def ver_logs_correos():
 # 📊 EXPORTAR BITÁCORA DE CORREOS A EXCEL / CSV
 @app.route('/exportar_logs_correos_csv')
 @login_required
-@agente_o_admin_required
+@auditoria_o_extra_required
 def exportar_logs_correos_csv():
     q_destinatario = request.args.get('destinatario', '').strip()
     q_tipo = request.args.get('tipo', '').strip()
@@ -17689,7 +17822,7 @@ def index():
 # 📦 SUBIDA DE ARCHIVOS (IMÁGENES, VIDEOS, DOCUMENTOS Y COMPRIMIDOS .ZIP/.RAR)
 @app.route('/subir', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@galerias_o_extra_required
 def subir_archivo():
     archivos = request.files.getlist('archivo')
     titulo = request.form.get('titulo', 'Sin título')
@@ -17804,7 +17937,7 @@ def subir_archivo():
 
 @app.route('/editar_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@galerias_o_extra_required
 def editar_galeria(galeria_id):
     nuevo_titulo = (request.form.get('titulo') or '').strip()
     nueva_desc = (request.form.get('descripcion') or '').strip()
@@ -17937,7 +18070,7 @@ def editar_galeria(galeria_id):
 # 🗑️ BORRADO LÓGICO DE INSTRUCTIVO
 @app.route('/eliminar_galeria/<galeria_id>', methods=['POST'])
 @login_required
-@agente_o_admin_required
+@galerias_o_extra_required
 def eliminar_galeria(galeria_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -17965,7 +18098,7 @@ def eliminar_galeria(galeria_id):
 
 @app.route('/vencimientos')
 @login_required
-@agente_o_admin_required
+@vencimientos_o_extra_required
 def ver_vencimientos():
     """Panel consolidado de vencimiento de documentos: instructivos institucionales
     ('galerias') y documentos por empleado ('documentos_empleado') en una sola vista,
