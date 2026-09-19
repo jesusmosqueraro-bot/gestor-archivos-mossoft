@@ -185,6 +185,50 @@ def test_eliminar_powerbi_rechaza_a_no_admin(client, app, crear_usuario):
 
 
 # ---------------------------------------------------------------------------
+# Gestión también desde /tablero-ejecutivo (pedido por Tomás, 19/09/2026: "no visualizo los
+# botones editar desde el usuario AdminMaster" — el lápiz de editar solo aparecía al pasar el
+# mouse, y Bloquear/Eliminar no existían ahí; ahora hay controles siempre visibles y 'next'
+# hace que alternar/eliminar regresen a esta misma página en vez de saltar al visor dedicado).
+# ---------------------------------------------------------------------------
+
+def test_tablero_ejecutivo_muestra_tableros_bloqueados_tambien(admin_session, app):
+    _crear_tablero(app, titulo='Tablero Bloqueado', activo=False)
+    html = admin_session.get('/tablero-ejecutivo').get_data(as_text=True)
+    assert 'Tablero Bloqueado' in html
+    assert 'Bloqueado' in html
+
+
+def test_tablero_ejecutivo_controles_no_dependen_de_hover(admin_session, app):
+    _crear_tablero(app)
+    html = admin_session.get('/tablero-ejecutivo').get_data(as_text=True)
+    assert 'class="absolute top-3 right-3 text-slate-500 hover:text-purple-300 opacity-0' not in html
+    assert 'confirmarEliminarPowerBI' in html
+    assert '/alternar' in html
+
+
+def test_alternar_powerbi_con_next_tablero_ejecutivo_regresa_ahi(admin_session, app):
+    tablero_id = _crear_tablero(app, activo=True)
+    resp = admin_session.post(f'/indicadores/powerbi/{tablero_id}/alternar', data={'next': 'tablero_ejecutivo'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/tablero-ejecutivo')
+
+
+def test_eliminar_powerbi_con_next_tablero_ejecutivo_regresa_ahi(admin_session, app):
+    tablero_id = _crear_tablero(app)
+    resp = admin_session.post(f'/indicadores/powerbi/{tablero_id}/eliminar', data={'next': 'tablero_ejecutivo'})
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/tablero-ejecutivo')
+
+
+def test_alternar_powerbi_next_invalido_se_ignora(admin_session, app):
+    tablero_id = _crear_tablero(app, activo=True)
+    resp = admin_session.post(f'/indicadores/powerbi/{tablero_id}/alternar', data={'next': 'visor_db'})
+    assert resp.status_code == 302
+    assert f'/indicadores/powerbi/{tablero_id}' in resp.headers['Location']
+    assert 'visor_db' not in resp.headers['Location'] and '/admin/db' not in resp.headers['Location']
+
+
+# ---------------------------------------------------------------------------
 # Edición de Nombres por Admin: un admin (no super-admin) ahora SÍ puede editar
 # agente/estandar, pero sigue sin poder tocar OTRA cuenta 'admin'.
 # ---------------------------------------------------------------------------
