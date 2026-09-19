@@ -75,6 +75,78 @@
             <p><i class="fa-solid fa-swatchbook text-fuchsia-400 mr-1.5"></i> Los "Colores de marca" de abajo también se usan fuera de los modales: en la pantalla de inicio de sesión y en el selector de color del Muro de Comunicados — cámbialos con eso en mente.</p>
         </div>
 
+        <!-- 🏢 LOGO INSTITUCIONAL Y MARCA DE AGUA DE LAS ACTAS (pedido de Tomás, 19/09/2026:
+             "habilita... una opción para cambiar el icono de preventiva cuando se desee o cuando
+             se cambie de Sociedad, y... la opción de cambiar la marca de agua a las imágenes").
+             Dos formularios independientes (cada uno sube UN archivo a Cloudinary, ver
+             _subir_imagen_institucional en app.py) para no atarlos al guardado de colores de
+             abajo. El logo aplica en TODO el sistema: barra de navegación (logo_preventiva_nav.
+             html), /login, y el encabezado + la marca de agua por defecto de las actas de
+             Asignación/Devolución en PDF (ver _logo_institucional_fuente_pdf en app.py). La
+             marca de agua es un override PUNTUAL solo para esas actas: si no se sube una propia,
+             sigue reutilizando el logo institucional vigente sin necesitar una segunda imagen. -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 space-y-6">
+            <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-1">
+                    <i class="fa-solid fa-building text-fuchsia-400"></i> Logo institucional
+                </h3>
+                <p class="text-[10px] text-slate-500 mb-3">Se usa en toda la plataforma: la barra de navegación, la pantalla de inicio de sesión, y el encabezado de las actas de Asignación/Devolución en PDF. Útil si cambia de Sociedad o simplemente quieres actualizar el ícono.</p>
+                <div class="flex flex-wrap items-end gap-4">
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Actual</p>
+                        <div class="w-28 h-16 rounded-xl bg-white border border-slate-700 flex items-center justify-center p-2">
+                            <img src="{{ logo_institucional_url_personalizado or url_for('static', filename='img/logo_preventiva.png') }}" alt="Logo institucional actual" class="max-w-full max-h-full object-contain">
+                        </div>
+                    </div>
+                    <form method="POST" action="{{ url_for('guardar_logo_institucional') }}" enctype="multipart/form-data" class="flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="file" name="logo_archivo" accept=".jpg,.jpeg,.png,.gif,.webp" required class="text-[11px] text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-700 file:text-slate-200 file:text-[11px] file:font-semibold hover:file:bg-slate-600">
+                        <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 px-3.5 rounded-xl text-[11px] transition-all active:scale-95">
+                            <i class="fa-solid fa-cloud-arrow-up"></i> Cambiar logo
+                        </button>
+                    </form>
+                    {% if logo_institucional_url_personalizado %}
+                    <form method="POST" action="{{ url_for('restablecer_logo_institucional') }}" onsubmit="return confirm('¿Restablecer el logo institucional al de Preventiva Salud IPS?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" class="text-[11px] text-slate-500 hover:text-rose-400 font-semibold flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-arrow-rotate-left"></i> Restablecer al logo de Preventiva
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="border-t border-slate-700/60 pt-5">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-1">
+                    <i class="fa-solid fa-droplet text-fuchsia-400"></i> Marca de agua de las actas (Asignación y Devolución)
+                </h3>
+                <p class="text-[10px] text-slate-500 mb-3">Imagen tenue que aparece de fondo en las actas de Asignación y Devolución en PDF. Si no subes una propia aquí, se usa automáticamente el logo institucional de arriba.</p>
+                <div class="flex flex-wrap items-end gap-4">
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Actual</p>
+                        <div class="w-28 h-16 rounded-xl bg-white border border-slate-700 flex items-center justify-center p-2">
+                            <img src="{{ marca_agua_actas_url_personalizada or logo_institucional_url_personalizado or url_for('static', filename='img/logo_preventiva.png') }}" alt="Marca de agua actual" class="max-w-full max-h-full object-contain opacity-40">
+                        </div>
+                    </div>
+                    <form method="POST" action="{{ url_for('guardar_marca_agua_actas') }}" enctype="multipart/form-data" class="flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="file" name="marca_agua_archivo" accept=".jpg,.jpeg,.png,.gif,.webp" required class="text-[11px] text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-700 file:text-slate-200 file:text-[11px] file:font-semibold hover:file:bg-slate-600">
+                        <button type="submit" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 px-3.5 rounded-xl text-[11px] transition-all active:scale-95">
+                            <i class="fa-solid fa-cloud-arrow-up"></i> Cambiar marca de agua
+                        </button>
+                    </form>
+                    {% if marca_agua_actas_url_personalizada %}
+                    <form method="POST" action="{{ url_for('restablecer_marca_agua_actas') }}" onsubmit="return confirm('¿Restablecer la marca de agua de las actas? Volverá a usar el logo institucional vigente.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" class="text-[11px] text-slate-500 hover:text-rose-400 font-semibold flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-arrow-rotate-left"></i> Usar el logo institucional
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
         <form method="POST" action="{{ url_for('guardar_diseno_modales') }}" id="form-diseno-modales" class="space-y-6">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
