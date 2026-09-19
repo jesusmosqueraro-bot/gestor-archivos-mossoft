@@ -69,15 +69,20 @@ def test_la_tabla_usuarios_tiene_la_columna_modulos_extra(app):
 # 2) Catálogo expuesto a las plantillas
 # ---------------------------------------------------------------------------
 
-def test_modulos_asignables_catalog_tiene_las_seis_claves_esperadas(app):
+def test_modulos_asignables_catalog_tiene_las_siete_claves_esperadas(app):
+    # 🧩 19/09/2026 (segunda ronda de permisos por módulo): se agregó 'reportes' (Indicadores /
+    # Power BI) al catálogo original de seis. Ver comentario junto a MODULOS_ASIGNABLES en app.py.
     claves = set(app.CLAVES_MODULOS_ASIGNABLES)
-    assert claves == {'comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos'}
+    assert claves == {
+        'comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos',
+        'reportes',
+    }
 
 
 def test_modal_editar_usuario_incluye_el_checklist_de_modulos(admin_session):
     html = admin_session.get('/usuarios').get_data(as_text=True)
     assert 'Acceso extra a módulos' in html
-    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos'):
+    for clave in ('comunicados', 'inventario', 'boveda_accesos', 'auditoria', 'galerias', 'vencimientos', 'reportes'):
         assert f'value="{clave}"' in html
     assert 'edit-modulo-extra' in html
 
