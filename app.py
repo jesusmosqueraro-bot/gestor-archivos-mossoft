@@ -3043,7 +3043,12 @@ inventario_o_boveda_o_extra_required = modulo_o_acceso_operativo_required('inven
 
 @app.context_processor
 def _inyectar_modulos_extra():
-    return dict(usuario_tiene_modulo=usuario_tiene_modulo, MODULOS_ASIGNABLES=MODULOS_ASIGNABLES)
+    # 🧩 modulos_extra_desde_texto también se expone a Jinja (pedido por Tomás, 19/09/2026: "aun
+    # no veo que permisos o modulos tiene cada usuario creado") para que la columna "Módulos" y el
+    # modal "Ver Permisos" de usuarios.html reutilicen exactamente el mismo parseo que ya usa el
+    # login, en vez de reimplementar el split/filtrado de claves en la plantilla.
+    return dict(usuario_tiene_modulo=usuario_tiene_modulo, MODULOS_ASIGNABLES=MODULOS_ASIGNABLES,
+                modulos_extra_desde_texto=_modulos_extra_desde_texto)
 
 
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
