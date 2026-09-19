@@ -1412,7 +1412,15 @@ def init_db():
                 # puntual (ej. Inventario) sin ascenderla de rol. Texto plano con las claves
                 # separadas por coma (ver MODULOS_ASIGNABLES/CLAVES_MODULOS_ASIGNABLES/
                 # _modulos_extra_de_usuario más abajo) — nunca le QUITA nada a lo que el rol ya da.
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS modulos_extra TEXT;"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS modulos_extra TEXT;",
+                # 🖼️ Ícono SUBIDO (imagen) para un Tipo de activo del catálogo de Inventario
+                # (pedido por Tomás, 19/09/2026: "que [el botón de agregar Tipo] a su vez pueda
+                # cargar iconos relacionados cuando se agregue") — alternativa a elegir un ícono
+                # de Font Awesome de la lista fija ICONOS_TIPO_ACTIVO. Si esta columna tiene URL,
+                # gana sobre 'icono' en cualquier lugar que muestre el ícono del tipo (ver
+                # crear_tipo_activo_catalogo/_subir_icono_tipo_activo más abajo); si es NULL, se
+                # sigue usando 'icono' exactamente como antes — ningún tipo existente cambia.
+                "ALTER TABLE tipos_activo_catalogo ADD COLUMN IF NOT EXISTS icono_url TEXT;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -9922,13 +9930,18 @@ def tablero_ejecutivo():
         conn.close()
         return redirect(url_for('tablero_ejecutivo'))
 
+    # 🛠️ Sin filtrar por 'activo' (pedido por Tomás, 19/09/2026): toda esta página ya es
+    # @admin_required, así que un tablero bloqueado también debe seguir apareciendo AQUÍ para
+    # poder gestionarlo (editarlo o desbloquearlo) — antes desaparecía también de esta vista de
+    # administración en cuanto se bloqueaba, igual que le pasaba a ver_powerbi (ver esa ruta).
     cursor.execute(
-        "SELECT id, titulo, descripcion, categoria, embed_url, roles_permitidos FROM reportes_powerbi WHERE activo = TRUE ORDER BY fecha_publicacion DESC"
-        if db_type == 'postgres' else
-        "SELECT id, titulo, descripcion, categoria, embed_url, roles_permitidos FROM reportes_powerbi WHERE activo = 1 ORDER BY fecha_publicacion DESC"
+        "SELECT id, titulo, descripcion, categoria, embed_url, roles_permitidos, activo FROM reportes_powerbi ORDER BY fecha_publicacion DESC"
     )
     tableros_powerbi = [
-        {'id': f[0], 'titulo': f[1], 'descripcion': f[2], 'categoria': f[3], 'embed_url': f[4], 'roles_permitidos': f[5]}
+        {
+            'id': f[0], 'titulo': f[1], 'descripcion': f[2], 'categoria': f[3], 'embed_url': f[4],
+            'roles_permitidos': f[5], 'activo': bool(f[6]) if f[6] is not None else True,
+        }
         for f in cursor.fetchall()
     ]
     conn.close()
@@ -16972,6 +16985,24 @@ def editar_powerbi_visor(id):
     return redirect(url_for('ver_powerbi', id=id))
 
 
+# 🔀 A dónde volver tras Bloquear/Desbloquear o Eliminar un tablero de Power BI: por defecto al
+# propio visor/catálogo (ver_powerbi/listar_powerbi, pensado para powerbi_visor.html), pero
+# ambos también se administran desde /tablero-ejecutivo (que tiene su propia tarjeta por
+# tablero con Editar/Bloquear/Eliminar — ver tablero_ejecutivo.html) y ahí el admin espera volver
+# a esa misma pantalla, no saltar al visor dedicado. Lista blanca cerrada (nunca un valor
+# arbitrario del form) para no abrir un open-redirect.
+_DESTINOS_POWERBI_PERMITIDOS = {'tablero_ejecutivo', 'listar_powerbi', 'ver_powerbi'}
+
+
+def _redirect_powerbi(id=None):
+    destino = request.form.get('next', '')
+    if destino in _DESTINOS_POWERBI_PERMITIDOS:
+        if destino == 'ver_powerbi' and id is not None:
+            return redirect(url_for('ver_powerbi', id=id))
+        return redirect(url_for(destino))
+    return None
+
+
 @app.route('/indicadores/powerbi/<int:id>/alternar', methods=['POST'])
 @login_required
 @admin_required
@@ -16995,7 +17026,7 @@ def alternar_powerbi(id):
             f"ID: {id} · Título: {fila[0]}",
         )
     conn.close()
-    return redirect(url_for('ver_powerbi', id=id))
+    return _redirect_powerbi(id) or redirect(url_for('ver_powerbi', id=id))
 
 
 @app.route('/indicadores/powerbi/<int:id>/eliminar', methods=['POST'])
@@ -17016,7 +17047,7 @@ def eliminar_powerbi(id):
         conn.commit()
         registrar_log(session['username'], "Tablero Power BI eliminado", f"ID: {id} · Título: {fila[0]}")
     conn.close()
-    return redirect(url_for('listar_powerbi'))
+    return _redirect_powerbi() or redirect(url_for('listar_powerbi'))
 
 
 @app.route('/admin/geolocalizacion')
