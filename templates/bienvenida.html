@@ -240,8 +240,29 @@
             </a>
             {% endif %}
 
-            {% if rol in ['admin', 'agente'] %}
-            <!-- 4. Bóveda de Accesos (Admin/Agente) -->
+            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('inventario') %}
+            <!-- 3.5 Inventario de Activos (Admin/Agente por su rol; el resto solo si se le
+            concedió el módulo 'inventario' como permiso extra desde Gestión de Usuarios — ver
+            usuario_tiene_modulo/MODULOS_ASIGNABLES). Admin/Agente ya llegan a este módulo desde
+            las pestañas de Soporte TI, así que esta tarjeta es sobre todo la puerta de entrada
+            para quien lo recibió como permiso extra puntual. -->
+            <a href="{{ url_for('ver_inventario') }}" class="group card-acento-cyan bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
+                <div>
+                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">Inventario de Activos</h3>
+                    <p class="text-xs text-slate-400 mt-2 leading-relaxed">Registra, asigna y genera las actas de los activos institucionales.</p>
+                </div>
+                <div class="mt-6 flex items-center gap-2 text-xs font-semibold text-cyan-400">
+                    <span>Ir al inventario</span>
+                    <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                </div>
+            </a>
+            {% endif %}
+
+            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('boveda_accesos') %}
+            <!-- 4. Bóveda de Accesos (Admin/Agente, o permiso extra 'boveda_accesos') -->
             <a href="{{ url_for('ver_credenciales') }}" class="group card-acento-emerald bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -256,7 +277,7 @@
                 </div>
             </a>
 
-            <!-- 4.5 Altas de Credenciales de Colaboradores (Admin/Agente) -->
+            <!-- 4.5 Altas de Credenciales de Colaboradores (Admin/Agente, o permiso extra 'boveda_accesos') -->
             <a href="{{ url_for('ver_credenciales_colaboradores') }}" class="group card-acento-fuchsia bg-slate-900/80 border border-slate-800 hover:border-fuchsia-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -270,8 +291,10 @@
                     <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
+            {% endif %}
 
-            <!-- 4.7 Vencimiento de Documentos (Admin/Agente) -->
+            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('vencimientos') %}
+            <!-- 4.7 Vencimiento de Documentos (Admin/Agente, o permiso extra 'vencimientos') -->
             <a href="{{ url_for('ver_vencimientos') }}" class="group card-acento-amber bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -335,7 +358,8 @@
             {% endif %}
 
             {% if rol in ['admin', 'agente'] %}
-            <!-- 6. Papelera de Reciclaje (Admin/Agente) -->
+            <!-- 6. Papelera de Reciclaje (Admin/Agente — mezcla varios módulos a la vez, no es
+            parte del catálogo de permisos extra por módulo, ver MODULOS_ASIGNABLES) -->
             <a href="{{ url_for('ver_papelera') }}" class="group card-acento-rose bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -349,8 +373,10 @@
                     <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
+            {% endif %}
 
-            <!-- 7. Auditoría y Logs (Admin/Agente) -->
+            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('auditoria') %}
+            <!-- 7. Auditoría y Logs (Admin/Agente, o permiso extra 'auditoria') -->
             <a href="{{ url_for('ver_logs') }}" class="group card-acento-amber bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
@@ -365,7 +391,7 @@
                 </div>
             </a>
 
-            <!-- 7b. Log de Correos Enviados (Admin/Agente) -->
+            <!-- 7b. Log de Correos Enviados (Admin/Agente, o permiso extra 'auditoria') -->
             <a href="{{ url_for('ver_logs_correos') }}" class="group card-acento-sky bg-slate-900/80 border border-slate-800 hover:border-sky-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">

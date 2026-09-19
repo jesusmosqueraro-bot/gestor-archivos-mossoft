@@ -53,7 +53,7 @@
         </div>
 
         <div class="flex items-center gap-2">
-            {% if rol in ['admin', 'agente'] %}
+            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('comunicados') %}
             <a href="{{ url_for('cumplimiento_comunicados') }}" title="Cumplimiento de lectura" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-clipboard-check text-emerald-400"></i>
                 <span class="hidden sm:inline">Cumplimiento</span>
@@ -164,7 +164,7 @@
                         <div class="pt-3 border-t border-slate-700/50 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
                             <span><i class="fa-regular fa-user text-slate-500"></i> Publicado por: <strong class="text-slate-300">{{ c.autor }}</strong></span>
 
-                            {% if rol in ['admin', 'agente'] %}
+                            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('comunicados') %}
                                 <div class="flex items-center gap-2">
                                     {% if c.total_usuarios is defined %}
                                     <button type="button" onclick="abrirModalLecturas({{ c.id }}, '{{ c.titulo|replace("'", "\\'") }}')" title="Ver quién lo ha leído" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center gap-1">

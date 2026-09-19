@@ -731,6 +731,7 @@
                 <button onclick="cerrarModalTiposActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
+            {% if session.get('rol') == 'admin' %}
             <form method="POST" action="{{ url_for('crear_tipo_activo_catalogo') }}" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-4 border-b border-slate-700/60 pb-4">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="text" name="key" required maxlength="50" placeholder="Key (ej: TABLET)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 uppercase" style="text-transform:uppercase">
@@ -742,7 +743,14 @@
                     <i class="fa-solid fa-plus mr-1"></i> Agregar tipo
                 </button>
             </form>
+            {% endif %}
 
+            <!-- 🧩 Crear/reordenar/eliminar tipos de activo sigue siendo exclusivo de 'admin'
+            (ver crear_tipo_activo_catalogo/reordenar_tipo_activo_catalogo/eliminar_tipo_activo_
+            catalogo, todas @admin_required) — con el permiso extra 'inventario' este modal ahora
+            también lo puede abrir un colaborador Estándar/Gestión Humana o un Agente, así que el
+            catálogo se muestra en modo solo-lectura para quien no sea admin, en vez de mostrar
+            botones que igual serían rechazados por el servidor. -->
             <div class="space-y-1.5">
                 {% for t in tipos_activo_catalogo %}
                 <div class="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs">
@@ -750,6 +758,7 @@
                         <i class="fa-solid fa-{{ t.icono }} text-orange-400 w-4 text-center"></i> {{ t.etiqueta }}
                         <span class="text-slate-500 font-mono text-[10px]">{{ t.key }}</span>
                     </span>
+                    {% if session.get('rol') == 'admin' %}
                     <div class="flex items-center gap-1">
                         <form method="POST" action="{{ url_for('reordenar_tipo_activo_catalogo', tipo_id=t.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -766,6 +775,7 @@
                             <button type="submit" title="Desactivar" class="text-slate-400 hover:text-rose-400 p-1"><i class="fa-solid fa-trash-can"></i></button>
                         </form>
                     </div>
+                    {% endif %}
                 </div>
                 {% else %}
                 <p class="text-slate-500 text-xs text-center py-4">No hay tipos de activo activos en el catálogo.</p>

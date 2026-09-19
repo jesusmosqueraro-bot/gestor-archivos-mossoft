@@ -231,7 +231,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% elif u[1] == session.get('username') %}
@@ -614,6 +614,25 @@
                     <input type="hidden" name="firma_dataurl" id="firma-editar-input">
                 </div>
 
+                <!-- 🧩 Módulos extra (pedido por Tomás, 19/09/2026): permiso EXTRA sobre el rol —
+                solo AGREGA acceso a un módulo puntual, nunca le quita nada a nadie que ya lo
+                tuviera por su rol. Admin y Agente ya ven todos estos módulos por su rol, así que
+                marcarles o no estas casillas no les cambia nada; sirve sobre todo para un
+                colaborador Estándar o Gestión Humana que necesita entrar a un módulo puntual sin
+                ascenderlo de rol. -->
+                <div class="md:col-span-2 border-t border-slate-800 pt-4">
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Acceso extra a módulos</label>
+                    <p class="text-[10px] text-slate-500 mb-2">Además de lo que ya le da su rol, marca los módulos puntuales a los que esta cuenta debe poder entrar. No le quita nada a nadie: un Administrador o Agente ya ve todos estos módulos por su rol.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {% for m in MODULOS_ASIGNABLES %}
+                        <label class="flex items-center gap-1.5 text-[11px] text-slate-300 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 cursor-pointer hover:border-cyan-700" title="{{ m.descripcion }}">
+                            <input type="checkbox" name="modulos_extra" value="{{ m.clave }}" class="edit-modulo-extra rounded border-slate-700 bg-slate-950">
+                            <i class="fa-solid {{ m.icono }} text-cyan-400"></i> {{ m.etiqueta }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+
                 <div class="pt-2 flex gap-3 md:col-span-2">
                     <button type="button" onclick="cerrarModalEditarUsuario()" class="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all">Cancelar</button>
                     <button type="submit" class="w-1/2 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-500/20 transition-all">Guardar Cambios</button>
@@ -798,7 +817,7 @@
             });
         }
 
-        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma) {
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma, modulosExtra) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
@@ -806,6 +825,12 @@
             document.getElementById('edit_telefono').value = telefono || '';
             document.getElementById('edit_cedula').value = cedula || '';
             document.getElementById('edit_especialidad').value = especialidad || '';
+            // 🧩 Módulos extra: marca solo las casillas de los módulos que esta cuenta ya tiene
+            // concedidos (texto separado por coma guardado en usuarios.modulos_extra).
+            var clavesModulosExtra = (modulosExtra || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);
+            document.querySelectorAll('.edit-modulo-extra').forEach(function(casilla) {
+                casilla.checked = clavesModulosExtra.indexOf(casilla.value) !== -1;
+            });
             // ✍️ Firma: se reinicia el widget (dibujo/archivo pendiente de una edición anterior no
             // debe "arrastrarse" a la cuenta que se va a editar ahora) y, si esta cuenta ya tenía
             // una firma guardada, se muestra como vista previa junto con la opción de quitarla.
