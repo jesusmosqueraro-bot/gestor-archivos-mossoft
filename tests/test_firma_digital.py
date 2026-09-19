@@ -199,6 +199,19 @@ def test_modal_usuarios_incluye_el_capturador_de_firma(admin_session):
     assert 'name="firma_dataurl"' in texto
 
 
+def test_canvas_de_firma_en_usuarios_mide_360_por_80(admin_session):
+    """Pedido explícito de Tomás, 19/09/2026: el campo de la firma (tanto en 'Registrar
+    Usuario' como en 'Editar Usuario') debe medir 360x80px — antes era 280x80px. Se revisan
+    tanto el width/height reales del <canvas> (usados por firma-digital.js para el dibujo)
+    como el style inline (el tamaño visible), que deben coincidir."""
+    texto = admin_session.get('/usuarios').get_data(as_text=True)
+    assert 'id="firma-nuevo-canvas" width="360" height="80"' in texto
+    assert 'style="width:360px; height:80px' in texto
+    assert 'id="firma-editar-canvas" width="360" height="80"' in texto
+    assert 'width="280" height="80"' not in texto
+    assert 'width:280px' not in texto
+
+
 def test_panel_inventario_incluye_el_capturador_de_firma(admin_session):
     texto = admin_session.get('/tickets/inventario').get_data(as_text=True)
     assert 'firma-rapido-canvas' in texto

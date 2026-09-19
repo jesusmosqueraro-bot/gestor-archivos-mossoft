@@ -272,6 +272,37 @@ def test_bienvenida_muestra_tarjeta_de_inventario_solo_con_el_permiso_extra(clie
     assert 'Ir al inventario' not in html2
 
 
+def test_bienvenida_muestra_tarjeta_de_reportes_solo_con_el_permiso_extra(client, app, crear_usuario):
+    """Corrige el bug evidenciado por Tomás en video (19/09/2026): 'Indicadores / Power BI' no
+    tenía tarjeta propia en /bienvenida, así que conceder el permiso extra 'reportes' desde
+    Gestión de Usuarios no se reflejaba visiblemente ahí — la única forma de llegar al tablero
+    era por el buscador global o memorizando la URL. Ver la tarjeta nueva en bienvenida.html y
+    el comentario actualizado junto al bloque de Power BI en buscar_global_api()."""
+    usuario = crear_usuario(usuario='ve_powerbi', rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['reportes'])
+    html = client.get('/bienvenida').get_data(as_text=True)
+    # 'Ver indicadores' es el texto del botón de la tarjeta en sí — a diferencia de "Indicadores /
+    # Power BI", que también aparece siempre (tenga o no el permiso) en la ayuda estática del
+    # buscador global (ver partials/buscador.html), así que no sirve para distinguir los dos casos.
+    assert 'Ver indicadores' in html
+
+    otro = crear_usuario(usuario='no_ve_powerbi', rol='estandar')
+    _sesion_como(client, app, otro, 'estandar', modulos_extra=[])
+    html2 = client.get('/bienvenida').get_data(as_text=True)
+    assert 'Ver indicadores' not in html2
+
+
+def test_bienvenida_muestra_tarjeta_de_reportes_a_admin_y_agente_sin_necesitar_el_permiso_extra(client, app, crear_usuario):
+    """El permiso extra 'reportes' SOLO agrega acceso — admin/agente ya ven la tarjeta por su rol,
+    sin necesidad de que nadie se la conceda a mano (misma promesa que el resto del catálogo, ver
+    MODULOS_ASIGNABLES). Esto es a propósito: el checklist de 'Acceso extra a módulos' en el
+    modal de Editar Usuario NO le quita nada a una cuenta admin/agente aunque quede sin marcar."""
+    agente = crear_usuario(usuario='agente_ve_powerbi', rol='agente')
+    _sesion_como(client, app, agente, 'agente', modulos_extra=[])
+    html = client.get('/bienvenida').get_data(as_text=True)
+    assert 'Ver indicadores' in html
+
+
 def test_comunicados_muestra_boton_publicar_con_el_permiso_extra(client, app, crear_usuario):
     usuario = crear_usuario(usuario='publica_comunicados', rol='estandar')
     _sesion_como(client, app, usuario, 'estandar', modulos_extra=['comunicados'])
