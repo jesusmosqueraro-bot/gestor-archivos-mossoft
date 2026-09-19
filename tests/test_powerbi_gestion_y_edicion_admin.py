@@ -303,3 +303,39 @@ def test_css_close_button_no_depende_del_color_personalizable(app):
         ruta = _os.path.join(base_dir, 'static', 'css', nombre_tema)
         contenido = open(ruta, encoding='utf-8').read()
         assert 'fa-xmark' in contenido and ':has(' in contenido
+
+
+# ---------------------------------------------------------------------------
+# Overlay de carga del visor: Tomás reportó, con video adjunto (19/09/2026), "un bug al hacer uso
+# de este boton buscar, no cargan de manera correcta los tableros aqui" tras probar un resultado
+# de Power BI desde el buscador global. Revisando el video cuadro a cuadro se confirmó que el
+# tablero SÍ termina cargando bien en ambos casos -entrando desde el buscador global o desde la
+# tarjeta del catálogo, es EXACTAMENTE el mismo comportamiento- pero justo al navegar, Power BI
+# muestra un instante su propio ícono genérico en blanco, sin ningún texto, antes de su propio
+# "Cargando datos..."; ese instante en blanco sin marca ni mensaje es lo que se ve/parece un
+# tablero roto. No hay nada que "corregir" en el enrutamiento ni en los permisos (ver el resto de
+# pruebas de este archivo y las de test_buscador_global_powerbi_auditoria_respaldos.py, que ya
+# prueban que el enlace generado por el buscador apunta siempre al tablero correcto), así que la
+# corrección real es tapar ese instante con un overlay propio de Arkiv.
+# ---------------------------------------------------------------------------
+
+def test_visor_powerbi_tapa_el_flash_inicial_con_un_overlay_de_carga_propio(admin_session, app):
+    tablero_id = _crear_tablero(app)
+    html = admin_session.get(f'/indicadores/powerbi/{tablero_id}').get_data(as_text=True)
+    assert 'id="overlay-carga-powerbi"' in html
+    assert 'Cargando tablero' in html
+    assert 'id="iframe-powerbi-visor"' in html
+    # El overlay debe desaparecer solo cuando el iframe termine de cargar...
+    assert "onload=\"var ov = document.getElementById('overlay-carga-powerbi')" in html
+    # ...y, como red de seguridad, a los 8s aunque el iframe nunca dispare 'load' (embebido caído,
+    # red muy lenta) para no dejarlo tapando el tablero para siempre.
+    assert 'setTimeout(function () {' in html and '8000' in html
+
+
+def test_visor_powerbi_overlay_tambien_se_ve_para_un_rol_no_admin_con_acceso(client, app, crear_usuario):
+    tablero_id = _crear_tablero(app, roles_permitidos='agente')
+    usuario = crear_usuario(rol='agente')
+    _sesion_como(client, app, usuario, 'agente')
+    html = client.get(f'/indicadores/powerbi/{tablero_id}').get_data(as_text=True)
+    assert 'id="overlay-carga-powerbi"' in html
+    assert 'id="iframe-powerbi-visor"' in html
