@@ -123,8 +123,27 @@ def test_marca_agua_logo_imagen_reader_carga_el_logo_institucional(app):
 
 def test_marca_agua_logo_no_rompe_si_el_archivo_no_existe(app, monkeypatch):
     """Si el logo no se pudiera leer (ruta rota, archivo corrupto, etc.), la marca de agua debe
-    omitirse en silencio — nunca debe tumbar la generación del acta completa por esto."""
+    omitirse en silencio — nunca debe tumbar la generación del acta completa por esto. Sin ningún
+    logo/marca de agua personalizados guardados en configuracion_app (BD recién sembrada, ver
+    fixture _base_de_datos_limpia), _marca_agua_actas_fuente_pdf cae hasta _RUTA_LOGO_PREVENTIVA
+    — se rompe esa ruta a propósito para simular el archivo faltante."""
     app._MARCA_AGUA_LOGO_CACHE.clear()
-    monkeypatch.setattr(app.app, 'root_path', '/ruta/que/no/existe/de/verdad')
+    monkeypatch.setattr(app, '_RUTA_LOGO_PREVENTIVA', '/ruta/que/no/existe/de/verdad/logo.png')
     assert app._marca_agua_logo_imagen_reader() is None
     app._MARCA_AGUA_LOGO_CACHE.clear()
+
+
+def test_marca_agua_actas_reutiliza_el_logo_institucional_personalizado(app, monkeypatch):
+    """Si un admin sube un logo institucional propio pero NO una marca de agua propia, la marca
+    de agua de las actas debe reutilizar esa misma fuente (pedido de Tomás, 19/09/2026, aclarado
+    con AskUserQuestion: no hace falta subir dos imágenes distintas si basta con una)."""
+    app._guardar_config_app(app.CLAVE_LOGO_INSTITUCIONAL, 'https://res.cloudinary.com/demo/image/upload/logo_personalizado.png')
+    assert app._marca_agua_actas_fuente_pdf() == 'https://res.cloudinary.com/demo/image/upload/logo_personalizado.png'
+
+
+def test_marca_agua_actas_propia_tiene_prioridad_sobre_el_logo(app):
+    """Si además se sube una marca de agua propia para las actas, esa gana sobre el logo
+    institucional (aunque ambos estén personalizados)."""
+    app._guardar_config_app(app.CLAVE_LOGO_INSTITUCIONAL, 'https://res.cloudinary.com/demo/image/upload/logo_personalizado.png')
+    app._guardar_config_app(app.CLAVE_MARCA_AGUA_ACTAS, 'https://res.cloudinary.com/demo/image/upload/marca_agua_propia.png')
+    assert app._marca_agua_actas_fuente_pdf() == 'https://res.cloudinary.com/demo/image/upload/marca_agua_propia.png'

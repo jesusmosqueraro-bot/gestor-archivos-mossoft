@@ -73,7 +73,10 @@ def test_el_logo_institucional_enlaza_al_sitio_publico_de_preventiva_en_todas_la
     assert '<a href="https://preventivaips.com.co/"' in contenido
     assert 'target="_blank"' in contenido
     assert 'rel="noopener noreferrer"' in contenido
-    assert '/static/img/logo_preventiva.png' in contenido
+    # 🏢 19/09/2026: el <img> ya no apunta al archivo estático a mano — sale de
+    # 'logo_institucional_url' (ver _inyectar_colores_modal en app.py), que resuelve solo el
+    # logo personalizado desde /admin/diseno si existe, o si no, este mismo archivo por defecto.
+    assert '{{ logo_institucional_url }}' in contenido
 
 
 def test_pagina_de_bienvenida_muestra_el_logo_ya_enlazado_al_sitio_publico(admin_session):
