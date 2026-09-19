@@ -17883,12 +17883,13 @@ def buscar_global_api():
         except Exception as e:
             print(f"⚠️ Error buscando en certificación de devoluciones (buscador global): {e}")
 
-    # --- Indicadores / Power BI (tableros embebidos, ver listar_powerbi()/ver_powerbi()): sin
-    # tarjeta propia en Inicio hoy, así que para quien tenga el permiso extra 'reportes' este
-    # buscador es la ÚNICA forma de encontrar un tablero puntual sin memorizar la URL. Replica
-    # EXACTAMENTE la misma regla de visibilidad de ver_powerbi(): se ve si tiene el permiso
-    # extra 'reportes' O su rol está en 'roles_permitidos' de ese tablero puntual; y si está
-    # bloqueado (activo = FALSE) solo lo ve un admin (igual que el propio visor).
+    # --- Indicadores / Power BI (tableros embebidos, ver listar_powerbi()/ver_powerbi(); desde
+    # 19/09/2026 también tiene su propia tarjeta en Inicio para admin/agente o quien tenga el
+    # permiso extra 'reportes' — ver bienvenida.html). El buscador sigue sirviendo para encontrar
+    # un tablero PUNTUAL sin entrar al catálogo completo. Replica EXACTAMENTE la misma regla de
+    # visibilidad de ver_powerbi(): se ve si tiene el permiso extra 'reportes' O su rol está en
+    # 'roles_permitidos' de ese tablero puntual; y si está bloqueado (activo = FALSE) solo lo ve
+    # un admin (igual que el propio visor).
     try:
         cursor.execute("SELECT id, titulo, descripcion, categoria, roles_permitidos, activo FROM reportes_powerbi ORDER BY id DESC")
         contador = 0
