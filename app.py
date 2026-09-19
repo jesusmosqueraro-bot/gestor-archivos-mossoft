@@ -11262,6 +11262,68 @@ def _pdf_pie_de_pagina_powered_by(canvas_obj, doc_obj):
     canvas_obj.restoreState()
 
 
+# 💧 Marca de agua institucional en las actas de Asignación y Devolución (pedido de Tomás,
+# 19/09/2026, con dos capturas de referencia mostrando el logo de Preventiva Salud IPS centrado
+# y casi transparente sobre la hoja, como el watermark clásico de Word). El PNG real
+# (static/img/logo_preventiva.png) NO tiene canal alfa (se guardó en modo RGB, fondo blanco), así
+# que se le agrega uno en memoria, reducido a ~8% de opacidad, la primera vez que hace falta —
+# _MARCA_AGUA_LOGO_CACHE evita reabrir/reprocesar el archivo en cada PDF generado.
+_MARCA_AGUA_LOGO_CACHE = {}
+
+
+def _marca_agua_logo_imagen_reader():
+    """Devuelve (cacheado en memoria del proceso) un reportlab.lib.utils.ImageReader del logo
+    institucional con un canal alfa reducido, listo para dibujarse como marca de agua. Si el
+    archivo no existe o algo falla al procesarlo, devuelve None — la marca de agua simplemente no
+    se dibuja; nunca debe romper la generación de un acta por esto."""
+    if 'reader' in _MARCA_AGUA_LOGO_CACHE:
+        return _MARCA_AGUA_LOGO_CACHE['reader']
+    lector = None
+    try:
+        from PIL import Image as PILImage
+        from reportlab.lib.utils import ImageReader
+        ruta_logo = os.path.join(app.root_path, 'static', 'img', 'logo_preventiva.png')
+        logo = PILImage.open(ruta_logo).convert('RGBA')
+        canal_alfa = logo.split()[3].point(lambda p: int(p * 0.05))
+        logo.putalpha(canal_alfa)
+        lector = ImageReader(logo)
+    except Exception as e:
+        print(f"⚠️ No se pudo preparar la marca de agua institucional para los PDFs de actas: {e}")
+    _MARCA_AGUA_LOGO_CACHE['reader'] = lector
+    return lector
+
+
+def _pdf_marca_agua_logo(canvas_obj, doc_obj):
+    """Dibuja el logo de Preventiva Salud IPS como marca de agua tenue, centrada en la hoja. Se
+    engancha igual que _pdf_pie_de_pagina_powered_by (onFirstPage/onLaterPages de doc.build): al
+    dibujarse directo sobre el canvas ANTES de que reportlab pinte los 'elementos' (tablas, texto)
+    de esa misma página, queda visualmente DEBAJO del contenido del acta, tal como se ve en las
+    capturas de referencia de Tomás."""
+    imagen = _marca_agua_logo_imagen_reader()
+    if imagen is None:
+        return
+    from reportlab.lib.units import cm
+    ancho_pagina, alto_pagina = doc_obj.pagesize
+    # 221x96 es el tamaño real de static/img/logo_preventiva.png — se mantiene esa proporción
+    # (96/221) para que la marca de agua no salga estirada/deformada.
+    ancho_marca = 10 * cm
+    alto_marca = ancho_marca * (96 / 221)
+    x = (ancho_pagina - ancho_marca) / 2
+    y = (alto_pagina - alto_marca) / 2
+    canvas_obj.saveState()
+    canvas_obj.drawImage(imagen, x, y, width=ancho_marca, height=alto_marca, mask='auto')
+    canvas_obj.restoreState()
+
+
+def _pdf_decoracion_pagina_acta(canvas_obj, doc_obj):
+    """Decoración compartida de cada hoja de las actas de Asignación y Devolución de Inventario:
+    la marca de agua institucional de arriba + el pie de página 'Powered by MosSoft' que ya
+    existía (_pdf_pie_de_pagina_powered_by). Un solo callback para poder seguir pasando una única
+    función a onFirstPage/onLaterPages en doc.build(...)."""
+    _pdf_marca_agua_logo(canvas_obj, doc_obj)
+    _pdf_pie_de_pagina_powered_by(canvas_obj, doc_obj)
+
+
 def _campos_acta_asignacion(acta_id):
     """Devuelve el dict de campos ya resueltos para armar el PDF del acta de asignación
     'acta_id' guardada en 'actas_asignacion' (o None si no existe) — usado por la descarga bajo
@@ -11409,7 +11471,7 @@ def _pdf_bytes_acta_asignacion(campos):
     ]))
     elementos.append(tabla_firmas)
 
-    doc.build(elementos, onFirstPage=_pdf_pie_de_pagina_powered_by, onLaterPages=_pdf_pie_de_pagina_powered_by)
+    doc.build(elementos, onFirstPage=_pdf_decoracion_pagina_acta, onLaterPages=_pdf_decoracion_pagina_acta)
     salida.seek(0)
     return salida.read()
 
@@ -12857,7 +12919,7 @@ def _pdf_bytes_acta_devolucion(campos):
         tabla_firma_responsable.hAlign = 'CENTER'
         elementos.append(tabla_firma_responsable)
 
-    doc.build(elementos, onFirstPage=_pdf_pie_de_pagina_powered_by, onLaterPages=_pdf_pie_de_pagina_powered_by)
+    doc.build(elementos, onFirstPage=_pdf_decoracion_pagina_acta, onLaterPages=_pdf_decoracion_pagina_acta)
     salida.seek(0)
     return salida.read()
 
