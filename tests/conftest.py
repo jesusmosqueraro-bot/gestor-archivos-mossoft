@@ -59,6 +59,11 @@ def _sin_correos_reales(monkeypatch):
     # 'correos_log' mientras la prueba SIGUIENTE ya está borrando/recreando la base sqlite.
     monkeypatch.setattr(arkiv, '_enviar_formulario_asignacion_por_correo', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, '_enviar_certificado_devolucion_por_correo', lambda *a, **k: None)
+    # 🗓️ Aviso de turno (Cuadro de Turnos, 20/09/2026): notificar_turno() llama a
+    # _enviar_correo_simple() directamente (no a través de ninguno de los envoltorios de arriba)
+    # y /turnos/publicar_semana la dispara en threading.Thread — mismo riesgo de red real +
+    # hilo suelto compitiendo con el borrado/recreación de la base sqlite de la prueba siguiente.
+    monkeypatch.setattr(arkiv, '_enviar_correo_simple', lambda *a, **k: True)
 
 
 @pytest.fixture(autouse=True)
