@@ -1505,7 +1505,16 @@ def init_db():
                 # pedido por Tomás 20/09/2026): opcional, se configura por persona desde Editar
                 # Usuario. NULL = sin meta configurada (el reporte solo muestra el total asignado,
                 # sin comparar "a favor/en contra").
-                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS meta_horas_mensual NUMERIC(6,2);"
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS meta_horas_mensual NUMERIC(6,2);",
+                # 🍽️ Minutos de almuerzo/descanso a descontar por Tipo de Turno (pedido por Tomás,
+                # 21/09/2026: "tener presente... la hora del almuerzo, debe descontarse esta del
+                # total horas"; Art. 167 del Código Sustantivo del Trabajo — el descanso NO cuenta
+                # como jornada laboral salvo acuerdo contrario). Opcional y configurable POR tipo
+                # de turno (0/NULL = no descuenta nada, ej. turnos cortos que no aplican para
+                # descanso) porque no todos los turnos son iguales. Solo afecta el cálculo de
+                # "Horas del Mes" (horas NETAS) — la matriz, el catálogo y las exportaciones del
+                # Cuadro de Turnos siguen mostrando el horario completo del turno, sin cambios.
+                "ALTER TABLE tipos_turno ADD COLUMN IF NOT EXISTS minutos_descanso INTEGER DEFAULT 0;"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -2107,7 +2116,10 @@ def init_db():
             # horas mensuales).
             for col_turnos_v2_sql in [
                 "ALTER TABLE tipos_turno ADD COLUMN es_personalizado INTEGER DEFAULT 0;",
-                "ALTER TABLE usuarios ADD COLUMN meta_horas_mensual REAL;"
+                "ALTER TABLE usuarios ADD COLUMN meta_horas_mensual REAL;",
+                # 🍽️ Ver comentario equivalente en la rama de Postgres (minutos de almuerzo/
+                # descanso por Tipo de Turno).
+                "ALTER TABLE tipos_turno ADD COLUMN minutos_descanso INTEGER DEFAULT 0;"
             ]:
                 try:
                     cursor.execute(col_turnos_v2_sql)
@@ -19377,6 +19389,23 @@ ETIQUETAS_ROL_PROFESIONAL_TURNO = {
 }
 CATEGORIAS_TIPO_TURNO = ('ASISTENCIAL', 'ADMINISTRATIVO', 'DESCANSO')
 
+# 🗓️➕ Tope de seguridad para "Fecha Fin" en Asignar Turno / Asignar a Grupo (pedido de Tomás,
+# 20/09/2026: "QUE TAMBIEN HAYA UNA FECHA FIN") — evita crear miles de turnos sueltos por un typo
+# de fecha (ej. año equivocado). 366 cubre cómodamente cualquier rango real (un mes, un trimestre,
+# hasta un año completo) sin ser tan alto como para permitir un error de digitación costoso.
+MAX_DIAS_RANGO_FECHA_FIN = 366
+
+# ⚖️ Jornada laboral máxima legal en Colombia (pedido por Tomás, 20/09/2026: "Tener presente la
+# ley colombiana [sobre horas] laborales según el mes"). La Ley 2101 de 2021 redujo la jornada
+# semanal máxima de forma progresiva —48h hasta jul/2023, 47h (2023-24), 46h (2024-25), 44h
+# (2025-26)— hasta llegar a las 42 horas/semana vigentes desde el 15 de julio de 2026 (la ley
+# actual a la fecha de esta implementación). El equivalente mensual de nómina usado en Colombia
+# para 42h/semana es el "divisor 210" (210 horas/mes). Este número es solo una REFERENCIA
+# informativa + aviso no bloqueante en "Horas del Mes" (ver turnos_horas_mes) — Arkiv nunca
+# bloquea la asignación de turnos por esto, igual que el resto de conflictos de horario del
+# módulo ("avisa, no bloquea").
+HORAS_MAXIMAS_LEGALES_MES_COLOMBIA = 210
+
 # 📲 WhatsApp Cloud API (Meta) — ver scripts/README_WHATSAPP_TURNOS.md para la guía de activación.
 WHATSAPP_CLOUD_API_TOKEN = os.environ.get('WHATSAPP_CLOUD_API_TOKEN')
 WHATSAPP_CLOUD_API_PHONE_ID = os.environ.get('WHATSAPP_CLOUD_API_PHONE_ID')
@@ -19427,25 +19456,35 @@ def _tipos_turno_activos():
     sueltas tipo "LIBRE-1900-0700" que no tiene sentido volver a elegir a mano."""
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, FALSE) = FALSE ORDER BY orden ASC, nombre ASC" if db_type == 'postgres' else
-                   "SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, 0) = 0 ORDER BY orden ASC, nombre ASC")
+    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, minutos_descanso FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, FALSE) = FALSE ORDER BY orden ASC, nombre ASC" if db_type == 'postgres' else
+                   "SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, minutos_descanso FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, 0) = 0 ORDER BY orden ASC, nombre ASC")
     filas = cursor.fetchall()
     conn.close()
     return [
         {'id': f[0], 'codigo': f[1], 'nombre': f[2], 'hora_inicio': f[3], 'hora_fin': f[4],
-         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7]}
+         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7],
+         'minutos_descanso': int(f[8]) if f[8] is not None else 0}
         for f in filas
     ]
 
 
-def _resolver_tipo_turno_personalizado(hora_inicio, hora_fin, nombre_personalizado, conn, db_type):
+def _resolver_tipo_turno_personalizado(hora_inicio, hora_fin, nombre_personalizado, conn, db_type, minutos_descanso=0):
     """Encuentra o crea (idempotente, por hora_inicio+hora_fin exactos) la fila de tipos_turno que
     representa un "horario personalizado" escrito a mano en el modal de Asignar Turno — ver el
     comentario junto a la migración 'es_personalizado' en init_db() sobre por qué se resuelve así
     en vez de permitir turnos_asignados.tipo_turno_id NULL. Reutiliza EXACTAMENTE el mismo cálculo
     de duración que /turnos/tipos (incluye turnos que cruzan la medianoche). No hace commit ni
     cierra la conexión — eso lo maneja quien llama (turnos_asignar/turnos_asignar_grupo), dentro
-    de la misma transacción que crea/edita el turno."""
+    de la misma transacción que crea/edita el turno.
+
+    🍽️ minutos_descanso (pedido de Tomás, 21/09/2026) SOLO se usa al CREAR la fila la primera vez
+    — si dos personas asignan el mismo horario personalizado (mismas hora_inicio/hora_fin) en
+    momentos distintos, comparten la MISMA fila de tipos_turno (por diseño, ver arriba), así que
+    un valor de minutos_descanso distinto en un envío posterior se ignora a propósito: cambiarlo
+    retroactivamente alteraría en silencio las Horas del Mes ya calculadas de todo el mundo que
+    usa ese mismo horario. Para un descanso distinto, hay que darle un horario ligeramente
+    distinto o (si aplica a todos) ajustarlo desde /turnos/tipos si ya se volvió parte del
+    catálogo administrable."""
     # Validar el formato ANTES de tocar la base de datos (ValueError si hora_inicio/hora_fin no
     # son 'HH:MM' válidos) — quien llama debe capturarlo igual que ya hace turnos_tipos().
     inicio_calc, fin_calc = _calcular_inicio_fin_real('2000-01-01', hora_inicio, hora_fin)
@@ -19458,14 +19497,15 @@ def _resolver_tipo_turno_personalizado(hora_inicio, hora_fin, nombre_personaliza
     if fila:
         return fila[0]
     nombre = (nombre_personalizado or '').strip() or f"Horario personalizado {hora_inicio}-{hora_fin}"
+    minutos_descanso = minutos_descanso if isinstance(minutos_descanso, int) and minutos_descanso > 0 else 0
     if db_type == 'postgres':
         cursor.execute(
-            "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-            (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999))
+            "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado, minutos_descanso) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id",
+            (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999, minutos_descanso))
         return cursor.fetchone()[0]
     cursor.execute(
-        "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado) VALUES (?,?,?,?,?,?,?,?,1)",
-        (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999))
+        "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado, minutos_descanso) VALUES (?,?,?,?,?,?,?,?,1,?)",
+        (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999, minutos_descanso))
     return cursor.lastrowid
 
 
@@ -19483,6 +19523,34 @@ def _calcular_inicio_fin_real(fecha_str, hora_inicio, hora_fin):
     if fin_real <= inicio_real:
         fin_real += timedelta(days=1)
     return inicio_real.strftime('%Y-%m-%d %H:%M:%S'), fin_real.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _fechas_en_rango(fecha_inicio_str, fecha_fin_str=None):
+    """🗓️➕ "Fecha Fin" en Asignar Turno / Asignar a Grupo (pedido de Tomás, 20/09/2026: "QUE
+    TAMBIEN HAYA UNA FECHA FIN") — devuelve la lista de fechas ('YYYY-MM-DD') desde
+    fecha_inicio_str hasta fecha_fin_str, AMBAS inclusive, en orden ascendente, TODOS los días del
+    rango sin excluir ningún día de la semana (decisión explícita de Tomás). Si fecha_fin_str
+    viene vacío o es igual a fecha_inicio_str, devuelve una lista de un solo elemento — así el
+    caso de un solo día (el de siempre) usa exactamente el mismo camino de código que un rango de
+    tamaño 1, sin ninguna rama especial.
+
+    Se crea UN turno independiente por cada fecha del rango (no un único registro multi-día): así
+    la matriz, la detección de conflictos, "Horas del Mes" y las exportaciones —que estructuralmente
+    asumen un turno = un día calendario— no necesitan ningún cambio.
+
+    Lanza ValueError si: el formato de cualquiera de las dos fechas es inválido, fecha_fin es
+    anterior a fecha_inicio, o el rango excede MAX_DIAS_RANGO_FECHA_FIN (tope de seguridad)."""
+    inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
+    fecha_fin_str = (fecha_fin_str or '').strip()
+    if not fecha_fin_str or fecha_fin_str == fecha_inicio_str:
+        return [fecha_inicio_str]
+    fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
+    if fin < inicio:
+        raise ValueError('La fecha fin no puede ser anterior a la fecha de inicio.')
+    total_dias = (fin - inicio).days + 1
+    if total_dias > MAX_DIAS_RANGO_FECHA_FIN:
+        raise ValueError(f'El rango de fechas no puede superar los {MAX_DIAS_RANGO_FECHA_FIN} días.')
+    return [(inicio + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(total_dias)]
 
 
 def _turnos_en_conflicto(usuario_id, inicio_real, fin_real, excluir_id=None):
@@ -19559,14 +19627,54 @@ def _enviar_whatsapp_turno(telefono, mensaje):
         return False, None, f"Error de red enviando WhatsApp: {e}"
 
 
-def _mensaje_turno_texto(nombre_colaborador, fecha_legible, turno_nombre, horario, area, sede):
+# 📧 Aviso INMEDIATO por correo al crear/asignar, modificar o cancelar un turno (pedido de Tomás,
+# 20/09/2026: "debe notificarse al usuario via email cuando se cree o asigne un turno y cuando
+# hayan modificaciones y/o cancelen el turno") — REEMPLAZA el aviso que antes solo se disparaba al
+# pulsar "Publicar semana" (ver turnos_publicar_semana, que ya NO notifica). "Publicar semana"
+# sigue sirviendo para agrupar el periodo en un cuadro y poder cerrarlo después.
+_ASUNTOS_NOTIFICACION_TURNO = {
+    'CREACION': 'Asignación de Turno',
+    'MODIFICACION': 'Modificación de Turno',
+    'CANCELACION': 'Cancelación de Turno',
+}
+_INTRO_NOTIFICACION_TURNO = {
+    'CREACION': 'se te ha asignado un turno',
+    'MODIFICACION': 'se modificó uno de tus turnos ya asignados',
+    'CANCELACION': 'se canceló uno de tus turnos asignados',
+}
+_INTRO_NOTIFICACION_TURNO_RESUMEN = {
+    'CREACION': 'se te asignaron los siguientes turnos',
+    'MODIFICACION': 'se modificaron los siguientes turnos ya asignados',
+    'CANCELACION': 'se cancelaron los siguientes turnos asignados',
+}
+
+
+def _mensaje_turno_texto(nombre_colaborador, fecha_legible, turno_nombre, horario, area, sede, tipo_evento='CREACION'):
+    intro = _INTRO_NOTIFICACION_TURNO.get(tipo_evento, 'se ha programado/actualizado tu turno')
     return (
-        f"Hola {nombre_colaborador}, se ha programado/actualizado tu turno en Preventiva Salud IPS:\n\n"
+        f"Hola {nombre_colaborador}, {intro} en Preventiva Salud IPS:\n\n"
         f"Fecha: {fecha_legible}\n"
         f"Turno: {turno_nombre} ({horario})\n"
         f"Área: {area}\n"
         f"Sede: {sede}\n\n"
         "Consulta el detalle en https://arkivapp.co\n"
+        "---\nEquipo de Soporte - ARKIV System"
+    )
+
+
+def _mensaje_turno_resumen_texto(nombre_colaborador, turnos, tipo_evento='CREACION'):
+    """Igual que _mensaje_turno_texto pero para VARIOS turnos del mismo colaborador en una sola
+    operación (Fecha Fin, Asignar a Grupo) — pedido de Tomás, 20/09/2026: en vez de un correo por
+    cada día (podrían ser decenas con Fecha Fin), un único correo con todas las fechas."""
+    intro = _INTRO_NOTIFICACION_TURNO_RESUMEN.get(tipo_evento, 'se programaron/actualizaron los siguientes turnos')
+    lineas = [
+        f"- {t['fecha_legible']}: {t['turno_nombre']} ({t['horario']}) — Área: {t['area']} / Sede: {t['sede']}"
+        for t in turnos
+    ]
+    return (
+        f"Hola {nombre_colaborador}, {intro} en Preventiva Salud IPS:\n\n"
+        + "\n".join(lineas) +
+        "\n\nConsulta el detalle en https://arkivapp.co\n"
         "---\nEquipo de Soporte - ARKIV System"
     )
 
@@ -19606,11 +19714,11 @@ def notificar_turno(turno_id, tipo_evento='CREACION'):
     except Exception:
         fecha_legible = turno['fecha']
     horario = f"{turno['hora_inicio']} a {turno['hora_fin']}"
-    mensaje = _mensaje_turno_texto(turno['nombre'], fecha_legible, turno['turno_nombre'], horario, turno['area'], turno['sede'])
+    mensaje = _mensaje_turno_texto(turno['nombre'], fecha_legible, turno['turno_nombre'], horario, turno['area'], turno['sede'], tipo_evento=tipo_evento)
 
     # 📧 Correo — ya funciona de una vez, reutiliza el mismo webhook de Apps Script del resto de Arkiv.
     if turno['correo']:
-        asunto = f"Asignación de Turno - {fecha_legible} - Preventiva Salud IPS"
+        asunto = f"{_ASUNTOS_NOTIFICACION_TURNO.get(tipo_evento, 'Aviso de Turno')} - {fecha_legible} - Preventiva Salud IPS"
         try:
             if _enviar_correo_simple(turno['correo'], asunto, mensaje):
                 registrar_correo_log(turno['correo'], asunto, 'turno', 'enviado')
@@ -19631,6 +19739,56 @@ def notificar_turno(turno_id, tipo_evento='CREACION'):
         'enviado' if ok_wa else 'error',
         destinatario=turno['telefono'], mensaje_id=mensaje_id_wa, error=None if ok_wa else error_wa,
     )
+
+
+def notificar_turnos_resumen(turno_ids, tipo_evento='CREACION'):
+    """Aviso por correo cuando UNA sola operación crea/modifica/cancela VARIOS turnos (Fecha Fin en
+    Asignar Turno, o Asignar a Grupo) — pedido de Tomás, 20/09/2026. En vez de un correo separado
+    por cada turno (con Fecha Fin podrían ser decenas de días), agrupa por colaborador
+    (turno_ids puede mezclar varios colaboradores, como en Asignar a Grupo) y manda UN solo correo
+    a cada uno con TODAS sus fechas de esta operación. Solo por Correo (no WhatsApp, a propósito:
+    Tomás pidió explícitamente el aviso "via email"; WhatsApp sigue disponible para el aviso de un
+    solo turno vía notificar_turno). Nunca lanza, igual que notificar_turno."""
+    if not turno_ids:
+        return
+    detalles = [d for d in (_detalle_turno_para_notificar(tid) for tid in turno_ids) if d]
+    if not detalles:
+        return
+    por_usuario = {}
+    for d in detalles:
+        por_usuario.setdefault(d['usuario_id'], []).append(d)
+
+    for usuario_id, turnos in por_usuario.items():
+        turnos_ordenados = sorted(turnos, key=lambda t: t['fecha'])
+        primero = turnos_ordenados[0]
+        if not primero['correo']:
+            for t in turnos_ordenados:
+                _registrar_notificacion_turno(t['id'], usuario_id, 'EMAIL', tipo_evento, 'error', error='El colaborador no tiene correo registrado')
+            continue
+        turnos_para_mensaje = []
+        for t in turnos_ordenados:
+            try:
+                fecha_legible = datetime.strptime(t['fecha'], '%Y-%m-%d').strftime('%d/%m/%Y')
+            except Exception:
+                fecha_legible = t['fecha']
+            turnos_para_mensaje.append({
+                'fecha_legible': fecha_legible, 'turno_nombre': t['turno_nombre'],
+                'horario': f"{t['hora_inicio']} a {t['hora_fin']}", 'area': t['area'], 'sede': t['sede'],
+            })
+        asunto = f"{_ASUNTOS_NOTIFICACION_TURNO.get(tipo_evento, 'Aviso de Turno')} ({len(turnos_ordenados)} turnos) - Preventiva Salud IPS"
+        mensaje = _mensaje_turno_resumen_texto(primero['nombre'], turnos_para_mensaje, tipo_evento=tipo_evento)
+        try:
+            if _enviar_correo_simple(primero['correo'], asunto, mensaje):
+                registrar_correo_log(primero['correo'], asunto, 'turno', 'enviado')
+                for t in turnos_ordenados:
+                    _registrar_notificacion_turno(t['id'], usuario_id, 'EMAIL', tipo_evento, 'enviado', destinatario=primero['correo'])
+            else:
+                registrar_correo_log(primero['correo'], asunto, 'turno', 'error', 'Falló el envío del resumen de turnos por correo')
+                for t in turnos_ordenados:
+                    _registrar_notificacion_turno(t['id'], usuario_id, 'EMAIL', tipo_evento, 'error', destinatario=primero['correo'], error='Falló el envío por el webhook de correo')
+        except Exception as e:
+            for t in turnos_ordenados:
+                _registrar_notificacion_turno(t['id'], usuario_id, 'EMAIL', tipo_evento, 'error', destinatario=primero['correo'], error=str(e))
 
 
 def _datos_turnos(desde_str, hasta_str, f_sede='', f_area='', f_rol=''):
@@ -19778,7 +19936,29 @@ def turnos_cuadro():
         {'id': f[0], 'nombre': f[1], 'periodo_inicio': f[2], 'periodo_fin': f[3], 'sede': f[4], 'area': f[5], 'estado': f[6]}
         for f in cursor.fetchall()
     ]
+
+    # 🛈 Tooltip con los datos del PERFIL de cada colaborador al pasar el mouse sobre su nombre en
+    # la matriz (pedido de Tomás, 20/09/2026: "que se reflejen los datos del usuario") — cédula,
+    # correo, teléfono, Sede y cargo/rol de CUENTA (Administrador/Soporte TI/Gestión Humana/
+    # Colaborador), igual que en "Colaboradores por Sede". A propósito son los datos del PERFIL
+    # (usuarios.*), no los del turno puntual de ese día (que ya se ven en su propio tooltip).
+    ph = '%s' if db_type == 'postgres' else '?'
+    usuarios_matriz = [fila['usuario'] for fila in matriz]
+    perfiles_por_usuario = {}
+    if usuarios_matriz:
+        placeholders = ','.join([ph] * len(usuarios_matriz))
+        cursor.execute(
+            f"SELECT usuario, cedula, correo, telefono, sede, rol FROM usuarios WHERE usuario IN ({placeholders})",
+            tuple(usuarios_matriz)
+        )
+        for u, cedula, correo, telefono, sede, rol in cursor.fetchall():
+            perfiles_por_usuario[u] = {
+                'cedula': cedula or '', 'correo': correo or '', 'telefono': telefono or '',
+                'sede': sede or '', 'rol_etiqueta': _CARGO_LEGIBLE_POR_ROL.get(rol, rol),
+            }
     conn.close()
+    for fila in matriz:
+        fila['perfil'] = perfiles_por_usuario.get(fila['usuario'], {})
 
     hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
     return render_template(
@@ -19933,7 +20113,7 @@ def turnos_horas_mes():
         condiciones.append(f"ta.rol_profesional = {ph}")
         parametros.append(f_rol)
     cursor.execute(f"""
-        SELECT u.usuario, u.nombre, u.meta_horas_mensual, ta.fecha, tt.duracion_horas
+        SELECT u.usuario, u.nombre, u.meta_horas_mensual, ta.fecha, tt.duracion_horas, tt.minutos_descanso
         FROM turnos_asignados ta
         JOIN usuarios u ON u.id = ta.usuario_id
         JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
@@ -19944,17 +20124,24 @@ def turnos_horas_mes():
 
     hoy_str = hoy.strftime('%Y-%m-%d')
     por_colaborador = {}
-    for usuario, nombre, meta, fecha_turno, duracion in filas:
+    for usuario, nombre, meta, fecha_turno, duracion, minutos_descanso in filas:
         entrada = por_colaborador.setdefault(usuario, {
             'usuario': usuario, 'nombre': nombre,
             'meta_horas_mensual': float(meta) if meta is not None else None,
             'horas_transcurridas': 0.0, 'horas_programadas': 0.0,
         })
-        duracion = float(duracion or 0)
+        # ⚖️ Ley 2101 de 2021 / Art. 167 CST (20/09/2026): la hora de almuerzo/descanso no cuenta
+        # como jornada laboral, así que aquí —y SOLO aquí, en "Horas del Mes"— se descuenta de la
+        # duración bruta del tipo de turno antes de acumular. El resto del sistema (matriz,
+        # catálogo de Tipos de Turno, exportaciones CSV/Excel/PDF) sigue mostrando la duración
+        # bruta sin cambios, tal como se acordó con Tomás.
+        duracion_bruta = float(duracion or 0)
+        descanso_horas = float(minutos_descanso or 0) / 60.0
+        duracion_neta = max(0.0, duracion_bruta - descanso_horas)
         if fecha_turno <= hoy_str:
-            entrada['horas_transcurridas'] += duracion
+            entrada['horas_transcurridas'] += duracion_neta
         else:
-            entrada['horas_programadas'] += duracion
+            entrada['horas_programadas'] += duracion_neta
 
     resumen = []
     for entrada in por_colaborador.values():
@@ -19964,6 +20151,11 @@ def turnos_horas_mes():
         entrada['horas_programadas'] = round(entrada['horas_programadas'], 2)
         entrada['total_horas'] = total
         entrada['diferencia'] = round(total - meta, 2) if meta is not None else None
+        # ⚖️ Referencia informativa + aviso NO bloqueante (Ley 2101 de 2021, ver
+        # HORAS_MAXIMAS_LEGALES_MES_COLOMBIA): nunca impide asignar turnos, solo se muestra en la
+        # tabla de "Horas del Mes" para que Tomás/gestión humana lo tengan presente.
+        entrada['excede_legal'] = total > HORAS_MAXIMAS_LEGALES_MES_COLOMBIA
+        entrada['meta_excede_legal'] = meta is not None and meta > HORAS_MAXIMAS_LEGALES_MES_COLOMBIA
         resumen.append(entrada)
     resumen.sort(key=lambda r: r['nombre'].lower())
 
@@ -19977,7 +20169,62 @@ def turnos_horas_mes():
         areas=_areas_turno_disponibles(), sedes=_sedes_turno_disponibles(),
         roles_profesionales=[{'clave': k, 'etiqueta': v} for k, v in ETIQUETAS_ROL_PROFESIONAL_TURNO.items()],
         f_sede=f_sede, f_area=f_area, f_rol=f_rol,
+        horas_maximas_legales_mes=HORAS_MAXIMAS_LEGALES_MES_COLOMBIA,
     )
+
+
+def _colaboradores_por_sede():
+    """Directorio de solo lectura de colaboradores agrupados por la Sede de su PERFIL de usuario
+    (usuarios.sede — el campo "Sede" que se asigna al crear la cuenta en Registrar Usuario, o se
+    ajusta después desde Gestión de Usuarios → Editar), pedido por Tomás (20/09/2026) para poder
+    ver dentro de Cuadro de Turnos a qué Sede está asociado cada colaborador. A propósito NO usa
+    la Sede que se elige al ASIGNAR un turno puntual (turnos_asignados.sede, que puede diferir por
+    una cobertura/reemplazo) — esta vista es sobre la Sede "de base" de cada cuenta, no sobre los
+    turnos. Incluye TODAS las cuentas activas del sistema (no solo quienes tienen acceso a
+    Turnos), porque el objetivo es ver la organización completa por Sede."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT usuario, nombre, rol, sede, cedula, correo, telefono FROM usuarios "
+        "WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC"
+    )
+    filas = cursor.fetchall()
+    conn.close()
+
+    sedes_catalogo = _sedes_turno_disponibles()
+    grupos = {s: [] for s in sedes_catalogo}
+    sin_sede = []
+    for usuario, nombre, rol, sede, cedula, correo, telefono in filas:
+        colaborador = {
+            'usuario': usuario, 'nombre': nombre or usuario, 'rol': rol,
+            'rol_etiqueta': _CARGO_LEGIBLE_POR_ROL.get(rol, rol),
+            'cedula': cedula or '', 'correo': correo or '', 'telefono': telefono or '',
+        }
+        sede_limpia = (sede or '').strip()
+        if sede_limpia:
+            # Una Sede guardada en el perfil que ya no está en el catálogo activo (se renombró o
+            # se desactivó después de asignarla) igual se muestra, con su propio grupo aparte, en
+            # vez de perderla silenciosamente dentro de "Sin sede".
+            grupos.setdefault(sede_limpia, []).append(colaborador)
+        else:
+            sin_sede.append(colaborador)
+
+    resultado = [{'sede': s, 'colaboradores': grupos[s]} for s in sedes_catalogo]
+    for sede, colaboradores in grupos.items():
+        if sede not in sedes_catalogo:
+            resultado.append({'sede': sede, 'colaboradores': colaboradores})
+    if sin_sede:
+        resultado.append({'sede': None, 'colaboradores': sin_sede})
+    return resultado
+
+
+@app.route('/turnos/por_sede')
+@login_required
+@turnos_o_extra_required
+def turnos_por_sede():
+    grupos_sede = _colaboradores_por_sede()
+    total_colaboradores = sum(len(g['colaboradores']) for g in grupos_sede)
+    return render_template('turnos_por_sede.html', grupos_sede=grupos_sede, total_colaboradores=total_colaboradores)
 
 
 @app.route('/turnos/asignar', methods=['POST'])
@@ -19991,6 +20238,11 @@ def turnos_asignar():
     turno_id_raw = request.form.get('turno_id', '').strip()
     colaborador_usuario = request.form.get('colaborador_usuario', '').strip()
     fecha = request.form.get('fecha', '').strip()
+    # 🗓️➕ "Fecha Fin" (pedido de Tomás, 20/09/2026: "QUE TAMBIEN HAYA UNA FECHA FIN") — SOLO se
+    # aplica al CREAR un turno nuevo (turno_id vacío); si se está EDITANDO uno existente, se
+    # ignora aunque venga en el formulario, y ese turno puntual se sigue actualizando exactamente
+    # como antes. Ver _fechas_en_rango: crea un turno independiente por cada día del rango.
+    fecha_fin_raw = request.form.get('fecha_fin', '').strip()
     tipo_turno_id_raw = request.form.get('tipo_turno_id', '').strip()
     area = request.form.get('area', '').strip()
     sede = request.form.get('sede', '').strip()
@@ -20006,6 +20258,14 @@ def turnos_asignar():
     hora_inicio_libre = request.form.get('hora_inicio_libre', '').strip()
     hora_fin_libre = request.form.get('hora_fin_libre', '').strip()
     nombre_horario_libre = request.form.get('nombre_horario_libre', '').strip()
+    # ⚖️ Minutos de almuerzo/descanso del horario personalizado (Ley 2101 de 2021 / Art. 167 CST,
+    # 20/09/2026) — opcional; ver _resolver_tipo_turno_personalizado (solo se guarda la primera
+    # vez que se crea ESTE horario específico, se ignora silenciosamente si ya existía).
+    try:
+        minutos_descanso_libre = int(request.form.get('minutos_descanso_libre', '').strip() or 0)
+        minutos_descanso_libre = minutos_descanso_libre if minutos_descanso_libre > 0 else 0
+    except ValueError:
+        minutos_descanso_libre = 0
 
     errores = []
     if not colaborador_usuario:
@@ -20037,7 +20297,7 @@ def turnos_asignar():
 
     if horario_personalizado:
         try:
-            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type)
+            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type, minutos_descanso=minutos_descanso_libre)
         except ValueError:
             conn.close()
             return jsonify({'ok': False, 'errores': ['El horario personalizado ingresado no es válido.']}), 400
@@ -20056,46 +20316,98 @@ def turnos_asignar():
         return jsonify({'ok': False, 'errores': ['No se encontró ese colaborador en Arkiv — búscalo de nuevo por cédula o nombre y elige una sugerencia.']}), 400
     usuario_id = fila_usuario[0]
 
+    # 🗓️➕ "Fecha Fin": SOLO al crear (turno_id ausente) — editar un turno puntual sigue usando
+    # exclusivamente `fecha` (un único día), sin importar si el formulario trae fecha_fin.
+    if turno_id:
+        fechas = [fecha]
+    else:
+        try:
+            fechas = _fechas_en_rango(fecha, fecha_fin_raw)
+        except ValueError as e:
+            conn.close()
+            return jsonify({'ok': False, 'errores': [str(e)]}), 400
+
     try:
-        inicio_real, fin_real = _calcular_inicio_fin_real(fecha, tipo_row[0], tipo_row[1])
+        rangos_por_fecha = {f: _calcular_inicio_fin_real(f, tipo_row[0], tipo_row[1]) for f in fechas}
     except ValueError:
         conn.close()
         return jsonify({'ok': False, 'errores': ['La fecha no tiene un formato válido.']}), 400
 
-    conflictos = _turnos_en_conflicto(usuario_id, inicio_real, fin_real, excluir_id=turno_id)
-    if conflictos and not forzar:
+    conflictos_por_fecha = {}
+    for f in fechas:
+        inicio_real, fin_real = rangos_por_fecha[f]
+        conflictos = _turnos_en_conflicto(usuario_id, inicio_real, fin_real, excluir_id=turno_id)
+        if conflictos:
+            conflictos_por_fecha[f] = conflictos
+
+    if conflictos_por_fecha and not forzar:
         conn.close()
-        return jsonify({'ok': False, 'conflicto': True, 'turnos_conflicto': conflictos})
+        if len(fechas) == 1:
+            # 🔙 Forma de respuesta IDÉNTICA a la de siempre (sin Fecha Fin ni edición): nada
+            # cambia para el frontend ni para las pruebas ya existentes.
+            return jsonify({'ok': False, 'conflicto': True, 'turnos_conflicto': conflictos_por_fecha[fechas[0]]})
+        # 🗓️➕ Rango de varios días: "avisa, no bloquea" — TODO el lote queda sin crear hasta que
+        # se confirme con forzar=1 (ver conflictos_por_fecha en el frontend, una entrada por cada
+        # fecha del rango que tuviera cruce).
+        return jsonify({'ok': False, 'conflicto': True, 'conflictos_por_fecha': conflictos_por_fecha})
 
     fecha_actual = obtener_fecha_actual()
+    turnos_creados = []
     if turno_id:
+        inicio_real, fin_real = rangos_por_fecha[fecha]
         q = f"""UPDATE turnos_asignados SET tipo_turno_id={ph}, fecha={ph}, inicio_real={ph}, fin_real={ph},
                 area={ph}, sede={ph}, rol_profesional={ph}, observaciones={ph}, cuadro_id={ph},
                 actualizado_por={ph}, fecha_actualizacion={ph} WHERE id={ph}"""
         cursor.execute(q, (tipo_turno_id, fecha, inicio_real, fin_real, area, sede, rol_profesional,
                            observaciones, cuadro_id, session['username'], fecha_actual, turno_id))
         accion_log = "Turno Modificado"
+        turnos_creados = [turno_id]
     else:
-        if db_type == 'postgres':
-            q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
-            cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
-            turno_id = cursor.fetchone()[0]
-        else:
-            q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
-            cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
-            turno_id = cursor.lastrowid
-        accion_log = "Turno Asignado"
+        # 🗓️➕ Un turno independiente por cada fecha del rango (una sola por defecto, cuando no se
+        # usó Fecha Fin) — ver _fechas_en_rango: así la matriz, los conflictos, "Horas del Mes" y
+        # las exportaciones no necesitan ningún cambio (siguen siendo 1 turno = 1 día calendario).
+        for f in fechas:
+            inicio_real, fin_real = rangos_por_fecha[f]
+            if db_type == 'postgres':
+                q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                        area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
+                cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, f, inicio_real, fin_real,
+                                   area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+                nuevo_id = cursor.fetchone()[0]
+            else:
+                q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                        area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
+                cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, f, inicio_real, fin_real,
+                                   area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+                nuevo_id = cursor.lastrowid
+            turnos_creados.append(nuevo_id)
+        accion_log = "Turno Asignado" if len(turnos_creados) == 1 else "Turno Asignado (rango de fechas)"
     conn.commit()
     conn.close()
 
-    registrar_log(session['username'], accion_log, f"Turno #{turno_id}: colaborador_id={usuario_id}, fecha={fecha}, área={area}, sede={sede}, rol={rol_profesional}")
-    return jsonify({'ok': True, 'turno_id': turno_id})
+    # 📧 Aviso INMEDIATO por correo (pedido de Tomás, 20/09/2026) — en un hilo aparte para no
+    # demorar la respuesta HTTP, igual que el resto de correos de Arkiv. Editar un turno existente
+    # notifica como MODIFICACION; crear uno (o varios, con Fecha Fin) notifica como CREACION. Con
+    # un solo turno se usa el aviso "clásico" (notificar_turno); con varios del mismo colaborador
+    # (Fecha Fin), un único correo resumen (notificar_turnos_resumen).
+    if turno_id and len(turnos_creados) == 1:
+        threading.Thread(target=notificar_turno, args=(turnos_creados[0], 'MODIFICACION')).start()
+    elif len(turnos_creados) == 1:
+        threading.Thread(target=notificar_turno, args=(turnos_creados[0], 'CREACION')).start()
+    else:
+        threading.Thread(target=notificar_turnos_resumen, args=(turnos_creados, 'CREACION')).start()
+
+    if len(fechas) == 1:
+        # 🔙 Forma de respuesta IDÉNTICA a la de siempre para el caso de un solo día (con o sin
+        # edición) — {'ok': True, 'turno_id': ...}, sin ningún campo nuevo.
+        turno_id_final = turnos_creados[0]
+        registrar_log(session['username'], accion_log, f"Turno #{turno_id_final}: colaborador_id={usuario_id}, fecha={fecha}, área={area}, sede={sede}, rol={rol_profesional}")
+        return jsonify({'ok': True, 'turno_id': turno_id_final})
+
+    registrar_log(session['username'], accion_log, f"{len(turnos_creados)} turno(s) del {fechas[0]} al {fechas[-1]}: colaborador_id={usuario_id}, área={area}, sede={sede}, rol={rol_profesional}")
+    return jsonify({'ok': True, 'turnos_creados': turnos_creados, 'total': len(turnos_creados)})
 
 
 @app.route('/turnos/asignar_grupo', methods=['POST'])
@@ -20116,6 +20428,9 @@ def turnos_asignar_grupo():
     aunque algunos tuvieran conflicto."""
     colaboradores_usuario = [u.strip() for u in request.form.getlist('colaboradores_usuario') if u.strip()]
     fecha = request.form.get('fecha', '').strip()
+    # 🗓️➕ "Fecha Fin" (pedido de Tomás, 20/09/2026) también en Asignar a Grupo — ver
+    # _fechas_en_rango: crea un turno independiente por cada (colaborador × día del rango).
+    fecha_fin_raw = request.form.get('fecha_fin', '').strip()
     tipo_turno_id_raw = request.form.get('tipo_turno_id', '').strip()
     area = request.form.get('area', '').strip()
     sede = request.form.get('sede', '').strip()
@@ -20126,6 +20441,13 @@ def turnos_asignar_grupo():
     hora_inicio_libre = request.form.get('hora_inicio_libre', '').strip()
     hora_fin_libre = request.form.get('hora_fin_libre', '').strip()
     nombre_horario_libre = request.form.get('nombre_horario_libre', '').strip()
+    # ⚖️ Minutos de almuerzo/descanso del horario personalizado (Ley 2101 de 2021 / Art. 167 CST,
+    # 20/09/2026) — opcional; ver _resolver_tipo_turno_personalizado.
+    try:
+        minutos_descanso_libre = int(request.form.get('minutos_descanso_libre', '').strip() or 0)
+        minutos_descanso_libre = minutos_descanso_libre if minutos_descanso_libre > 0 else 0
+    except ValueError:
+        minutos_descanso_libre = 0
 
     errores = []
     if not colaboradores_usuario:
@@ -20152,7 +20474,7 @@ def turnos_asignar_grupo():
 
     if horario_personalizado:
         try:
-            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type)
+            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type, minutos_descanso=minutos_descanso_libre)
             conn.commit()
         except ValueError:
             conn.close()
@@ -20180,16 +20502,29 @@ def turnos_asignar_grupo():
         objetivos.append({'usuario': u, 'usuario_id': fila[0], 'nombre': fila[1]})
 
     try:
-        inicio_real, fin_real = _calcular_inicio_fin_real(fecha, tipo_row[0], tipo_row[1])
+        fechas = _fechas_en_rango(fecha, fecha_fin_raw)
+    except ValueError as e:
+        conn.close()
+        return jsonify({'ok': False, 'errores': [str(e)]}), 400
+
+    try:
+        rangos_por_fecha = {f: _calcular_inicio_fin_real(f, tipo_row[0], tipo_row[1]) for f in fechas}
     except ValueError:
         conn.close()
         return jsonify({'ok': False, 'errores': ['La fecha no tiene un formato válido.']}), 400
 
+    # 🗓️➕ Con Fecha Fin, cada colaborador se revisa contra CADA fecha del rango; los conflictos de
+    # todas sus fechas se acumulan en la MISMA entrada de conflictos_por_colaborador (cada
+    # conflicto ya trae su propia 'fecha' — la del turno existente con el que choca — así que la
+    # forma de la respuesta no cambia para el frontend, ni para un solo día ni para un rango).
     conflictos_por_colaborador = {}
     for objetivo in objetivos:
-        conflictos = _turnos_en_conflicto(objetivo['usuario_id'], inicio_real, fin_real)
-        if conflictos:
-            conflictos_por_colaborador[objetivo['usuario']] = {'nombre': objetivo['nombre'], 'turnos_conflicto': conflictos}
+        conflictos_objetivo = []
+        for f in fechas:
+            inicio_real, fin_real = rangos_por_fecha[f]
+            conflictos_objetivo.extend(_turnos_en_conflicto(objetivo['usuario_id'], inicio_real, fin_real))
+        if conflictos_objetivo:
+            conflictos_por_colaborador[objetivo['usuario']] = {'nombre': objetivo['nombre'], 'turnos_conflicto': conflictos_objetivo}
     if conflictos_por_colaborador and not forzar:
         conn.close()
         return jsonify({'ok': False, 'conflicto': True, 'conflictos_por_colaborador': conflictos_por_colaborador})
@@ -20197,26 +20532,36 @@ def turnos_asignar_grupo():
     fecha_actual = obtener_fecha_actual()
     turnos_creados = []
     for objetivo in objetivos:
-        if db_type == 'postgres':
-            q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
-            cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, fecha, inicio_real, fin_real,
-                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
-            nuevo_id = cursor.fetchone()[0]
-        else:
-            q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
-                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
-            cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, fecha, inicio_real, fin_real,
-                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
-            nuevo_id = cursor.lastrowid
-        turnos_creados.append(nuevo_id)
+        for f in fechas:
+            inicio_real, fin_real = rangos_por_fecha[f]
+            if db_type == 'postgres':
+                q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                        area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
+                cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, f, inicio_real, fin_real,
+                                   area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+                nuevo_id = cursor.fetchone()[0]
+            else:
+                q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                        area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
+                cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, f, inicio_real, fin_real,
+                                   area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+                nuevo_id = cursor.lastrowid
+            turnos_creados.append(nuevo_id)
     conn.commit()
     conn.close()
 
+    # 📧 Aviso INMEDIATO por correo (pedido de Tomás, 20/09/2026) — un solo correo-resumen por
+    # colaborador con TODAS las fechas que le tocaron en esta operación (aunque sea solo una),
+    # en vez de un correo por cada (colaborador × día). notificar_turnos_resumen ya agrupa
+    # turnos_creados por colaborador internamente.
+    if turnos_creados:
+        threading.Thread(target=notificar_turnos_resumen, args=(turnos_creados, 'CREACION')).start()
+
+    rango_legible = fecha if len(fechas) == 1 else f"{fechas[0]} a {fechas[-1]}"
     registrar_log(session['username'], "Turno Asignado a Grupo",
-                  f"{len(turnos_creados)} turno(s) el {fecha}: {', '.join(o['nombre'] for o in objetivos)} — área={area}, sede={sede}, rol={rol_profesional}")
+                  f"{len(turnos_creados)} turno(s) el {rango_legible}: {', '.join(o['nombre'] for o in objetivos)} — área={area}, sede={sede}, rol={rol_profesional}")
     return jsonify({'ok': True, 'turnos_creados': turnos_creados, 'total': len(turnos_creados), 'no_encontrados': no_encontrados})
 
 
@@ -20234,6 +20579,9 @@ def turnos_asignados_eliminar(turno_id):
     cursor.execute(q, (session['username'], obtener_fecha_actual(), turno_id))
     conn.commit()
     conn.close()
+    # 📧 Aviso INMEDIATO por correo de la cancelación (pedido de Tomás, 20/09/2026) — en hilo
+    # aparte, igual que el resto de correos de Arkiv.
+    threading.Thread(target=notificar_turno, args=(turno_id, 'CANCELACION')).start()
     registrar_log(session['username'], "Turno Cancelado", f"Turno #{turno_id}")
     return jsonify({'ok': True})
 
@@ -20289,10 +20637,14 @@ def _obtener_o_crear_cuadro(desde_str, hasta_str, sede, area, usuario):
 @turnos_o_extra_required
 def turnos_publicar_semana():
     """Publica el cuadro de la semana/filtro actual: adopta los turnos sueltos de ese rango que
-    todavía no pertenecían a ningún cuadro, marca el cuadro como 'publicado' (si estaba en
-    'borrador') y dispara la notificación (Correo + WhatsApp) SOLO de los turnos que todavía no
-    tienen ningún intento de aviso registrado — así volver a pulsar 'Publicar' no reenvía spam a
-    quien ya fue notificado; un turno agregado después del primer publicar sí se notifica."""
+    todavía no pertenecían a ningún cuadro y marca el cuadro como 'publicado' (si estaba en
+    'borrador'), para poder cerrarlo después.
+
+    📧 20/09/2026 (pedido de Tomás): el aviso por correo a cada colaborador YA NO se dispara aquí
+    — desde esta ronda, cada turno avisa de inmediato al crearse/asignarse, modificarse o
+    cancelarse (ver notificar_turno/notificar_turnos_resumen en turnos_asignar, turnos_asignar_grupo
+    y turnos_asignados_eliminar). "Publicar semana" queda como el paso para agrupar el periodo en
+    un cuadro y poder cerrarlo cuando termine, sin reenviar ningún aviso."""
     desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
     desde_str, hasta_str = desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d')
 
@@ -20316,25 +20668,10 @@ def turnos_publicar_semana():
         cursor.execute(f"UPDATE cuadros_turnos SET estado = 'publicado', publicado_por = {ph}, fecha_publicacion = {ph} WHERE id = {ph}",
                        (session['username'], obtener_fecha_actual(), cuadro_id))
         conn.commit()
-
-    cursor.execute(
-        f"""SELECT ta.id FROM turnos_asignados ta WHERE ta.cuadro_id = {ph} AND ta.estado = 'activo'
-            AND NOT EXISTS (SELECT 1 FROM notificaciones_turnos nt WHERE nt.turno_id = ta.id)""",
-        (cuadro_id,)
-    )
-    ids_a_notificar = [r[0] for r in cursor.fetchall()]
     conn.close()
 
-    def _notificar_en_hilo(ids):
-        for tid in ids:
-            notificar_turno(tid, 'CREACION')
-
-    if ids_a_notificar:
-        threading.Thread(target=_notificar_en_hilo, args=(ids_a_notificar,)).start()
-
-    registrar_log(session['username'], "Cuadro de Turnos Publicado",
-                  f"Cuadro #{cuadro_id} ({desde_str} a {hasta_str}), {len(ids_a_notificar)} turno(s) notificado(s)")
-    return jsonify({'ok': True, 'cuadro_id': cuadro_id, 'notificando': len(ids_a_notificar)})
+    registrar_log(session['username'], "Cuadro de Turnos Publicado", f"Cuadro #{cuadro_id} ({desde_str} a {hasta_str})")
+    return jsonify({'ok': True, 'cuadro_id': cuadro_id})
 
 
 @app.route('/turnos/cuadros/<int:cuadro_id>/cerrar', methods=['POST'])
@@ -20373,6 +20710,14 @@ def turnos_tipos():
         color_hex = request.form.get('color_hex', '#2563eb').strip() or '#2563eb'
         if categoria not in CATEGORIAS_TIPO_TURNO:
             categoria = 'ASISTENCIAL'
+        # 🍽️ Minutos de almuerzo/descanso a descontar (pedido de Tomás, 21/09/2026) — opcional,
+        # cualquier valor inválido/negativo se descarta en silencio a 0 (sin descuento), mismo
+        # criterio permisivo que ya usan otros campos numéricos opcionales del sistema.
+        try:
+            minutos_descanso = int(request.form.get('minutos_descanso', '').strip() or 0)
+            minutos_descanso = minutos_descanso if minutos_descanso > 0 else 0
+        except ValueError:
+            minutos_descanso = 0
         if codigo and nombre and hora_inicio and hora_fin:
             try:
                 inicio_calc, fin_calc = _calcular_inicio_fin_real('2000-01-01', hora_inicio, hora_fin)
@@ -20385,10 +20730,10 @@ def turnos_tipos():
             cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_turno")
             siguiente_orden = cursor.fetchone()[0] + 1
             try:
-                q = ("INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
+                q = ("INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, minutos_descanso) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                      if db_type == 'postgres' else
-                     "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (?,?,?,?,?,?,?,?)")
-                cursor.execute(q, (codigo, nombre, hora_inicio, hora_fin, duracion, categoria, color_hex, siguiente_orden))
+                     "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, minutos_descanso) VALUES (?,?,?,?,?,?,?,?,?)")
+                cursor.execute(q, (codigo, nombre, hora_inicio, hora_fin, duracion, categoria, color_hex, siguiente_orden, minutos_descanso))
                 conn.commit()
                 registrar_log(session['username'], "Tipo de Turno Creado", f"{codigo} - {nombre} ({hora_inicio}-{hora_fin})")
             except Exception as e:
@@ -20401,12 +20746,13 @@ def turnos_tipos():
 
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, estado FROM tipos_turno ORDER BY orden ASC, nombre ASC")
+    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, estado, minutos_descanso FROM tipos_turno ORDER BY orden ASC, nombre ASC")
     filas = cursor.fetchall()
     conn.close()
     tipos = [
         {'id': f[0], 'codigo': f[1], 'nombre': f[2], 'hora_inicio': f[3], 'hora_fin': f[4],
-         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7], 'estado': f[8]}
+         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7], 'estado': f[8],
+         'minutos_descanso': int(f[9]) if f[9] is not None else 0}
         for f in filas
     ]
     return render_template('turnos_tipos.html', tipos=tipos, categorias=CATEGORIAS_TIPO_TURNO)
