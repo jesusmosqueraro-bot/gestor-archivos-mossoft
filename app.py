@@ -16237,10 +16237,22 @@ def editar_usuario(usuario_id):
         row = cursor.fetchone()
         user_target = row[0] if row else None
         rol_target = row[1] if row else None
+        es_superadmin = (session.get('username') == 'admin')
+
+        # 🔒 Bloqueo del campo Nombre al EDITAR (pedido por Tomás, 20/09/2026): una vez creada la
+        # cuenta, solo el usuario AdminMaster ('admin') puede seguir cambiando el Nombre de una
+        # cuenta con rol distinto a 'agente' — esto cubre tanto a OTRO 'admin' (ya "cread[o]", no
+        # el propio AdminMaster) como a 'estandar'/'gestion_humana'. El Nombre de una cuenta
+        # 'agente' sigue totalmente editable por cualquier admin, sin cambios. Esto se aplica
+        # aquí, en el backend, para que no se pueda saltar editando el HTML a mano ("por
+        # inspeccionar") — el valor recibido en nuevo_nombre simplemente se descarta y se
+        # conserva el que ya tenía la cuenta. No aplica a la creación de usuarios (gestion_
+        # usuarios), que sigue sin restricciones en este campo.
+        nombre_bloqueado = (not es_superadmin) and (rol_target not in ('agente', 'admin'))
         # Si el admin deja el campo Nombre, Teléfono, Cédula o Especialidad vacío en el formulario
         # de edición, se conserva el valor que ya tenía (permite editar solo correo/rol/contraseña
         # sin borrar los demás datos).
-        nombre_final = nuevo_nombre or (row[2] if row else None)
+        nombre_final = (row[2] if row else None) if nombre_bloqueado else (nuevo_nombre or (row[2] if row else None))
         telefono_final = nuevo_telefono or (row[3] if row else None)
         cedula_original = row[4] if row else None
         cedula_final = nueva_cedula or cedula_original
@@ -16294,8 +16306,6 @@ def editar_usuario(usuario_id):
             if cursor.fetchone():
                 conn.close()
                 return redirect(url_for('gestion_usuarios', error_cedula=nueva_cedula))
-
-        es_superadmin = (session.get('username') == 'admin')
 
         # 🛡️ Edición de Nombres/datos por Admin (pedido por Tomás, 19/09/2026): un 'admin'
         # cualquiera SÍ puede editar los datos (nombre, correo, teléfono, cédula, especialidad,
