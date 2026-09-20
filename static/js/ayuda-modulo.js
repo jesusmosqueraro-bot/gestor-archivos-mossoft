@@ -907,38 +907,44 @@ var AYUDA_MODULOS = {
   },
   "turnos_cuadro": {
       "titulo": "Cuadro de Turnos",
-      "descripcion": "Programa, visualiza y publica los turnos hospitalarios y administrativos de la semana: una matriz de colaborador x día, un listado plano exportable, y el envío de avisos por correo y WhatsApp al publicar. Disponible para cuentas con rol Agente/Administrador o con el permiso extra 'Cuadro de Turnos'.",
+      "descripcion": "Programa, visualiza y publica los turnos hospitalarios y administrativos de la semana: una matriz de colaborador x día, un listado plano exportable, y un aviso INMEDIATO por correo (y WhatsApp si está configurado) al crear, modificar o cancelar cada turno. Disponible para cuentas con rol Agente/Administrador o con el permiso extra 'Cuadro de Turnos'.",
       "pasos": [
           "Usa \"Semana anterior\"/\"HOY\"/\"Semana siguiente\" para moverte entre semanas, y los filtros de Sede/Área/Rol para acotar la matriz y el listado.",
-          "Pulsa \"+ Nuevo turno\" para asignar un turno: busca al colaborador por cédula o nombre (autocompleta mientras escribes), elige tipo de turno, área, sede y rol, y guarda.",
-          "Marca \"Horario personalizado\" en el modal si necesitas crear un horario específico desde cero (hora de inicio y fin a mano) en vez de elegir uno del catálogo de Tipos de Turno.",
-          "Pulsa \"Asignar a Grupo\" para dar el mismo turno a varios colaboradores a la vez: se precarga con los que ya ves en la matriz filtrada, y puedes agregar o quitar colaboradores antes de guardar.",
-          "En una casilla ya asignada de la matriz, pulsa el lápiz para editar ese turno o la X para cancelarlo (queda anulado, no se borra del historial).",
+          "Pasa el mouse sobre el nombre de un colaborador en la matriz para ver sus datos de perfil (cédula, correo, teléfono, Sede y cargo/rol de cuenta) sin salir de esta pantalla.",
+          "Pulsa \"+ Nuevo turno\" para asignar un turno: busca al colaborador por cédula o nombre (autocompleta mientras escribes), elige tipo de turno, área, sede y rol, y guarda. Se le avisa por correo de inmediato.",
+          "Si el turno se repite varios días seguidos, completa también \"Fecha Fin\": se crea un turno independiente para cada día del rango (todos los días, sin excluir fines de semana), y el colaborador recibe UN solo correo-resumen con todas las fechas, no uno por cada día. Déjala en blanco para asignar un único día, como siempre.",
+          "Marca \"Horario personalizado\" en el modal si necesitas crear un horario específico desde cero (hora de inicio y fin a mano) en vez de elegir uno del catálogo de Tipos de Turno; ahí también puedes indicar los minutos de almuerzo/descanso de ese horario (opcional, solo se guardan la primera vez que se crea).",
+          "Pulsa \"Asignar a Grupo\" para dar el mismo turno a varios colaboradores a la vez (también admite Fecha Fin): se precarga con los que ya ves en la matriz filtrada, y puedes agregar o quitar colaboradores antes de guardar. Cada colaborador recibe su propio correo-resumen.",
+          "En una casilla ya asignada de la matriz, pulsa el lápiz para editar ese turno (avisa por correo como modificación) o la X para cancelarlo (avisa por correo como cancelación; el turno queda anulado, no se borra del historial).",
           "En una casilla vacía de una fila existente, pulsa el \"+\" para agregarle a ese mismo colaborador un turno ese día.",
           "La estrella junto al nombre de cada colaborador lo marca como favorito (sube arriba de la lista, en tu cuenta); el chinche lo fija arriba de todo en este navegador puntual.",
           "Guarda la combinación de Sede/Área/Rol actual como \"vista favorita\" con nombre, y marca una como predeterminada para que se cargue sola cada vez que entres al Cuadro de Turnos.",
           "Si el sistema detecta que el colaborador ya tiene otro turno que se cruza en el horario, te avisa antes de guardar; puedes confirmar igual con \"Guardar de todas formas\" si el cruce es intencional (por ejemplo turnos partidos).",
-          "Pulsa \"Publicar semana\" para fijar el cuadro de ese periodo/filtro y disparar el aviso (correo + WhatsApp) a los colaboradores que todavía no habían sido notificados de su turno.",
+          "Pulsa \"Publicar semana\" para agrupar el cuadro de ese periodo/filtro y dejarlo listo para cerrarse después — el aviso a cada colaborador ya se mandó al crear/modificar/cancelar su turno, así que publicar NO vuelve a notificar a nadie.",
           "En el panel \"Cuadros recientes\", pulsa \"Cerrar cuadro\" sobre uno ya publicado cuando el periodo termine y no deba aceptar más cambios.",
           "Usa los botones CSV/Excel/PDF para exportar el listado de la semana y filtro actuales (el PDF incluye la marca de agua institucional).",
           "Entra a \"Horas del Mes\" para ver cuántas horas lleva o tiene programadas cada colaborador ese mes, y cuántas tiene a favor o en contra de su meta mensual."
       ],
       "preguntas": [
           {
-              "q": "¿Publicar la semana reenvía el aviso a todos otra vez?",
-              "a": "No. Publicar solo notifica (correo + WhatsApp) a los turnos que nunca antes recibieron ningún intento de aviso; si vuelves a pulsar \"Publicar\" después de agregar un turno nuevo, solo ese turno nuevo se notifica."
+              "q": "¿Cuándo se avisa por correo a un colaborador de su turno?",
+              "a": "De inmediato: al crearse/asignarse, al modificarse o al cancelarse — ya no hay que esperar a \"Publicar semana\" para que salga el aviso. Con Fecha Fin o Asignar a Grupo, el colaborador recibe un solo correo-resumen con todas las fechas de esa operación, no uno por cada día."
+          },
+          {
+              "q": "¿\"Publicar semana\" todavía notifica a alguien?",
+              "a": "No. Publicar solo agrupa los turnos del periodo/filtro en un cuadro para poder cerrarlo después; el aviso por correo de cada turno ya se envió al crearlo, modificarlo o cancelarlo."
           },
           {
               "q": "¿Qué pasa si WhatsApp todavía no está configurado?",
-              "a": "El aviso por correo funciona igual; el intento de WhatsApp queda registrado como 'error' (credenciales pendientes) hasta que el administrador configure la cuenta de WhatsApp Cloud API (ver scripts/README_WHATSAPP_TURNOS.md)."
+              "a": "El aviso por correo funciona igual; el intento de WhatsApp queda registrado como 'error' (credenciales pendientes) hasta que el administrador configure la cuenta de WhatsApp Cloud API (ver scripts/README_WHATSAPP_TURNOS.md). Los correos-resumen de Fecha Fin/Asignar a Grupo son solo por correo, sin intento de WhatsApp."
           },
           {
               "q": "¿Un cruce de horario me impide guardar el turno?",
-              "a": "No, solo te avisa. El sistema no bloquea el guardado porque un colaborador puede tener válidamente turnos partidos o complementarios; decides tú si confirmar con \"Guardar de todas formas\" (individual o para todo el grupo)."
+              "a": "No, solo te avisa. El sistema no bloquea el guardado porque un colaborador puede tener válidamente turnos partidos o complementarios; decides tú si confirmar con \"Guardar de todas formas\" (individual o para todo el grupo, incluido un rango con Fecha Fin)."
           },
           {
               "q": "¿Cancelar un turno lo borra del historial?",
-              "a": "No, queda marcado como cancelado (no se elimina), igual que el resto de bajas lógicas de Arkiv, para conservar la auditoría."
+              "a": "No, queda marcado como cancelado (no se elimina), igual que el resto de bajas lógicas de Arkiv, para conservar la auditoría. El colaborador recibe su aviso de cancelación por correo."
           },
           {
               "q": "¿En qué se diferencian \"favorito\" y \"fijar\" en una fila de la matriz?",
@@ -956,6 +962,7 @@ var AYUDA_MODULOS = {
       "pasos": [
           "Completa código, nombre, hora de inicio y hora de fin, elige la categoría (Asistencial, Administrativo o Descanso) y un color identificador, y pulsa \"Crear tipo de turno\".",
           "Si la hora de fin es menor o igual a la de inicio, el sistema entiende que el turno cruza la medianoche (por ejemplo Noche 18:00 a 06:00) y calcula la duración correctamente.",
+          "El campo \"Min. almuerzo\" es opcional: son los minutos de almuerzo/descanso de ese tipo de turno, que no cuentan como jornada laboral (Art. 167 CST) y se descuentan solo en el reporte \"Horas del Mes\" — la duración que ves aquí en el catálogo y en la matriz sigue siendo la completa.",
           "Pulsa \"Desactivar\" sobre un tipo de turno que ya no se deba seguir asignando; los turnos ya asignados con ese tipo no se ven afectados."
       ],
       "preguntas": [
@@ -966,17 +973,22 @@ var AYUDA_MODULOS = {
           {
               "q": "¿Por qué el código debe ser único?",
               "a": "Es el identificador corto que se usa en la matriz del Cuadro de Turnos y en las exportaciones; si ya existe uno igual, la creación se rechaza."
+          },
+          {
+              "q": "¿Dónde se nota el efecto de los minutos de almuerzo/descanso?",
+              "a": "Únicamente en el reporte \"Horas del Mes\": ahí las horas de cada colaborador ya salen netas (sin el almuerzo). El catálogo, la matriz del Cuadro de Turnos y las exportaciones CSV/Excel/PDF siguen mostrando la duración bruta del turno, sin descontar nada."
           }
       ]
   },
   "turnos_horas_mes": {
       "titulo": "Horas del Mes",
-      "descripcion": "Reporte mensual, por colaborador, de las horas ya trabajadas, las que todavía tiene programadas ese mismo mes, el total, y cuántas horas tiene a favor o en contra de la meta mensual configurada en su ficha de usuario. Se calcula a partir de los turnos activos del Cuadro de Turnos, no requiere ningún registro aparte.",
+      "descripcion": "Reporte mensual, por colaborador, de las horas ya trabajadas, las que todavía tiene programadas ese mismo mes, el total, y cuántas horas tiene a favor o en contra de la meta mensual configurada en su ficha de usuario. Se calcula a partir de los turnos activos del Cuadro de Turnos, no requiere ningún registro aparte, y ya descuenta el almuerzo/descanso configurado (Art. 167 CST).",
       "pasos": [
           "Usa \"Mes anterior\"/\"HOY\"/\"Mes siguiente\" para moverte entre meses, y los filtros de Sede/Área/Rol para acotar el reporte.",
-          "\"Horas transcurridas\" suma los turnos con fecha hasta hoy; \"Horas programadas\" suma los que quedan del mes (la proyección de lo que trabajará).",
+          "\"Horas transcurridas\" suma los turnos con fecha hasta hoy; \"Horas programadas\" suma los que quedan del mes (la proyección de lo que trabajará). Ambas ya vienen netas: se descontaron los minutos de almuerzo/descanso configurados en el Tipo de Turno o el horario personalizado de cada turno.",
           "\"Meta mensual\" es el total fijo de horas configurado para esa persona en Gestión de Usuarios → Editar → \"Meta de horas mensuales\" (opcional, en blanco si nunca se definió).",
-          "\"Horas a favor / en contra\" es el total del mes menos esa meta; sin meta configurada, la columna solo muestra el total, sin comparar contra nada."
+          "\"Horas a favor / en contra\" es el total del mes menos esa meta; sin meta configurada, la columna solo muestra el total, sin comparar contra nada.",
+          "El banner superior recuerda la jornada máxima legal vigente en Colombia (Ley 2101 de 2021: 42 horas/semana, 210 horas/mes); un ícono de alerta junto al total o la meta de un colaborador avisa cuando la supera — es solo informativo, nunca bloquea la asignación de turnos."
       ],
       "preguntas": [
           {
@@ -985,7 +997,31 @@ var AYUDA_MODULOS = {
           },
           {
               "q": "¿De dónde salen las horas de este reporte?",
-              "a": "De los turnos activos (no cancelados) del Cuadro de Turnos con fecha dentro del mes elegido — no hay que registrar nada aparte, es el mismo dato que ya se ve en la matriz semanal."
+              "a": "De los turnos activos (no cancelados) del Cuadro de Turnos con fecha dentro del mes elegido — no hay que registrar nada aparte, es el mismo dato que ya se ve en la matriz semanal, pero descontando el almuerzo/descanso configurado."
+          },
+          {
+              "q": "¿Qué pasa si un colaborador supera las 210 horas/mes (42h/semana) de referencia legal?",
+              "a": "Nada se bloquea: solo aparece un ícono de alerta junto a su total (o su meta, si la meta configurada ya supera ese número) para que gestión humana lo tenga presente, siguiendo la Ley 2101 de 2021."
+          }
+      ]
+  },
+  "turnos_por_sede": {
+      "titulo": "Colaboradores por Sede",
+      "descripcion": "Directorio de solo consulta dentro de Cuadro de Turnos: agrupa a todas las cuentas activas del sistema según la Sede que tienen asignada en su perfil de usuario, para saber de un vistazo a qué Sede pertenece cada colaborador.",
+      "pasos": [
+          "Cada tarjeta es una Sede del catálogo (el mismo que se administra en Configuración de Tickets); dentro se listan los colaboradores cuyo perfil tiene esa Sede asignada, con su rol de cuenta.",
+          "Usa el buscador de arriba para filtrar por nombre, usuario o cédula sin recargar la página — las tarjetas sin ningún resultado se ocultan solas.",
+          "Un colaborador sin ninguna Sede en su perfil aparece en la tarjeta \"Sin sede asignada\", al final.",
+          "Esta vista es solo para consultar; para cambiar la Sede de alguien entra a Gestión de Usuarios → Editar."
+      ],
+      "preguntas": [
+          {
+              "q": "¿La Sede que aparece aquí es la misma que se elige al asignar un turno puntual?",
+              "a": "No necesariamente. Esta vista muestra la Sede \"de base\" del perfil de cada colaborador; al asignar un turno se puede elegir una Sede distinta puntualmente (por ejemplo, una cobertura o un reemplazo), y eso no cambia la Sede de su perfil."
+          },
+          {
+              "q": "¿Por qué veo aquí cuentas que no tienen acceso al módulo de Turnos?",
+              "a": "Este directorio incluye a todas las cuentas activas del sistema, no solo a quienes pueden recibir turnos, porque el objetivo es ver la organización completa por Sede."
           }
       ]
   }
