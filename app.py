@@ -17550,6 +17550,143 @@ def admin_geolocalizacion_resumen():
     })
 
 
+def _etiqueta_estado_geolocalizacion(r):
+    """Mismo texto que ya arma la tabla de respaldo en admin_geolocalizacion.html (JS) para la
+    columna Sede/Estado de un registro — se reutiliza aquí para que las 3 exportaciones de abajo
+    (pedidas por Tomás, 20/09/2026) muestren exactamente lo mismo que la persona ya está viendo
+    en pantalla."""
+    if r['latitud'] is None or r['longitud'] is None:
+        return 'Sin ubicación'
+    if r['dentro_de_sede']:
+        return r['sede'] or ''
+    return f"Fuera de {r['sede']}" if r['sede'] else 'Fuera de sede'
+
+
+def _filtros_geolocalizacion_desde_query():
+    return (
+        request.args.get('usuario', '').strip(),
+        request.args.get('fecha_inicio', '').strip(),
+        request.args.get('fecha_fin', '').strip(),
+    )
+
+
+# 📤 Exportar Geolocalización a CSV/Excel/PDF (pedido de Tomás, 20/09/2026) — respeta los mismos
+# filtros de usuario/fecha que la persona tenga aplicados en ese momento en /admin/geolocalizacion
+# (igual que ya hacen las exportaciones de Inventario, ver inventario_exportar_csv/xlsx/pdf de
+# arriba). El registro histórico en `login_geolocalizacion` nunca se toca ni se filtra aquí — esto
+# solo cambia lo que el MAPA dibuja (ver admin_geolocalizacion.html: ahora solo un marcador, el más
+# reciente, por usuario), nunca lo que la base de datos guarda ni lo que esta tabla/exportación
+# lista, que siguen mostrando el historial completo.
+@app.route('/admin/geolocalizacion/exportar_csv')
+@login_required
+@admin_required
+def geolocalizacion_exportar_csv():
+    datos = _datos_geolocalizacion(*_filtros_geolocalizacion_desde_query())
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['USUARIO', 'IP', 'LATITUD', 'LONGITUD', 'FECHA', 'SEDE / ESTADO'])
+    for r in datos['registros']:
+        writer.writerow([
+            r['usuario'], r['ip'],
+            r['latitud'] if r['latitud'] is not None else '',
+            r['longitud'] if r['longitud'] is not None else '',
+            r['fecha'], _etiqueta_estado_geolocalizacion(r),
+        ])
+
+    csv_bytes = '﻿' + output.getvalue()
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    headers = {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="Arkiv_Geolocalizacion_{fecha_filename}.csv"'
+    }
+    return Response(csv_bytes, headers=headers, status=200)
+
+
+@app.route('/admin/geolocalizacion/exportar_xlsx')
+@login_required
+@admin_required
+def geolocalizacion_exportar_xlsx():
+    datos = _datos_geolocalizacion(*_filtros_geolocalizacion_desde_query())
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Geolocalización'
+    encabezados = ['Usuario', 'IP', 'Latitud', 'Longitud', 'Fecha', 'Sede / Estado']
+    ws.append(encabezados)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='0EA5B7', end_color='0EA5B7', fill_type='solid')
+    for r in datos['registros']:
+        ws.append([
+            r['usuario'], r['ip'], r['latitud'], r['longitud'], r['fecha'],
+            _etiqueta_estado_geolocalizacion(r),
+        ])
+    ws.freeze_panes = 'A2'
+    for i, ancho in enumerate([18, 16, 12, 12, 20, 22], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="Arkiv_Geolocalizacion_{fecha_filename}.xlsx"'
+    })
+
+
+@app.route('/admin/geolocalizacion/exportar_pdf')
+@login_required
+@admin_required
+def geolocalizacion_exportar_pdf():
+    datos = _datos_geolocalizacion(*_filtros_geolocalizacion_desde_query())
+
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=landscape(letter), topMargin=1.2 * cm, bottomMargin=1.2 * cm,
+                             leftMargin=1 * cm, rightMargin=1 * cm)
+    estilos = getSampleStyleSheet()
+    elementos = [Paragraph("Arkiv &mdash; Geolocalización de Accesos", estilos['Title']), Spacer(1, 0.25 * cm)]
+    elementos.append(Paragraph(f"{len(datos['registros'])} inicio(s) de sesión", estilos['Normal']))
+    elementos.append(Spacer(1, 0.4 * cm))
+
+    tabla_datos = [['Usuario', 'IP', 'Latitud', 'Longitud', 'Fecha', 'Sede / Estado']]
+    for r in datos['registros']:
+        tabla_datos.append([
+            r['usuario'], r['ip'],
+            f"{r['latitud']:.6f}" if r['latitud'] is not None else '-',
+            f"{r['longitud']:.6f}" if r['longitud'] is not None else '-',
+            r['fecha'] or '-', _etiqueta_estado_geolocalizacion(r) or '-',
+        ])
+
+    tabla = Table(tabla_datos, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5b7')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    elementos.append(tabla)
+    doc.build(elementos)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_Geolocalizacion_{fecha_filename}.pdf"'
+    })
+
+
 # 🔔 NOTIFICACIONES (campanita) ------------------------------------------------------------
 # Se generan en los mismos puntos donde ya sale un correo (ticket creado, comentado, cambio
 # de estado — ver crear_ticket/comentar_ticket/actualizar_ticket) vía crear_notificacion() /
