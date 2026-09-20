@@ -635,8 +635,16 @@
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Nombre Completo</label>
-                        <input type="text" id="edit_nombre" name="nombre" placeholder="Ej: Juan Pérez" autocomplete="off" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                        <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-300 uppercase mb-1">
+                            Nombre Completo
+                            <!-- 🔒 Bloqueo de Nombre al editar (pedido de Tomás, 20/09/2026): visible solo cuando
+                            abrirModalEditarUsuario() bloquea el campo para quien no sea AdminMaster (ver esa función
+                            más abajo) -- el candado real está en el backend (editar_usuario), esto es solo el aviso. -->
+                            <span id="edit_nombre_candado" class="hidden items-center gap-1 text-[10px] normal-case font-normal text-amber-400" title="Solo el usuario AdminMaster puede cambiar este nombre">
+                                <i class="fa-solid fa-lock"></i> Solo AdminMaster
+                            </span>
+                        </label>
+                        <input type="text" id="edit_nombre" name="nombre" placeholder="Ej: Juan Pérez" autocomplete="off" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     </div>
 
                     <div>
@@ -844,6 +852,13 @@
     </div>
 
     <script>
+        // 🔒 Bloqueo de Nombre al editar (pedido de Tomás, 20/09/2026): solo el frontend necesita
+        // saber si quien tiene la sesión abierta es el AdminMaster ('admin'), para deshabilitar el
+        // campo Nombre en el modal de Editar Usuario -- el candado real, el que de verdad importa,
+        // está en el backend (ver editar_usuario en app.py: nombre_bloqueado se recalcula ahí sin
+        // confiar en nada de lo que llegue del navegador).
+        const ES_ADMIN_MASTER = {{ (session.get('username') == 'admin') | tojson }};
+
         function abrirModalNuevoUsuario() {
             var modal = document.getElementById('modalNuevoUsuario');
             modal.classList.remove('hidden');
@@ -921,6 +936,14 @@
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
             document.getElementById('edit_nombre').value = nombre || '';
+            // 🔒 Bloqueo de Nombre al editar (pedido de Tomás, 20/09/2026): igual que en el
+            // backend (editar_usuario), el Nombre solo queda editable para AdminMaster o para
+            // una cuenta 'agente' -- para cualquier otro rol ('admin' que no sea AdminMaster,
+            // 'estandar', 'gestion_humana'), el campo se deshabilita y se muestra el aviso.
+            var nombreBloqueado = !ES_ADMIN_MASTER && rol !== 'agente';
+            document.getElementById('edit_nombre').disabled = nombreBloqueado;
+            document.getElementById('edit_nombre_candado').classList.toggle('hidden', !nombreBloqueado);
+            document.getElementById('edit_nombre_candado').classList.toggle('flex', nombreBloqueado);
             document.getElementById('edit_telefono').value = telefono || '';
             document.getElementById('edit_cedula').value = cedula || '';
             document.getElementById('edit_especialidad').value = especialidad || '';
