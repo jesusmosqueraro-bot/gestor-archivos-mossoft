@@ -16,13 +16,23 @@ su propia propuesta inicial):
      un solape real sí, y se puede confirmar de todas formas con forzar=1.
   5) Turnos que cruzan la medianoche: _calcular_inicio_fin_real calcula fin_real al día siguiente.
   6) Cancelación: es baja lógica (estado='cancelado'), no borra la fila ni afecta el historial.
-  7) Publicación: crea/reutiliza un cuadro, adopta los turnos sueltos del rango, y notifica SOLO
-     los turnos sin ningún intento previo (no reenvía spam si se vuelve a publicar).
+  7) Publicación: crea/reutiliza un cuadro y adopta los turnos sueltos del rango a ese cuadro.
+     📧 20/09/2026: YA NO notifica (ver punto 10) — solo agrupa el periodo para poder cerrarlo.
   8) Cierre de cuadro: solo procede si el cuadro está 'publicado'.
   9) Catálogo de Tipos de Turno: alta con cálculo automático de duración (incluyendo turnos que
      cruzan medianoche), código único, y baja lógica ('inactivo', no se borra).
+  10) Aviso INMEDIATO por correo (20/09/2026): cada turno notifica al crearse/asignarse,
+      modificarse o cancelarse — ya no se espera a "Publicar semana". Con Fecha Fin o Asignar a
+      Grupo, un solo correo-resumen por colaborador en vez de uno por cada turno.
 """
 import pytest
+
+# 📌 Referencia a la función REAL notificar_turno, capturada ANTES de que la fixture autouse
+# _sin_correos_reales (ver conftest.py) la reemplace por un no-op en cada prueba — las pocas
+# pruebas que sí necesitan ejercitar el envío real (mockeando solo _enviar_correo_simple, no
+# notificar_turno en sí) la restauran con monkeypatch.setattr(app, 'notificar_turno', ...).
+import app as _arkiv_module  # noqa: E402
+_NOTIFICAR_TURNO_REAL = _arkiv_module.notificar_turno
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +120,37 @@ def _mock_notificar_turno(monkeypatch, app):
         llamadas.append(turno_id)
 
     monkeypatch.setattr(app, 'notificar_turno', _fake)
+    return llamadas
+
+
+def _mock_notificar_turnos_resumen(monkeypatch, app):
+    """Igual que _mock_notificar_turno pero para notificar_turnos_resumen() (el aviso INMEDIATO
+    de VARIOS turnos del mismo colaborador en una sola operación — Fecha Fin, Asignar a Grupo,
+    20/09/2026): registra cada llamada completa (turno_ids, tipo_evento) para poder verificar
+    cuántos correos-resumen se mandarían y a partir de qué turnos, sin depender de la red."""
+    llamadas = []
+
+    def _fake(turno_ids, tipo_evento='CREACION'):
+        # 🔒 Escribe en la BD ANTES de anotar en `llamadas`: las pruebas esperan a que `llamadas`
+        # tenga la entrada (ver _esperar_hasta) para seguir adelante, así que si se anotara antes
+        # de terminar de escribir, la prueba podría avanzar (y su teardown borrar/recrear la base
+        # sqlite) mientras este hilo todavía sigue escribiendo — el mismo riesgo de
+        # "attempt to write a readonly database" que ya documenta conftest.py.
+        conn, db_type = app.get_db()
+        cur = conn.cursor()
+        for turno_id in turno_ids:
+            cur.execute("SELECT usuario_id FROM turnos_asignados WHERE id = ?", (turno_id,))
+            fila = cur.fetchone()
+            if fila:
+                cur.execute(
+                    "INSERT INTO notificaciones_turnos (turno_id, usuario_id, canal, tipo_evento, estado, creado_en) VALUES (?,?,?,?,?,?)",
+                    (turno_id, fila[0], 'EMAIL', tipo_evento, 'enviado', app.obtener_fecha_actual()),
+                )
+        conn.commit()
+        conn.close()
+        llamadas.append({'turno_ids': list(turno_ids), 'tipo_evento': tipo_evento})
+
+    monkeypatch.setattr(app, 'notificar_turnos_resumen', _fake)
     return llamadas
 
 
@@ -428,11 +469,12 @@ def test_turno_cancelado_no_aparece_en_el_listado_de_la_semana(admin_session, ap
 
 
 # ---------------------------------------------------------------------------
-# 7) Publicación: crea/reutiliza cuadro, adopta turnos sueltos, notifica solo una vez por turno
+# 7) Publicación: crea/reutiliza cuadro, adopta turnos sueltos a ese cuadro. 📧 20/09/2026: YA NO
+# notifica (el aviso ahora es INMEDIATO al crear/modificar/cancelar cada turno — ver Sección 23) —
+# "Publicar semana" queda solo para agrupar el periodo y poder cerrarlo después.
 # ---------------------------------------------------------------------------
 
-def test_publicar_semana_crea_el_cuadro_y_lo_marca_publicado(admin_session, app, crear_usuario, monkeypatch):
-    _mock_notificar_turno(monkeypatch, app)
+def test_publicar_semana_crea_el_cuadro_y_lo_marca_publicado(admin_session, app, crear_usuario):
     colaborador = crear_usuario(usuario='colab_publicar')
     area, sede = _crear_area_y_sede(app)
     tipo_id = _tipo_id(app, 'M6_12')
@@ -444,24 +486,17 @@ def test_publicar_semana_crea_el_cuadro_y_lo_marca_publicado(admin_session, app,
     r = admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27')
     data = r.get_json()
 
-    # 'notificando' se calcula de forma síncrona (antes de disparar el hilo), así que no depende
-    # de que el hilo de aviso ya haya terminado.
     assert data['ok'] is True
-    assert data['notificando'] == 1
+    assert 'notificando' not in data  # 📧 ya no notifica al publicar (ver Sección 23)
     conn, db_type = app.get_db()
     cur = conn.cursor()
     cur.execute("SELECT estado FROM cuadros_turnos WHERE id = ?", (data['cuadro_id'],))
     (estado,) = cur.fetchone()
     conn.close()
     assert estado == 'publicado'
-    # Se espera a que el hilo de aviso termine antes de que la prueba acabe: si sigue vivo cuando
-    # la prueba SIGUIENTE borra/recrea la base sqlite (fixture autouse _base_de_datos_limpia),
-    # revienta con "attempt to write a readonly database" en un hilo que nadie está esperando.
-    assert _esperar_hasta(lambda: _total_notificaciones(app) >= 1)
 
 
-def test_publicar_de_nuevo_no_reenvia_a_turnos_ya_notificados(admin_session, app, crear_usuario, monkeypatch):
-    _mock_notificar_turno(monkeypatch, app)
+def test_publicar_de_nuevo_reutiliza_el_mismo_cuadro_sin_duplicarlo(admin_session, app, crear_usuario):
     colaborador = crear_usuario(usuario='colab_no_reenvio')
     area, sede = _crear_area_y_sede(app)
     tipo_id = _tipo_id(app, 'M6_12')
@@ -470,62 +505,209 @@ def test_publicar_de_nuevo_no_reenvia_a_turnos_ya_notificados(admin_session, app
         'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
     })
     primera = admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27').get_json()
-    assert primera['notificando'] == 1
-    # El envío real ocurre en threading.Thread (para no bloquear la respuesta) — se espera a que
-    # termine de escribir su fila en notificaciones_turnos antes de publicar de nuevo, en vez de
-    # asumir que ya terminó (ver _esperar_hasta).
-    assert _esperar_hasta(lambda: _total_notificaciones(app) >= 1)
 
     segunda = admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27').get_json()
 
     assert segunda['ok'] is True
-    assert segunda['notificando'] == 0
+    assert segunda['cuadro_id'] == primera['cuadro_id']
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM cuadros_turnos")
+    (total,) = cur.fetchone()
+    conn.close()
+    assert total == 1
 
 
-def test_un_turno_agregado_despues_de_publicar_si_se_notifica_en_la_siguiente_publicacion(admin_session, app, crear_usuario, monkeypatch):
-    _mock_notificar_turno(monkeypatch, app)
+def test_un_turno_agregado_despues_de_publicar_se_adopta_en_la_siguiente_publicacion(admin_session, app, crear_usuario):
     colaborador = crear_usuario(usuario='colab_turno_nuevo')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno1_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    cuadro_id = admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27').get_json()['cuadro_id']
+
+    # Se agrega un turno nuevo dentro de la misma semana, después de la primera publicación.
+    turno2_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-22', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27')
+
+    assert _fila_turno(app, turno1_id)[1] == cuadro_id
+    assert _fila_turno(app, turno2_id)[1] == cuadro_id  # el nuevo se adoptó al volver a publicar
+
+
+def test_publicar_respeta_el_filtro_de_sede_area_al_adoptar_turnos(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_filtro_publicar')
+    area_a, sede_a = _crear_area_y_sede(app, area='Urgencias', sede='SedePrincipal')
+    area_b, sede_b = _crear_area_y_sede(app, area='ConsultaExterna', sede='SedeNorte')
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno_a_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area_a, 'sede': sede_a, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    turno_b_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area_b, 'sede': sede_b, 'rol_profesional': 'MEDICO', 'forzar': '1',
+    }).get_json()['turno_id']
+
+    r = admin_session.post(f'/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27&sede={sede_a}&area={area_a}')
+    cuadro_id = r.get_json()['cuadro_id']
+
+    assert _fila_turno(app, turno_a_id)[1] == cuadro_id
+    assert _fila_turno(app, turno_b_id)[1] is None  # otra área/sede: no se adoptó en este cuadro
+
+
+# ---------------------------------------------------------------------------
+# Sección 23 — Aviso INMEDIATO por correo al crear/asignar, modificar o cancelar un turno (pedido
+# de Tomás, 20/09/2026: "debe notificarse al usuario via email cuando se cree o asigne un turno y
+# cuando hayan modificaciones y/o cancelen el turno") — reemplaza el aviso que antes solo se
+# disparaba al publicar.
+# ---------------------------------------------------------------------------
+
+def test_asignar_turno_dispara_el_aviso_inmediato_de_creacion(admin_session, app, crear_usuario, monkeypatch):
+    llamadas = _mock_notificar_turno(monkeypatch, app)
+    colaborador = crear_usuario(usuario='colab_aviso_creacion')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    turno_id = r.get_json()['turno_id']
+
+    assert _esperar_hasta(lambda: turno_id in llamadas)
+
+
+def test_editar_turno_existente_dispara_el_aviso_inmediato_de_modificacion(admin_session, app, crear_usuario, monkeypatch):
+    colaborador = crear_usuario(usuario='colab_aviso_modificacion')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    eventos = []
+    monkeypatch.setattr(app, 'notificar_turno', lambda tid, tipo_evento='CREACION': eventos.append((tid, tipo_evento)))
+
+    admin_session.post('/turnos/asignar', data={
+        'turno_id': str(turno_id), 'colaborador_usuario': colaborador, 'fecha': '2026-09-22',
+        'tipo_turno_id': str(tipo_id), 'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert _esperar_hasta(lambda: (turno_id, 'MODIFICACION') in eventos)
+
+
+def test_cancelar_turno_dispara_el_aviso_inmediato_de_cancelacion(admin_session, app, crear_usuario, monkeypatch):
+    colaborador = crear_usuario(usuario='colab_aviso_cancelacion')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    eventos = []
+    monkeypatch.setattr(app, 'notificar_turno', lambda tid, tipo_evento='CREACION': eventos.append((tid, tipo_evento)))
+
+    admin_session.post(f'/turnos/asignados/{turno_id}/eliminar')
+
+    assert _esperar_hasta(lambda: (turno_id, 'CANCELACION') in eventos)
+
+
+def test_notificar_turno_usa_el_asunto_y_mensaje_segun_el_tipo_de_evento(app, crear_usuario, monkeypatch):
+    """El contenido real del correo (no un mock) para cada tipo_evento — CREACION, MODIFICACION,
+    CANCELACION — usa un asunto/introducción distintos."""
+    colaborador = crear_usuario(usuario='colab_texto_aviso', correo='colab_texto_aviso@preventivaips.com.co')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM usuarios WHERE usuario = ?", (colaborador,))
+    (usuario_id,) = cur.fetchone()
+    cur.execute(
+        "INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real, area, sede, rol_profesional, creado_por, fecha_creacion) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (usuario_id, tipo_id, '2026-09-21', '2026-09-21 06:00:00', '2026-09-21 12:00:00', area, sede, 'MEDICO', 'admin', app.obtener_fecha_actual()),
+    )
+    turno_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    correos_enviados = []
+    monkeypatch.setattr(app, '_enviar_correo_simple', lambda destino, asunto, cuerpo: correos_enviados.append((destino, asunto, cuerpo)) or True)
+    # 🔓 Restaura la función REAL (la fixture autouse _sin_correos_reales la reemplazó por un
+    # no-op) — esta prueba SÍ quiere ejercitar notificar_turno de verdad, solo con
+    # _enviar_correo_simple mockeado arriba.
+    monkeypatch.setattr(app, 'notificar_turno', _NOTIFICAR_TURNO_REAL)
+
+    app.notificar_turno(turno_id, 'CANCELACION')
+
+    assert len(correos_enviados) == 1
+    _, asunto, cuerpo = correos_enviados[0]
+    assert 'Cancelación de Turno' in asunto
+    assert 'se canceló uno de tus turnos asignados' in cuerpo
+
+
+def test_asignar_turno_con_fecha_fin_manda_un_solo_correo_resumen_no_uno_por_dia(admin_session, app, crear_usuario, monkeypatch):
+    llamadas = _mock_notificar_turnos_resumen(monkeypatch, app)
+    colaborador = crear_usuario(usuario='colab_resumen_fecha_fin')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-25', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    turnos_creados = r.get_json()['turnos_creados']
+
+    assert _esperar_hasta(lambda: len(llamadas) >= 1)
+    assert len(llamadas) == 1  # UN solo aviso-resumen para las 5 fechas, no 5 avisos separados
+    assert sorted(llamadas[0]['turno_ids']) == sorted(turnos_creados)
+    assert llamadas[0]['tipo_evento'] == 'CREACION'
+
+
+def test_asignar_grupo_manda_un_correo_resumen_por_colaborador(admin_session, app, crear_usuario, monkeypatch):
+    llamadas = _mock_notificar_turnos_resumen(monkeypatch, app)
+    c1 = crear_usuario(usuario='colab_resumen_grupo_1')
+    c2 = crear_usuario(usuario='colab_resumen_grupo_2')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'fecha_fin': '2026-09-22', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    # notificar_turnos_resumen se llama UNA vez con TODOS los turnos creados (4: 2 colaboradores x
+    # 2 días) — es la propia función la que agrupa por colaborador puertas adentro.
+    assert _esperar_hasta(lambda: len(llamadas) >= 1)
+    assert len(llamadas) == 1
+    assert len(llamadas[0]['turno_ids']) == 4
+
+
+def test_publicar_semana_ya_no_dispara_ningun_aviso(admin_session, app, crear_usuario, monkeypatch):
+    llamadas_individual = _mock_notificar_turno(monkeypatch, app)
+    llamadas_resumen = _mock_notificar_turnos_resumen(monkeypatch, app)
+    colaborador = crear_usuario(usuario='colab_publicar_sin_aviso')
     area, sede = _crear_area_y_sede(app)
     tipo_id = _tipo_id(app, 'M6_12')
     admin_session.post('/turnos/asignar', data={
         'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
         'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
     })
+    # Espera a que el aviso INMEDIATO que ya disparó el propio /turnos/asignar (en su propio hilo)
+    # termine de anotarse, antes de descartarlo — si se limpiara la lista antes de que el hilo
+    # terminara, esa anotación tardía se confundiría con una disparada por "Publicar semana".
+    assert _esperar_hasta(lambda: len(llamadas_individual) >= 1)
+    llamadas_individual.clear()
+
     admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27')
-    assert _esperar_hasta(lambda: _total_notificaciones(app) >= 1)
 
-    # Se agrega un turno nuevo dentro de la misma semana, después de la primera publicación.
-    admin_session.post('/turnos/asignar', data={
-        'colaborador_usuario': colaborador, 'fecha': '2026-09-22', 'tipo_turno_id': str(tipo_id),
-        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
-    })
-
-    segunda = admin_session.post('/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27').get_json()
-
-    assert segunda['notificando'] == 1
-    # Espera a que el segundo hilo también termine antes de que la prueba acabe (mismo motivo).
-    assert _esperar_hasta(lambda: _total_notificaciones(app) >= 2)
-
-
-def test_publicar_respeta_el_filtro_de_sede_area_al_adoptar_turnos(admin_session, app, crear_usuario, monkeypatch):
-    _mock_notificar_turno(monkeypatch, app)
-    colaborador = crear_usuario(usuario='colab_filtro_publicar')
-    area_a, sede_a = _crear_area_y_sede(app, area='Urgencias', sede='SedePrincipal')
-    area_b, sede_b = _crear_area_y_sede(app, area='ConsultaExterna', sede='SedeNorte')
-    tipo_id = _tipo_id(app, 'M6_12')
-    admin_session.post('/turnos/asignar', data={
-        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
-        'area': area_a, 'sede': sede_a, 'rol_profesional': 'MEDICO',
-    })
-    admin_session.post('/turnos/asignar', data={
-        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
-        'area': area_b, 'sede': sede_b, 'rol_profesional': 'MEDICO', 'forzar': '1',
-    })
-
-    r = admin_session.post(f'/turnos/publicar_semana?desde=2026-09-21&hasta=2026-09-27&sede={sede_a}&area={area_a}')
-
-    assert r.get_json()['notificando'] == 1
-    assert _esperar_hasta(lambda: _total_notificaciones(app) >= 1)
+    assert llamadas_individual == []
+    assert llamadas_resumen == []
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +756,7 @@ def test_cerrar_un_cuadro_publicado(admin_session, app, crear_usuario, monkeypat
 # 9) Notificaciones: correo funciona ya, WhatsApp queda registrado como pendiente sin credenciales
 # ---------------------------------------------------------------------------
 
-def test_notificar_turno_registra_email_enviado_y_whatsapp_sin_configurar(admin_session, app, crear_usuario):
+def test_notificar_turno_registra_email_enviado_y_whatsapp_sin_configurar(admin_session, app, crear_usuario, monkeypatch):
     colaborador = crear_usuario(usuario='colab_notificar', correo='colab_notificar@preventivaips.com.co', telefono='3005556677')
     area, sede = _crear_area_y_sede(app)
     tipo_id = _tipo_id(app, 'M6_12')
@@ -582,6 +764,9 @@ def test_notificar_turno_registra_email_enviado_y_whatsapp_sin_configurar(admin_
         'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
         'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
     }).get_json()['turno_id']
+    # 🔓 Restaura la función REAL (la fixture autouse _sin_correos_reales la reemplazó por un
+    # no-op para que /turnos/asignar de arriba no dispare un hilo real de fondo).
+    monkeypatch.setattr(app, 'notificar_turno', _NOTIFICAR_TURNO_REAL)
 
     app.notificar_turno(turno_id, 'CREACION')
 
@@ -595,7 +780,7 @@ def test_notificar_turno_registra_email_enviado_y_whatsapp_sin_configurar(admin_
     assert 'no está configurado' in filas['WHATSAPP'][1]
 
 
-def test_notificar_turno_sin_correo_registrado_marca_error_en_email(admin_session, app, crear_usuario):
+def test_notificar_turno_sin_correo_registrado_marca_error_en_email(admin_session, app, crear_usuario, monkeypatch):
     colaborador = crear_usuario(usuario='colab_sin_correo')
     conn, db_type = app.get_db()
     cur = conn.cursor()
@@ -608,6 +793,8 @@ def test_notificar_turno_sin_correo_registrado_marca_error_en_email(admin_sessio
         'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
         'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
     }).get_json()['turno_id']
+    # 🔓 Restaura la función REAL (ver comentario equivalente en la prueba anterior).
+    monkeypatch.setattr(app, 'notificar_turno', _NOTIFICAR_TURNO_REAL)
 
     app.notificar_turno(turno_id, 'CREACION')
 
@@ -1281,3 +1468,676 @@ def test_crear_usuario_con_meta_de_horas_mensuales_desde_el_alta(admin_session, 
     conn.close()
     assert fila is not None
     assert float(fila[0]) == 176.0
+
+
+# ---------------------------------------------------------------------------
+# 20) Colaboradores por Sede (pedido de Tomás, 20/09/2026: "un sub modulo por sede... para saber
+#     a que sede esta asociado cada usuario"). Directorio de SOLO CONSULTA dentro de Cuadro de
+#     Turnos, agrupado por la Sede del PERFIL de cada cuenta (usuarios.sede, asignada al crear el
+#     usuario) — a propósito NO es la Sede que se elige al asignar un turno puntual. Incluye a
+#     TODAS las cuentas activas del sistema, no solo a quienes pueden recibir turnos.
+# ---------------------------------------------------------------------------
+
+def _set_sede(app, usuario, sede):
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET sede = ? WHERE usuario = ?", (sede, usuario))
+    conn.commit()
+    conn.close()
+
+
+def test_anonimo_no_entra_a_por_sede(client):
+    r = client.get('/turnos/por_sede', follow_redirects=False)
+    assert r.status_code == 302
+
+
+def test_estandar_sin_permiso_extra_sigue_bloqueado_de_por_sede(client, app, crear_usuario):
+    usuario = crear_usuario(rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar')
+    assert client.get('/turnos/por_sede').status_code in (302, 403)
+
+
+def test_estandar_con_el_permiso_extra_turnos_entra_a_por_sede(client, app, crear_usuario):
+    usuario = crear_usuario(rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['turnos'])
+    assert client.get('/turnos/por_sede').status_code == 200
+
+
+def test_agente_entra_a_por_sede_sin_necesitar_el_permiso_extra(client, app, crear_usuario):
+    usuario = crear_usuario(rol='agente')
+    _sesion_como(client, app, usuario, 'agente')
+    assert client.get('/turnos/por_sede').status_code == 200
+
+
+def test_por_sede_agrupa_colaboradores_segun_la_sede_de_su_perfil(app, crear_usuario):
+    _crear_area_y_sede(app, area='Urgencias', sede='Sede Norte')
+    _crear_area_y_sede(app, area='Urgencias', sede='Sede Sur')
+    u1 = crear_usuario(usuario='colab_sede_norte', nombre='Norte Uno')
+    u2 = crear_usuario(usuario='colab_sede_sur', nombre='Sur Uno')
+    _set_sede(app, u1, 'Sede Norte')
+    _set_sede(app, u2, 'Sede Sur')
+
+    grupos = app._colaboradores_por_sede()
+    por_sede = {g['sede']: [c['usuario'] for c in g['colaboradores']] for g in grupos}
+
+    assert u1 in por_sede['Sede Norte']
+    assert u1 not in por_sede['Sede Sur']
+    assert u2 in por_sede['Sede Sur']
+    assert u2 not in por_sede['Sede Norte']
+
+
+def test_por_sede_agrupa_sin_sede_asignada_por_separado(app, crear_usuario):
+    usuario = crear_usuario(usuario='colab_sin_sede')
+    _set_sede(app, usuario, None)
+
+    grupos = app._colaboradores_por_sede()
+    grupo_sin_sede = next((g for g in grupos if g['sede'] is None), None)
+    assert grupo_sin_sede is not None
+    assert usuario in [c['usuario'] for c in grupo_sin_sede['colaboradores']]
+
+
+def test_por_sede_incluye_cuentas_sin_acceso_al_modulo_de_turnos(app, crear_usuario):
+    """El directorio muestra TODAS las cuentas activas del sistema (pedido explícito de Tomás:
+    "saber a que sede esta asociado cada usuario"), no solo a quienes pueden recibir turnos."""
+    _crear_area_y_sede(app, area='Urgencias', sede='Sede Central')
+    usuario = crear_usuario(usuario='estandar_sin_turnos', rol='estandar')
+    _set_sede(app, usuario, 'Sede Central')
+
+    grupos = app._colaboradores_por_sede()
+    grupo = next(g for g in grupos if g['sede'] == 'Sede Central')
+    assert usuario in [c['usuario'] for c in grupo['colaboradores']]
+
+
+def test_por_sede_no_incluye_cuentas_inactivas(app, crear_usuario):
+    usuario = crear_usuario(usuario='colab_inactivo_sede')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET estado = 'inactivo', sede = 'Alguna Sede' WHERE usuario = ?", (usuario,))
+    conn.commit()
+    conn.close()
+
+    grupos = app._colaboradores_por_sede()
+    todos = [c['usuario'] for g in grupos for c in g['colaboradores']]
+    assert usuario not in todos
+
+
+def test_por_sede_muestra_una_sede_que_ya_no_esta_en_el_catalogo_activo(app, crear_usuario):
+    """Si un colaborador quedó con una Sede en su perfil que después se renombró o se desactivó
+    en el catálogo (ticket_configuraciones), igual debe verse en su propio grupo — nunca se pierde
+    silenciosamente dentro de "Sin sede asignada"."""
+    usuario = crear_usuario(usuario='colab_sede_vieja')
+    _set_sede(app, usuario, 'Sede Que Ya No Existe')
+
+    grupos = app._colaboradores_por_sede()
+    grupo = next((g for g in grupos if g['sede'] == 'Sede Que Ya No Existe'), None)
+    assert grupo is not None
+    assert usuario in [c['usuario'] for c in grupo['colaboradores']]
+
+
+def test_pagina_por_sede_renderiza_sin_reventar_y_tiene_boton_de_ayuda(admin_session):
+    r = admin_session.get('/turnos/por_sede')
+    assert r.status_code == 200
+    assert 'data-ayuda-modulo="turnos_por_sede"' in r.get_data(as_text=True)
+
+
+def test_pagina_por_sede_aparece_como_pestana_desde_el_cuadro_de_turnos(admin_session):
+    r = admin_session.get('/turnos/cuadro')
+    assert '/turnos/por_sede' in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------
+# Sección 21 — Ley 2101 de 2021 / Art. 167 CST: minutos de almuerzo/descanso por
+# Tipo de Turno y horario personalizado, horas netas en "Horas del Mes", y el aviso
+# (no bloqueante) de jornada máxima legal (pedido por Tomás, 20/09/2026).
+# ---------------------------------------------------------------------------
+
+def test_crear_tipo_de_turno_con_minutos_descanso_se_guarda(admin_session, app):
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'TARDE_ALMUERZO', 'nombre': 'Tarde con almuerzo', 'hora_inicio': '13:00', 'hora_fin': '21:00',
+        'categoria': 'ASISTENCIAL', 'minutos_descanso': '60',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT minutos_descanso FROM tipos_turno WHERE codigo = 'TARDE_ALMUERZO'")
+    (minutos,) = cur.fetchone()
+    conn.close()
+    assert int(minutos) == 60
+
+
+def test_crear_tipo_de_turno_sin_minutos_descanso_queda_en_cero(admin_session, app):
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'SIN_ALMUERZO', 'nombre': 'Sin almuerzo', 'hora_inicio': '08:00', 'hora_fin': '12:00',
+        'categoria': 'ASISTENCIAL',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT minutos_descanso FROM tipos_turno WHERE codigo = 'SIN_ALMUERZO'")
+    (minutos,) = cur.fetchone()
+    conn.close()
+    assert int(minutos or 0) == 0
+
+
+def test_crear_tipo_de_turno_con_minutos_descanso_negativo_se_descarta(admin_session, app):
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'ALMUERZO_NEGATIVO', 'nombre': 'Negativo', 'hora_inicio': '08:00', 'hora_fin': '12:00',
+        'categoria': 'ASISTENCIAL', 'minutos_descanso': '-30',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT minutos_descanso FROM tipos_turno WHERE codigo = 'ALMUERZO_NEGATIVO'")
+    (minutos,) = cur.fetchone()
+    conn.close()
+    assert int(minutos or 0) == 0
+
+
+def test_catalogo_de_tipos_de_turno_muestra_la_columna_de_almuerzo(admin_session):
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'CATALOGO_ALMUERZO', 'nombre': 'Con almuerzo visible', 'hora_inicio': '08:00', 'hora_fin': '16:00',
+        'categoria': 'ASISTENCIAL', 'minutos_descanso': '45',
+    })
+
+    r = admin_session.get('/turnos/tipos')
+
+    assert '45 min' in r.get_data(as_text=True)
+
+
+def test_horario_personalizado_con_minutos_descanso_se_guarda_en_la_primera_creacion(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_libre_almuerzo_1')
+    area, sede = _crear_area_y_sede(app)
+
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '08:00', 'hora_fin_libre': '17:00', 'minutos_descanso_libre': '60',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT minutos_descanso FROM tipos_turno WHERE codigo = 'LIBRE-0800-1700'")
+    (minutos,) = cur.fetchone()
+    conn.close()
+    assert int(minutos) == 60
+
+
+def test_horario_personalizado_minutos_descanso_se_ignora_al_reutilizar(admin_session, app, crear_usuario):
+    """El diseño acordado: como todos los turnos con el mismo rango de horas comparten UNA sola
+    fila en tipos_turno (idempotencia), un minutos_descanso distinto mandado al REUTILIZAR un
+    horario ya existente se ignora — cambiarlo retroactivamente alteraría las Horas del Mes ya
+    calculadas de todo el que comparta ese horario."""
+    colaborador_1 = crear_usuario(usuario='colab_libre_almuerzo_2a')
+    colaborador_2 = crear_usuario(usuario='colab_libre_almuerzo_2b')
+    area, sede = _crear_area_y_sede(app)
+
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador_1, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '09:00', 'hora_fin_libre': '15:00', 'minutos_descanso_libre': '30',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador_2, 'fecha': '2026-09-22', 'horario_personalizado': '1',
+        'hora_inicio_libre': '09:00', 'hora_fin_libre': '15:00', 'minutos_descanso_libre': '90',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*), MIN(minutos_descanso), MAX(minutos_descanso) FROM tipos_turno WHERE codigo = 'LIBRE-0900-1500'")
+    total_filas, minimo, maximo = cur.fetchone()
+    conn.close()
+    assert total_filas == 1  # sigue siendo una sola fila compartida
+    assert int(minimo) == 30 and int(maximo) == 30  # se quedó con el valor de la PRIMERA creación
+
+
+def test_asignar_grupo_admite_minutos_descanso_en_horario_personalizado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_grupo_almuerzo')
+    area, sede = _crear_area_y_sede(app)
+
+    admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [colaborador], 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '11:00', 'hora_fin_libre': '19:00', 'minutos_descanso_libre': '45',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT minutos_descanso FROM tipos_turno WHERE codigo = 'LIBRE-1100-1900'")
+    (minutos,) = cur.fetchone()
+    conn.close()
+    assert int(minutos) == 45
+
+
+def test_horas_mes_descuenta_los_minutos_de_almuerzo_del_tipo_de_turno(admin_session, app, crear_usuario):
+    from datetime import datetime as _dt
+    hoy = _dt.now(app.ZONA_HORARIA_COLOMBIA).date()
+    colaborador = crear_usuario(usuario='colab_horas_mes_almuerzo')
+    area, sede = _crear_area_y_sede(app)
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'JORNADA_CON_ALMUERZO', 'nombre': 'Jornada con almuerzo', 'hora_inicio': '07:00', 'hora_fin': '17:00',
+        'categoria': 'ASISTENCIAL', 'minutos_descanso': '60',
+    })  # 10 horas brutas - 1 hora de almuerzo = 9 horas netas
+    tipo_id = _tipo_id(app, 'JORNADA_CON_ALMUERZO')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': hoy.strftime('%Y-%m-%d'), 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes={hoy.strftime("%Y-%m")}')
+
+    assert '9.0 h' in r.get_data(as_text=True)  # neto, no las 10 horas brutas del tipo de turno
+
+
+def test_horas_mes_sin_minutos_descanso_no_descuenta_nada(admin_session, app, crear_usuario):
+    from datetime import datetime as _dt
+    hoy = _dt.now(app.ZONA_HORARIA_COLOMBIA).date()
+    colaborador = crear_usuario(usuario='colab_horas_mes_sin_almuerzo')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')  # 6 horas, sin minutos_descanso configurados
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': hoy.strftime('%Y-%m-%d'), 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes={hoy.strftime("%Y-%m")}')
+
+    assert '6.0 h' in r.get_data(as_text=True)
+
+
+def test_horas_mes_matriz_y_catalogo_siguen_mostrando_la_duracion_bruta(admin_session, app, crear_usuario):
+    """El acuerdo con Tomás: el descuento de almuerzo aplica SOLO en "Horas del Mes" — la matriz
+    del Cuadro de Turnos y el catálogo de Tipos de Turno deben seguir mostrando la duración
+    completa, sin descontar nada."""
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'JORNADA_MATRIZ', 'nombre': 'Jornada matriz', 'hora_inicio': '07:00', 'hora_fin': '17:00',
+        'categoria': 'ASISTENCIAL', 'minutos_descanso': '60',
+    })
+
+    r = admin_session.get('/turnos/tipos')
+
+    assert '10.0 h' in r.get_data(as_text=True) or '10 h' in r.get_data(as_text=True)
+
+
+def test_horas_mes_marca_excede_legal_cuando_supera_las_210_horas_mes(admin_session, app, crear_usuario):
+    from datetime import datetime as _dt
+    hoy = _dt.now(app.ZONA_HORARIA_COLOMBIA).date()
+    colaborador = crear_usuario(usuario='colab_horas_mes_excede_legal')
+    area, sede = _crear_area_y_sede(app)
+    admin_session.post('/turnos/tipos', data={
+        'codigo': 'JORNADA_MARATON', 'nombre': 'Jornada larga de prueba', 'hora_inicio': '00:00', 'hora_fin': '01:00',
+        'categoria': 'ASISTENCIAL',
+    })
+    tipo_id = _tipo_id(app, 'JORNADA_MARATON')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    # 🔧 Se ajusta la duración directo en la BD (en vez de crear 220 turnos uno a uno) para simular
+    # rápido a un colaborador que ya superó las 210 horas/mes de referencia legal.
+    cur.execute("UPDATE tipos_turno SET duracion_horas = 220 WHERE id = ?", (tipo_id,))
+    conn.commit()
+    conn.close()
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': hoy.strftime('%Y-%m-%d'), 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes={hoy.strftime("%Y-%m")}')
+
+    assert r.status_code == 200
+    assert '220.0 h' in r.get_data(as_text=True)
+    assert 'fa-triangle-exclamation' in r.get_data(as_text=True)
+
+
+def test_horas_mes_no_marca_excede_legal_cuando_esta_por_debajo_de_210(admin_session, app, crear_usuario):
+    from datetime import datetime as _dt
+    hoy = _dt.now(app.ZONA_HORARIA_COLOMBIA).date()
+    colaborador = crear_usuario(usuario='colab_horas_mes_no_excede_legal')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': hoy.strftime('%Y-%m-%d'), 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes={hoy.strftime("%Y-%m")}')
+
+    assert 'fa-triangle-exclamation' not in r.get_data(as_text=True)
+
+
+def test_horas_mes_marca_meta_excede_legal_cuando_la_meta_supera_210(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_meta_excede_legal')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET meta_horas_mensual = 220 WHERE usuario = ?", (colaborador,))
+    conn.commit()
+    conn.close()
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get('/turnos/horas_mes?mes=2026-09')
+
+    assert 'fa-triangle-exclamation' in r.get_data(as_text=True)
+
+
+def test_pagina_horas_del_mes_muestra_la_referencia_de_ley_2101(admin_session):
+    r = admin_session.get('/turnos/horas_mes')
+    texto = r.get_data(as_text=True)
+    assert 'Ley 2101' in texto
+    assert '210 horas/mes' in texto
+
+
+# ---------------------------------------------------------------------------
+# Sección 22 — "Fecha Fin" en Asignar Turno / Asignar a Grupo (pedido de Tomás, 20/09/2026: "QUE
+# TAMBIEN HAYA UNA FECHA FIN"): crea un turno independiente por CADA día del rango (todos los
+# días, sin excluir fines de semana), solo al CREAR (nunca al editar uno existente).
+# ---------------------------------------------------------------------------
+
+def test_asignar_turno_sin_fecha_fin_sigue_creando_un_solo_turno_como_siempre(admin_session, app, crear_usuario):
+    """Compatibilidad hacia atrás: sin 'fecha_fin' en el formulario, la respuesta debe ser
+    EXACTAMENTE la de siempre — {'ok': True, 'turno_id': ...} — sin ningún campo nuevo."""
+    colaborador = crear_usuario(usuario='colab_sin_fecha_fin')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert 'turno_id' in data
+    assert 'turnos_creados' not in data
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM turnos_asignados WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = ?)", (colaborador,))
+    (total,) = cur.fetchone()
+    conn.close()
+    assert total == 1
+
+
+def test_asignar_turno_con_fecha_fin_igual_a_fecha_se_comporta_como_un_solo_dia(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_igual')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert 'turno_id' in data
+    assert 'turnos_creados' not in data
+
+
+def test_asignar_turno_con_fecha_fin_crea_un_turno_por_cada_dia_del_rango(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_rango')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-25', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 5  # 21, 22, 23, 24 y 25 de septiembre — TODOS los días, incluye fin de semana
+    assert len(data['turnos_creados']) == 5
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT fecha FROM turnos_asignados WHERE id IN ({})".format(','.join(['?'] * 5)), tuple(data['turnos_creados']))
+    fechas = sorted(f[0] for f in cur.fetchall())
+    conn.close()
+    assert fechas == ['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25']
+
+
+def test_asignar_turno_con_fecha_fin_anterior_a_fecha_es_rechazado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_invertida')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-25', 'fecha_fin': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.status_code == 400
+    assert 'anterior' in r.get_json()['errores'][0].lower()
+
+
+def test_asignar_turno_con_fecha_fin_demasiado_extensa_es_rechazado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_extensa')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-01-01', 'fecha_fin': '2028-01-01', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.status_code == 400
+    assert 'rango' in r.get_json()['errores'][0].lower()
+
+
+def test_asignar_turno_con_fecha_fin_avisa_conflicto_por_fecha_y_no_crea_nada_sin_forzar(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_conflicto')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    # Turno ya existente el 23/09 — debe chocar con el rango 21-25/09 de abajo.
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-23', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-25', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is False
+    assert data['conflicto'] is True
+    assert list(data['conflictos_por_fecha'].keys()) == ['2026-09-23']
+    # 🔒 "Avisa, no bloquea" pero TODO el lote — ni siquiera los días sin conflicto se crean hasta
+    # que se confirme con forzar=1.
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM turnos_asignados WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = ?)", (colaborador,))
+    (total,) = cur.fetchone()
+    conn.close()
+    assert total == 1  # solo el turno original del 23/09, nada del rango nuevo
+
+
+def test_asignar_turno_con_fecha_fin_y_forzar_crea_todo_el_rango_a_pesar_del_conflicto(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_forzar')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-23', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-25', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO', 'forzar': '1',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 5
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM turnos_asignados WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = ?)", (colaborador,))
+    (total,) = cur.fetchone()
+    conn.close()
+    assert total == 6  # el original del 23/09 + los 5 del rango forzado
+
+
+def test_editar_turno_ignora_fecha_fin_aunque_venga_en_el_formulario(admin_session, app, crear_usuario):
+    """El diseño acordado: Fecha Fin SOLO aplica al crear. Si se edita un turno existente
+    (turno_id presente) y por error el formulario trae fecha_fin, se ignora — sigue siendo la
+    edición de un único turno puntual, exactamente como antes de esta funcionalidad."""
+    colaborador = crear_usuario(usuario='colab_editar_ignora_fecha_fin')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+
+    r = admin_session.post('/turnos/asignar', data={
+        'turno_id': str(turno_id), 'colaborador_usuario': colaborador, 'fecha': '2026-09-22',
+        'fecha_fin': '2026-09-28', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['turno_id'] == turno_id
+    assert 'turnos_creados' not in data
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM turnos_asignados WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = ?)", (colaborador,))
+    (total,) = cur.fetchone()
+    cur.execute("SELECT fecha FROM turnos_asignados WHERE id = ?", (turno_id,))
+    (fecha_guardada,) = cur.fetchone()
+    conn.close()
+    assert total == 1  # sigue siendo UN solo turno, no se creó ningún rango
+    assert fecha_guardada == '2026-09-22'
+
+
+def test_asignar_turno_con_fecha_fin_admite_horario_personalizado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_fecha_fin_libre')
+    area, sede = _crear_area_y_sede(app)
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'fecha_fin': '2026-09-23',
+        'horario_personalizado': '1', 'hora_inicio_libre': '09:00', 'hora_fin_libre': '15:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 3
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM tipos_turno WHERE codigo = 'LIBRE-0900-1500'")
+    (total_tipos,) = cur.fetchone()
+    conn.close()
+    assert total_tipos == 1  # las 3 fechas del rango comparten el MISMO tipo personalizado
+
+
+def test_asignar_grupo_sin_fecha_fin_sigue_creando_un_turno_por_colaborador_como_siempre(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='colab_grupo_sin_fecha_fin_1')
+    c2 = crear_usuario(usuario='colab_grupo_sin_fecha_fin_2')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 2  # 2 colaboradores x 1 día, comportamiento idéntico al de siempre
+
+
+def test_asignar_grupo_con_fecha_fin_crea_un_turno_por_colaborador_y_por_dia(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='colab_grupo_fecha_fin_1')
+    c2 = crear_usuario(usuario='colab_grupo_fecha_fin_2')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'fecha_fin': '2026-09-23', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 6  # 2 colaboradores x 3 días (21, 22, 23)
+
+
+def test_asignar_grupo_con_fecha_fin_avisa_conflicto_por_colaborador_agregando_todas_sus_fechas(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='colab_grupo_fecha_fin_conflicto_1', nombre='Colaborador Conflicto Uno')
+    c2 = crear_usuario(usuario='colab_grupo_fecha_fin_conflicto_2', nombre='Colaborador Conflicto Dos')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    # c1 ya tiene turno el 22/09, que choca con el rango de abajo; c2 no tiene ningún turno previo.
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': c1, 'fecha': '2026-09-22', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'fecha_fin': '2026-09-23', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is False
+    assert data['conflicto'] is True
+    assert list(data['conflictos_por_colaborador'].keys()) == [c1]
+    assert c2 not in data['conflictos_por_colaborador']
+
+    r_forzado = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'fecha_fin': '2026-09-23', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO', 'forzar': '1',
+    })
+    assert r_forzado.get_json()['total'] == 6
+
+
+# ---------------------------------------------------------------------------
+# Sección 24 — Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su nombre
+# en la matriz del Cuadro de Turnos (pedido de Tomás, 20/09/2026: "que se reflejen los datos del
+# usuario"): cédula, correo, teléfono, Sede y cargo/rol de cuenta.
+# ---------------------------------------------------------------------------
+
+def test_matriz_muestra_el_tooltip_con_los_datos_del_perfil_del_colaborador(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(
+        usuario='colab_tooltip', nombre='Colaborador Tooltip',
+        correo='colab_tooltip@preventivaips.com.co', telefono='3009998877', cedula='123456789',
+    )
+    _set_sede(app, colaborador, 'Sede Tooltip')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get('/turnos/cuadro?desde=2026-09-21')
+
+    texto = r.get_data(as_text=True)
+    assert 'Cédula: 123456789' in texto
+    assert 'Correo: colab_tooltip@preventivaips.com.co' in texto
+    assert 'Teléfono: 3009998877' in texto
+    assert 'Sede: Sede Tooltip' in texto
+    assert 'Cargo: Colaborador' in texto  # rol='estandar' -> _CARGO_LEGIBLE_POR_ROL
+
+
+def test_matriz_tooltip_omite_los_datos_que_el_colaborador_no_tiene(admin_session, app, crear_usuario):
+    """Un colaborador sin cédula/correo/teléfono/Sede registrados no debe mostrar líneas vacías
+    tipo 'Cédula: ' en el tooltip — cada dato se omite si no existe."""
+    colaborador = crear_usuario(usuario='colab_tooltip_incompleto', nombre='Colaborador Incompleto', cedula=None, telefono=None)
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get('/turnos/cuadro?desde=2026-09-21')
+
+    texto = r.get_data(as_text=True)
+    assert 'Cédula: ' not in texto
+    assert 'Teléfono: ' not in texto
+    assert 'Sede: ' not in texto  # sin Sede en el perfil (usuarios.sede en blanco)

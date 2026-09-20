@@ -60,10 +60,21 @@ def _sin_correos_reales(monkeypatch):
     monkeypatch.setattr(arkiv, '_enviar_formulario_asignacion_por_correo', lambda *a, **k: None)
     monkeypatch.setattr(arkiv, '_enviar_certificado_devolucion_por_correo', lambda *a, **k: None)
     # 🗓️ Aviso de turno (Cuadro de Turnos, 20/09/2026): notificar_turno() llama a
-    # _enviar_correo_simple() directamente (no a través de ninguno de los envoltorios de arriba)
-    # y /turnos/publicar_semana la dispara en threading.Thread — mismo riesgo de red real +
-    # hilo suelto compitiendo con el borrado/recreación de la base sqlite de la prueba siguiente.
+    # _enviar_correo_simple() directamente (no a través de ninguno de los envoltorios de arriba).
+    # Mismo riesgo de red real + hilo suelto compitiendo con el borrado/recreación de la base
+    # sqlite de la prueba siguiente.
     monkeypatch.setattr(arkiv, '_enviar_correo_simple', lambda *a, **k: True)
+    # 🗓️➕ 20/09/2026: el aviso de turno ahora es INMEDIATO (se dispara en threading.Thread desde
+    # turnos_asignar/turnos_asignar_grupo/turnos_asignados_eliminar, no solo desde
+    # /turnos/publicar_semana como antes) — así que CASI CUALQUIER prueba que asigne, modifique o
+    # cancele un turno dispara un hilo de aviso, no solo las ~5 pruebas de publicación de antes.
+    # Se mockean las dos funciones completas (no solo _enviar_correo_simple de arriba) para que
+    # ninguna prueba corriente dispare ese hilo -ni sus escrituras a notificaciones_turnos- de
+    # fondo; las pruebas que sí verifican el contenido/registro del aviso (ver
+    # _mock_notificar_turno/_mock_notificar_turnos_resumen en test_turnos_cuadro.py) sobreescriben
+    # este mock puntualmente dentro de su propio cuerpo.
+    monkeypatch.setattr(arkiv, 'notificar_turno', lambda *a, **k: None)
+    monkeypatch.setattr(arkiv, 'notificar_turnos_resumen', lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)

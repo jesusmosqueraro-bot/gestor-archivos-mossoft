@@ -10,16 +10,16 @@ lógica de permisos adicional — nunca se ve un botón de ayuda de un módulo a
 acceso, porque nunca se llega a esa página.
 
 Piezas del feature:
-  - static/js/ayuda-modulo.js: objeto AYUDA_MODULOS (36 claves) + abrirAyudaModulo/cerrarAyudaModulo.
+  - static/js/ayuda-modulo.js: objeto AYUDA_MODULOS (37 claves) + abrirAyudaModulo/cerrarAyudaModulo.
   - templates/partials/ayuda_modulo.html: el botón "?" + el modal, reusable.
-  - Cada una de las 36 plantillas de módulo: incluye el parcial pasando su propia clave, y
+  - Cada una de las 37 plantillas de módulo: incluye el parcial pasando su propia clave, y
     enlaza ayuda-modulo.js antes de </body>.
 
 Estas pruebas verifican, en capas:
   1) Que AYUDA_MODULOS es JSON válido y cada entrada tiene contenido completo (sin campos vacíos).
   2) Que no hay claves duplicadas (un duplicado en el objeto JS silenciosamente descarta la
      primera definición y nadie lo notaría con solo mirar el archivo).
-  3) Que cada una de las 36 plantillas de módulo incluye el botón con la clave correcta y el
+  3) Que cada una de las 37 plantillas de módulo incluye el botón con la clave correcta y el
      script, y que las plantillas SIN el botón son exactamente las que se decidió excluir
      (páginas de autenticación/cuenta, no "módulos" de la aplicación).
   4) Que las claves usadas en las plantillas y las claves definidas en el JS coinciden
@@ -80,6 +80,9 @@ PLANTILLA_A_CLAVE = {
     # ⏱️ Horas del Mes (20/09/2026, pedido por Tomás: horas trabajadas/programadas y "horas a
     # favor" contra la meta mensual configurable por colaborador).
     'turnos_horas_mes.html': 'turnos_horas_mes',
+    # 🏢 Colaboradores por Sede (20/09/2026, pedido por Tomás: directorio de solo consulta,
+    # agrupado por la Sede del perfil de cada usuario).
+    'turnos_por_sede.html': 'turnos_por_sede',
 }
 
 # Plantillas deliberadamente SIN botón de ayuda: son pantallas de autenticación/cuenta (login,
@@ -109,10 +112,10 @@ def _cargar_ayuda_modulos():
     return contenido, json.loads(m.group(1))
 
 
-def test_ayuda_modulos_js_es_json_valido_y_tiene_las_36_claves_esperadas():
+def test_ayuda_modulos_js_es_json_valido_y_tiene_las_37_claves_esperadas():
     _, datos = _cargar_ayuda_modulos()
     assert set(datos.keys()) == set(PLANTILLA_A_CLAVE.values())
-    assert len(datos) == 36
+    assert len(datos) == 37
 
 
 def test_ayuda_modulos_js_no_tiene_claves_duplicadas():
