@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Cuadro de Turnos</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
+         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-indigo bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="/bienvenida" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-calendar-week text-indigo-400"></i> Cuadro de Turnos
+            </h1>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="abrirModalAsignar({fecha: '{{ hoy_str }}'})" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-indigo-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-plus"></i><span>Nuevo turno</span>
+            </button>
+
+            <!-- 📤 Exportar: respeta la semana y los filtros de sede/área/rol actuales. -->
+            <a href="{{ url_for('turnos_exportar_csv', desde=desde.strftime('%Y-%m-%d'), hasta=hasta.strftime('%Y-%m-%d'), sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a CSV">
+                <i class="fa-solid fa-file-csv text-emerald-400"></i><span class="hidden lg:inline">CSV</span>
+            </a>
+            <a href="{{ url_for('turnos_exportar_xlsx', desde=desde.strftime('%Y-%m-%d'), hasta=hasta.strftime('%Y-%m-%d'), sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a Excel">
+                <i class="fa-solid fa-file-excel text-emerald-400"></i><span class="hidden lg:inline">Excel</span>
+            </a>
+            <a href="{{ url_for('turnos_exportar_pdf', desde=desde.strftime('%Y-%m-%d'), hasta=hasta.strftime('%Y-%m-%d'), sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a PDF">
+                <i class="fa-solid fa-file-pdf text-rose-400"></i><span class="hidden lg:inline">PDF</span>
+            </a>
+
+            {% if rol == 'admin' %}
+            <a href="{{ url_for('turnos_tipos') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Tipos de Turno">
+                <i class="fa-solid fa-sliders"></i><span class="hidden lg:inline">Tipos</span>
+            </a>
+            {% endif %}
+
+            <div class="flex items-center gap-2">
+                {% include 'partials/logo_preventiva_nav.html' %}
+                {% include 'partials/buscador.html' %}
+                {% with modulo='turnos_cuadro' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
+                {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/seguridad_boton.html' %}
+                {% include 'partials/perfil_boton.html' %}
+                {% include 'partials/chat_boton.html' %}
+                {% include 'partials/campanita.html' %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div id="toast" class="fixed bottom-6 right-6 bg-slate-800 border border-slate-700 text-white font-bold text-xs px-4 py-3 rounded-2xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 z-50 flex items-center gap-2 max-w-sm">
+            <i class="fa-solid fa-circle-info text-indigo-400"></i>
+            <span id="toast-msg">—</span>
+        </div>
+
+        {% if not whatsapp_configurado %}
+        <div class="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-2xl px-4 py-3 text-xs font-bold flex items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>WhatsApp todavía no está configurado: los avisos de turno se envían solo por correo. Los intentos de WhatsApp quedan registrados como pendientes hasta activar las credenciales.</span>
+        </div>
+        {% endif %}
+
+        <!-- NAVEGACIÓN DE SEMANA + FILTROS -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl flex flex-wrap items-end gap-3 text-xs">
+            <div class="flex items-center gap-1.5">
+                <a href="{{ url_for('turnos_cuadro', desde=semana_anterior, sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all" title="Semana anterior"><i class="fa-solid fa-chevron-left"></i></a>
+                <a href="{{ url_for('turnos_cuadro', desde=hoy_str, sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all">HOY</a>
+                <a href="{{ url_for('turnos_cuadro', desde=semana_siguiente, sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all" title="Semana siguiente"><i class="fa-solid fa-chevron-right"></i></a>
+                <span class="text-slate-200 font-bold px-2 whitespace-nowrap">{{ desde.strftime('%d/%m/%Y') }} — {{ hasta.strftime('%d/%m/%Y') }}</span>
+            </div>
+
+            <form method="GET" action="{{ url_for('turnos_cuadro') }}" class="flex flex-wrap items-end gap-2 ml-auto">
+                <input type="hidden" name="desde" value="{{ desde.strftime('%Y-%m-%d') }}">
+                <div>
+                    <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Sede</label>
+                    <select name="sede" class="w-full sm:w-40 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Todas</option>
+                        {% for s in sedes %}<option value="{{ s }}" {% if s == f_sede %}selected{% endif %}>{{ s }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Área</label>
+                    <select name="area" class="w-full sm:w-40 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Todas</option>
+                        {% for a in areas %}<option value="{{ a }}" {% if a == f_area %}selected{% endif %}>{{ a }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Rol</label>
+                    <select name="rol" class="w-full sm:w-40 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Todos</option>
+                        {% for r in roles_profesionales %}<option value="{{ r.clave }}" {% if r.clave == f_rol %}selected{% endif %}>{{ r.etiqueta }}</option>{% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2"><i class="fa-solid fa-filter"></i> Filtrar</button>
+                {% if f_sede or f_area or f_rol %}
+                <a href="{{ url_for('turnos_cuadro', desde=desde.strftime('%Y-%m-%d')) }}" class="text-slate-400 hover:text-indigo-400 font-bold px-2 py-2.5"><i class="fa-solid fa-filter-circle-xmark"></i> Limpiar</a>
+                {% endif %}
+                <button type="button" onclick="publicarSemana()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2" title="Publica el cuadro de esta semana/filtro y notifica a los colaboradores pendientes">
+                    <i class="fa-solid fa-paper-plane"></i> Publicar semana
+                </button>
+            </form>
+        </div>
+
+        <!-- MATRIZ SEMANAL -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl shadow-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                        <tr>
+                            <th class="p-2.5 sticky left-0 bg-slate-800 z-10 min-w-[10rem]">Colaborador</th>
+                            {% for dia in dias_semana %}
+                            <th class="p-2.5 text-center min-w-[6.5rem] {{ 'bg-indigo-500/10 text-indigo-300' if dia.strftime('%Y-%m-%d') == hoy_str else '' }}">
+                                {{ ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][dia.weekday()] }}
+                                <br><span class="font-normal normal-case text-slate-500">{{ dia.strftime('%d/%m') }}</span>
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                        {% for fila in matriz %}
+                        <tr>
+                            <td class="p-2.5 font-bold text-slate-200 sticky left-0 bg-slate-800/95 whitespace-nowrap">{{ fila.nombre }}</td>
+                            {% for dia in fila.dias %}
+                            <td class="p-1.5 text-center align-top">
+                                {% if dia %}
+                                <div class="rounded-lg p-1.5 text-white cursor-pointer hover:opacity-80 transition-all" style="background-color: {{ dia.color }};" title="{{ dia.turno_nombre }} · {{ dia.rol_etiqueta }} · {{ dia.area }} / {{ dia.sede }}{% if dia.observaciones %} · {{ dia.observaciones }}{% endif %}" onclick='abrirModalAsignar({{ dia | tojson }})'>
+                                    <p class="font-extrabold text-[10px]">{{ dia.turno_codigo }}</p>
+                                    <p class="font-normal text-[9px] opacity-90">{{ dia.hora_inicio }}-{{ dia.hora_fin }}</p>
+                                </div>
+                                {% else %}
+                                <button type="button" class="w-full h-10 rounded-lg border border-dashed border-slate-700 text-slate-600 hover:text-indigo-400 hover:border-indigo-400 transition-all" title="Agregar turno" onclick='abrirModalAsignar({{ dict(colaborador=fila.nombre, usuario=fila.usuario, fecha=dias_semana[loop.index0].strftime("%Y-%m-%d")) | tojson }})'>
+                                    <i class="fa-solid fa-plus text-[10px]"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="text-center py-10 text-slate-500 font-bold">Sin turnos asignados en esta semana/filtro todavía.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- LISTADO PLANO -->
+        <div>
+            <h3 class="text-sm font-bold text-white mb-2 flex items-center gap-2"><i class="fa-solid fa-list text-indigo-400"></i> Listado de la semana <span class="text-slate-500 font-normal">({{ listado|length }})</span></h3>
+            <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
+                <table class="w-full text-xs text-left" data-tabla-interactiva="turnos">
+                    <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                        <tr>
+                            <th class="p-3">Colaborador</th><th class="p-3">Fecha</th><th class="p-3">Turno</th>
+                            <th class="p-3">Horario</th><th class="p-3">Área</th><th class="p-3">Sede</th>
+                            <th class="p-3">Rol</th><th class="p-3">Observaciones</th><th class="p-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                        {% for r in listado %}
+                        <tr>
+                            <td class="p-3 font-bold text-slate-200">{{ r.colaborador }}</td>
+                            <td class="p-3 text-slate-400">{{ r.fecha }}</td>
+                            <td class="p-3 text-slate-300"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background-color: {{ r.color }};"></span>{{ r.turno_nombre }}</td>
+                            <td class="p-3 text-slate-400">{{ r.horario }}</td>
+                            <td class="p-3 text-slate-400">{{ r.area }}</td>
+                            <td class="p-3 text-slate-400">{{ r.sede }}</td>
+                            <td class="p-3 text-slate-400">{{ r.rol_etiqueta }}</td>
+                            <td class="p-3 text-slate-500">{{ r.observaciones or '—' }}</td>
+                            <td class="p-3 whitespace-nowrap">
+                                <button type="button" class="text-slate-500 hover:text-indigo-400 mr-2" title="Editar" onclick='abrirModalAsignar({{ r | tojson }})'><i class="fa-solid fa-pen"></i></button>
+                                <button type="button" class="text-slate-500 hover:text-rose-400" title="Cancelar" onclick="cancelarTurno({{ r.id }})"><i class="fa-solid fa-ban"></i></button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="9" class="text-center py-10 text-slate-500 font-bold">No se encontraron turnos que coincidan con los filtros.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- CUADROS RECIENTES -->
+        <div>
+            <h3 class="text-sm font-bold text-white mb-2 flex items-center gap-2"><i class="fa-solid fa-clipboard-check text-indigo-400"></i> Cuadros recientes</h3>
+            <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
+                <table class="w-full text-xs text-left">
+                    <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                        <tr>
+                            <th class="p-3">Nombre</th><th class="p-3">Periodo</th><th class="p-3">Sede</th>
+                            <th class="p-3">Área</th><th class="p-3">Estado</th><th class="p-3">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                        {% for c in cuadros_recientes %}
+                        <tr>
+                            <td class="p-3 font-bold text-slate-200">{{ c.nombre }}</td>
+                            <td class="p-3 text-slate-400">{{ c.periodo_inicio }} a {{ c.periodo_fin }}</td>
+                            <td class="p-3 text-slate-400">{{ c.sede or 'Todas' }}</td>
+                            <td class="p-3 text-slate-400">{{ c.area or 'Todas' }}</td>
+                            <td class="p-3">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+                                    {{ 'bg-slate-700 text-slate-400' if c.estado == 'borrador' else ('bg-emerald-500/10 text-emerald-400' if c.estado == 'publicado' else 'bg-indigo-500/10 text-indigo-300') }}">
+                                    {{ c.estado.capitalize() }}
+                                </span>
+                            </td>
+                            <td class="p-3">
+                                {% if c.estado == 'publicado' %}
+                                <button type="button" class="text-slate-500 hover:text-indigo-400 text-[11px] font-bold" onclick="cerrarCuadro({{ c.id }})"><i class="fa-solid fa-lock"></i> Cerrar cuadro</button>
+                                {% else %}
+                                <span class="text-slate-600 text-[11px]">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="text-center py-8 text-slate-500 font-bold">Todavía no se ha publicado ningún cuadro.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- MODAL ASIGNAR/EDITAR TURNO -->
+    <div id="modal-asignar-turno" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-titulo-asignar" class="text-base font-bold text-white">Asignar Turno</h3>
+                <button onclick="cerrarModalAsignar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="form-asignar-turno" class="flex flex-col gap-3 text-xs" onsubmit="event.preventDefault(); guardarTurno();">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="turno_id" id="input-turno-id" value="">
+                <input type="hidden" name="forzar" id="input-forzar" value="0">
+                <input type="hidden" name="colaborador_usuario" id="input-colaborador-usuario" value="">
+
+                <div class="relative">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
+                    {# 🔎 Busca por cédula o nombre en Gestión de Usuarios (activarAutocompletarPersona /
+                       /usuarios/buscar) — al elegir una sugerencia se guarda el usuario real en el campo
+                       oculto colaborador_usuario, que es lo único que /turnos/asignar acepta. #}
+                    <input type="text" id="input-colaborador-nombre" autocomplete="off" required
+                           placeholder="Busca por cédula o nombre..."
+                           class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <div id="sugerencias-colaborador-turno" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
+                    <button type="button" onclick="habilitarCambiarColaborador()" class="text-slate-500 hover:text-indigo-400 text-[10px] font-bold mt-1"><i class="fa-solid fa-rotate"></i> Cambiar colaborador</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha *</label>
+                        <input type="date" name="fecha" id="input-fecha" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo de turno *</label>
+                        <select name="tipo_turno_id" id="select-tipo-turno" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Selecciona...</option>
+                            {% for t in tipos_turno %}<option value="{{ t.id }}">{{ t.codigo }} — {{ t.nombre }} ({{ t.hora_inicio }}-{{ t.hora_fin }})</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área *</label>
+                        <select name="area" id="select-area" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Selecciona...</option>
+                            {% for a in areas %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede *</label>
+                        <select name="sede" id="select-sede" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Selecciona...</option>
+                            {% for s in sedes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Rol profesional *</label>
+                    <select name="rol_profesional" id="select-rol" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Selecciona...</option>
+                        {% for r in roles_profesionales %}<option value="{{ r.clave }}">{{ r.etiqueta }}</option>{% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
+                    <textarea name="observaciones" id="input-observaciones" rows="2" placeholder="Opcional" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                </div>
+
+                <!-- ⚠️ Aviso de cruce de horario — no bloquea, solo informa (pedido explícito de
+                     Tomás: un turno partido o complementario puede ser válido). -->
+                <div id="turno-conflicto-panel" class="hidden bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+                    <p class="text-amber-300 font-bold text-[11px] mb-1.5"><i class="fa-solid fa-triangle-exclamation"></i> Este colaborador ya tiene otro turno que se cruza en el horario:</p>
+                    <ul id="turno-conflicto-detalle" class="text-amber-200/90 text-[11px] list-disc list-inside mb-2"></ul>
+                    <button type="button" onclick="confirmarConTodo()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-1.5 px-3 rounded-lg text-[11px]">Guardar de todas formas</button>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 mt-1">
+                    <button type="button" id="boton-cancelar-turno" onclick="cancelarTurnoDesdeModal()" class="hidden text-rose-400 hover:text-rose-300 font-bold text-[11px]"><i class="fa-solid fa-ban"></i> Cancelar este turno</button>
+                    <button type="submit" class="ml-auto bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-5 rounded-xl text-xs"><i class="fa-solid fa-floppy-disk"></i> Guardar turno</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
+
+        function mostrarToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(function () { toast.classList.add('translate-y-20', 'opacity-0'); }, 3500);
+        }
+
+        function abrirModalAsignar(t) {
+            t = t || {};
+            document.getElementById('form-asignar-turno').reset();
+            document.getElementById('turno-conflicto-panel').classList.add('hidden');
+            document.getElementById('input-turno-id').value = t.id || '';
+            document.getElementById('input-forzar').value = '0';
+            document.getElementById('input-colaborador-usuario').value = t.usuario || '';
+            document.getElementById('input-colaborador-nombre').value = t.colaborador || '';
+            document.getElementById('input-colaborador-nombre').readOnly = !!t.usuario;
+            document.getElementById('input-fecha').value = t.fecha || '';
+            document.getElementById('select-tipo-turno').value = t.tipo_turno_id || '';
+            document.getElementById('select-area').value = t.area || '';
+            document.getElementById('select-sede').value = t.sede || '';
+            document.getElementById('select-rol').value = t.rol || '';
+            document.getElementById('input-observaciones').value = t.observaciones || '';
+            document.getElementById('modal-titulo-asignar').innerText = t.id ? 'Editar Turno' : 'Asignar Turno';
+            const botonCancelar = document.getElementById('boton-cancelar-turno');
+            botonCancelar.classList.toggle('hidden', !t.id);
+            botonCancelar.setAttribute('data-turno-id', t.id || '');
+            document.getElementById('modal-asignar-turno').classList.remove('hidden');
+            document.getElementById('modal-asignar-turno').classList.add('flex');
+        }
+
+        function cerrarModalAsignar() {
+            document.getElementById('modal-asignar-turno').classList.add('hidden');
+            document.getElementById('modal-asignar-turno').classList.remove('flex');
+        }
+
+        function habilitarCambiarColaborador() {
+            document.getElementById('input-colaborador-nombre').readOnly = false;
+            document.getElementById('input-colaborador-nombre').value = '';
+            document.getElementById('input-colaborador-usuario').value = '';
+            document.getElementById('input-colaborador-nombre').focus();
+        }
+
+        // 🔎 Ver activarAutocompletarPersona en /static/js/autocompletar_persona.js — mismo
+        // buscador compartido /usuarios/buscar que el resto de Arkiv (pedido de Tomás:
+        // "que los usuarios se puedan buscar por numero de documento y/o nombre").
+        activarAutocompletarPersona({
+            inputId: 'input-colaborador-nombre',
+            listaId: 'sugerencias-colaborador-turno',
+            onSeleccionar: function (persona) {
+                document.getElementById('input-colaborador-nombre').value = persona.nombre;
+                document.getElementById('input-colaborador-usuario').value = persona.usuario;
+            }
+        });
+
+        function guardarTurno() {
+            if (!document.getElementById('input-colaborador-usuario').value) {
+                mostrarToast('Busca al colaborador por cédula o nombre y elige una sugerencia de la lista.');
+                return;
+            }
+            const datos = new URLSearchParams(new FormData(document.getElementById('form-asignar-turno')));
+            fetch('{{ url_for("turnos_asignar") }}', { method: 'POST', body: datos })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.ok) {
+                        cerrarModalAsignar();
+                        location.reload();
+                    } else if (data.conflicto) {
+                        mostrarConflicto(data.turnos_conflicto || []);
+                    } else {
+                        mostrarToast((data.errores || ['No se pudo guardar el turno.']).join(' '));
+                    }
+                })
+                .catch(function () { mostrarToast('Error de red guardando el turno.'); });
+        }
+
+        function mostrarConflicto(lista) {
+            const detalle = document.getElementById('turno-conflicto-detalle');
+            detalle.innerHTML = lista.map(function (c) {
+                return '<li>' + c.fecha + ' — ' + c.turno_nombre + ' (' + c.area + ' / ' + c.sede + ')</li>';
+            }).join('');
+            document.getElementById('turno-conflicto-panel').classList.remove('hidden');
+        }
+
+        function confirmarConTodo() {
+            document.getElementById('input-forzar').value = '1';
+            guardarTurno();
+        }
+
+        function cancelarTurno(id) {
+            if (!confirm('¿Cancelar este turno? Quedará anulado, no se borra del historial.')) return;
+            fetch('/turnos/asignados/' + id + '/eliminar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) { location.reload(); } else { mostrarToast('No se pudo cancelar el turno.'); }
+            }).catch(function () { mostrarToast('Error de red cancelando el turno.'); });
+        }
+
+        function cancelarTurnoDesdeModal() {
+            const id = document.getElementById('boton-cancelar-turno').getAttribute('data-turno-id');
+            if (id) { cancelarTurno(id); }
+        }
+
+        function cerrarCuadro(id) {
+            if (!confirm('¿Cerrar este cuadro? Ya no debe aceptar más cambios.')) return;
+            fetch('/turnos/cuadros/' + id + '/cerrar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) { location.reload(); } else { mostrarToast(data.error || 'No se pudo cerrar el cuadro.'); }
+            }).catch(function () { mostrarToast('Error de red cerrando el cuadro.'); });
+        }
+
+        function publicarSemana() {
+            if (!confirm('¿Publicar el cuadro de esta semana/filtro? Se notificará por correo y WhatsApp a los colaboradores que todavía no habían recibido su aviso.')) return;
+            const params = new URLSearchParams({
+                desde: '{{ desde.strftime("%Y-%m-%d") }}', hasta: '{{ hasta.strftime("%Y-%m-%d") }}',
+                sede: '{{ f_sede }}', area: '{{ f_area }}', rol: '{{ f_rol }}',
+            });
+            fetch('/turnos/publicar_semana?' + params.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) {
+                    mostrarToast('Cuadro publicado — notificando ' + data.notificando + ' turno(s).');
+                    setTimeout(function () { location.reload(); }, 1200);
+                } else {
+                    mostrarToast('No se pudo publicar el cuadro.');
+                }
+            }).catch(function () { mostrarToast('Error de red publicando el cuadro.'); });
+        }
+    </script>
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/autocompletar_persona.js"></script>
+    <!-- 🧰 Reordenar/filtrar/ocultar columnas en la tabla de columnas fijas (pedido por Tomás,
+         12/09/2026) — ver static/js/tabla-interactiva.js. La MATRIZ semanal no lo usa porque sus
+         columnas cambian con la semana (tabla-interactiva solo soporta un <thead> estático). -->
+    <script src="/static/js/tabla-interactiva.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
+</body>
+</html>

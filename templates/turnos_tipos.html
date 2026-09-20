@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Tipos de Turno</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
+         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-indigo bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="{{ url_for('turnos_cuadro') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-calendar-week text-indigo-400"></i> Tipos de Turno
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/logo_preventiva_nav.html' %}
+            {% include 'partials/buscador.html' %}
+            {% with modulo='turnos_tipos' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
+            {% include 'partials/historial_sesiones_boton.html' %}
+            {% include 'partials/seguridad_boton.html' %}
+            {% include 'partials/perfil_boton.html' %}
+            {% include 'partials/chat_boton.html' %}
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="{{ url_for('turnos_cuadro') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-table-cells mr-1.5"></i>Cuadro de Turnos</a>
+            <a href="{{ url_for('turnos_tipos') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Tipos de Turno</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div>
+            <h2 class="text-xl font-extrabold text-white mb-1">Catálogo de Tipos de Turno</h2>
+            <p class="text-sm text-slate-400">Estas jornadas alimentan el desplegable "Tipo de turno" al asignar en el Cuadro de Turnos. Solo la cuenta administradora puede crearlas o desactivarlas.</p>
+        </div>
+
+        {% with mensajes = get_flashed_messages(with_categories=true) %}
+        {% if mensajes %}
+        <div class="space-y-2">
+            {% for categoria, mensaje in mensajes %}
+            <div class="rounded-2xl px-4 py-3 text-xs font-bold {{ 'bg-rose-500/10 border border-rose-500/30 text-rose-300' if categoria == 'danger' else 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300' }}">
+                <i class="fa-solid {{ 'fa-circle-exclamation' if categoria == 'danger' else 'fa-circle-check' }} mr-1.5"></i>{{ mensaje }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <!-- FORMULARIO NUEVO TIPO -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-plus text-indigo-400"></i> Nuevo tipo de turno</h3>
+            <form method="POST" action="{{ url_for('turnos_tipos') }}" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="codigo" required maxlength="30" placeholder="Código * (ej: M6_12)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase">
+                <input type="text" name="nombre" required maxlength="100" placeholder="Nombre *" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 lg:col-span-2">
+                <input type="time" name="hora_inicio" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input type="time" name="hora_fin" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <select name="categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    {% for c in categorias %}<option value="{{ c }}">{{ c.capitalize() }}</option>{% endfor %}
+                </select>
+                <div class="flex items-center gap-2 lg:col-span-1">
+                    <input type="color" name="color_hex" value="#2563eb" class="h-10 w-12 bg-slate-900 border border-slate-700 rounded-xl cursor-pointer" title="Color identificador en la matriz">
+                    <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Crear</button>
+                </div>
+            </form>
+            <p class="text-[10px] text-slate-500 mt-2">Si la hora de fin es menor o igual a la de inicio, se entiende que el turno cruza la medianoche (ej: 18:00 a 06:00 = turno nocturno) y la duración se calcula automáticamente.</p>
+        </div>
+
+        <!-- LISTADO -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl shadow-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left">
+                    <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                        <tr>
+                            <th class="p-3">Color</th><th class="p-3">Código</th><th class="p-3">Nombre</th>
+                            <th class="p-3">Horario</th><th class="p-3">Duración</th><th class="p-3">Categoría</th>
+                            <th class="p-3">Estado</th><th class="p-3">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                        {% for t in tipos %}
+                        <tr class="{{ 'opacity-50' if t.estado != 'activo' else '' }}">
+                            <td class="p-3"><span class="inline-block w-4 h-4 rounded-full border border-slate-600" style="background-color: {{ t.color_hex }};"></span></td>
+                            <td class="p-3 font-mono font-bold text-slate-200">{{ t.codigo }}</td>
+                            <td class="p-3 text-slate-300">{{ t.nombre }}</td>
+                            <td class="p-3 text-slate-400">{{ t.hora_inicio }} a {{ t.hora_fin }}</td>
+                            <td class="p-3 text-slate-400">{{ t.duracion_horas }} h</td>
+                            <td class="p-3 text-slate-400">{{ t.categoria.capitalize() }}</td>
+                            <td class="p-3">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {{ 'bg-emerald-500/10 text-emerald-400' if t.estado == 'activo' else 'bg-slate-700 text-slate-400' }}">{{ 'Activo' if t.estado == 'activo' else 'Inactivo' }}</span>
+                            </td>
+                            <td class="p-3">
+                                {% if t.estado == 'activo' %}
+                                <form method="POST" action="{{ url_for('turnos_tipos_eliminar', tipo_id=t.id) }}" onsubmit="return confirm('¿Desactivar el tipo de turno {{ t.nombre }}? Los turnos ya asignados con este tipo no se ven afectados.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="text-slate-500 hover:text-rose-400 text-[11px] font-bold"><i class="fa-solid fa-ban"></i> Desactivar</button>
+                                </form>
+                                {% else %}
+                                <span class="text-slate-600 text-[11px]">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="text-center py-10 text-slate-500 font-bold">Sin tipos de turno configurados todavía.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
+</body>
+</html>
