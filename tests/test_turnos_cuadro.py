@@ -746,3 +746,538 @@ def test_pagina_del_cuadro_renderiza_con_un_turno_real_sin_reventar(admin_sessio
     texto = r.get_data(as_text=True)
     assert 'data-ayuda-modulo="turnos_cuadro"' in texto
     assert 'data-tabla-interactiva="turnos"' in texto
+
+
+# ---------------------------------------------------------------------------
+# 13) Horario personalizado (pedido de Tomás, 20/09/2026: "que se puedan crear horarios desde
+#     cero para los turnos, poder crear horarios específicos") — ver
+#     _resolver_tipo_turno_personalizado: encuentra-o-crea, idempotente, en el mismo catálogo
+#     tipos_turno (es_personalizado=true), sin tocar turnos_asignados.tipo_turno_id (sigue
+#     NOT NULL). Los personalizados quedan OCULTOS del desplegable normal.
+# ---------------------------------------------------------------------------
+
+def test_asignar_con_horario_personalizado_crea_un_tipo_libre_marcado_personalizado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_libre_1')
+    area, sede = _crear_area_y_sede(app)
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '19:00', 'hora_fin_libre': '07:00', 'nombre_horario_libre': 'Turno especial',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.get_json()['ok'] is True
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT nombre, es_personalizado, hora_inicio, hora_fin FROM tipos_turno WHERE codigo = 'LIBRE-1900-0700'")
+    nombre, es_personalizado, hora_inicio, hora_fin = cur.fetchone()
+    conn.close()
+    assert nombre == 'Turno especial'
+    assert bool(es_personalizado) is True
+    assert hora_inicio == '19:00' and hora_fin == '07:00'
+
+
+def test_horario_personalizado_es_idempotente_reutiliza_el_mismo_tipo(admin_session, app, crear_usuario):
+    colaborador_1 = crear_usuario(usuario='colab_libre_2a')
+    colaborador_2 = crear_usuario(usuario='colab_libre_2b')
+    area, sede = _crear_area_y_sede(app)
+
+    r1 = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador_1, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '10:00', 'hora_fin_libre': '16:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()
+    r2 = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador_2, 'fecha': '2026-09-22', 'horario_personalizado': '1',
+        'hora_inicio_libre': '10:00', 'hora_fin_libre': '16:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT tipo_turno_id FROM turnos_asignados WHERE id IN (?, ?)", (r1['turno_id'], r2['turno_id']))
+    ids_tipo = {f[0] for f in cur.fetchall()}
+    cur.execute("SELECT COUNT(*) FROM tipos_turno WHERE codigo = 'LIBRE-1000-1600'")
+    (total_filas,) = cur.fetchone()
+    conn.close()
+    assert len(ids_tipo) == 1  # ambos turnos reutilizan el MISMO tipo, no crean uno cada uno
+    assert total_filas == 1
+
+
+def test_horario_personalizado_con_horas_invalidas_es_rechazado(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_libre_3')
+    area, sede = _crear_area_y_sede(app)
+
+    r = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': 'no-es-hora', 'hora_fin_libre': '07:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.status_code == 400
+    assert 'horario personalizado' in r.get_json()['errores'][0].lower()
+
+
+def test_tipos_turno_personalizados_no_aparecen_en_el_catalogo_del_desplegable(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_libre_4')
+    area, sede = _crear_area_y_sede(app)
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '08:00', 'hora_fin_libre': '20:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    codigos_activos = {t['codigo'] for t in app._tipos_turno_activos()}
+    assert 'LIBRE-0800-2000' not in codigos_activos
+
+
+# ---------------------------------------------------------------------------
+# 14) Asignación por grupo (pedido de Tomás, 20/09/2026: "modificar el horario de una persona o
+#     varias personas o de todo el grupo") — /turnos/asignar_grupo. Solo CREA turnos nuevos;
+#     misma filosofía de conflictos "avisa, no bloquea" que /turnos/asignar, pero por lote.
+# ---------------------------------------------------------------------------
+
+def test_asignar_grupo_crea_un_turno_para_cada_colaborador_marcado(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='grupo_col_1')
+    c2 = crear_usuario(usuario='grupo_col_2')
+    c3 = crear_usuario(usuario='grupo_col_3')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2, c3], 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 3
+    assert data['no_encontrados'] == []
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM turnos_asignados WHERE fecha = '2026-09-21' AND estado = 'activo'")
+    (total,) = cur.fetchone()
+    conn.close()
+    assert total == 3
+
+
+def test_asignar_grupo_reporta_pero_no_revienta_por_colaboradores_inexistentes(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='grupo_col_existe')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, 'usuario_que_no_existe'], 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    data = r.get_json()
+    assert data['ok'] is True
+    assert data['total'] == 1
+    assert data['no_encontrados'] == ['usuario_que_no_existe']
+
+
+def test_asignar_grupo_avisa_conflicto_por_colaborador_y_se_puede_forzar_el_lote(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='grupo_col_conflicto_1')
+    c2 = crear_usuario(usuario='grupo_col_conflicto_2')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    # c1 ya tiene un turno ese día -> al asignarle el grupo de nuevo, debe generar conflicto SOLO
+    # para c1, no para c2.
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': c1, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r_sin_forzar = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    data = r_sin_forzar.get_json()
+    assert data['ok'] is False
+    assert data['conflicto'] is True
+    assert list(data['conflictos_por_colaborador'].keys()) == [c1]
+
+    r_forzado = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO', 'forzar': '1',
+    })
+    assert r_forzado.get_json()['ok'] is True
+    assert r_forzado.get_json()['total'] == 2
+
+
+def test_asignar_grupo_sin_colaboradores_es_rechazado(admin_session, app):
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id), 'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.status_code == 400
+
+
+def test_asignar_grupo_admite_horario_personalizado_igual_que_el_individual(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='grupo_col_libre_1')
+    c2 = crear_usuario(usuario='grupo_col_libre_2')
+    area, sede = _crear_area_y_sede(app)
+
+    r = admin_session.post('/turnos/asignar_grupo', data={
+        'colaboradores_usuario': [c1, c2], 'fecha': '2026-09-21', 'horario_personalizado': '1',
+        'hora_inicio_libre': '09:00', 'hora_fin_libre': '17:00',
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    assert r.get_json()['ok'] is True
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM tipos_turno WHERE codigo = 'LIBRE-0900-1700'")
+    (total_tipos,) = cur.fetchone()
+    conn.close()
+    assert total_tipos == 1  # un solo tipo creado, reutilizado para los dos colaboradores del grupo
+
+
+# ---------------------------------------------------------------------------
+# 15) Favoritos de colaborador (personal de quien los marca, ordenan arriba de la matriz)
+# ---------------------------------------------------------------------------
+
+def test_alternar_favorito_colaborador_marca_y_desmarca(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_favorito_1')
+
+    r1 = admin_session.post(f'/turnos/favoritos/{colaborador}/alternar')
+    assert r1.get_json() == {'ok': True, 'favorito': True}
+
+    r2 = admin_session.post(f'/turnos/favoritos/{colaborador}/alternar')
+    assert r2.get_json() == {'ok': True, 'favorito': False}
+
+
+def test_favorito_es_personal_de_quien_lo_marca_no_afecta_a_otro_admin(admin_session, app, client, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_favorito_2')
+    otro_admin = crear_usuario(usuario='otro_admin_favoritos', rol='admin')
+    admin_session.post(f'/turnos/favoritos/{colaborador}/alternar')
+
+    assert colaborador in app._favoritos_colaboradores_de('admin')
+    assert colaborador not in app._favoritos_colaboradores_de(otro_admin)
+
+
+def test_colaborador_favorito_aparece_primero_en_la_matriz(admin_session, app, crear_usuario):
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    zzz = crear_usuario(usuario='colab_zzz_no_favorito', nombre='Zzz Ultimo Alfabetico')
+    aaa = crear_usuario(usuario='colab_aaa_favorito', nombre='Aaa Primero Alfabetico')
+    for c in (zzz, aaa):
+        admin_session.post('/turnos/asignar', data={
+            'colaborador_usuario': c, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+            'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+        })
+    # 'zzz' iría de últimas alfabéticamente, pero al marcarla favorita debe subir primero.
+    admin_session.post(f'/turnos/favoritos/{zzz}/alternar')
+
+    r = admin_session.get('/turnos/cuadro?desde=2026-09-21')
+    texto = r.get_data(as_text=True)
+    assert texto.index('Zzz Ultimo Alfabetico') < texto.index('Aaa Primero Alfabetico')
+
+
+# ---------------------------------------------------------------------------
+# 16) Vistas favoritas (combinación de Sede/Área/Rol guardada con nombre; una puede ser la
+#     predeterminada que se precarga sola al entrar sin filtros en la URL)
+# ---------------------------------------------------------------------------
+
+def test_guardar_vista_favorita_y_marcarla_predeterminada(admin_session, app):
+    area, sede = _crear_area_y_sede(app)
+
+    r = admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Mi vista', 'area': area, 'sede': sede, 'es_default': '1'})
+    data = r.get_json()
+    assert data['ok'] is True
+
+    vistas = app._vistas_favoritas_de('admin')
+    assert len(vistas) == 1
+    assert vistas[0]['nombre'] == 'Mi vista'
+    assert vistas[0]['es_default'] is True
+    assert app._vista_favorita_default('admin') == {'area': area, 'sede': sede, 'rol': ''}
+
+
+def test_guardar_vista_sin_nombre_es_rechazado(admin_session):
+    r = admin_session.post('/turnos/vistas/guardar', data={'nombre': '', 'area': 'X'})
+    assert r.status_code == 400
+    assert r.get_json()['ok'] is False
+
+
+def test_solo_una_vista_puede_ser_predeterminada_a_la_vez(admin_session, app):
+    id1 = admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Vista 1', 'es_default': '1'}).get_json()['vista_id']
+    id2 = admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Vista 2', 'es_default': '1'}).get_json()['vista_id']
+
+    vistas = {v['id']: v['es_default'] for v in app._vistas_favoritas_de('admin')}
+    assert vistas[id1] is False
+    assert vistas[id2] is True
+
+    admin_session.post(f'/turnos/vistas/{id1}/predeterminar')
+    vistas = {v['id']: v['es_default'] for v in app._vistas_favoritas_de('admin')}
+    assert vistas[id1] is True
+    assert vistas[id2] is False
+
+
+def test_predeterminar_una_vista_ajena_falla(admin_session, app, crear_usuario):
+    otro = crear_usuario(usuario='dueno_de_la_vista', rol='admin')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO turnos_vistas_favoritas (usuario, nombre, es_default, creado_en) VALUES (?, ?, 0, ?)", (otro, 'Vista ajena', app.obtener_fecha_actual()))
+    vista_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    r = admin_session.post(f'/turnos/vistas/{vista_id}/predeterminar')
+    assert r.status_code == 404
+
+
+def test_eliminar_vista_favorita_ajena_falla_y_no_borra_nada(admin_session, app, crear_usuario):
+    otro = crear_usuario(usuario='dueno_de_la_vista_2', rol='admin')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO turnos_vistas_favoritas (usuario, nombre, es_default, creado_en) VALUES (?, ?, 0, ?)", (otro, 'Vista ajena 2', app.obtener_fecha_actual()))
+    vista_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    r = admin_session.post(f'/turnos/vistas/{vista_id}/eliminar')
+
+    assert r.status_code == 404
+    assert len(app._vistas_favoritas_de(otro)) == 1
+
+
+def test_eliminar_vista_propia_funciona(admin_session, app):
+    vista_id = admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Para borrar'}).get_json()['vista_id']
+
+    r = admin_session.post(f'/turnos/vistas/{vista_id}/eliminar')
+
+    assert r.get_json()['ok'] is True
+    assert app._vistas_favoritas_de('admin') == []
+
+
+def test_vista_predeterminada_se_precarga_sola_sin_filtros_en_la_url(admin_session, app):
+    area, sede = _crear_area_y_sede(app, area='AreaDefault', sede='SedeDefault')
+    admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Default', 'area': area, 'sede': sede, 'es_default': '1'})
+
+    r = admin_session.get('/turnos/cuadro')
+
+    assert r.status_code == 200
+    # Si la vista default se aplicó, el <select> de Sede debe traer esa Sede ya seleccionada.
+    texto = r.get_data(as_text=True)
+    assert f'value="{sede}" selected' in texto
+
+
+def test_vista_predeterminada_no_se_aplica_si_la_url_ya_trae_filtros_explicitos(admin_session, app):
+    area, sede = _crear_area_y_sede(app, area='AreaDefault2', sede='SedeDefault2')
+    admin_session.post('/turnos/vistas/guardar', data={'nombre': 'Default2', 'area': area, 'sede': sede, 'es_default': '1'})
+
+    # El propio usuario limpia filtros a mano (sede='' explícito en la URL) -> debe respetarse,
+    # NO debe volver a imponerse la vista default por encima de una elección explícita.
+    r = admin_session.get('/turnos/cuadro?sede=&area=&rol=')
+
+    texto = r.get_data(as_text=True)
+    assert f'value="{sede}" selected' not in texto
+
+
+# ---------------------------------------------------------------------------
+# 17) Horas del Mes (pedido de Tomás, 20/09/2026: horas trabajadas/programadas + "horas a favor"
+#     contra la meta mensual configurable por colaborador, usuarios.meta_horas_mensual)
+# ---------------------------------------------------------------------------
+
+def test_horas_mes_calcula_transcurridas_total_y_diferencia_con_meta(admin_session, app, crear_usuario):
+    """Evita fijar/mockear 'hoy' (datetime.now se usa en varios sitios más de la petición —
+    sesión, CSRF, auditoría— y sustituirlo globalmente es frágil); en cambio usa un turno
+    fechado HOY de verdad, que siempre cae en 'horas_transcurridas' (fecha <= hoy) sin importar
+    qué día sea al correr la prueba."""
+    from datetime import datetime as _dt
+    hoy = _dt.now(app.ZONA_HORARIA_COLOMBIA).date()
+    colaborador = crear_usuario(usuario='colab_horas_mes_1')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET meta_horas_mensual = 4 WHERE usuario = ?", (colaborador,))
+    conn.commit()
+    conn.close()
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')  # 6 horas (06:00-12:00)
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': hoy.strftime('%Y-%m-%d'), 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes={hoy.strftime("%Y-%m")}')
+
+    assert r.status_code == 200
+    texto = r.get_data(as_text=True)
+    assert 'Persona de Prueba' in texto
+    assert '6.0 h' in texto  # horas_transcurridas = total, horas_programadas = 0
+    assert '+2.0 h a favor' in texto  # 6h asignadas - 4h de meta = 2h a favor
+
+
+def test_horas_mes_sin_meta_configurada_la_diferencia_es_none(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_horas_mes_sin_meta')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get('/turnos/horas_mes?mes=2026-09')
+
+    assert r.status_code == 200
+    assert 'Sin meta definida' in r.get_data(as_text=True)
+
+
+def test_horas_mes_respeta_el_filtro_de_area(admin_session, app, crear_usuario):
+    c1 = crear_usuario(usuario='colab_horas_mes_area_a', nombre='Colaborador Area A')
+    c2 = crear_usuario(usuario='colab_horas_mes_area_b', nombre='Colaborador Area B')
+    area_a, sede_a = _crear_area_y_sede(app, area='HorasMesAreaA', sede='HorasMesSedeA')
+    area_b, sede_b = _crear_area_y_sede(app, area='HorasMesAreaB', sede='HorasMesSedeB')
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': c1, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area_a, 'sede': sede_a, 'rol_profesional': 'MEDICO',
+    })
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': c2, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area_b, 'sede': sede_b, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get(f'/turnos/horas_mes?mes=2026-09&area={area_a}')
+
+    texto = r.get_data(as_text=True)
+    assert 'Colaborador Area A' in texto
+    assert 'Colaborador Area B' not in texto
+
+
+def test_horas_mes_turno_cancelado_no_cuenta(admin_session, app, crear_usuario):
+    colaborador = crear_usuario(usuario='colab_horas_mes_cancelado', nombre='Colaborador Cancelado Horas')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    turno_id = admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    }).get_json()['turno_id']
+    admin_session.post(f'/turnos/asignados/{turno_id}/eliminar')
+
+    r = admin_session.get('/turnos/horas_mes?mes=2026-09')
+
+    assert 'Colaborador Cancelado Horas' not in r.get_data(as_text=True)
+
+
+def test_pagina_horas_del_mes_renderiza_sin_reventar(admin_session, app):
+    r = admin_session.get('/turnos/horas_mes')
+    assert r.status_code == 200
+    assert 'data-ayuda-modulo="turnos_horas_mes"' in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------
+# 18) Marca de agua institucional en la exportación a PDF (pedido de Tomás, 20/09/2026: "que este
+#     documento también exporte la marca de agua") — reutiliza _pdf_decoracion_pagina_acta, el
+#     mismo mecanismo ya usado por las actas de Inventario.
+# ---------------------------------------------------------------------------
+
+def test_exportar_pdf_de_turnos_aplica_la_decoracion_de_marca_de_agua(admin_session, app, crear_usuario, monkeypatch):
+    llamadas = {'n': 0}
+    original = app._pdf_decoracion_pagina_acta
+
+    def _envoltorio(*args, **kwargs):
+        llamadas['n'] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(app, '_pdf_decoracion_pagina_acta', _envoltorio)
+    colaborador = crear_usuario(usuario='colab_pdf_marca_agua')
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    admin_session.post('/turnos/asignar', data={
+        'colaborador_usuario': colaborador, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+
+    r = admin_session.get('/turnos/exportar_pdf?desde=2026-09-21&hasta=2026-09-27')
+
+    assert r.status_code == 200
+    assert llamadas['n'] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 19) Meta de horas mensuales configurable por colaborador (Gestión de Usuarios → Editar/Crear)
+# ---------------------------------------------------------------------------
+
+def test_editar_usuario_guarda_la_meta_de_horas_mensuales(admin_session, app, crear_usuario):
+    colaborador_usuario = crear_usuario(usuario='colab_meta_1')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM usuarios WHERE usuario = ?", (colaborador_usuario,))
+    (usuario_id,) = cur.fetchone()
+    conn.close()
+
+    admin_session.post(f'/editar_usuario/{usuario_id}', data={
+        'email': f'{colaborador_usuario}@preventivaips.com.co', 'rol': 'estandar', 'meta_horas_mensual': '160',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT meta_horas_mensual FROM usuarios WHERE id = ?", (usuario_id,))
+    (meta,) = cur.fetchone()
+    conn.close()
+    assert float(meta) == 160.0
+
+
+def test_editar_usuario_meta_invalida_se_descarta_y_conserva_la_anterior(admin_session, app, crear_usuario):
+    colaborador_usuario = crear_usuario(usuario='colab_meta_2')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM usuarios WHERE usuario = ?", (colaborador_usuario,))
+    (usuario_id,) = cur.fetchone()
+    cur.execute("UPDATE usuarios SET meta_horas_mensual = 100 WHERE id = ?", (usuario_id,))
+    conn.commit()
+    conn.close()
+
+    admin_session.post(f'/editar_usuario/{usuario_id}', data={
+        'email': f'{colaborador_usuario}@preventivaips.com.co', 'rol': 'estandar', 'meta_horas_mensual': 'no-es-un-numero',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT meta_horas_mensual FROM usuarios WHERE id = ?", (usuario_id,))
+    (meta,) = cur.fetchone()
+    conn.close()
+    assert float(meta) == 100.0
+
+
+def test_editar_usuario_meta_en_blanco_limpia_la_meta(admin_session, app, crear_usuario):
+    colaborador_usuario = crear_usuario(usuario='colab_meta_3')
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM usuarios WHERE usuario = ?", (colaborador_usuario,))
+    (usuario_id,) = cur.fetchone()
+    cur.execute("UPDATE usuarios SET meta_horas_mensual = 100 WHERE id = ?", (usuario_id,))
+    conn.commit()
+    conn.close()
+
+    admin_session.post(f'/editar_usuario/{usuario_id}', data={
+        'email': f'{colaborador_usuario}@preventivaips.com.co', 'rol': 'estandar', 'meta_horas_mensual': '',
+    })
+
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT meta_horas_mensual FROM usuarios WHERE id = ?", (usuario_id,))
+    (meta,) = cur.fetchone()
+    conn.close()
+    assert meta is None
+
+
+def test_crear_usuario_con_meta_de_horas_mensuales_desde_el_alta(admin_session, app):
+    r = admin_session.post('/usuarios', data={
+        'primer_nombre': 'Carla', 'primer_apellido': 'Meta', 'email': 'carla.meta@preventivaips.com.co',
+        'password': 'ClaveSegura123', 'especialidad': 'Auxiliar', 'rol': 'estandar', 'meta_horas_mensual': '176',
+    }, follow_redirects=False)
+
+    assert r.status_code == 302
+    conn, db_type = app.get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT meta_horas_mensual FROM usuarios WHERE correo = 'carla.meta@preventivaips.com.co'")
+    fila = cur.fetchone()
+    conn.close()
+    assert fila is not None
+    assert float(fila[0]) == 176.0
