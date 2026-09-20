@@ -938,6 +938,44 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
                 id SERIAL PRIMARY KEY, key VARCHAR(50) NOT NULL, etiqueta VARCHAR(150) NOT NULL, icono VARCHAR(50) DEFAULT 'box', orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo'
             )''')
+            # 🗓️ CUADRO DE TURNOS HOSPITALARIOS Y ADMINISTRATIVOS (pedido por Tomás, 20/09/2026,
+            # para la operación 24/7 de Preventiva Salud IPS) — ver la sección completa del
+            # módulo más abajo en este archivo (helpers, decoradores y rutas de /turnos/...).
+            # 4 tablas nuevas:
+            #   tipos_turno: catálogo administrable de jornadas (mañana/tarde/noche/administrativo/
+            #     descanso), igual de administrable que tipos_activo_catalogo arriba.
+            #   cuadros_turnos: la unidad de "programación" que se publica de una vez (con su
+            #     propio flujo de estados borrador → publicado → cerrado) y agrupa varias
+            #     asignaciones de un periodo/sede/área.
+            #   turnos_asignados: cada asignación puntual de un colaborador a un turno en una
+            #     fecha. A propósito NO tiene una restricción UNIQUE(usuario_id, fecha): un mismo
+            #     colaborador puede tener más de una asignación el mismo día (turno partido,
+            #     complementario, cambio de sede) — los conflictos de horario se detectan en la
+            #     aplicación (ver _turnos_en_conflicto), no en el esquema, para poder avisar en vez
+            #     de bloquear ciegamente. inicio_real/fin_real son TIMESTAMP efectivos calculados a
+            #     partir de fecha + tipos_turno.hora_inicio/hora_fin (sumando un día a fin_real si
+            #     el turno cruza la medianoche, ej. Noche 19:00→07:00) — se guardan ya resueltos
+            #     para poder comparar solapamientos con una simple comparación de rangos.
+            #   notificaciones_turnos: un registro por cada intento de aviso (no solo un booleano
+            #     como el borrador inicial) — canal, tipo de evento, estado, intentos, mensaje_id
+            #     de WhatsApp y el error si lo hubo, para poder auditar/reintentar.
+            # La auditoría de quién creó/modificó/publicó/canceló un turno NO usa una tabla nueva:
+            # reutiliza registrar_log()/la tabla 'logs' ya existente (mismo criterio que "todos los
+            # cambios del sistema de Respaldo", ver claude/estado-produccion-2026-09-13.md), así
+            # queda visible desde Auditoría y Logs sin duplicar el mecanismo de auditoría del resto
+            # de la app.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_turno (
+                id SERIAL PRIMARY KEY, codigo VARCHAR(30) NOT NULL UNIQUE, nombre VARCHAR(100) NOT NULL, hora_inicio VARCHAR(5) NOT NULL, hora_fin VARCHAR(5) NOT NULL, duracion_horas NUMERIC(4,2) NOT NULL DEFAULT 0, categoria VARCHAR(20) NOT NULL DEFAULT 'ASISTENCIAL', color_hex VARCHAR(10) DEFAULT '#2563eb', orden INTEGER DEFAULT 0, estado VARCHAR(20) DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS cuadros_turnos (
+                id SERIAL PRIMARY KEY, nombre VARCHAR(150) NOT NULL, periodo_inicio VARCHAR(10) NOT NULL, periodo_fin VARCHAR(10) NOT NULL, sede VARCHAR(150), area VARCHAR(100), estado VARCHAR(20) NOT NULL DEFAULT 'borrador', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, publicado_por VARCHAR(100), fecha_publicacion VARCHAR(100), cerrado_por VARCHAR(100), fecha_cierre VARCHAR(100)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_asignados (
+                id SERIAL PRIMARY KEY, cuadro_id INTEGER REFERENCES cuadros_turnos(id) ON DELETE SET NULL, usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE, tipo_turno_id INTEGER NOT NULL REFERENCES tipos_turno(id), fecha VARCHAR(10) NOT NULL, inicio_real VARCHAR(100) NOT NULL, fin_real VARCHAR(100) NOT NULL, area VARCHAR(100) NOT NULL, sede VARCHAR(150) NOT NULL, rol_profesional VARCHAR(50) NOT NULL, observaciones TEXT, estado VARCHAR(20) NOT NULL DEFAULT 'activo', creado_por VARCHAR(100) NOT NULL, fecha_creacion VARCHAR(100) NOT NULL, actualizado_por VARCHAR(100), fecha_actualizacion VARCHAR(100)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones_turnos (
+                id SERIAL PRIMARY KEY, turno_id INTEGER NOT NULL REFERENCES turnos_asignados(id) ON DELETE CASCADE, usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE, canal VARCHAR(20) NOT NULL, tipo_evento VARCHAR(30) NOT NULL, estado VARCHAR(20) NOT NULL DEFAULT 'pendiente', destinatario VARCHAR(200), mensaje_id VARCHAR(150), intentos INTEGER DEFAULT 0, error TEXT, enviado_en VARCHAR(100), creado_en VARCHAR(100) NOT NULL
+            )''')
             # 🔁 Historial de reemplazos de activos (Reemplazar activo / Trazabilidad, visto en
             # Solvyx): cada fila conecta un activo "anterior" con el activo que lo reemplazó,
             # con el motivo, notas libres y qué pasó con el activo anterior. Reconstruyendo la
@@ -1534,6 +1572,21 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_activo_catalogo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, etiqueta TEXT NOT NULL, icono TEXT DEFAULT 'box', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
             )''')
+            # 🗓️ Cuadro de Turnos — ver el comentario completo en la rama de Postgres arriba.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS tipos_turno (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, codigo TEXT NOT NULL UNIQUE, nombre TEXT NOT NULL, hora_inicio TEXT NOT NULL, hora_fin TEXT NOT NULL, duracion_horas REAL NOT NULL DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'ASISTENCIAL', color_hex TEXT DEFAULT '#2563eb', orden INTEGER DEFAULT 0, estado TEXT DEFAULT 'activo'
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS cuadros_turnos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, periodo_inicio TEXT NOT NULL, periodo_fin TEXT NOT NULL, sede TEXT, area TEXT, estado TEXT NOT NULL DEFAULT 'borrador', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, publicado_por TEXT, fecha_publicacion TEXT, cerrado_por TEXT, fecha_cierre TEXT
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_asignados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, cuadro_id INTEGER, usuario_id INTEGER NOT NULL, tipo_turno_id INTEGER NOT NULL, fecha TEXT NOT NULL, inicio_real TEXT NOT NULL, fin_real TEXT NOT NULL, area TEXT NOT NULL, sede TEXT NOT NULL, rol_profesional TEXT NOT NULL, observaciones TEXT, estado TEXT NOT NULL DEFAULT 'activo', creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, actualizado_por TEXT, fecha_actualizacion TEXT,
+                FOREIGN KEY(cuadro_id) REFERENCES cuadros_turnos(id) ON DELETE SET NULL, FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE, FOREIGN KEY(tipo_turno_id) REFERENCES tipos_turno(id)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones_turnos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, turno_id INTEGER NOT NULL, usuario_id INTEGER NOT NULL, canal TEXT NOT NULL, tipo_evento TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', destinatario TEXT, mensaje_id TEXT, intentos INTEGER DEFAULT 0, error TEXT, enviado_en TEXT, creado_en TEXT NOT NULL,
+                FOREIGN KEY(turno_id) REFERENCES turnos_asignados(id) ON DELETE CASCADE, FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+            )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_reemplazos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_anterior_id INTEGER NOT NULL, activo_nuevo_id INTEGER, motivo TEXT NOT NULL, notas TEXT, fecha_reemplazo TEXT NOT NULL, estado_anterior_resultante TEXT NOT NULL, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, FOREIGN KEY(activo_anterior_id) REFERENCES activos_inventario(id) ON DELETE CASCADE, FOREIGN KEY(activo_nuevo_id) REFERENCES activos_inventario(id)
             )''')
@@ -2060,6 +2113,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_tipo_fecha ON chat_mensajes (tipo, fecha);",
             "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_remitente ON chat_mensajes (remitente);",
             "CREATE INDEX IF NOT EXISTS idx_chat_mensajes_destinatario ON chat_mensajes (destinatario);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_asignados_usuario_fecha ON turnos_asignados (usuario_id, fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_asignados_cuadro ON turnos_asignados (cuadro_id);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_asignados_fecha ON turnos_asignados (fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_notificaciones_turnos_turno ON notificaciones_turnos (turno_id);",
         ]:
             try:
                 cursor.execute(indice_sql)
@@ -2233,6 +2290,27 @@ def init_db():
             if not cursor.fetchone():
                 cursor.execute(q_ins_esp, (nombre_esp,))
         conn.commit()
+
+        # 🗓️ Siembra el catálogo de Tipos de Turno con las jornadas típicas de una operación
+        # hospitalaria 24/7, solo la primera vez (igual que tipos_activo_catalogo arriba) — de
+        # ahí en adelante se administra por completo desde /turnos/tipos (agregar, editar,
+        # desactivar) sin volver a tocar código.
+        cursor.execute("SELECT COUNT(*) FROM tipos_turno")
+        if cursor.fetchone()[0] == 0:
+            q_seed_turno = ("INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                             if db_type == 'postgres' else
+                             "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            tipos_turno_semilla = [
+                ('M6_12', 'Mañana', '06:00', '12:00', 6, 'ASISTENCIAL', '#0ea5b7'),
+                ('T12_18', 'Tarde', '12:00', '18:00', 6, 'ASISTENCIAL', '#f59e0b'),
+                ('N18_6', 'Noche', '18:00', '06:00', 12, 'ASISTENCIAL', '#6366f1'),
+                ('DIA_12', 'Turno Día 12h', '07:00', '19:00', 12, 'ASISTENCIAL', '#2563eb'),
+                ('ADMIN_8_17', 'Jornada Administrativa', '08:00', '17:00', 9, 'ADMINISTRATIVO', '#0d9488'),
+                ('DESCANSO', 'Descanso / Post-turno', '00:00', '00:00', 0, 'DESCANSO', '#64748b'),
+            ]
+            for orden_t, (codigo_t, nombre_t, hi_t, hf_t, dur_t, cat_t, color_t) in enumerate(tipos_turno_semilla):
+                cursor.execute(q_seed_turno, (codigo_t, nombre_t, hi_t, hf_t, dur_t, cat_t, color_t, orden_t))
+            conn.commit()
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
@@ -2977,6 +3055,13 @@ MODULOS_ASIGNABLES = [
     # Gestión Humana del paz y salvo, que siguen siendo exclusivos de esos roles.
     {'clave': 'devoluciones', 'etiqueta': 'Certificación de Devoluciones', 'icono': 'fa-id-card-clip',
      'descripcion': 'Certificar la devolución de activos del Inventario (sin poder firmar los pasos de Soporte TI o Gestión Humana del paz y salvo).'},
+    # 🧩 Agregado 20/09/2026: Cuadro de Turnos Hospitalarios y Administrativos, para la
+    # operación 24/7 de Preventiva Salud IPS. Da el mismo nivel operativo que ya tienen
+    # admin/agente en este módulo (crear/editar/publicar turnos, no solo consultarlos) — igual
+    # criterio que 'inventario'/'boveda_accesos' arriba — típicamente pensado para quien coordina
+    # turnos sin necesitar rol 'agente' completo (soporte TI).
+    {'clave': 'turnos', 'etiqueta': 'Cuadro de Turnos', 'icono': 'fa-calendar-week',
+     'descripcion': 'Programar, publicar y notificar los turnos hospitalarios y administrativos del Cuadro de Turnos.'},
 ]
 CLAVES_MODULOS_ASIGNABLES = tuple(m['clave'] for m in MODULOS_ASIGNABLES)
 
@@ -3042,9 +3127,13 @@ boveda_accesos_o_extra_required = modulo_o_acceso_operativo_required('boveda_acc
 auditoria_o_extra_required = modulo_o_acceso_operativo_required('auditoria')
 galerias_o_extra_required = modulo_o_acceso_operativo_required('galerias')
 vencimientos_o_extra_required = modulo_o_acceso_operativo_required('vencimientos')
+# 🗓️ Cuadro de Turnos (20/09/2026) — ver la sección completa del módulo más abajo.
+turnos_o_extra_required = modulo_o_acceso_operativo_required('turnos')
 # 🔎 Endpoint compartido (búsqueda de usuarios por cédula/nombre): lo usan tanto el modal de
-# asignación de Inventario como Altas de Credenciales / Bóveda Personal.
-inventario_o_boveda_o_extra_required = modulo_o_acceso_operativo_required('inventario', 'boveda_accesos')
+# asignación de Inventario como Altas de Credenciales / Bóveda Personal, y ahora también el
+# selector de colaborador de "Asignar Turno" (20/09/2026) — así el nuevo módulo reutiliza
+# exactamente el mismo buscador en vez de duplicar la lógica.
+inventario_o_boveda_o_extra_required = modulo_o_acceso_operativo_required('inventario', 'boveda_accesos', 'turnos')
 
 
 @app.context_processor
@@ -19146,6 +19235,787 @@ def documentos_empleado_eliminar(doc_id):
     conn.close()
 
     return redirect(url_for('gestion_usuarios'))
+
+
+# ==========================================================================================
+# 🗓️ CUADRO DE TURNOS HOSPITALARIOS Y ADMINISTRATIVOS (pedido por Tomás, 20/09/2026)
+# ==========================================================================================
+# Roster 24/7 de Preventiva Salud IPS. Modelo de datos completo (tipos_turno, cuadros_turnos,
+# turnos_asignados, notificaciones_turnos) en init_db() más arriba; ver también
+# MODULOS_ASIGNABLES / turnos_o_extra_required (control de acceso) y
+# inventario_o_boveda_o_extra_required (reutiliza el buscador de colaborador por cédula/nombre).
+#
+# Alcance de esta entrega (decidido con Tomás vía AskUserQuestion, 20/09/2026 — "arquitectura
+# robusta desde ya"):
+#  - Estados de publicación por cuadro (borrador → publicado → cerrado), timestamps efectivos
+#    que resuelven turnos que cruzan medianoche (ej. Noche 18:00→06:00), detección de
+#    conflictos de horario (AVISA, no bloquea a ciegas — se puede confirmar "de todas formas":
+#    un turno partido o complementario puede ser válido según el caso real), y una tabla
+#    dedicada de notificaciones con estado/intentos/mensaje_id por canal (no un simple booleano).
+#  - Notificación por Correo: funciona de una vez, reutilizando _enviar_correo_simple (el mismo
+#    webhook de Apps Script que ya usa el resto de Arkiv) — no hay plantillas HTML de correo en
+#    todo el proyecto (todo es texto plano firmado "Equipo de Soporte - ARKIV System"), así que
+#    el aviso de turno sigue ese mismo formato en vez de inventar un mecanismo de correo HTML
+#    nuevo solo para este módulo.
+#  - Notificación por WhatsApp: la integración (Meta Cloud API) queda completa y lista para
+#    activarse, pero Tomás confirmó que Preventiva TODAVÍA NO tiene la cuenta de mensajería
+#    empresarial — mientras no se configuren WHATSAPP_CLOUD_API_TOKEN/WHATSAPP_CLOUD_API_PHONE_ID
+#    en Render, cada intento queda registrado en notificaciones_turnos con estado='error' y un
+#    mensaje explicando qué falta (ver scripts/README_WHATSAPP_TURNOS.md).
+#  - Vista semanal de la matriz (lunes a domingo, con "Semana anterior/HOY/Semana siguiente"),
+#    igual que el mockup que compartió Tomás — la vista MENSUAL queda para una siguiente ronda
+#    si la pide explícitamente (una matriz de hasta 31 columnas es una UI bastante distinta, y
+#    tabla-interactiva.js no aplica aquí de todas formas: la matriz tiene columnas dinámicas
+#    según el rango elegido, así que se renderiza directo con Jinja en vez de con ese componente
+#    — ver el listado plano de abajo, que SÍ lo usa, con columnas fijas).
+#  - Auditoría: reutiliza registrar_log()/la tabla 'logs' ya existente (mismo criterio que "todos
+#    los cambios del sistema de Respaldo" — ver claude/estado-produccion-2026-09-13.md) en vez de
+#    una tabla nueva — así los cambios de turnos ya aparecen en Auditoría y Logs sin duplicar el
+#    mecanismo de auditoría del resto de la app.
+#  - Área y Sede reutilizan el catálogo YA administrable de Tickets (ticket_configuraciones,
+#    tipo='area'/'sede', administrado desde /tickets/configuracion) en vez de crear un catálogo
+#    paralelo. Rol profesional es una lista cerrada nueva (ROLES_PROFESIONALES_TURNO) porque no
+#    existía nada equivalente todavía.
+#  - El selector de colaborador en "Asignar Turno" reutiliza el buscador YA existente de usuarios
+#    por cédula/nombre (activarAutocompletarPersona / /usuarios/buscar) — no se construyó un
+#    buscador nuevo, tal como se confirmó con Tomás.
+#  - Deliberadamente FUERA de esta ronda (no pedido explícitamente, para no ampliar el alcance
+#    sin confirmar): intercambio de turnos entre colaboradores con flujo de aprobación propio,
+#    "copiar semana/mes completo", validación cruzada contra vacaciones/incapacidades/permisos
+#    (ese módulo no existe hoy en Arkiv), y reportes agregados de horas por área/sede más allá de
+#    la exportación CSV/Excel/PDF del listado plano.
+
+ROLES_PROFESIONALES_TURNO = (
+    'MEDICO', 'ENFERMERO_JEFE', 'AUX_ENFERMERIA', 'BACTERIOLOGO', 'TERAPEUTA', 'ADMINISTRATIVO', 'OTRO',
+)
+ETIQUETAS_ROL_PROFESIONAL_TURNO = {
+    'MEDICO': 'Médico', 'ENFERMERO_JEFE': 'Enfermero(a) Jefe', 'AUX_ENFERMERIA': 'Auxiliar de Enfermería',
+    'BACTERIOLOGO': 'Bacteriólogo(a)', 'TERAPEUTA': 'Terapeuta', 'ADMINISTRATIVO': 'Administrativo', 'OTRO': 'Otro',
+}
+CATEGORIAS_TIPO_TURNO = ('ASISTENCIAL', 'ADMINISTRATIVO', 'DESCANSO')
+
+# 📲 WhatsApp Cloud API (Meta) — ver scripts/README_WHATSAPP_TURNOS.md para la guía de activación.
+WHATSAPP_CLOUD_API_TOKEN = os.environ.get('WHATSAPP_CLOUD_API_TOKEN')
+WHATSAPP_CLOUD_API_PHONE_ID = os.environ.get('WHATSAPP_CLOUD_API_PHONE_ID')
+WHATSAPP_CLOUD_API_VERSION = os.environ.get('WHATSAPP_CLOUD_API_VERSION', 'v20.0')
+
+
+def _whatsapp_turno_configurado():
+    return bool(WHATSAPP_CLOUD_API_TOKEN and WHATSAPP_CLOUD_API_PHONE_ID)
+
+
+def _areas_turno_disponibles():
+    """Reutiliza el catálogo de Áreas ya administrable desde /tickets/configuracion
+    (ticket_configuraciones, tipo='area') en vez de crear un catálogo paralelo para Turnos."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT nombre FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT nombre FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        cursor.execute(q, ('area',))
+        filas = [r[0] for r in cursor.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error listando áreas para Cuadro de Turnos: {e}")
+        filas = []
+    conn.close()
+    return filas
+
+
+def _sedes_turno_disponibles():
+    """Reutiliza el catálogo de Sedes ya administrable desde /tickets/configuracion
+    (ticket_configuraciones, tipo='sede')."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    try:
+        q = "SELECT nombre FROM ticket_configuraciones WHERE tipo = %s AND estado = 'activo' ORDER BY nombre ASC" if db_type == 'postgres' else "SELECT nombre FROM ticket_configuraciones WHERE tipo = ? AND estado = 'activo' ORDER BY nombre ASC"
+        cursor.execute(q, ('sede',))
+        filas = [r[0] for r in cursor.fetchall()]
+    except Exception as e:
+        print(f"⚠️ Error listando sedes para Cuadro de Turnos: {e}")
+        filas = []
+    conn.close()
+    return filas
+
+
+def _tipos_turno_activos():
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, nombre ASC")
+    filas = cursor.fetchall()
+    conn.close()
+    return [
+        {'id': f[0], 'codigo': f[1], 'nombre': f[2], 'hora_inicio': f[3], 'hora_fin': f[4],
+         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7]}
+        for f in filas
+    ]
+
+
+def _calcular_inicio_fin_real(fecha_str, hora_inicio, hora_fin):
+    """Convierte fecha ('YYYY-MM-DD') + horas de plantilla ('HH:MM') del tipo de turno en el par
+    de timestamps EFECTIVOS ('YYYY-MM-DD HH:MM:SS') que sí se pueden comparar para detectar
+    solapamientos. Si hora_fin es menor o igual a hora_inicio, el turno cruza la medianoche (ej.
+    Noche 18:00 → 06:00) y fin_real cae al día siguiente. Lanza ValueError si fecha/horas no
+    tienen un formato válido (el llamador lo traduce en un error de validación al usuario)."""
+    fecha_base = datetime.strptime(fecha_str, '%Y-%m-%d')
+    h_ini, m_ini = (int(x) for x in hora_inicio.split(':'))
+    h_fin, m_fin = (int(x) for x in hora_fin.split(':'))
+    inicio_real = fecha_base.replace(hour=h_ini, minute=m_ini)
+    fin_real = fecha_base.replace(hour=h_fin, minute=m_fin)
+    if fin_real <= inicio_real:
+        fin_real += timedelta(days=1)
+    return inicio_real.strftime('%Y-%m-%d %H:%M:%S'), fin_real.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _turnos_en_conflicto(usuario_id, inicio_real, fin_real, excluir_id=None):
+    """Asignaciones ACTIVAS del mismo colaborador cuyo rango [inicio_real, fin_real) se solapa
+    con el rango dado (comparación clásica de intervalos: A.inicio < B.fin AND B.inicio < A.fin).
+    No bloquea por sí sola: /turnos/asignar la usa para AVISAR antes de guardar; el frontend
+    puede reenviar con forzar=1 para confirmar de todas formas (un turno partido o complementario
+    puede ser válido según el caso real — pedido explícito de la revisión de Tomás)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = [f"ta.usuario_id = {ph}", "ta.estado = 'activo'", f"ta.inicio_real < {ph}", f"ta.fin_real > {ph}"]
+    parametros = [usuario_id, fin_real, inicio_real]
+    if excluir_id:
+        condiciones.append(f"ta.id != {ph}")
+        parametros.append(excluir_id)
+    q = f"""SELECT ta.id, ta.fecha, ta.inicio_real, ta.fin_real, tt.nombre, ta.area, ta.sede
+            FROM turnos_asignados ta JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+            WHERE {' AND '.join(condiciones)}"""
+    cursor.execute(q, tuple(parametros))
+    filas = cursor.fetchall()
+    conn.close()
+    return [
+        {'id': f[0], 'fecha': f[1], 'inicio_real': f[2], 'fin_real': f[3], 'turno_nombre': f[4], 'area': f[5], 'sede': f[6]}
+        for f in filas
+    ]
+
+
+def _registrar_notificacion_turno(turno_id, usuario_id, canal, tipo_evento, estado, destinatario=None, mensaje_id=None, intentos=1, error=None):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    fecha_actual = obtener_fecha_actual()
+    enviado_en = fecha_actual if estado == 'enviado' else None
+    q = ("INSERT INTO notificaciones_turnos (turno_id, usuario_id, canal, tipo_evento, estado, destinatario, mensaje_id, intentos, error, enviado_en, creado_en) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+         if db_type == 'postgres' else
+         "INSERT INTO notificaciones_turnos (turno_id, usuario_id, canal, tipo_evento, estado, destinatario, mensaje_id, intentos, error, enviado_en, creado_en) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+    cursor.execute(q, (turno_id, usuario_id, canal, tipo_evento, estado, destinatario, mensaje_id, intentos, error, enviado_en, fecha_actual))
+    conn.commit()
+    conn.close()
+
+
+def _enviar_whatsapp_turno(telefono, mensaje):
+    """Envía un mensaje de texto libre por WhatsApp Cloud API (Meta). Devuelve
+    (ok: bool, mensaje_id_o_None, error_o_None) — nunca lanza. Si las credenciales no están
+    configuradas todavía, devuelve de una vez un error descriptivo sin intentar la petición (ver
+    scripts/README_WHATSAPP_TURNOS.md para activarlo)."""
+    if not _whatsapp_turno_configurado():
+        return False, None, ("WhatsApp no está configurado todavía: faltan las variables de entorno "
+                              "WHATSAPP_CLOUD_API_TOKEN y/o WHATSAPP_CLOUD_API_PHONE_ID en Render "
+                              "(ver scripts/README_WHATSAPP_TURNOS.md).")
+    if not telefono:
+        return False, None, "El colaborador no tiene teléfono registrado."
+    telefono_normalizado = ''.join(ch for ch in telefono if ch.isdigit())
+    if not telefono_normalizado:
+        return False, None, "El teléfono registrado no tiene dígitos válidos."
+    if not telefono_normalizado.startswith('57'):
+        telefono_normalizado = '57' + telefono_normalizado
+    url = f"https://graph.facebook.com/{WHATSAPP_CLOUD_API_VERSION}/{WHATSAPP_CLOUD_API_PHONE_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_CLOUD_API_TOKEN}", "Content-Type": "application/json"}
+    payload = {"messaging_product": "whatsapp", "to": telefono_normalizado, "type": "text", "text": {"body": mensaje}}
+    try:
+        if not requests:
+            return False, None, "La librería 'requests' no está disponible en este servidor."
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code in (200, 201):
+            mensaje_id = None
+            try:
+                mensaje_id = (res.json().get('messages') or [{}])[0].get('id')
+            except Exception:
+                pass
+            return True, mensaje_id, None
+        return False, None, f"WhatsApp respondió {res.status_code}: {res.text[:300]}"
+    except Exception as e:
+        return False, None, f"Error de red enviando WhatsApp: {e}"
+
+
+def _mensaje_turno_texto(nombre_colaborador, fecha_legible, turno_nombre, horario, area, sede):
+    return (
+        f"Hola {nombre_colaborador}, se ha programado/actualizado tu turno en Preventiva Salud IPS:\n\n"
+        f"Fecha: {fecha_legible}\n"
+        f"Turno: {turno_nombre} ({horario})\n"
+        f"Área: {area}\n"
+        f"Sede: {sede}\n\n"
+        "Consulta el detalle en https://arkivapp.co\n"
+        "---\nEquipo de Soporte - ARKIV System"
+    )
+
+
+def _detalle_turno_para_notificar(turno_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = ("""SELECT ta.id, ta.usuario_id, u.nombre, u.usuario, u.correo, u.telefono, ta.fecha, ta.area, ta.sede,
+                    tt.nombre, tt.hora_inicio, tt.hora_fin
+             FROM turnos_asignados ta JOIN usuarios u ON u.id = ta.usuario_id JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+             WHERE ta.id = %s""" if db_type == 'postgres' else
+         """SELECT ta.id, ta.usuario_id, u.nombre, u.usuario, u.correo, u.telefono, ta.fecha, ta.area, ta.sede,
+                   tt.nombre, tt.hora_inicio, tt.hora_fin
+            FROM turnos_asignados ta JOIN usuarios u ON u.id = ta.usuario_id JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+            WHERE ta.id = ?""")
+    cursor.execute(q, (turno_id,))
+    fila = cursor.fetchone()
+    conn.close()
+    if not fila:
+        return None
+    return {
+        'id': fila[0], 'usuario_id': fila[1], 'nombre': fila[2] or fila[3], 'usuario': fila[3],
+        'correo': fila[4], 'telefono': fila[5], 'fecha': fila[6], 'area': fila[7], 'sede': fila[8],
+        'turno_nombre': fila[9], 'hora_inicio': fila[10], 'hora_fin': fila[11],
+    }
+
+
+def notificar_turno(turno_id, tipo_evento='CREACION'):
+    """Envía el aviso de un turno por Correo y WhatsApp y registra CADA intento en
+    notificaciones_turnos — nunca lanza: un fallo de notificación no debe tumbar la asignación ni
+    la publicación del cuadro, que ya quedaron guardadas correctamente en la base de datos."""
+    turno = _detalle_turno_para_notificar(turno_id)
+    if not turno:
+        return
+    try:
+        fecha_legible = datetime.strptime(turno['fecha'], '%Y-%m-%d').strftime('%d/%m/%Y')
+    except Exception:
+        fecha_legible = turno['fecha']
+    horario = f"{turno['hora_inicio']} a {turno['hora_fin']}"
+    mensaje = _mensaje_turno_texto(turno['nombre'], fecha_legible, turno['turno_nombre'], horario, turno['area'], turno['sede'])
+
+    # 📧 Correo — ya funciona de una vez, reutiliza el mismo webhook de Apps Script del resto de Arkiv.
+    if turno['correo']:
+        asunto = f"Asignación de Turno - {fecha_legible} - Preventiva Salud IPS"
+        try:
+            if _enviar_correo_simple(turno['correo'], asunto, mensaje):
+                registrar_correo_log(turno['correo'], asunto, 'turno', 'enviado')
+                _registrar_notificacion_turno(turno['id'], turno['usuario_id'], 'EMAIL', tipo_evento, 'enviado', destinatario=turno['correo'])
+            else:
+                registrar_correo_log(turno['correo'], asunto, 'turno', 'error', 'Falló el envío del aviso de turno por correo')
+                _registrar_notificacion_turno(turno['id'], turno['usuario_id'], 'EMAIL', tipo_evento, 'error', destinatario=turno['correo'], error='Falló el envío por el webhook de correo')
+        except Exception as e:
+            _registrar_notificacion_turno(turno['id'], turno['usuario_id'], 'EMAIL', tipo_evento, 'error', destinatario=turno['correo'], error=str(e))
+    else:
+        _registrar_notificacion_turno(turno['id'], turno['usuario_id'], 'EMAIL', tipo_evento, 'error', error='El colaborador no tiene correo registrado')
+
+    # 📲 WhatsApp — integración completa, pero inactiva hasta que se configuren las credenciales
+    # (ver _whatsapp_turno_configurado / scripts/README_WHATSAPP_TURNOS.md).
+    ok_wa, mensaje_id_wa, error_wa = _enviar_whatsapp_turno(turno['telefono'], mensaje)
+    _registrar_notificacion_turno(
+        turno['id'], turno['usuario_id'], 'WHATSAPP', tipo_evento,
+        'enviado' if ok_wa else 'error',
+        destinatario=turno['telefono'], mensaje_id=mensaje_id_wa, error=None if ok_wa else error_wa,
+    )
+
+
+def _datos_turnos(desde_str, hasta_str, f_sede='', f_area='', f_rol=''):
+    """Listado plano de asignaciones activas en [desde_str, hasta_str], compartido por la matriz
+    de /turnos/cuadro, el listado con tabla-interactiva de esa misma página y las 3 exportaciones
+    — mismo patrón que _datos_geolocalizacion."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = ["ta.estado = 'activo'", f"ta.fecha >= {ph}", f"ta.fecha <= {ph}"]
+    parametros = [desde_str, hasta_str]
+    if f_sede:
+        condiciones.append(f"ta.sede = {ph}")
+        parametros.append(f_sede)
+    if f_area:
+        condiciones.append(f"ta.area = {ph}")
+        parametros.append(f_area)
+    if f_rol:
+        condiciones.append(f"ta.rol_profesional = {ph}")
+        parametros.append(f_rol)
+    q = f"""SELECT ta.id, ta.usuario_id, u.nombre, u.usuario, ta.fecha, ta.area, ta.sede, ta.rol_profesional,
+                   tt.codigo, tt.nombre, tt.color_hex, tt.hora_inicio, tt.hora_fin, ta.observaciones, ta.cuadro_id,
+                   tt.id
+            FROM turnos_asignados ta
+            JOIN usuarios u ON u.id = ta.usuario_id
+            JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+            WHERE {' AND '.join(condiciones)}
+            ORDER BY u.nombre ASC, ta.fecha ASC"""
+    cursor.execute(q, tuple(parametros))
+    filas = cursor.fetchall()
+    conn.close()
+    listado = []
+    for f in filas:
+        listado.append({
+            # 🔎 'usuario' (nombre de cuenta) y 'tipo_turno_id' viajan aparte de 'colaborador'
+            # (nombre para mostrar) y 'turno_codigo'/'turno_nombre' (para mostrar) porque la
+            # plantilla los necesita para precargar el modal "Asignar Turno" al editar o al
+            # agregar otro día para el mismo colaborador (el buscador compartido /usuarios/buscar
+            # nunca expone un id numérico, así que 'usuario' es el único identificador reutilizable).
+            'id': f[0], 'usuario_id': f[1], 'usuario': f[3], 'colaborador': f[2] or f[3], 'fecha': f[4],
+            'area': f[5], 'sede': f[6], 'rol': f[7], 'rol_etiqueta': ETIQUETAS_ROL_PROFESIONAL_TURNO.get(f[7], f[7]),
+            'tipo_turno_id': f[15], 'turno_codigo': f[8], 'turno_nombre': f[9], 'color': f[10],
+            'hora_inicio': f[11], 'hora_fin': f[12], 'horario': f"{f[11]} a {f[12]}",
+            'observaciones': f[13] or '', 'cuadro_id': f[14],
+        })
+    return listado
+
+
+def _filtros_turnos_desde_query():
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
+    try:
+        desde = datetime.strptime(request.args.get('desde', ''), '%Y-%m-%d').date()
+    except ValueError:
+        desde = hoy - timedelta(days=hoy.weekday())  # lunes de esta semana
+    try:
+        hasta = datetime.strptime(request.args.get('hasta', ''), '%Y-%m-%d').date()
+    except ValueError:
+        hasta = desde + timedelta(days=6)
+    return desde, hasta, request.args.get('sede', '').strip(), request.args.get('area', '').strip(), request.args.get('rol', '').strip()
+
+
+@app.route('/turnos/cuadro')
+@login_required
+@turnos_o_extra_required
+def turnos_cuadro():
+    desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
+    dias_semana = [desde + timedelta(days=i) for i in range((hasta - desde).days + 1)]
+    listado = _datos_turnos(desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d'), f_sede, f_area, f_rol)
+
+    colaboradores = {}
+    for r in listado:
+        clave = (r['usuario_id'], r['colaborador'])
+        colaboradores.setdefault(clave, {})[r['fecha']] = r
+    matriz = [
+        # 🔎 'usuario' (nombre de cuenta) va a nivel de fila —no solo por día— para que la
+        # plantilla pueda precargar el colaborador al agregar otro turno del mismo colaborador
+        # en un día vacío de su propia fila, sin depender de que ESE día ya tenga un turno.
+        {'usuario_id': clave[0], 'nombre': clave[1], 'usuario': next(iter(turnos_por_fecha.values()))['usuario'],
+         'dias': [turnos_por_fecha.get(d.strftime('%Y-%m-%d')) for d in dias_semana]}
+        for clave, turnos_por_fecha in sorted(colaboradores.items(), key=lambda kv: kv[0][1].lower())
+    ]
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre, periodo_inicio, periodo_fin, sede, area, estado FROM cuadros_turnos ORDER BY id DESC LIMIT 10")
+    cuadros_recientes = [
+        {'id': f[0], 'nombre': f[1], 'periodo_inicio': f[2], 'periodo_fin': f[3], 'sede': f[4], 'area': f[5], 'estado': f[6]}
+        for f in cursor.fetchall()
+    ]
+    conn.close()
+
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
+    return render_template(
+        'turnos_cuadro.html',
+        dias_semana=dias_semana, matriz=matriz, listado=listado, cuadros_recientes=cuadros_recientes,
+        desde=desde, hasta=hasta,
+        semana_anterior=(desde - timedelta(days=7)).strftime('%Y-%m-%d'),
+        semana_siguiente=(desde + timedelta(days=7)).strftime('%Y-%m-%d'),
+        hoy_str=hoy.strftime('%Y-%m-%d'),
+        tipos_turno=_tipos_turno_activos(), areas=_areas_turno_disponibles(), sedes=_sedes_turno_disponibles(),
+        roles_profesionales=[{'clave': k, 'etiqueta': v} for k, v in ETIQUETAS_ROL_PROFESIONAL_TURNO.items()],
+        f_sede=f_sede, f_area=f_area, f_rol=f_rol,
+        whatsapp_configurado=_whatsapp_turno_configurado(),
+    )
+
+
+@app.route('/turnos/asignar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_asignar():
+    # 🔎 El campo de colaborador viaja como `colaborador_usuario` (el nombre de usuario, texto) y
+    # no como un id numérico: es exactamente lo que devuelve el buscador compartido
+    # /usuarios/buscar (activarAutocompletarPersona) — {usuario, nombre, cedula, firma}, sin
+    # exponer nunca el id interno de la tabla `usuarios` al frontend. Aquí se resuelve al id real.
+    turno_id_raw = request.form.get('turno_id', '').strip()
+    colaborador_usuario = request.form.get('colaborador_usuario', '').strip()
+    fecha = request.form.get('fecha', '').strip()
+    tipo_turno_id_raw = request.form.get('tipo_turno_id', '').strip()
+    area = request.form.get('area', '').strip()
+    sede = request.form.get('sede', '').strip()
+    rol_profesional = request.form.get('rol_profesional', '').strip().upper()
+    observaciones = request.form.get('observaciones', '').strip() or None
+    cuadro_id_raw = request.form.get('cuadro_id', '').strip()
+    forzar = request.form.get('forzar') == '1'
+
+    errores = []
+    if not colaborador_usuario:
+        errores.append('Selecciona un colaborador válido (búscalo por cédula o nombre y elige una sugerencia).')
+    if not fecha:
+        errores.append('La fecha es obligatoria.')
+    if not tipo_turno_id_raw.isdigit():
+        errores.append('Selecciona un tipo de turno válido.')
+    if not area:
+        errores.append('El área es obligatoria.')
+    if not sede:
+        errores.append('La sede es obligatoria.')
+    if rol_profesional not in ROLES_PROFESIONALES_TURNO:
+        errores.append('Selecciona un rol profesional válido.')
+    if turno_id_raw and not turno_id_raw.isdigit():
+        errores.append('Identificador de turno inválido.')
+    if errores:
+        return jsonify({'ok': False, 'errores': errores}), 400
+
+    tipo_turno_id = int(tipo_turno_id_raw)
+    turno_id = int(turno_id_raw) if turno_id_raw else None
+    cuadro_id = int(cuadro_id_raw) if cuadro_id_raw.isdigit() else None
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT hora_inicio, hora_fin FROM tipos_turno WHERE id = {ph}", (tipo_turno_id,))
+    tipo_row = cursor.fetchone()
+    if not tipo_row:
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['El tipo de turno seleccionado ya no existe.']}), 400
+    cursor.execute(f"SELECT id FROM usuarios WHERE usuario = {ph} AND COALESCE(estado, 'activo') = 'activo'", (colaborador_usuario,))
+    fila_usuario = cursor.fetchone()
+    if not fila_usuario:
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['No se encontró ese colaborador en Arkiv — búscalo de nuevo por cédula o nombre y elige una sugerencia.']}), 400
+    usuario_id = fila_usuario[0]
+
+    try:
+        inicio_real, fin_real = _calcular_inicio_fin_real(fecha, tipo_row[0], tipo_row[1])
+    except ValueError:
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['La fecha no tiene un formato válido.']}), 400
+
+    conflictos = _turnos_en_conflicto(usuario_id, inicio_real, fin_real, excluir_id=turno_id)
+    if conflictos and not forzar:
+        conn.close()
+        return jsonify({'ok': False, 'conflicto': True, 'turnos_conflicto': conflictos})
+
+    fecha_actual = obtener_fecha_actual()
+    if turno_id:
+        q = f"""UPDATE turnos_asignados SET tipo_turno_id={ph}, fecha={ph}, inicio_real={ph}, fin_real={ph},
+                area={ph}, sede={ph}, rol_profesional={ph}, observaciones={ph}, cuadro_id={ph},
+                actualizado_por={ph}, fecha_actualizacion={ph} WHERE id={ph}"""
+        cursor.execute(q, (tipo_turno_id, fecha, inicio_real, fin_real, area, sede, rol_profesional,
+                           observaciones, cuadro_id, session['username'], fecha_actual, turno_id))
+        accion_log = "Turno Modificado"
+    else:
+        if db_type == 'postgres':
+            q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
+            cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+            turno_id = cursor.fetchone()[0]
+        else:
+            q = f"""INSERT INTO turnos_asignados (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
+            cursor.execute(q, (cuadro_id, usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+            turno_id = cursor.lastrowid
+        accion_log = "Turno Asignado"
+    conn.commit()
+    conn.close()
+
+    registrar_log(session['username'], accion_log, f"Turno #{turno_id}: colaborador_id={usuario_id}, fecha={fecha}, área={area}, sede={sede}, rol={rol_profesional}")
+    return jsonify({'ok': True, 'turno_id': turno_id})
+
+
+@app.route('/turnos/asignados/<int:turno_id>/eliminar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_asignados_eliminar(turno_id):
+    """Cancela (no borra) la asignación — mismo criterio de baja lógica que el resto de la app,
+    para conservar el historial/auditoría."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = ("UPDATE turnos_asignados SET estado = 'cancelado', actualizado_por = %s, fecha_actualizacion = %s WHERE id = %s"
+         if db_type == 'postgres' else
+         "UPDATE turnos_asignados SET estado = 'cancelado', actualizado_por = ?, fecha_actualizacion = ? WHERE id = ?")
+    cursor.execute(q, (session['username'], obtener_fecha_actual(), turno_id))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Turno Cancelado", f"Turno #{turno_id}")
+    return jsonify({'ok': True})
+
+
+def _obtener_o_crear_cuadro(desde_str, hasta_str, sede, area, usuario):
+    """Encuentra el cuadro (no cerrado) que ya exista para exactamente este periodo/sede/área, o
+    crea uno nuevo en 'borrador' — evita que cada clic en 'Publicar' de la misma semana/filtro
+    genere un cuadro distinto."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = [f"periodo_inicio = {ph}", f"periodo_fin = {ph}", "estado != 'cerrado'"]
+    parametros = [desde_str, hasta_str]
+    if sede:
+        condiciones.append(f"sede = {ph}")
+        parametros.append(sede)
+    else:
+        condiciones.append("(sede IS NULL OR sede = '')")
+    if area:
+        condiciones.append(f"area = {ph}")
+        parametros.append(area)
+    else:
+        condiciones.append("(area IS NULL OR area = '')")
+    cursor.execute(f"SELECT id, estado FROM cuadros_turnos WHERE {' AND '.join(condiciones)} ORDER BY id DESC LIMIT 1", tuple(parametros))
+    fila = cursor.fetchone()
+    if fila:
+        conn.close()
+        return fila[0], fila[1]
+
+    nombre_cuadro = f"Semana {desde_str} a {hasta_str}"
+    if sede:
+        nombre_cuadro += f" - {sede}"
+    if area:
+        nombre_cuadro += f" - {area}"
+    fecha_actual = obtener_fecha_actual()
+    if db_type == 'postgres':
+        cursor.execute(
+            "INSERT INTO cuadros_turnos (nombre, periodo_inicio, periodo_fin, sede, area, creado_por, fecha_creacion) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (nombre_cuadro, desde_str, hasta_str, sede or None, area or None, usuario, fecha_actual))
+        nuevo_id = cursor.fetchone()[0]
+    else:
+        cursor.execute(
+            "INSERT INTO cuadros_turnos (nombre, periodo_inicio, periodo_fin, sede, area, creado_por, fecha_creacion) VALUES (?,?,?,?,?,?,?)",
+            (nombre_cuadro, desde_str, hasta_str, sede or None, area or None, usuario, fecha_actual))
+        nuevo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return nuevo_id, 'borrador'
+
+
+@app.route('/turnos/publicar_semana', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_publicar_semana():
+    """Publica el cuadro de la semana/filtro actual: adopta los turnos sueltos de ese rango que
+    todavía no pertenecían a ningún cuadro, marca el cuadro como 'publicado' (si estaba en
+    'borrador') y dispara la notificación (Correo + WhatsApp) SOLO de los turnos que todavía no
+    tienen ningún intento de aviso registrado — así volver a pulsar 'Publicar' no reenvía spam a
+    quien ya fue notificado; un turno agregado después del primer publicar sí se notifica."""
+    desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
+    desde_str, hasta_str = desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d')
+
+    cuadro_id, estado_actual = _obtener_o_crear_cuadro(desde_str, hasta_str, f_sede, f_area, session['username'])
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = ["cuadro_id IS NULL", "estado = 'activo'", f"fecha >= {ph}", f"fecha <= {ph}"]
+    parametros = [desde_str, hasta_str]
+    if f_sede:
+        condiciones.append(f"sede = {ph}")
+        parametros.append(f_sede)
+    if f_area:
+        condiciones.append(f"area = {ph}")
+        parametros.append(f_area)
+    cursor.execute(f"UPDATE turnos_asignados SET cuadro_id = {ph} WHERE {' AND '.join(condiciones)}", tuple([cuadro_id] + parametros))
+    conn.commit()
+
+    if estado_actual == 'borrador':
+        cursor.execute(f"UPDATE cuadros_turnos SET estado = 'publicado', publicado_por = {ph}, fecha_publicacion = {ph} WHERE id = {ph}",
+                       (session['username'], obtener_fecha_actual(), cuadro_id))
+        conn.commit()
+
+    cursor.execute(
+        f"""SELECT ta.id FROM turnos_asignados ta WHERE ta.cuadro_id = {ph} AND ta.estado = 'activo'
+            AND NOT EXISTS (SELECT 1 FROM notificaciones_turnos nt WHERE nt.turno_id = ta.id)""",
+        (cuadro_id,)
+    )
+    ids_a_notificar = [r[0] for r in cursor.fetchall()]
+    conn.close()
+
+    def _notificar_en_hilo(ids):
+        for tid in ids:
+            notificar_turno(tid, 'CREACION')
+
+    if ids_a_notificar:
+        threading.Thread(target=_notificar_en_hilo, args=(ids_a_notificar,)).start()
+
+    registrar_log(session['username'], "Cuadro de Turnos Publicado",
+                  f"Cuadro #{cuadro_id} ({desde_str} a {hasta_str}), {len(ids_a_notificar)} turno(s) notificado(s)")
+    return jsonify({'ok': True, 'cuadro_id': cuadro_id, 'notificando': len(ids_a_notificar)})
+
+
+@app.route('/turnos/cuadros/<int:cuadro_id>/cerrar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_cuadros_cerrar(cuadro_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT estado FROM cuadros_turnos WHERE id = {ph}", (cuadro_id,))
+    fila = cursor.fetchone()
+    if not fila or fila[0] != 'publicado':
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Solo se puede cerrar un cuadro que ya esté publicado.'}), 400
+    cursor.execute(f"UPDATE cuadros_turnos SET estado = 'cerrado', cerrado_por = {ph}, fecha_cierre = {ph} WHERE id = {ph}",
+                   (session['username'], obtener_fecha_actual(), cuadro_id))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Cuadro de Turnos Cerrado", f"Cuadro #{cuadro_id}")
+    return jsonify({'ok': True})
+
+
+@app.route('/turnos/tipos', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def turnos_tipos():
+    """Catálogo administrable de Tipos de Turno — solo admin, mismo criterio que el catálogo de
+    Tipos de Activo del Inventario (la configuración del catálogo es sensible; usarlo al asignar
+    un turno no lo es, y eso sí lo puede hacer cualquiera con turnos_o_extra_required)."""
+    if request.method == 'POST':
+        codigo = request.form.get('codigo', '').strip().upper()
+        nombre = request.form.get('nombre', '').strip()
+        hora_inicio = request.form.get('hora_inicio', '').strip()
+        hora_fin = request.form.get('hora_fin', '').strip()
+        categoria = request.form.get('categoria', 'ASISTENCIAL').strip().upper()
+        color_hex = request.form.get('color_hex', '#2563eb').strip() or '#2563eb'
+        if categoria not in CATEGORIAS_TIPO_TURNO:
+            categoria = 'ASISTENCIAL'
+        if codigo and nombre and hora_inicio and hora_fin:
+            try:
+                inicio_calc, fin_calc = _calcular_inicio_fin_real('2000-01-01', hora_inicio, hora_fin)
+                duracion = round((datetime.strptime(fin_calc, '%Y-%m-%d %H:%M:%S') - datetime.strptime(inicio_calc, '%Y-%m-%d %H:%M:%S')).total_seconds() / 3600, 2)
+            except ValueError:
+                flash("El horario ingresado no es válido.", "danger")
+                return redirect(url_for('turnos_tipos'))
+            conn, db_type = get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(orden), -1) FROM tipos_turno")
+            siguiente_orden = cursor.fetchone()[0] + 1
+            try:
+                q = ("INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
+                     if db_type == 'postgres' else
+                     "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden) VALUES (?,?,?,?,?,?,?,?)")
+                cursor.execute(q, (codigo, nombre, hora_inicio, hora_fin, duracion, categoria, color_hex, siguiente_orden))
+                conn.commit()
+                registrar_log(session['username'], "Tipo de Turno Creado", f"{codigo} - {nombre} ({hora_inicio}-{hora_fin})")
+            except Exception as e:
+                conn.rollback()
+                flash(f"No se pudo crear el tipo de turno (¿el código ya existe?): {e}", "danger")
+            conn.close()
+        else:
+            flash("Completa código, nombre y horario para crear un tipo de turno.", "danger")
+        return redirect(url_for('turnos_tipos'))
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, estado FROM tipos_turno ORDER BY orden ASC, nombre ASC")
+    filas = cursor.fetchall()
+    conn.close()
+    tipos = [
+        {'id': f[0], 'codigo': f[1], 'nombre': f[2], 'hora_inicio': f[3], 'hora_fin': f[4],
+         'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7], 'estado': f[8]}
+        for f in filas
+    ]
+    return render_template('turnos_tipos.html', tipos=tipos, categorias=CATEGORIAS_TIPO_TURNO)
+
+
+@app.route('/turnos/tipos/<int:tipo_id>/eliminar', methods=['POST'])
+@login_required
+@admin_required
+def turnos_tipos_eliminar(tipo_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    q = "UPDATE tipos_turno SET estado = 'inactivo' WHERE id = %s" if db_type == 'postgres' else "UPDATE tipos_turno SET estado = 'inactivo' WHERE id = ?"
+    cursor.execute(q, (tipo_id,))
+    conn.commit()
+    conn.close()
+    registrar_log(session['username'], "Tipo de Turno Desactivado", f"Tipo de turno #{tipo_id}")
+    return redirect(url_for('turnos_tipos'))
+
+
+@app.route('/turnos/exportar_csv')
+@login_required
+@turnos_o_extra_required
+def turnos_exportar_csv():
+    desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
+    listado = _datos_turnos(desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d'), f_sede, f_area, f_rol)
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['COLABORADOR', 'FECHA', 'TURNO', 'HORARIO', 'ÁREA', 'SEDE', 'ROL', 'OBSERVACIONES'])
+    for r in listado:
+        writer.writerow([r['colaborador'], r['fecha'], r['turno_nombre'], r['horario'], r['area'], r['sede'], r['rol_etiqueta'], r['observaciones']])
+
+    csv_bytes = '﻿' + output.getvalue()
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    headers = {'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': f'attachment; filename="Arkiv_CuadroTurnos_{fecha_filename}.csv"'}
+    return Response(csv_bytes, headers=headers, status=200)
+
+
+@app.route('/turnos/exportar_xlsx')
+@login_required
+@turnos_o_extra_required
+def turnos_exportar_xlsx():
+    desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
+    listado = _datos_turnos(desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d'), f_sede, f_area, f_rol)
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Cuadro de Turnos'
+    encabezados = ['Colaborador', 'Fecha', 'Turno', 'Horario', 'Área', 'Sede', 'Rol', 'Observaciones']
+    ws.append(encabezados)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='0EA5B7', end_color='0EA5B7', fill_type='solid')
+    for r in listado:
+        ws.append([r['colaborador'], r['fecha'], r['turno_nombre'], r['horario'], r['area'], r['sede'], r['rol_etiqueta'], r['observaciones']])
+    ws.freeze_panes = 'A2'
+    for i, ancho in enumerate([26, 12, 16, 16, 18, 18, 20, 30], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="Arkiv_CuadroTurnos_{fecha_filename}.xlsx"'
+    })
+
+
+@app.route('/turnos/exportar_pdf')
+@login_required
+@turnos_o_extra_required
+def turnos_exportar_pdf():
+    desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
+    listado = _datos_turnos(desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d'), f_sede, f_area, f_rol)
+
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    salida = io.BytesIO()
+    doc = SimpleDocTemplate(salida, pagesize=landscape(letter), topMargin=1.2 * cm, bottomMargin=1.2 * cm,
+                             leftMargin=1 * cm, rightMargin=1 * cm)
+    estilos = getSampleStyleSheet()
+    elementos = [Paragraph("Arkiv &mdash; Cuadro de Turnos", estilos['Title']), Spacer(1, 0.25 * cm)]
+    elementos.append(Paragraph(f"{desde.strftime('%d/%m/%Y')} a {hasta.strftime('%d/%m/%Y')} &mdash; {len(listado)} turno(s)", estilos['Normal']))
+    elementos.append(Spacer(1, 0.4 * cm))
+
+    tabla_datos = [['Colaborador', 'Fecha', 'Turno', 'Horario', 'Área', 'Sede', 'Rol']]
+    for r in listado:
+        tabla_datos.append([r['colaborador'], r['fecha'], r['turno_nombre'], r['horario'], r['area'], r['sede'], r['rol_etiqueta']])
+
+    tabla = Table(tabla_datos, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0ea5b7')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    elementos.append(tabla)
+    doc.build(elementos)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="Arkiv_CuadroTurnos_{fecha_filename}.pdf"'
+    })
 
 
 if __name__ == '__main__':
