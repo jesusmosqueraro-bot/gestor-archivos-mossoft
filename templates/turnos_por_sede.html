@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Colaboradores por Sede</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
+         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-indigo bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="{{ url_for('turnos_cuadro') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-building-user text-indigo-400"></i> Colaboradores por Sede
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/logo_preventiva_nav.html' %}
+            {% include 'partials/buscador.html' %}
+            {% with modulo='turnos_por_sede' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
+            {% include 'partials/historial_sesiones_boton.html' %}
+            {% include 'partials/seguridad_boton.html' %}
+            {% include 'partials/perfil_boton.html' %}
+            {% include 'partials/chat_boton.html' %}
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="{{ url_for('turnos_cuadro') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-table-cells mr-1.5"></i>Cuadro de Turnos</a>
+            {% if session.get('rol') == 'admin' %}
+            <a href="{{ url_for('turnos_tipos') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Tipos de Turno</a>
+            {% endif %}
+            <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
+            <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h2 class="text-xl font-extrabold text-white mb-1">Colaboradores por Sede</h2>
+                <p class="text-sm text-slate-400 max-w-2xl">Directorio de solo consulta: agrupa a todas las cuentas activas del sistema según la Sede asignada en su perfil (se elige al crear el usuario en Registrar Usuario, o se ajusta después desde Gestión de Usuarios → Editar). Para cambiar la Sede de alguien, hazlo desde ahí — esta vista no modifica nada.</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-300 whitespace-nowrap">
+                <i class="fa-solid fa-users mr-1.5 text-indigo-400"></i>{{ total_colaboradores }} colaborador{{ 'es' if total_colaboradores != 1 else '' }} en total
+            </div>
+        </div>
+
+        <!-- BUSCADOR RÁPIDO (filtra por nombre/usuario/cédula dentro de las tarjetas, sin recargar) -->
+        <div class="relative">
+            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+            <input type="text" id="filtro-colaborador-sede" oninput="filtrarColaboradoresPorSede()" placeholder="Filtrar por nombre, usuario o cédula..." class="w-full bg-slate-800/60 border border-slate-700/60 rounded-2xl pl-11 pr-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <!-- TARJETAS POR SEDE -->
+        <div id="grupos-sede" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {% for grupo in grupos_sede %}
+            <div class="grupo-sede bg-slate-800/60 border border-slate-700/60 rounded-2xl overflow-hidden flex flex-col">
+                <div class="px-4 py-3 border-b border-slate-700/60 flex items-center justify-between gap-2 bg-slate-800/80">
+                    <h3 class="text-sm font-extrabold text-white flex items-center gap-2 truncate">
+                        <i class="fa-solid {{ 'fa-building-circle-xmark text-slate-500' if grupo.sede is none else 'fa-building text-indigo-400' }}"></i>
+                        <span class="truncate">{{ grupo.sede if grupo.sede is not none else 'Sin sede asignada' }}</span>
+                    </h3>
+                    <span class="contador-sede shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-700 text-slate-300">{{ grupo.colaboradores | length }}</span>
+                </div>
+                <div class="divide-y divide-slate-800">
+                    {% for c in grupo.colaboradores %}
+                    <div class="fila-colaborador-sede px-4 py-2.5 flex items-center justify-between gap-3" data-busqueda="{{ (c.nombre ~ ' ' ~ c.usuario ~ ' ' ~ c.cedula) | lower }}">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-slate-200 truncate">{{ c.nombre }}</p>
+                            <p class="text-[10px] text-slate-500 truncate">@{{ c.usuario }}{% if c.cedula %} · CC {{ c.cedula }}{% endif %}</p>
+                        </div>
+                        <span class="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-300 whitespace-nowrap">{{ c.rol_etiqueta }}</span>
+                    </div>
+                    {% else %}
+                    <div class="px-4 py-6 text-center text-[11px] text-slate-500 font-bold">Sin colaboradores registrados aquí todavía.</div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="lg:col-span-2 text-center py-14 text-slate-500 font-bold">No hay ninguna cuenta activa para mostrar.</div>
+            {% endfor %}
+        </div>
+        <p id="mensaje-sin-resultados-sede" class="hidden text-center py-6 text-slate-500 font-bold text-sm">Ningún colaborador coincide con esa búsqueda.</p>
+
+    </main>
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script>
+        // 🔎 Filtro cliente-side (pedido de Tomás, 20/09/2026, "poder visualizar" — solo consulta,
+        // sin recargar la página): oculta filas de colaborador que no coincidan y, si una tarjeta
+        // de Sede se queda sin ninguna fila visible, la oculta entera también.
+        function filtrarColaboradoresPorSede() {
+            const termino = document.getElementById('filtro-colaborador-sede').value.trim().toLowerCase();
+            const grupos = document.querySelectorAll('.grupo-sede');
+            let algunaFilaVisible = false;
+            grupos.forEach(function (grupo) {
+                const filas = grupo.querySelectorAll('.fila-colaborador-sede');
+                let visiblesEnGrupo = 0;
+                filas.forEach(function (fila) {
+                    const coincide = !termino || fila.getAttribute('data-busqueda').indexOf(termino) !== -1;
+                    fila.classList.toggle('hidden', !coincide);
+                    if (coincide) { visiblesEnGrupo++; algunaFilaVisible = true; }
+                });
+                // Sin filtro activo, o si la tarjeta no tiene ninguna fila (Sede vacía de por sí),
+                // se sigue mostrando siempre — solo se oculta cuando SÍ hay filas pero ninguna coincide.
+                const tieneFilas = filas.length > 0;
+                grupo.classList.toggle('hidden', termino !== '' && tieneFilas && visiblesEnGrupo === 0);
+                if (!tieneFilas) algunaFilaVisible = true;
+            });
+            document.getElementById('mensaje-sin-resultados-sede').classList.toggle('hidden', termino === '' || algunaFilaVisible);
+        }
+    </script>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
+</body>
+</html>

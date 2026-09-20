@@ -63,6 +63,8 @@
         <div class="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
             <a href="{{ url_for('turnos_cuadro') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-table-cells mr-1.5"></i>Cuadro de Turnos</a>
             <a href="{{ url_for('turnos_tipos') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Tipos de Turno</a>
+            <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
+            <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
         </div>
     </div>
 
@@ -98,12 +100,13 @@
                 <select name="categoria" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     {% for c in categorias %}<option value="{{ c }}">{{ c.capitalize() }}</option>{% endfor %}
                 </select>
+                <input type="number" name="minutos_descanso" min="0" step="1" placeholder="Min. almuerzo (opc.)" title="Minutos de almuerzo/descanso a descontar de las horas netas en &quot;Horas del Mes&quot; (Art. 167 CST). Opcional, 0 si no aplica." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <div class="flex items-center gap-2 lg:col-span-1">
                     <input type="color" name="color_hex" value="#2563eb" class="h-10 w-12 bg-slate-900 border border-slate-700 rounded-xl cursor-pointer" title="Color identificador en la matriz">
                     <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs"><i class="fa-solid fa-plus"></i> Crear</button>
                 </div>
             </form>
-            <p class="text-[10px] text-slate-500 mt-2">Si la hora de fin es menor o igual a la de inicio, se entiende que el turno cruza la medianoche (ej: 18:00 a 06:00 = turno nocturno) y la duración se calcula automáticamente.</p>
+            <p class="text-[10px] text-slate-500 mt-2">Si la hora de fin es menor o igual a la de inicio, se entiende que el turno cruza la medianoche (ej: 18:00 a 06:00 = turno nocturno) y la duración se calcula automáticamente. Los minutos de almuerzo/descanso son opcionales: no cuentan como jornada laboral (Art. 167 CST) y solo se descuentan en la vista "Horas del Mes" — la matriz, este catálogo y las exportaciones siguen mostrando la duración completa del turno.</p>
         </div>
 
         <!-- LISTADO -->
@@ -113,7 +116,7 @@
                     <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
                         <tr>
                             <th class="p-3">Color</th><th class="p-3">Código</th><th class="p-3">Nombre</th>
-                            <th class="p-3">Horario</th><th class="p-3">Duración</th><th class="p-3">Categoría</th>
+                            <th class="p-3">Horario</th><th class="p-3">Duración</th><th class="p-3">Almuerzo</th><th class="p-3">Categoría</th>
                             <th class="p-3">Estado</th><th class="p-3">Acción</th>
                         </tr>
                     </thead>
@@ -125,6 +128,7 @@
                             <td class="p-3 text-slate-300">{{ t.nombre }}</td>
                             <td class="p-3 text-slate-400">{{ t.hora_inicio }} a {{ t.hora_fin }}</td>
                             <td class="p-3 text-slate-400">{{ t.duracion_horas }} h</td>
+                            <td class="p-3 text-slate-400">{{ (t.minutos_descanso ~ ' min') if t.minutos_descanso else '—' }}</td>
                             <td class="p-3 text-slate-400">{{ t.categoria.capitalize() }}</td>
                             <td class="p-3">
                                 <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {{ 'bg-emerald-500/10 text-emerald-400' if t.estado == 'activo' else 'bg-slate-700 text-slate-400' }}">{{ 'Activo' if t.estado == 'activo' else 'Inactivo' }}</span>
@@ -141,7 +145,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="8" class="text-center py-10 text-slate-500 font-bold">Sin tipos de turno configurados todavía.</td></tr>
+                        <tr><td colspan="9" class="text-center py-10 text-slate-500 font-bold">Sin tipos de turno configurados todavía.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

@@ -66,6 +66,13 @@
                 <i class="fa-solid fa-hourglass-half"></i><span class="hidden lg:inline">Horas del Mes</span>
             </a>
 
+            <!-- 🏢 Colaboradores por Sede (pedido de Tomás, 20/09/2026): directorio de solo
+                 consulta agrupado por la Sede del PERFIL de cada usuario (usuarios.sede, asignada
+                 al crear la cuenta) — ver /turnos/por_sede y _colaboradores_por_sede(). -->
+            <a href="{{ url_for('turnos_por_sede') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Colaboradores por Sede">
+                <i class="fa-solid fa-building-user"></i><span class="hidden lg:inline">Por Sede</span>
+            </a>
+
             <!-- 📤 Exportar: respeta la semana y los filtros de sede/área/rol actuales. -->
             <a href="{{ url_for('turnos_exportar_csv', desde=desde.strftime('%Y-%m-%d'), hasta=hasta.strftime('%Y-%m-%d'), sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a CSV">
                 <i class="fa-solid fa-file-csv text-emerald-400"></i><span class="hidden lg:inline">CSV</span>
@@ -146,7 +153,7 @@
                 {% if f_sede or f_area or f_rol %}
                 <a href="{{ url_for('turnos_cuadro', desde=desde.strftime('%Y-%m-%d')) }}" class="text-slate-400 hover:text-indigo-400 font-bold px-2 py-2.5"><i class="fa-solid fa-filter-circle-xmark"></i> Limpiar</a>
                 {% endif %}
-                <button type="button" onclick="publicarSemana()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2" title="Publica el cuadro de esta semana/filtro y notifica a los colaboradores pendientes">
+                <button type="button" onclick="publicarSemana()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2" title="Agrupa esta semana/filtro en un cuadro publicado, listo para cerrarse cuando termine el periodo (el aviso por correo a cada colaborador ya se envía al crear, modificar o cancelar su turno, sin esperar a publicar)">
                     <i class="fa-solid fa-paper-plane"></i> Publicar semana
                 </button>
             </form>
@@ -209,7 +216,18 @@
                                     <button type="button" onclick="alternarFijarFila('{{ fila.usuario }}')" class="fijar-pin shrink-0 text-[11px] text-slate-600 hover:text-indigo-400" title="Fijar esta fila arriba (solo en este navegador)">
                                         <i class="fa-solid fa-thumbtack"></i>
                                     </button>
-                                    <span class="truncate">{{ fila.nombre }}</span>
+                                    {#- 🛈 Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su
+                                         nombre (pedido de Tomás, 20/09/2026: "que se reflejen los datos del usuario") —
+                                         cédula, correo, teléfono, Sede y cargo/rol de cuenta, ver fila.perfil en
+                                         turnos_cuadro(). Usa el atributo title= nativo (no un tooltip a medida) para
+                                         que nunca quede recortado por el scroll horizontal/columna fija de la matriz. #}
+                                    {% set datos_tooltip = [fila.nombre] %}
+                                    {% if fila.perfil.cedula %}{% set _ = datos_tooltip.append('Cédula: ' ~ fila.perfil.cedula) %}{% endif %}
+                                    {% if fila.perfil.correo %}{% set _ = datos_tooltip.append('Correo: ' ~ fila.perfil.correo) %}{% endif %}
+                                    {% if fila.perfil.telefono %}{% set _ = datos_tooltip.append('Teléfono: ' ~ fila.perfil.telefono) %}{% endif %}
+                                    {% if fila.perfil.sede %}{% set _ = datos_tooltip.append('Sede: ' ~ fila.perfil.sede) %}{% endif %}
+                                    {% if fila.perfil.rol_etiqueta %}{% set _ = datos_tooltip.append('Cargo: ' ~ fila.perfil.rol_etiqueta) %}{% endif %}
+                                    <span class="truncate cursor-help" title="{{ datos_tooltip | join('\n') }}">{{ fila.nombre }}</span>
                                 </div>
                             </td>
                             {% for dia in fila.dias %}
@@ -344,6 +362,13 @@
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha *</label>
                         <input type="date" name="fecha" id="input-fecha" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
+                    <div id="bloque-fecha-fin">
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha Fin (opcional)</label>
+                        <input type="date" name="fecha_fin" id="input-fecha-fin" title="Si la dejas en blanco, se asigna solo el día de 'Fecha'. Si eliges una posterior, se crea un turno independiente para CADA día del rango (todos los días, sin excluir fines de semana)." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2">
                     <div id="bloque-tipo-turno-catalogo">
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo de turno *</label>
                         <select name="tipo_turno_id" id="select-tipo-turno" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -376,6 +401,10 @@
                     <div class="col-span-2">
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre del horario (opcional)</label>
                         <input type="text" name="nombre_horario_libre" id="input-nombre-horario-libre" placeholder="Ej: Turno especial fin de semana" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Minutos de almuerzo/descanso (opcional)</label>
+                        <input type="number" name="minutos_descanso_libre" id="input-minutos-descanso-libre" min="0" step="1" placeholder="Ej: 60" title="No cuentan como jornada laboral (Art. 167 CST); se descuentan solo en 'Horas del Mes'. Solo se guardan la primera vez que se crea este horario específico." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
                 </div>
 
@@ -447,6 +476,13 @@
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha *</label>
                         <input type="date" name="fecha" id="grupo-input-fecha" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha Fin (opcional)</label>
+                        <input type="date" name="fecha_fin" id="grupo-input-fecha-fin" title="Si la dejas en blanco, se asigna solo el día de 'Fecha'. Si eliges una posterior, se crea un turno independiente para CADA día del rango, para cada colaborador marcado (todos los días, sin excluir fines de semana)." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2">
                     <div id="grupo-bloque-tipo-turno-catalogo">
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo de turno *</label>
                         <select name="tipo_turno_id" id="grupo-select-tipo-turno" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -474,6 +510,10 @@
                     <div class="col-span-2">
                         <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Nombre del horario (opcional)</label>
                         <input type="text" name="nombre_horario_libre" id="grupo-input-nombre-horario-libre" placeholder="Ej: Turno especial fin de semana" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Minutos de almuerzo/descanso (opcional)</label>
+                        <input type="number" name="minutos_descanso_libre" id="grupo-input-minutos-descanso-libre" min="0" step="1" placeholder="Ej: 60" title="No cuentan como jornada laboral (Art. 167 CST); se descuentan solo en 'Horas del Mes'. Solo se guardan la primera vez que se crea este horario específico." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
                 </div>
 
@@ -583,6 +623,11 @@
                 document.getElementById('select-tipo-turno').value = t.tipo_turno_id || '';
             }
             document.getElementById('modal-titulo-asignar').innerText = t.id ? 'Editar Turno' : 'Asignar Turno';
+            // 🗓️➕ "Fecha Fin" solo aplica al CREAR (el backend la ignora si se está editando, ver
+            // turnos_asignar) — se oculta y se limpia al editar un turno ya existente para que no
+            // parezca que se puede estirar un turno puntual a un rango.
+            document.getElementById('bloque-fecha-fin').classList.toggle('hidden', !!t.id);
+            document.getElementById('input-fecha-fin').value = '';
             const botonCancelar = document.getElementById('boton-cancelar-turno');
             botonCancelar.classList.toggle('hidden', !t.id);
             botonCancelar.setAttribute('data-turno-id', t.id || '');
@@ -852,9 +897,21 @@
                 .then(function (data) {
                     if (data.ok) {
                         cerrarModalAsignar();
-                        location.reload();
+                        // 🗓️➕ Con Fecha Fin, la respuesta trae turnos_creados (uno por cada día
+                        // del rango) en vez del turno_id de siempre — se avisa cuántos se crearon
+                        // antes de recargar, igual que ya se hace en "Asignar a Grupo".
+                        if (data.turnos_creados && data.total > 1) {
+                            mostrarToast('Se crearon ' + data.total + ' turnos (uno por cada día del rango).');
+                            setTimeout(function () { location.reload(); }, 900);
+                        } else {
+                            location.reload();
+                        }
                     } else if (data.conflicto) {
-                        mostrarConflicto(data.turnos_conflicto || []);
+                        if (data.conflictos_por_fecha) {
+                            mostrarConflictoPorFecha(data.conflictos_por_fecha);
+                        } else {
+                            mostrarConflicto(data.turnos_conflicto || []);
+                        }
                     } else {
                         mostrarToast((data.errores || ['No se pudo guardar el turno.']).join(' '));
                     }
@@ -867,6 +924,20 @@
             detalle.innerHTML = lista.map(function (c) {
                 return '<li>' + c.fecha + ' — ' + c.turno_nombre + ' (' + c.area + ' / ' + c.sede + ')</li>';
             }).join('');
+            document.getElementById('turno-conflicto-panel').classList.remove('hidden');
+        }
+
+        // 🗓️➕ Conflictos de un rango de fechas (Fecha Fin): una entrada por cada día del rango que
+        // chocó con un turno ya existente de ese colaborador — ver conflictos_por_fecha en
+        // /turnos/asignar.
+        function mostrarConflictoPorFecha(conflictosPorFecha) {
+            const filas = [];
+            Object.keys(conflictosPorFecha).sort().forEach(function (fecha) {
+                (conflictosPorFecha[fecha] || []).forEach(function (c) {
+                    filas.push('<li>' + fecha + ' — cruza con ' + c.turno_nombre + ' (' + c.area + ' / ' + c.sede + ')</li>');
+                });
+            });
+            document.getElementById('turno-conflicto-detalle').innerHTML = filas.join('');
             document.getElementById('turno-conflicto-panel').classList.remove('hidden');
         }
 
@@ -903,7 +974,7 @@
         }
 
         function publicarSemana() {
-            if (!confirm('¿Publicar el cuadro de esta semana/filtro? Se notificará por correo y WhatsApp a los colaboradores que todavía no habían recibido su aviso.')) return;
+            if (!confirm('¿Publicar el cuadro de esta semana/filtro? Cada colaborador ya recibió su aviso por correo al crear/modificar/cancelar su turno — esto solo agrupa el periodo para poder cerrarlo después.')) return;
             const params = new URLSearchParams({
                 desde: '{{ desde.strftime("%Y-%m-%d") }}', hasta: '{{ hasta.strftime("%Y-%m-%d") }}',
                 sede: '{{ f_sede }}', area: '{{ f_area }}', rol: '{{ f_rol }}',
@@ -914,7 +985,7 @@
                 body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
             }).then(function (r) { return r.json(); }).then(function (data) {
                 if (data.ok) {
-                    mostrarToast('Cuadro publicado — notificando ' + data.notificando + ' turno(s).');
+                    mostrarToast('Cuadro publicado.');
                     setTimeout(function () { location.reload(); }, 1200);
                 } else {
                     mostrarToast('No se pudo publicar el cuadro.');

@@ -66,6 +66,7 @@
             <a href="{{ url_for('turnos_tipos') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Tipos de Turno</a>
             {% endif %}
             <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
+            <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
         </div>
     </div>
 
@@ -74,7 +75,13 @@
 
         <div>
             <h2 class="text-xl font-extrabold text-white mb-1">Horas trabajadas y proyectadas — {{ mes_nombre }}</h2>
-            <p class="text-sm text-slate-400">Por cada colaborador con turno asignado este mes: las horas ya transcurridas (hasta hoy), las que todavía tiene programadas, el total, y cuántas horas tiene "a favor" o "en contra" contra la meta mensual configurada en su ficha (Gestión de Usuarios → Editar → Meta de horas mensuales, opcional).</p>
+            <p class="text-sm text-slate-400">Por cada colaborador con turno asignado este mes: las horas ya transcurridas (hasta hoy), las que todavía tiene programadas, el total, y cuántas horas tiene "a favor" o "en contra" contra la meta mensual configurada en su ficha (Gestión de Usuarios → Editar → Meta de horas mensuales, opcional). Estas horas ya descuentan el tiempo de almuerzo/descanso configurado en el Tipo de Turno u horario personalizado (Art. 167 CST) — la matriz de Cuadro de Turnos, el catálogo de Tipos de Turno y las exportaciones CSV/Excel/PDF siguen mostrando la duración completa, sin descontar.</p>
+        </div>
+
+        <!-- REFERENCIA LEGAL (Ley 2101 de 2021) — informativa, nunca bloquea -->
+        <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl px-4 py-3 text-xs text-indigo-200 flex items-start gap-2.5">
+            <i class="fa-solid fa-scale-balanced mt-0.5"></i>
+            <span>Jornada máxima legal vigente en Colombia (Ley 2101 de 2021, desde el 15 de julio de 2026): <strong>42 horas/semana</strong>, equivalentes a <strong>{{ horas_maximas_legales_mes }} horas/mes</strong> ("divisor 210"). Es solo una referencia: Arkiv avisa cuando un colaborador la supera, pero nunca bloquea la asignación de turnos.</span>
         </div>
 
         <!-- NAVEGACIÓN DE MES + FILTROS -->
@@ -135,8 +142,18 @@
                         <td class="p-3 font-bold text-slate-200">{{ r.nombre }}</td>
                         <td class="p-3 text-right text-slate-300">{{ r.horas_transcurridas }} h</td>
                         <td class="p-3 text-right text-slate-400">{{ r.horas_programadas }} h</td>
-                        <td class="p-3 text-right font-bold text-slate-200">{{ r.total_horas }} h</td>
-                        <td class="p-3 text-right text-slate-400">{{ (r.meta_horas_mensual ~ ' h') if r.meta_horas_mensual is not none else '—' }}</td>
+                        <td class="p-3 text-right font-bold text-slate-200">
+                            {{ r.total_horas }} h
+                            {% if r.excede_legal %}
+                            <i class="fa-solid fa-triangle-exclamation text-amber-400 ml-1" title="Supera las {{ horas_maximas_legales_mes }} horas/mes de referencia legal (Ley 2101 de 2021, 42h/semana). No bloquea, solo es un aviso."></i>
+                            {% endif %}
+                        </td>
+                        <td class="p-3 text-right text-slate-400">
+                            {{ (r.meta_horas_mensual ~ ' h') if r.meta_horas_mensual is not none else '—' }}
+                            {% if r.meta_excede_legal %}
+                            <i class="fa-solid fa-triangle-exclamation text-amber-400 ml-1" title="La meta configurada supera las {{ horas_maximas_legales_mes }} horas/mes de referencia legal (Ley 2101 de 2021, 42h/semana)."></i>
+                            {% endif %}
+                        </td>
                         <td class="p-3 text-right">
                             {% if r.diferencia is none %}
                             <span class="text-slate-600" title="Configura una meta mensual en Editar Usuario para ver esta comparación">Sin meta definida</span>
