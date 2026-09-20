@@ -220,7 +220,7 @@
             </div>
             {% if historial %}
             <div class="overflow-x-auto">
-                <table class="w-full text-xs">
+                <table class="w-full text-xs" data-tabla-interactiva="certificacion-devoluciones">
                     <thead>
                         <tr class="text-left text-slate-500 border-b border-slate-800">
                             <th class="py-2 pr-4 font-semibold">Colaborador</th>
@@ -300,6 +300,11 @@
             if (!marcado) { input.value = ''; }
         }
     </script>
+    <!-- 🧰 Reordenar/filtrar/ocultar columnas en la tabla de certificados de devolución (pedido
+         por Tomás, 12/09/2026: "habilita en arkiv en todas las tablas que existan, en los
+         encabezados, funciones como poder reordenar, filtrar, ocultar") — ver
+         static/js/tabla-interactiva.js -->
+    <script src="/static/js/tabla-interactiva.js"></script>
     <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

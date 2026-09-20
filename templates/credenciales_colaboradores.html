@@ -130,7 +130,7 @@
 
         <!-- TABLA -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
-            <table class="w-full text-left text-xs text-slate-300">
+            <table class="w-full text-left text-xs text-slate-300" data-tabla-interactiva="credenciales">
                 <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
                     <tr>
                         <th class="pb-3 px-3 font-bold">Colaborador</th>
@@ -635,6 +635,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
     <script src="/static/js/tiempo_real.js"></script>
     <script src="/static/js/atajos_teclado.js"></script>
+    <!-- 🧰 Reordenar/filtrar/ocultar columnas en la tabla de credenciales (pedido por Tomás,
+         12/09/2026: "habilita en arkiv en todas las tablas que existan, en los encabezados,
+         funciones como poder reordenar, filtrar, ocultar") — ver static/js/tabla-interactiva.js -->
+    <script src="/static/js/tabla-interactiva.js"></script>
     <script src="/static/js/ayuda-modulo.js"></script>
 </body>
 </html>

@@ -33,6 +33,20 @@
                 <i class="fa-solid fa-map-location-dot text-cyan-400"></i> Geolocalización de Accesos
             </h1>
         </div>
+        <!-- 📤 Exportar (pedido de Tomás, 20/09/2026): respeta el filtro de usuario/fecha que
+        esté aplicado ahora mismo en la vista (ver _filtros_geolocalizacion_desde_query en
+        app.py). -->
+        <div class="flex items-center gap-1.5">
+            <a href="{{ url_for('geolocalizacion_exportar_csv', usuario=f_usuario, fecha_inicio=f_fecha_inicio, fecha_fin=f_fecha_fin) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a CSV">
+                <i class="fa-solid fa-file-csv text-emerald-400"></i><span class="hidden lg:inline">CSV</span>
+            </a>
+            <a href="{{ url_for('geolocalizacion_exportar_xlsx', usuario=f_usuario, fecha_inicio=f_fecha_inicio, fecha_fin=f_fecha_fin) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a Excel">
+                <i class="fa-solid fa-file-excel text-emerald-400"></i><span class="hidden lg:inline">Excel</span>
+            </a>
+            <a href="{{ url_for('geolocalizacion_exportar_pdf', usuario=f_usuario, fecha_inicio=f_fecha_inicio, fecha_fin=f_fecha_fin) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Exportar a PDF">
+                <i class="fa-solid fa-file-pdf text-rose-400"></i><span class="hidden lg:inline">PDF</span>
+            </a>
+        </div>
         {% include 'partials/logo_preventiva_nav.html' %}
         {% with modulo='geolocalizacion' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
     </nav>
@@ -115,7 +129,7 @@
 
         <!-- TABLA DE RESPALDO (accesibilidad / auditoría sin depender del mapa) -->
         <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
-            <table class="w-full text-xs text-left">
+            <table class="w-full text-xs text-left" data-tabla-interactiva="geolocalizacion">
                 <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
                     <tr>
                         <th class="p-3">Usuario</th><th class="p-3">IP</th>
@@ -148,11 +162,23 @@
                 .bindPopup(`<strong>${s.nombre}</strong><br>Sede autorizada (radio ${s.radio_metros} m)`);
         });
 
+        // 🧹 "Limpiar" el mapa (pedido de Tomás, 20/09/2026): el mapa dibujaba UN marcador por
+        // cada login histórico de cada usuario, así que alguien con muchos inicios de sesión
+        // acumulaba puntos viejos encima de los nuevos ("conexiones anteriores"). El registro
+        // completo sigue existiendo tal cual en la base de datos y en la tabla de respaldo de
+        // abajo (que sigue listando TODOS los registros, sin cambios) — lo único que cambia es
+        // que el MAPA ahora solo dibuja la ubicación MÁS RECIENTE de cada usuario. Como
+        // REGISTROS ya viene ordenado del más nuevo al más viejo (ORDER BY id DESC, ver
+        // _datos_geolocalizacion en app.py), basta con quedarse con la primera aparición de cada
+        // usuario en el arreglo.
+        const usuariosYaEnMapa = new Set();
+
         const filas = [];
         REGISTROS.forEach(r => {
             const tieneUbicacion = r.latitud != null && r.longitud != null;
             const valido = r.dentro_de_sede === true;
-            if (tieneUbicacion) {
+            if (tieneUbicacion && !usuariosYaEnMapa.has(r.usuario)) {
+                usuariosYaEnMapa.add(r.usuario);
                 L.circleMarker([r.latitud, r.longitud], {
                     radius: 6, color: valido ? '#10b981' : '#f43f5e', weight: 2, fillOpacity: 0.6,
                 })
@@ -162,10 +188,13 @@
                         (valido ? `✅ ${r.sede}` : (r.sede ? `⚠️ Fuera de ${r.sede}` : '⚠️ Fuera de sede autorizada'))
                     );
             }
-            // 🔧 Antes esta fila se saltaba entera cuando faltaba ubicación (mismo "return" que
-            // el marcador de arriba), por eso la tabla salía vacía aunque hubiera accesos
-            // registrados: ahora SIEMPRE lista (Usuario, IP, Latitud, Longitud, Fecha, Sede),
-            // mostrando "—"/"Sin ubicación" cuando el navegador no capturó coordenadas.
+            // 🔧 La TABLA de respaldo, a diferencia del mapa de arriba, sigue listando TODOS los
+            // registros (no solo el más reciente por usuario) — es el histórico completo,
+            // "el registro" que Tomás pidió explícitamente que siguiera existiendo. Antes esta
+            // fila se saltaba entera cuando faltaba ubicación (mismo "return" que el marcador de
+            // arriba), por eso la tabla salía vacía aunque hubiera accesos registrados: ahora
+            // SIEMPRE lista (Usuario, IP, Latitud, Longitud, Fecha, Sede), mostrando
+            // "—"/"Sin ubicación" cuando el navegador no capturó coordenadas.
             const etiquetaSede = valido ? r.sede : (r.sede ? `Fuera de ${r.sede}` : 'Fuera de sede');
             filas.push(`<tr>
                 <td class="p-3">${r.usuario}</td><td class="p-3 font-mono">${r.ip}</td>
@@ -239,5 +268,9 @@
         });
     </script>
     <script src="/static/js/ayuda-modulo.js"></script>
+    <!-- 🧲 Tabla de respaldo: reordenar/filtrar/ocultar columnas a gusto de cada usuario (pedido
+         de Tomás, 20/09/2026: "las mismas funcionalidades de la tabla de los tickets") — ver
+         static/js/tabla-interactiva.js -->
+    <script src="/static/js/tabla-interactiva.js"></script>
 </body>
 </html>
