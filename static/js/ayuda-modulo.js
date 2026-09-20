@@ -904,6 +904,57 @@ var AYUDA_MODULOS = {
               "a": "No, tanto agregar una nota como cambiar el estado o editar una tarea desde 'Mis Tareas' te devuelve a esta misma vista en vez de llevarte al detalle del ticket."
           }
       ]
+  },
+  "turnos_cuadro": {
+      "titulo": "Cuadro de Turnos",
+      "descripcion": "Programa, visualiza y publica los turnos hospitalarios y administrativos de la semana: una matriz de colaborador x día, un listado plano exportable, y el envío de avisos por correo y WhatsApp al publicar. Disponible para cuentas con rol Agente/Administrador o con el permiso extra 'Cuadro de Turnos'.",
+      "pasos": [
+          "Usa \"Semana anterior\"/\"HOY\"/\"Semana siguiente\" para moverte entre semanas, y los filtros de Sede/Área/Rol para acotar la matriz y el listado.",
+          "Pulsa \"+ Nuevo turno\" para asignar un turno: busca al colaborador por cédula o nombre, elige tipo de turno, área, sede y rol, y guarda.",
+          "En una casilla ya asignada de la matriz, pulsa el lápiz para editar ese turno o la X para cancelarlo (queda anulado, no se borra del historial).",
+          "En una casilla vacía de una fila existente, pulsa el \"+\" para agregarle a ese mismo colaborador un turno ese día.",
+          "Si el sistema detecta que el colaborador ya tiene otro turno que se cruza en el horario, te avisa antes de guardar; puedes confirmar igual con \"Guardar de todas formas\" si el cruce es intencional (por ejemplo turnos partidos).",
+          "Pulsa \"Publicar semana\" para fijar el cuadro de ese periodo/filtro y disparar el aviso (correo + WhatsApp) a los colaboradores que todavía no habían sido notificados de su turno.",
+          "En el panel \"Cuadros recientes\", pulsa \"Cerrar cuadro\" sobre uno ya publicado cuando el periodo termine y no deba aceptar más cambios.",
+          "Usa los botones CSV/Excel/PDF para exportar el listado de la semana y filtro actuales."
+      ],
+      "preguntas": [
+          {
+              "q": "¿Publicar la semana reenvía el aviso a todos otra vez?",
+              "a": "No. Publicar solo notifica (correo + WhatsApp) a los turnos que nunca antes recibieron ningún intento de aviso; si vuelves a pulsar \"Publicar\" después de agregar un turno nuevo, solo ese turno nuevo se notifica."
+          },
+          {
+              "q": "¿Qué pasa si WhatsApp todavía no está configurado?",
+              "a": "El aviso por correo funciona igual; el intento de WhatsApp queda registrado como 'error' (credenciales pendientes) hasta que el administrador configure la cuenta de WhatsApp Cloud API (ver scripts/README_WHATSAPP_TURNOS.md)."
+          },
+          {
+              "q": "¿Un cruce de horario me impide guardar el turno?",
+              "a": "No, solo te avisa. El sistema no bloquea el guardado porque un colaborador puede tener válidamente turnos partidos o complementarios; decides tú si confirmar con \"Guardar de todas formas\"."
+          },
+          {
+              "q": "¿Cancelar un turno lo borra del historial?",
+              "a": "No, queda marcado como cancelado (no se elimina), igual que el resto de bajas lógicas de Arkiv, para conservar la auditoría."
+          }
+      ]
+  },
+  "turnos_tipos": {
+      "titulo": "Tipos de Turno",
+      "descripcion": "Catálogo administrable de las jornadas disponibles para asignar en el Cuadro de Turnos (código, nombre, horario, categoría y color). Exclusivo de la cuenta administradora, igual que el catálogo de Tipos de Activo del Inventario.",
+      "pasos": [
+          "Completa código, nombre, hora de inicio y hora de fin, elige la categoría (Asistencial, Administrativo o Descanso) y un color identificador, y pulsa \"Crear tipo de turno\".",
+          "Si la hora de fin es menor o igual a la de inicio, el sistema entiende que el turno cruza la medianoche (por ejemplo Noche 18:00 a 06:00) y calcula la duración correctamente.",
+          "Pulsa \"Desactivar\" sobre un tipo de turno que ya no se deba seguir asignando; los turnos ya asignados con ese tipo no se ven afectados."
+      ],
+      "preguntas": [
+          {
+              "q": "¿Desactivar un tipo de turno borra los turnos ya asignados con él?",
+              "a": "No, solo deja de aparecer como opción al asignar nuevos turnos; los turnos ya guardados con ese tipo siguen intactos en el Cuadro de Turnos."
+          },
+          {
+              "q": "¿Por qué el código debe ser único?",
+              "a": "Es el identificador corto que se usa en la matriz del Cuadro de Turnos y en las exportaciones; si ya existe uno igual, la creación se rechaza."
+          }
+      ]
   }
 };
 
