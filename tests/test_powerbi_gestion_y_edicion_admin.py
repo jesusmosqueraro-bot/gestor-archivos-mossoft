@@ -245,7 +245,13 @@ def test_admin_comun_puede_editar_nombre_de_un_agente(client, app, crear_usuario
     assert fila[0] == 'Nombre Nuevo'
 
 
-def test_admin_comun_puede_editar_nombre_de_un_estandar(client, app, crear_usuario):
+def test_admin_comun_no_puede_editar_nombre_de_un_estandar(client, app, crear_usuario):
+    """Pedido posterior de Tomás (20/09/2026): se endureció la regla del 19/09/2026 de arriba
+    (ver test_admin_comun_puede_editar_nombre_de_un_agente) -- un admin regular ya NO puede
+    cambiar el Nombre de una cuenta 'estandar'/'gestion_humana' una vez creada, solo el
+    AdminMaster puede. Ver tests/test_bloqueo_nombre_edicion.py para la cobertura completa de
+    esta regla (incluye 'gestion_humana', el caso de otro 'admin', y que el AdminMaster sí
+    puede)."""
     admin_comun = crear_usuario(usuario='admin_comun2', rol='admin')
     estandar = crear_usuario(usuario='estandar_x', rol='estandar', nombre='Nombre Viejo')
     _sesion_como(client, app, admin_comun, 'admin')
@@ -256,7 +262,7 @@ def test_admin_comun_puede_editar_nombre_de_un_estandar(client, app, crear_usuar
     conn, _ = app.get_db()
     fila = conn.cursor().execute("SELECT nombre FROM usuarios WHERE id = ?", (estandar_id,)).fetchone()
     conn.close()
-    assert fila[0] == 'Nombre Nuevo'
+    assert fila[0] == 'Nombre Viejo'
 
 
 def test_admin_comun_no_puede_editar_a_otro_admin(client, app, crear_usuario):
