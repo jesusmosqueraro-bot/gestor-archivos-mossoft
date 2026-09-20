@@ -17081,7 +17081,8 @@ def cambiar_tema():
 @app.route('/perfil', methods=['GET', 'POST'])
 @login_required
 def perfil_datos():
-    """Página de autoservicio de datos personales: teléfono, correo y foto de perfil.
+    """Página de autoservicio de datos personales: teléfono, correo, foto de perfil, Sede y
+    Puesto de Trabajo (especialidad).
 
     🔒 El NOMBRE ya NO es editable desde aquí (pedido de Tomás, 06/09/2026): desde que las actas
     de asignación y devolución de activos (ver _registrar_acta_asignacion/confirmar_devolucion_
@@ -17094,7 +17095,23 @@ def perfil_datos():
     A cambio, el CORREO SÍ se vuelve editable aquí (antes era exclusivo de un admin, pedido de
     Tomás) — con la misma validación de formato que usa Gestión de Usuarios
     (_email_tiene_formato_valido). El usuario, el rol y el estado tampoco son editables aquí:
-    solo se muestran de referencia."""
+    solo se muestran de referencia.
+
+    🏢 Sede y Puesto de Trabajo (especialidad) — pedido de Tomás, 20/09/2026: "que cada usuario
+    pueda editar su perfil, su sede o puesto de trabajo... esto ayuda a tener un control de los
+    cuadros de turnos, si el usuario es cambiado de sede". Hasta ahora 'usuarios.sede' solo se
+    fijaba una vez, al crear la cuenta (ver _crear_usuario_interno) — ni siquiera un admin podía
+    corregirla después desde Editar Usuario (esa columna no aparecía ahí). Sede y Puesto de
+    Trabajo comparten aquí el mismo catálogo cerrado que ya usa el resto del sistema (Sedes de
+    /tickets/configuracion vía _config_ticket_lista('sede'); Puesto de Trabajo = la misma columna
+    'especialidad' y catálogo 'especialidades_catalogo' que administra Gestión de Usuarios), para
+    que un cambio hecho aquí se refleje de inmediato en TODO lo que ya lee esas dos columnas
+    directo de 'usuarios' — el directorio "Colaboradores por Sede", los filtros y el tooltip de
+    perfil del Cuadro de Turnos, Geolocalización, etc. — sin duplicar ningún dato. Sede sigue
+    siendo opcional (se puede dejar "Sin sede asignada", igual que al crear la cuenta); Puesto de
+    Trabajo sigue siendo obligatorio (toda cuenta ya tiene uno desde su creación). Un valor que no
+    exista en el catálogo correspondiente (manipulado a mano en el formulario) se descarta en
+    silencio y se conserva el que ya tenía, en vez de guardar un dato inválido."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     error = None
@@ -17103,6 +17120,8 @@ def perfil_datos():
     if request.method == 'POST':
         telefono_nuevo = (request.form.get('telefono') or '').strip() or None
         correo_nuevo = (request.form.get('correo') or '').strip()
+        sede_solicitada = (request.form.get('sede') or '').strip()
+        especialidad_solicitada = (request.form.get('especialidad') or '').strip()
 
         if not _email_tiene_formato_valido(correo_nuevo):
             error = "Escribe un correo electrónico con un formato válido."
@@ -17114,23 +17133,51 @@ def perfil_datos():
                 foto_url, error = _subir_foto_perfil(foto_file)
 
         if not error:
+            q_actual = "SELECT sede, especialidad FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT sede, especialidad FROM usuarios WHERE usuario = ?"
+            cursor.execute(q_actual, (session['username'],))
+            fila_actual = cursor.fetchone()
+            sede_original = (fila_actual[0] if fila_actual else None) or None
+            especialidad_original = (fila_actual[1] if fila_actual else None) or None
+
+            # 🏢 Sede: catálogo cerrado (/tickets/configuracion → Sedes) — "" es válido y
+            # significa "Sin sede asignada" (se limpia a propósito); cualquier otro valor debe
+            # coincidir exactamente con una Sede activa del catálogo, o se descarta.
+            nombres_sedes_validas = {s['nombre'] for s in _config_ticket_lista('sede')}
+            if sede_solicitada == '':
+                sede_final = None
+            elif sede_solicitada in nombres_sedes_validas:
+                sede_final = sede_solicitada
+            else:
+                sede_final = sede_original
+
+            # 🩺 Puesto de Trabajo (especialidad): catálogo cerrado también, pero obligatorio —
+            # dejarlo en blanco o mandar un valor inventado conserva el que la cuenta ya tenía,
+            # en vez de dejarla sin Puesto de Trabajo (toda cuenta lo tiene desde su creación).
+            nombres_especialidades_validas = {e['nombre'] for e in _catalogo_especialidades_activas()}
+            if especialidad_solicitada and especialidad_solicitada in nombres_especialidades_validas:
+                especialidad_final = especialidad_solicitada
+            else:
+                especialidad_final = especialidad_original
+
             try:
                 if foto_url:
-                    q_upd = "UPDATE usuarios SET correo = %s, telefono = %s, foto_perfil = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, telefono = ?, foto_perfil = ? WHERE usuario = ?"
-                    cursor.execute(q_upd, (correo_nuevo, telefono_nuevo, foto_url, session['username']))
+                    q_upd = "UPDATE usuarios SET correo = %s, telefono = %s, foto_perfil = %s, sede = %s, especialidad = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, telefono = ?, foto_perfil = ?, sede = ?, especialidad = ? WHERE usuario = ?"
+                    cursor.execute(q_upd, (correo_nuevo, telefono_nuevo, foto_url, sede_final, especialidad_final, session['username']))
                     session['foto_perfil'] = foto_url
                 else:
                     # Sin foto nueva: no se toca la columna foto_perfil (se conserva la que ya había).
-                    q_upd = "UPDATE usuarios SET correo = %s, telefono = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, telefono = ? WHERE usuario = ?"
-                    cursor.execute(q_upd, (correo_nuevo, telefono_nuevo, session['username']))
+                    q_upd = "UPDATE usuarios SET correo = %s, telefono = %s, sede = %s, especialidad = %s WHERE usuario = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, telefono = ?, sede = ?, especialidad = ? WHERE usuario = ?"
+                    cursor.execute(q_upd, (correo_nuevo, telefono_nuevo, sede_final, especialidad_final, session['username']))
                 conn.commit()
-                registrar_log(session['username'], "Actualización de Perfil", "El usuario actualizó sus datos de perfil" + (" (incluida foto)" if foto_url else ""))
+                detalle_sede = f" · Sede: {sede_final or 'sin asignar'}" if sede_final != sede_original else ""
+                detalle_especialidad = f" · Puesto: {especialidad_final}" if especialidad_final != especialidad_original else ""
+                registrar_log(session['username'], "Actualización de Perfil", "El usuario actualizó sus datos de perfil" + (" (incluida foto)" if foto_url else "") + detalle_sede + detalle_especialidad)
                 exito = True
             except Exception as e:
                 conn.rollback()
                 error = "No se pudieron guardar los cambios. Intenta de nuevo."
 
-    q_sel = "SELECT nombre, telefono, correo, rol, foto_perfil, usuario FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT nombre, telefono, correo, rol, foto_perfil, usuario FROM usuarios WHERE usuario = ?"
+    q_sel = "SELECT nombre, telefono, correo, rol, foto_perfil, usuario, sede, especialidad FROM usuarios WHERE usuario = %s" if db_type == 'postgres' else "SELECT nombre, telefono, correo, rol, foto_perfil, usuario, sede, especialidad FROM usuarios WHERE usuario = ?"
     cursor.execute(q_sel, (session['username'],))
     row = cursor.fetchone()
     conn.close()
@@ -17140,6 +17187,8 @@ def perfil_datos():
         nombre=(row[0] if row else '') or '', telefono=(row[1] if row else '') or '',
         correo=row[2] if row else '', rol=row[3] if row else session.get('rol'),
         foto_perfil=row[4] if row else None, usuario=row[5] if row else session.get('username'),
+        sede_actual=(row[6] if row else '') or '', especialidad_actual=(row[7] if row else '') or '',
+        sedes=_config_ticket_lista('sede'), especialidades=_catalogo_especialidades_activas(),
         error=error, exito=exito,
     )
 
