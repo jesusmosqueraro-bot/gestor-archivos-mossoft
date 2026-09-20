@@ -910,13 +910,18 @@ var AYUDA_MODULOS = {
       "descripcion": "Programa, visualiza y publica los turnos hospitalarios y administrativos de la semana: una matriz de colaborador x día, un listado plano exportable, y el envío de avisos por correo y WhatsApp al publicar. Disponible para cuentas con rol Agente/Administrador o con el permiso extra 'Cuadro de Turnos'.",
       "pasos": [
           "Usa \"Semana anterior\"/\"HOY\"/\"Semana siguiente\" para moverte entre semanas, y los filtros de Sede/Área/Rol para acotar la matriz y el listado.",
-          "Pulsa \"+ Nuevo turno\" para asignar un turno: busca al colaborador por cédula o nombre, elige tipo de turno, área, sede y rol, y guarda.",
+          "Pulsa \"+ Nuevo turno\" para asignar un turno: busca al colaborador por cédula o nombre (autocompleta mientras escribes), elige tipo de turno, área, sede y rol, y guarda.",
+          "Marca \"Horario personalizado\" en el modal si necesitas crear un horario específico desde cero (hora de inicio y fin a mano) en vez de elegir uno del catálogo de Tipos de Turno.",
+          "Pulsa \"Asignar a Grupo\" para dar el mismo turno a varios colaboradores a la vez: se precarga con los que ya ves en la matriz filtrada, y puedes agregar o quitar colaboradores antes de guardar.",
           "En una casilla ya asignada de la matriz, pulsa el lápiz para editar ese turno o la X para cancelarlo (queda anulado, no se borra del historial).",
           "En una casilla vacía de una fila existente, pulsa el \"+\" para agregarle a ese mismo colaborador un turno ese día.",
+          "La estrella junto al nombre de cada colaborador lo marca como favorito (sube arriba de la lista, en tu cuenta); el chinche lo fija arriba de todo en este navegador puntual.",
+          "Guarda la combinación de Sede/Área/Rol actual como \"vista favorita\" con nombre, y marca una como predeterminada para que se cargue sola cada vez que entres al Cuadro de Turnos.",
           "Si el sistema detecta que el colaborador ya tiene otro turno que se cruza en el horario, te avisa antes de guardar; puedes confirmar igual con \"Guardar de todas formas\" si el cruce es intencional (por ejemplo turnos partidos).",
           "Pulsa \"Publicar semana\" para fijar el cuadro de ese periodo/filtro y disparar el aviso (correo + WhatsApp) a los colaboradores que todavía no habían sido notificados de su turno.",
           "En el panel \"Cuadros recientes\", pulsa \"Cerrar cuadro\" sobre uno ya publicado cuando el periodo termine y no deba aceptar más cambios.",
-          "Usa los botones CSV/Excel/PDF para exportar el listado de la semana y filtro actuales."
+          "Usa los botones CSV/Excel/PDF para exportar el listado de la semana y filtro actuales (el PDF incluye la marca de agua institucional).",
+          "Entra a \"Horas del Mes\" para ver cuántas horas lleva o tiene programadas cada colaborador ese mes, y cuántas tiene a favor o en contra de su meta mensual."
       ],
       "preguntas": [
           {
@@ -929,11 +934,19 @@ var AYUDA_MODULOS = {
           },
           {
               "q": "¿Un cruce de horario me impide guardar el turno?",
-              "a": "No, solo te avisa. El sistema no bloquea el guardado porque un colaborador puede tener válidamente turnos partidos o complementarios; decides tú si confirmar con \"Guardar de todas formas\"."
+              "a": "No, solo te avisa. El sistema no bloquea el guardado porque un colaborador puede tener válidamente turnos partidos o complementarios; decides tú si confirmar con \"Guardar de todas formas\" (individual o para todo el grupo)."
           },
           {
               "q": "¿Cancelar un turno lo borra del historial?",
               "a": "No, queda marcado como cancelado (no se elimina), igual que el resto de bajas lógicas de Arkiv, para conservar la auditoría."
+          },
+          {
+              "q": "¿En qué se diferencian \"favorito\" y \"fijar\" en una fila de la matriz?",
+              "a": "Favorito es de tu cuenta (te sigue a cualquier dispositivo) y ordena esa fila arriba para todos los que vean esa lista contigo marcados. Fijar es solo de este navegador (no se guarda en el servidor) y ancla la fila arriba de todo, incluso por encima de los favoritos."
+          },
+          {
+              "q": "¿\"Asignar a Grupo\" reemplaza turnos que ya existan ese día?",
+              "a": "No, solo crea turnos nuevos. Si alguien del grupo ya tenía turno ese día, se le avisa como cruce de horario (igual que en la asignación individual) y puedes decidir si guardar igual o no."
           }
       ]
   },
@@ -953,6 +966,26 @@ var AYUDA_MODULOS = {
           {
               "q": "¿Por qué el código debe ser único?",
               "a": "Es el identificador corto que se usa en la matriz del Cuadro de Turnos y en las exportaciones; si ya existe uno igual, la creación se rechaza."
+          }
+      ]
+  },
+  "turnos_horas_mes": {
+      "titulo": "Horas del Mes",
+      "descripcion": "Reporte mensual, por colaborador, de las horas ya trabajadas, las que todavía tiene programadas ese mismo mes, el total, y cuántas horas tiene a favor o en contra de la meta mensual configurada en su ficha de usuario. Se calcula a partir de los turnos activos del Cuadro de Turnos, no requiere ningún registro aparte.",
+      "pasos": [
+          "Usa \"Mes anterior\"/\"HOY\"/\"Mes siguiente\" para moverte entre meses, y los filtros de Sede/Área/Rol para acotar el reporte.",
+          "\"Horas transcurridas\" suma los turnos con fecha hasta hoy; \"Horas programadas\" suma los que quedan del mes (la proyección de lo que trabajará).",
+          "\"Meta mensual\" es el total fijo de horas configurado para esa persona en Gestión de Usuarios → Editar → \"Meta de horas mensuales\" (opcional, en blanco si nunca se definió).",
+          "\"Horas a favor / en contra\" es el total del mes menos esa meta; sin meta configurada, la columna solo muestra el total, sin comparar contra nada."
+      ],
+      "preguntas": [
+          {
+              "q": "¿Un colaborador sin meta configurada no aparece en el reporte?",
+              "a": "Sí aparece, con su total de horas normal; solo la comparación \"a favor/en contra\" queda sin mostrar (\"Sin meta definida\") hasta que se le configure una meta mensual en Editar Usuario."
+          },
+          {
+              "q": "¿De dónde salen las horas de este reporte?",
+              "a": "De los turnos activos (no cancelados) del Cuadro de Turnos con fecha dentro del mes elegido — no hay que registrar nada aparte, es el mismo dato que ya se ve en la matriz semanal."
           }
       ]
   }
