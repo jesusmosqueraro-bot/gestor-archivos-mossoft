@@ -976,6 +976,22 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones_turnos (
                 id SERIAL PRIMARY KEY, turno_id INTEGER NOT NULL REFERENCES turnos_asignados(id) ON DELETE CASCADE, usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE, canal VARCHAR(20) NOT NULL, tipo_evento VARCHAR(30) NOT NULL, estado VARCHAR(20) NOT NULL DEFAULT 'pendiente', destinatario VARCHAR(200), mensaje_id VARCHAR(150), intentos INTEGER DEFAULT 0, error TEXT, enviado_en VARCHAR(100), creado_en VARCHAR(100) NOT NULL
             )''')
+            # ⭐ Colaboradores favoritos del Cuadro de Turnos (pedido por Tomás, 20/09/2026): quién
+            # los marcó (admin_usuario, el 'usuario' de sesión — mismo criterio que
+            # credenciales_compartidas/galerias_vistas: texto, no el id numérico) y a quién
+            # (colaborador_usuario). Es un favorito PERSONAL de quien lo marca, no global, para que
+            # cada admin/agente tenga su propia lista corta al buscar en el modal de Asignar Turno.
+            # UNIQUE evita duplicados al alternar (toggle) más de una vez.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_favoritos_colaborador (
+                id SERIAL PRIMARY KEY, admin_usuario VARCHAR(100) NOT NULL, colaborador_usuario VARCHAR(100) NOT NULL, creado_en VARCHAR(100) NOT NULL, UNIQUE(admin_usuario, colaborador_usuario)
+            )''')
+            # 📌 Vistas favoritas (combinación de filtros Área/Sede/Rol guardada con un nombre) del
+            # Cuadro de Turnos — también personal, por 'usuario' de sesión. es_default marca cuál
+            # de las vistas guardadas de esa persona se carga sola al entrar a /turnos/cuadro sin
+            # filtros en la URL ("fijar/anclar un grupo como vista por defecto", Tomás 20/09/2026).
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_vistas_favoritas (
+                id SERIAL PRIMARY KEY, usuario VARCHAR(100) NOT NULL, nombre VARCHAR(100) NOT NULL, area VARCHAR(100), sede VARCHAR(150), rol VARCHAR(50), es_default BOOLEAN NOT NULL DEFAULT FALSE, creado_en VARCHAR(100) NOT NULL
+            )''')
             # 🔁 Historial de reemplazos de activos (Reemplazar activo / Trazabilidad, visto en
             # Solvyx): cada fila conecta un activo "anterior" con el activo que lo reemplazó,
             # con el motivo, notas libres y qué pasó con el activo anterior. Reconstruyendo la
@@ -1475,7 +1491,21 @@ def init_db():
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS ram_gb INTEGER;",
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_ram VARCHAR(10);",
                 "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS disco_gb INTEGER;",
-                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_disco VARCHAR(10);"
+                "ALTER TABLE activos_inventario ADD COLUMN IF NOT EXISTS tipo_disco VARCHAR(10);",
+                # 🆓 Turno con horario libre (pedido por Tomás, 20/09/2026: "crear horarios desde
+                # cero, horarios específicos"): en vez de arriesgar una migración sobre la columna
+                # NOT NULL turnos_asignados.tipo_turno_id (ya en producción), un horario "personalizado"
+                # escrito a mano en el modal de Asignar Turno se resuelve/crea como una fila más de
+                # tipos_turno (misma tabla de siempre, mismo cálculo de duración/conflictos/export)
+                # marcada con es_personalizado=TRUE — así queda oculta del catálogo administrable
+                # de /turnos/tipos y del selector normal (ver _tipos_turno_activos), pero el resto
+                # del módulo no necesita saber que es distinta. Ver _resolver_tipo_turno_personalizado.
+                "ALTER TABLE tipos_turno ADD COLUMN IF NOT EXISTS es_personalizado BOOLEAN DEFAULT FALSE;",
+                # 🕐 Meta de horas mensuales por colaborador (Cuadro de Turnos → "Horas del Mes",
+                # pedido por Tomás 20/09/2026): opcional, se configura por persona desde Editar
+                # Usuario. NULL = sin meta configurada (el reporte solo muestra el total asignado,
+                # sin comparar "a favor/en contra").
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS meta_horas_mensual NUMERIC(6,2);"
             ]:
                 try:
                     cursor.execute(col_query)
@@ -1586,6 +1616,13 @@ def init_db():
             cursor.execute('''CREATE TABLE IF NOT EXISTS notificaciones_turnos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, turno_id INTEGER NOT NULL, usuario_id INTEGER NOT NULL, canal TEXT NOT NULL, tipo_evento TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', destinatario TEXT, mensaje_id TEXT, intentos INTEGER DEFAULT 0, error TEXT, enviado_en TEXT, creado_en TEXT NOT NULL,
                 FOREIGN KEY(turno_id) REFERENCES turnos_asignados(id) ON DELETE CASCADE, FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+            )''')
+            # ⭐📌 Ver comentarios equivalentes en la rama de Postgres.
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_favoritos_colaborador (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, admin_usuario TEXT NOT NULL, colaborador_usuario TEXT NOT NULL, creado_en TEXT NOT NULL, UNIQUE(admin_usuario, colaborador_usuario)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_vistas_favoritas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL, nombre TEXT NOT NULL, area TEXT, sede TEXT, rol TEXT, es_default INTEGER NOT NULL DEFAULT 0, creado_en TEXT NOT NULL
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS activos_reemplazos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, activo_anterior_id INTEGER NOT NULL, activo_nuevo_id INTEGER, motivo TEXT NOT NULL, notas TEXT, fecha_reemplazo TEXT NOT NULL, estado_anterior_resultante TEXT NOT NULL, creado_por TEXT NOT NULL, fecha_creacion TEXT NOT NULL, FOREIGN KEY(activo_anterior_id) REFERENCES activos_inventario(id) ON DELETE CASCADE, FOREIGN KEY(activo_nuevo_id) REFERENCES activos_inventario(id)
@@ -2066,6 +2103,18 @@ def init_db():
                 except Exception:
                     pass
 
+            # 🆓🕐 Ver comentarios equivalentes en la rama de Postgres (horario libre / meta de
+            # horas mensuales).
+            for col_turnos_v2_sql in [
+                "ALTER TABLE tipos_turno ADD COLUMN es_personalizado INTEGER DEFAULT 0;",
+                "ALTER TABLE usuarios ADD COLUMN meta_horas_mensual REAL;"
+            ]:
+                try:
+                    cursor.execute(col_turnos_v2_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+
         # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
         # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
         # consulta. Con pocos cientos de filas eso no se nota, pero 'logs', 'tickets' y
@@ -2117,6 +2166,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_turnos_asignados_cuadro ON turnos_asignados (cuadro_id);",
             "CREATE INDEX IF NOT EXISTS idx_turnos_asignados_fecha ON turnos_asignados (fecha);",
             "CREATE INDEX IF NOT EXISTS idx_notificaciones_turnos_turno ON notificaciones_turnos (turno_id);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_favoritos_admin ON turnos_favoritos_colaborador (admin_usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_vistas_favoritas_usuario ON turnos_vistas_favoritas (usuario);",
         ]:
             try:
                 cursor.execute(indice_sql)
@@ -15895,13 +15946,26 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     # no exista en MODULOS_ASIGNABLES.
     modulos_extra_texto = ','.join(m for m in (datos.get('modulos_extra') or []) if m in CLAVES_MODULOS_ASIGNABLES) or None
 
+    # ⏱️ Meta de horas mensuales (opcional, ver misma nota en editar_usuario): se puede dejar sin
+    # definir desde la creación y configurarla más adelante desde Editar Usuario; un valor
+    # inválido o menor o igual a cero simplemente se descarta (queda sin meta) en vez de
+    # bloquear la creación de la cuenta por esto.
+    meta_horas_nueva = None
+    try:
+        meta_horas_raw_crear = (datos.get('meta_horas_mensual') or '').strip()
+        if meta_horas_raw_crear:
+            meta_horas_valor_crear = float(meta_horas_raw_crear)
+            meta_horas_nueva = meta_horas_valor_crear if meta_horas_valor_crear > 0 else None
+    except (TypeError, ValueError):
+        meta_horas_nueva = None
+
     try:
         nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
         nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
         nuevo_hash = generate_password_hash(nuevo_pass)
-        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s, %s)" if db_type == 'postgres' else
-                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?, ?)")
-        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url, modulos_extra_texto))
+        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)")
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url, modulos_extra_texto, meta_horas_nueva))
         conn.commit()
         registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
 
@@ -15986,6 +16050,7 @@ def gestion_usuarios():
             'especialidad': (request.form.get('especialidad') or '').strip() or None,
             'sede': (request.form.get('sede') or '').strip() or None,
             'modulos_extra': modulos_extra_marcados,
+            'meta_horas_mensual': (request.form.get('meta_horas_mensual') or '').strip() or None,
         }
         error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
             {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl'),
@@ -15999,9 +16064,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -16317,11 +16382,19 @@ def editar_usuario(usuario_id):
     # como imagen en cualquier formato común (ver _subir_firma_desde_dataurl) — o quitarla.
     firma_dataurl = request.form.get('firma_dataurl') or ''
     quitar_firma = request.form.get('quitar_firma') in ('on', '1', 'true')
+    # ⏱️ Meta de horas mensuales (pedido por Tomás, 20/09/2026, junto con el reporte "Horas del
+    # Mes" de Cuadro de Turnos): total fijo de horas que se espera que ese colaborador trabaje
+    # cada mes — el reporte resta las horas asignadas contra esta meta para mostrar "horas a
+    # favor". Campo opcional: si el admin lo deja en blanco, se entiende que quiere QUITAR la
+    # meta (queda en NULL, el reporte simplemente no muestra diferencia para esa persona); si
+    # escribe algo que no es un número válido o es menor o igual a cero, se descarta ese valor y
+    # se conserva la meta que ya tenía (mismo criterio permisivo que ram_gb/costo_compra).
+    meta_horas_raw = request.form.get('meta_horas_mensual', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
@@ -16372,6 +16445,16 @@ def editar_usuario(usuario_id):
                 firma_final = nueva_firma_url
         elif quitar_firma:
             firma_final = None
+
+        meta_horas_original = row[8] if row and len(row) > 8 else None
+        if meta_horas_raw == '':
+            meta_horas_final = None
+        else:
+            try:
+                meta_horas_valor = float(meta_horas_raw)
+                meta_horas_final = meta_horas_valor if meta_horas_valor > 0 else meta_horas_original
+            except ValueError:
+                meta_horas_final = meta_horas_original
 
         # 🧩 Módulos extra (pedido por Tomás, 19/09/2026): permiso EXTRA sobre el rol — esta
         # lista SOLO agrega acceso a módulos puntuales (ver MODULOS_ASIGNABLES/usuario_tiene_
@@ -16428,12 +16511,12 @@ def editar_usuario(usuario_id):
             nuevo_hash = generate_password_hash(nueva_pass)
             # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
             # aquí, se obliga a cambiarla en su próximo inicio de sesión.
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, debe_cambiar_password = 1 WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ?, debe_cambiar_password = 1 WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
@@ -19337,9 +19420,15 @@ def _sedes_turno_disponibles():
 
 
 def _tipos_turno_activos():
+    """Catálogo para el selector normal del modal de Asignar Turno y para /turnos/tipos —
+    deliberadamente NO incluye los tipos con es_personalizado=TRUE (ver
+    _resolver_tipo_turno_personalizado): esos se crean/reutilizan por detrás cuando alguien elige
+    "Horario personalizado" en el modal, y listarlos aquí llenaría el selector normal de entradas
+    sueltas tipo "LIBRE-1900-0700" que no tiene sentido volver a elegir a mano."""
     conn, db_type = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY orden ASC, nombre ASC")
+    cursor.execute("SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, FALSE) = FALSE ORDER BY orden ASC, nombre ASC" if db_type == 'postgres' else
+                   "SELECT id, codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex FROM tipos_turno WHERE COALESCE(estado, 'activo') = 'activo' AND COALESCE(es_personalizado, 0) = 0 ORDER BY orden ASC, nombre ASC")
     filas = cursor.fetchall()
     conn.close()
     return [
@@ -19347,6 +19436,37 @@ def _tipos_turno_activos():
          'duracion_horas': float(f[5]) if f[5] is not None else 0, 'categoria': f[6], 'color_hex': f[7]}
         for f in filas
     ]
+
+
+def _resolver_tipo_turno_personalizado(hora_inicio, hora_fin, nombre_personalizado, conn, db_type):
+    """Encuentra o crea (idempotente, por hora_inicio+hora_fin exactos) la fila de tipos_turno que
+    representa un "horario personalizado" escrito a mano en el modal de Asignar Turno — ver el
+    comentario junto a la migración 'es_personalizado' en init_db() sobre por qué se resuelve así
+    en vez de permitir turnos_asignados.tipo_turno_id NULL. Reutiliza EXACTAMENTE el mismo cálculo
+    de duración que /turnos/tipos (incluye turnos que cruzan la medianoche). No hace commit ni
+    cierra la conexión — eso lo maneja quien llama (turnos_asignar/turnos_asignar_grupo), dentro
+    de la misma transacción que crea/edita el turno."""
+    # Validar el formato ANTES de tocar la base de datos (ValueError si hora_inicio/hora_fin no
+    # son 'HH:MM' válidos) — quien llama debe capturarlo igual que ya hace turnos_tipos().
+    inicio_calc, fin_calc = _calcular_inicio_fin_real('2000-01-01', hora_inicio, hora_fin)
+    duracion = round((datetime.strptime(fin_calc, '%Y-%m-%d %H:%M:%S') - datetime.strptime(inicio_calc, '%Y-%m-%d %H:%M:%S')).total_seconds() / 3600, 2)
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor = conn.cursor()
+    codigo = f"LIBRE-{hora_inicio.replace(':', '')}-{hora_fin.replace(':', '')}"
+    cursor.execute(f"SELECT id FROM tipos_turno WHERE codigo = {ph}", (codigo,))
+    fila = cursor.fetchone()
+    if fila:
+        return fila[0]
+    nombre = (nombre_personalizado or '').strip() or f"Horario personalizado {hora_inicio}-{hora_fin}"
+    if db_type == 'postgres':
+        cursor.execute(
+            "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+            (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999))
+        return cursor.fetchone()[0]
+    cursor.execute(
+        "INSERT INTO tipos_turno (codigo, nombre, hora_inicio, hora_fin, duracion_horas, categoria, color_hex, orden, es_personalizado) VALUES (?,?,?,?,?,?,?,?,1)",
+        (codigo, nombre, hora_inicio, hora_fin, duracion, 'ASISTENCIAL', '#64748b', 9999))
+    return cursor.lastrowid
 
 
 def _calcular_inicio_fin_real(fecha_str, hora_inicio, hora_fin):
@@ -19559,6 +19679,22 @@ def _datos_turnos(desde_str, hasta_str, f_sede='', f_area='', f_rol=''):
     return listado
 
 
+def _vista_favorita_default(usuario):
+    """La vista favorita marcada como predeterminada (es_default) de ESTE usuario de sesión, si
+    tiene alguna — ver turnos_vistas_favoritas / "fijar/anclar un grupo como vista por defecto"
+    (Tomás, 20/09/2026). None si nunca guardó ninguna o ninguna quedó marcada como default."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    valor_true = 'TRUE' if db_type == 'postgres' else '1'
+    cursor.execute(f"SELECT area, sede, rol FROM turnos_vistas_favoritas WHERE usuario = {ph} AND es_default = {valor_true} LIMIT 1", (usuario,))
+    fila = cursor.fetchone()
+    conn.close()
+    if not fila:
+        return None
+    return {'area': fila[0] or '', 'sede': fila[1] or '', 'rol': fila[2] or ''}
+
+
 def _filtros_turnos_desde_query():
     hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
     try:
@@ -19569,7 +19705,41 @@ def _filtros_turnos_desde_query():
         hasta = datetime.strptime(request.args.get('hasta', ''), '%Y-%m-%d').date()
     except ValueError:
         hasta = desde + timedelta(days=6)
+    # 📌 Si la URL no trae NINGÚN filtro (una entrada nueva a /turnos/cuadro, no un envío del
+    # formulario con casillas vacías a propósito) y esta persona tiene una vista favorita marcada
+    # como predeterminada, se precarga esa — ver _vista_favorita_default.
+    if 'sede' not in request.args and 'area' not in request.args and 'rol' not in request.args and session.get('username'):
+        vista_default = _vista_favorita_default(session['username'])
+        if vista_default:
+            return desde, hasta, vista_default['sede'], vista_default['area'], vista_default['rol']
     return desde, hasta, request.args.get('sede', '').strip(), request.args.get('area', '').strip(), request.args.get('rol', '').strip()
+
+
+def _favoritos_colaboradores_de(usuario):
+    """Nombres de usuario (colaborador_usuario) que ESTE usuario de sesión marcó como favoritos —
+    ver turnos_favoritos_colaborador. Un set, para O(1) al pintar la estrella en cada fila."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT colaborador_usuario FROM turnos_favoritos_colaborador WHERE admin_usuario = {ph}", (usuario,))
+    resultado = {f[0] for f in cursor.fetchall()}
+    conn.close()
+    return resultado
+
+
+def _vistas_favoritas_de(usuario):
+    """Vistas (combinaciones de Área/Sede/Rol) que ESTE usuario de sesión guardó con un nombre —
+    ver turnos_vistas_favoritas / botón "Guardar vista actual"."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT id, nombre, area, sede, rol, es_default FROM turnos_vistas_favoritas WHERE usuario = {ph} ORDER BY nombre ASC", (usuario,))
+    filas = cursor.fetchall()
+    conn.close()
+    return [
+        {'id': f[0], 'nombre': f[1], 'area': f[2] or '', 'sede': f[3] or '', 'rol': f[4] or '', 'es_default': bool(f[5])}
+        for f in filas
+    ]
 
 
 @app.route('/turnos/cuadro')
@@ -19579,6 +19749,7 @@ def turnos_cuadro():
     desde, hasta, f_sede, f_area, f_rol = _filtros_turnos_desde_query()
     dias_semana = [desde + timedelta(days=i) for i in range((hasta - desde).days + 1)]
     listado = _datos_turnos(desde.strftime('%Y-%m-%d'), hasta.strftime('%Y-%m-%d'), f_sede, f_area, f_rol)
+    favoritos_colaboradores = _favoritos_colaboradores_de(session['username'])
 
     colaboradores = {}
     for r in listado:
@@ -19588,10 +19759,17 @@ def turnos_cuadro():
         # 🔎 'usuario' (nombre de cuenta) va a nivel de fila —no solo por día— para que la
         # plantilla pueda precargar el colaborador al agregar otro turno del mismo colaborador
         # en un día vacío de su propia fila, sin depender de que ESE día ya tenga un turno.
+        # 'favorito' decide el orden (los favoritos SIEMPRE arriba, ver sorted() abajo) y también
+        # si la plantilla dibuja la estrella marcada.
         {'usuario_id': clave[0], 'nombre': clave[1], 'usuario': next(iter(turnos_por_fecha.values()))['usuario'],
+         'favorito': next(iter(turnos_por_fecha.values()))['usuario'] in favoritos_colaboradores,
          'dias': [turnos_por_fecha.get(d.strftime('%Y-%m-%d')) for d in dias_semana]}
         for clave, turnos_por_fecha in sorted(colaboradores.items(), key=lambda kv: kv[0][1].lower())
     ]
+    # ⭐ Favoritos primero (pedido de Tomás: "marcar como favoritos"), después orden alfabético —
+    # sorted() es estable, así que dentro de cada grupo (favorito/no favorito) se conserva el
+    # orden alfabético que ya traía la lista de arriba.
+    matriz.sort(key=lambda fila: not fila['favorito'])
 
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -19614,6 +19792,191 @@ def turnos_cuadro():
         roles_profesionales=[{'clave': k, 'etiqueta': v} for k, v in ETIQUETAS_ROL_PROFESIONAL_TURNO.items()],
         f_sede=f_sede, f_area=f_area, f_rol=f_rol,
         whatsapp_configurado=_whatsapp_turno_configurado(),
+        favoritos_colaboradores=favoritos_colaboradores, vistas_favoritas=_vistas_favoritas_de(session['username']),
+    )
+
+
+@app.route('/turnos/favoritos/<colaborador_usuario>/alternar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_favorito_alternar(colaborador_usuario):
+    """Marca/desmarca a `colaborador_usuario` como favorito PERSONAL de quien hace la petición
+    (ver turnos_favoritos_colaborador) — no afecta lo que ven otros admins/agentes."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT id FROM turnos_favoritos_colaborador WHERE admin_usuario = {ph} AND colaborador_usuario = {ph}",
+                   (session['username'], colaborador_usuario))
+    fila = cursor.fetchone()
+    if fila:
+        cursor.execute(f"DELETE FROM turnos_favoritos_colaborador WHERE id = {ph}", (fila[0],))
+        favorito = False
+    else:
+        cursor.execute(f"INSERT INTO turnos_favoritos_colaborador (admin_usuario, colaborador_usuario, creado_en) VALUES ({ph},{ph},{ph})",
+                       (session['username'], colaborador_usuario, obtener_fecha_actual()))
+        favorito = True
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'favorito': favorito})
+
+
+@app.route('/turnos/vistas/guardar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_vista_guardar():
+    """Guarda la combinación actual de filtros (Área/Sede/Rol) como una vista favorita con nombre
+    — "marcar como favoritos"/"fijar" un grupo, pedido de Tomás 20/09/2026. Si `es_default='1'`,
+    esta vista pasa a ser la que se precarga sola al entrar a /turnos/cuadro sin filtros en la URL
+    (y cualquier otra vista default de esta misma persona se desmarca, solo puede haber una)."""
+    nombre = request.form.get('nombre', '').strip()
+    area = request.form.get('area', '').strip() or None
+    sede = request.form.get('sede', '').strip() or None
+    rol = request.form.get('rol', '').strip() or None
+    es_default = request.form.get('es_default') == '1'
+    if not nombre:
+        return jsonify({'ok': False, 'errores': ['Ponle un nombre a la vista para poder guardarla.']}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    if es_default:
+        valor_false = 'FALSE' if db_type == 'postgres' else '0'
+        cursor.execute(f"UPDATE turnos_vistas_favoritas SET es_default = {valor_false} WHERE usuario = {ph}", (session['username'],))
+    if db_type == 'postgres':
+        cursor.execute(
+            f"INSERT INTO turnos_vistas_favoritas (usuario, nombre, area, sede, rol, es_default, creado_en) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id",
+            (session['username'], nombre, area, sede, rol, es_default, obtener_fecha_actual()))
+        vista_id = cursor.fetchone()[0]
+    else:
+        cursor.execute(
+            f"INSERT INTO turnos_vistas_favoritas (usuario, nombre, area, sede, rol, es_default, creado_en) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (session['username'], nombre, area, sede, rol, 1 if es_default else 0, obtener_fecha_actual()))
+        vista_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'vista_id': vista_id})
+
+
+@app.route('/turnos/vistas/<int:vista_id>/predeterminar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_vista_predeterminar(vista_id):
+    """Marca esta vista guardada como la predeterminada de quien la pide — "anclar un grupo como
+    vista por defecto". Solo se puede predeterminar una vista PROPIA (se valida por `usuario`)."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT id FROM turnos_vistas_favoritas WHERE id = {ph} AND usuario = {ph}", (vista_id, session['username']))
+    if not cursor.fetchone():
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['Esa vista no existe o no te pertenece.']}), 404
+    valor_false = 'FALSE' if db_type == 'postgres' else '0'
+    valor_true = 'TRUE' if db_type == 'postgres' else '1'
+    cursor.execute(f"UPDATE turnos_vistas_favoritas SET es_default = {valor_false} WHERE usuario = {ph}", (session['username'],))
+    cursor.execute(f"UPDATE turnos_vistas_favoritas SET es_default = {valor_true} WHERE id = {ph}", (vista_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/turnos/vistas/<int:vista_id>/eliminar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_vista_eliminar(vista_id):
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"DELETE FROM turnos_vistas_favoritas WHERE id = {ph} AND usuario = {ph}", (vista_id, session['username']))
+    afectadas = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if not afectadas:
+        return jsonify({'ok': False, 'errores': ['Esa vista no existe o no te pertenece.']}), 404
+    return jsonify({'ok': True})
+
+
+@app.route('/turnos/horas_mes')
+@login_required
+@turnos_o_extra_required
+def turnos_horas_mes():
+    """Horas del Mes (pedido por Tomás, 20/09/2026): "que mes a mes el sistema me indique cuántas
+    horas laboró el usuario y cuántas tiene a favor, y un campo que calcule las horas que
+    trabajará el usuario mes a mes". Una fila por colaborador con turno ACTIVO ese mes: horas ya
+    transcurridas (fecha <= hoy), horas todavía programadas ese mismo mes (fecha > hoy) — la
+    "proyección" pedida—, el total de ambas, la meta mensual configurada en su ficha (Editar
+    Usuario, usuarios.meta_horas_mensual, opcional) y la diferencia ("a favor" si asignó más que
+    la meta, "en contra" si menos). Sin meta configurada, se muestra el total sin comparar contra
+    nada (tal como se acordó: la meta es opcional, por colaborador)."""
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
+    try:
+        mes_dt = datetime.strptime(request.args.get('mes', ''), '%Y-%m').date()
+    except ValueError:
+        mes_dt = hoy.replace(day=1)
+    primer_dia = mes_dt.replace(day=1)
+    ultimo_dia = mes_dt.replace(day=calendar.monthrange(mes_dt.year, mes_dt.month)[1])
+    f_sede = request.args.get('sede', '').strip()
+    f_area = request.args.get('area', '').strip()
+    f_rol = request.args.get('rol', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = [f"ta.estado = 'activo'", f"ta.fecha BETWEEN {ph} AND {ph}"]
+    parametros = [primer_dia.strftime('%Y-%m-%d'), ultimo_dia.strftime('%Y-%m-%d')]
+    if f_sede:
+        condiciones.append(f"ta.sede = {ph}")
+        parametros.append(f_sede)
+    if f_area:
+        condiciones.append(f"ta.area = {ph}")
+        parametros.append(f_area)
+    if f_rol:
+        condiciones.append(f"ta.rol_profesional = {ph}")
+        parametros.append(f_rol)
+    cursor.execute(f"""
+        SELECT u.usuario, u.nombre, u.meta_horas_mensual, ta.fecha, tt.duracion_horas
+        FROM turnos_asignados ta
+        JOIN usuarios u ON u.id = ta.usuario_id
+        JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+        WHERE {' AND '.join(condiciones)}
+    """, tuple(parametros))
+    filas = cursor.fetchall()
+    conn.close()
+
+    hoy_str = hoy.strftime('%Y-%m-%d')
+    por_colaborador = {}
+    for usuario, nombre, meta, fecha_turno, duracion in filas:
+        entrada = por_colaborador.setdefault(usuario, {
+            'usuario': usuario, 'nombre': nombre,
+            'meta_horas_mensual': float(meta) if meta is not None else None,
+            'horas_transcurridas': 0.0, 'horas_programadas': 0.0,
+        })
+        duracion = float(duracion or 0)
+        if fecha_turno <= hoy_str:
+            entrada['horas_transcurridas'] += duracion
+        else:
+            entrada['horas_programadas'] += duracion
+
+    resumen = []
+    for entrada in por_colaborador.values():
+        total = round(entrada['horas_transcurridas'] + entrada['horas_programadas'], 2)
+        meta = entrada['meta_horas_mensual']
+        entrada['horas_transcurridas'] = round(entrada['horas_transcurridas'], 2)
+        entrada['horas_programadas'] = round(entrada['horas_programadas'], 2)
+        entrada['total_horas'] = total
+        entrada['diferencia'] = round(total - meta, 2) if meta is not None else None
+        resumen.append(entrada)
+    resumen.sort(key=lambda r: r['nombre'].lower())
+
+    mes_anterior = (primer_dia - timedelta(days=1)).replace(day=1)
+    mes_siguiente = (ultimo_dia + timedelta(days=1))
+    return render_template(
+        'turnos_horas_mes.html',
+        resumen=resumen, mes_actual=primer_dia, mes_str=primer_dia.strftime('%Y-%m'),
+        mes_nombre=f"{MESES_ES[primer_dia.month - 1].capitalize()} {primer_dia.year}",
+        mes_anterior=mes_anterior.strftime('%Y-%m'), mes_siguiente=mes_siguiente.strftime('%Y-%m'),
+        areas=_areas_turno_disponibles(), sedes=_sedes_turno_disponibles(),
+        roles_profesionales=[{'clave': k, 'etiqueta': v} for k, v in ETIQUETAS_ROL_PROFESIONAL_TURNO.items()],
+        f_sede=f_sede, f_area=f_area, f_rol=f_rol,
     )
 
 
@@ -19635,14 +19998,25 @@ def turnos_asignar():
     observaciones = request.form.get('observaciones', '').strip() or None
     cuadro_id_raw = request.form.get('cuadro_id', '').strip()
     forzar = request.form.get('forzar') == '1'
+    # 🆓 "Horario personalizado" (pedido por Tomás, 20/09/2026): en vez de elegir un tipo del
+    # catálogo, se puede escribir una hora de inicio/fin a mano para ESE turno puntual — ver
+    # _resolver_tipo_turno_personalizado. `horario_personalizado='1'` cambia cuáles campos son
+    # obligatorios (hora_inicio_libre/hora_fin_libre en vez de tipo_turno_id).
+    horario_personalizado = request.form.get('horario_personalizado') == '1'
+    hora_inicio_libre = request.form.get('hora_inicio_libre', '').strip()
+    hora_fin_libre = request.form.get('hora_fin_libre', '').strip()
+    nombre_horario_libre = request.form.get('nombre_horario_libre', '').strip()
 
     errores = []
     if not colaborador_usuario:
         errores.append('Selecciona un colaborador válido (búscalo por cédula o nombre y elige una sugerencia).')
     if not fecha:
         errores.append('La fecha es obligatoria.')
-    if not tipo_turno_id_raw.isdigit():
-        errores.append('Selecciona un tipo de turno válido.')
+    if horario_personalizado:
+        if not re.match(r'^\d{2}:\d{2}$', hora_inicio_libre) or not re.match(r'^\d{2}:\d{2}$', hora_fin_libre):
+            errores.append('El horario personalizado necesita una hora de inicio y de fin válidas.')
+    elif not tipo_turno_id_raw.isdigit():
+        errores.append('Selecciona un tipo de turno válido, o marca "Horario personalizado".')
     if not area:
         errores.append('El área es obligatoria.')
     if not sede:
@@ -19654,18 +20028,27 @@ def turnos_asignar():
     if errores:
         return jsonify({'ok': False, 'errores': errores}), 400
 
-    tipo_turno_id = int(tipo_turno_id_raw)
     turno_id = int(turno_id_raw) if turno_id_raw else None
     cuadro_id = int(cuadro_id_raw) if cuadro_id_raw.isdigit() else None
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     ph = '%s' if db_type == 'postgres' else '?'
-    cursor.execute(f"SELECT hora_inicio, hora_fin FROM tipos_turno WHERE id = {ph}", (tipo_turno_id,))
-    tipo_row = cursor.fetchone()
-    if not tipo_row:
-        conn.close()
-        return jsonify({'ok': False, 'errores': ['El tipo de turno seleccionado ya no existe.']}), 400
+
+    if horario_personalizado:
+        try:
+            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type)
+        except ValueError:
+            conn.close()
+            return jsonify({'ok': False, 'errores': ['El horario personalizado ingresado no es válido.']}), 400
+        tipo_row = (hora_inicio_libre, hora_fin_libre)
+    else:
+        tipo_turno_id = int(tipo_turno_id_raw)
+        cursor.execute(f"SELECT hora_inicio, hora_fin FROM tipos_turno WHERE id = {ph}", (tipo_turno_id,))
+        tipo_row = cursor.fetchone()
+        if not tipo_row:
+            conn.close()
+            return jsonify({'ok': False, 'errores': ['El tipo de turno seleccionado ya no existe.']}), 400
     cursor.execute(f"SELECT id FROM usuarios WHERE usuario = {ph} AND COALESCE(estado, 'activo') = 'activo'", (colaborador_usuario,))
     fila_usuario = cursor.fetchone()
     if not fila_usuario:
@@ -19713,6 +20096,128 @@ def turnos_asignar():
 
     registrar_log(session['username'], accion_log, f"Turno #{turno_id}: colaborador_id={usuario_id}, fecha={fecha}, área={area}, sede={sede}, rol={rol_profesional}")
     return jsonify({'ok': True, 'turno_id': turno_id})
+
+
+@app.route('/turnos/asignar_grupo', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+def turnos_asignar_grupo():
+    """Asigna el MISMO turno a varios colaboradores de una vez ("una persona, varias, o todo el
+    grupo" — pedido de Tomás, 20/09/2026). El "grupo" es, en la práctica, la lista de
+    colaboradores que el propio frontend ya tiene a la vista en la matriz filtrada por Área/Sede/
+    Rol (o los que se agreguen a mano con el mismo buscador de siempre) — el navegador manda la
+    lista explícita de usuarios objetivo (`colaboradores_usuario`, nombres de usuario) en vez de
+    que el backend vuelva a resolver "el grupo" por su cuenta a partir de los filtros, para que lo
+    que se guarda sea EXACTAMENTE lo que el admin vio marcado en el modal.
+
+    Solo crea turnos NUEVOS (no edita asignaciones existentes) — editar un turno puntual se sigue
+    haciendo desde el modal individual de siempre. Misma filosofía de conflictos que
+    /turnos/asignar: avisa por colaborador, no bloquea; con forzar=1 se guarda para TODO el lote
+    aunque algunos tuvieran conflicto."""
+    colaboradores_usuario = [u.strip() for u in request.form.getlist('colaboradores_usuario') if u.strip()]
+    fecha = request.form.get('fecha', '').strip()
+    tipo_turno_id_raw = request.form.get('tipo_turno_id', '').strip()
+    area = request.form.get('area', '').strip()
+    sede = request.form.get('sede', '').strip()
+    rol_profesional = request.form.get('rol_profesional', '').strip().upper()
+    observaciones = request.form.get('observaciones', '').strip() or None
+    forzar = request.form.get('forzar') == '1'
+    horario_personalizado = request.form.get('horario_personalizado') == '1'
+    hora_inicio_libre = request.form.get('hora_inicio_libre', '').strip()
+    hora_fin_libre = request.form.get('hora_fin_libre', '').strip()
+    nombre_horario_libre = request.form.get('nombre_horario_libre', '').strip()
+
+    errores = []
+    if not colaboradores_usuario:
+        errores.append('Selecciona al menos un colaborador (uno, varios, o todo el grupo filtrado).')
+    if not fecha:
+        errores.append('La fecha es obligatoria.')
+    if horario_personalizado:
+        if not re.match(r'^\d{2}:\d{2}$', hora_inicio_libre) or not re.match(r'^\d{2}:\d{2}$', hora_fin_libre):
+            errores.append('El horario personalizado necesita una hora de inicio y de fin válidas.')
+    elif not tipo_turno_id_raw.isdigit():
+        errores.append('Selecciona un tipo de turno válido, o marca "Horario personalizado".')
+    if not area:
+        errores.append('El área es obligatoria.')
+    if not sede:
+        errores.append('La sede es obligatoria.')
+    if rol_profesional not in ROLES_PROFESIONALES_TURNO:
+        errores.append('Selecciona un rol profesional válido.')
+    if errores:
+        return jsonify({'ok': False, 'errores': errores}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+
+    if horario_personalizado:
+        try:
+            tipo_turno_id = _resolver_tipo_turno_personalizado(hora_inicio_libre, hora_fin_libre, nombre_horario_libre, conn, db_type)
+            conn.commit()
+        except ValueError:
+            conn.close()
+            return jsonify({'ok': False, 'errores': ['El horario personalizado ingresado no es válido.']}), 400
+        cursor.execute(f"SELECT hora_inicio, hora_fin FROM tipos_turno WHERE id = {ph}", (tipo_turno_id,))
+        tipo_row = cursor.fetchone()
+    else:
+        tipo_turno_id = int(tipo_turno_id_raw)
+        cursor.execute(f"SELECT hora_inicio, hora_fin FROM tipos_turno WHERE id = {ph}", (tipo_turno_id,))
+        tipo_row = cursor.fetchone()
+        if not tipo_row:
+            conn.close()
+            return jsonify({'ok': False, 'errores': ['El tipo de turno seleccionado ya no existe.']}), 400
+
+    # Resolver cada nombre de usuario a su id real y a inicio/fin efectivo (por si algún colaborador
+    # ya no existe/está inactivo — se descarta con un aviso en vez de tumbar todo el lote).
+    objetivos = []
+    no_encontrados = []
+    for u in colaboradores_usuario:
+        cursor.execute(f"SELECT id, nombre FROM usuarios WHERE usuario = {ph} AND COALESCE(estado, 'activo') = 'activo'", (u,))
+        fila = cursor.fetchone()
+        if not fila:
+            no_encontrados.append(u)
+            continue
+        objetivos.append({'usuario': u, 'usuario_id': fila[0], 'nombre': fila[1]})
+
+    try:
+        inicio_real, fin_real = _calcular_inicio_fin_real(fecha, tipo_row[0], tipo_row[1])
+    except ValueError:
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['La fecha no tiene un formato válido.']}), 400
+
+    conflictos_por_colaborador = {}
+    for objetivo in objetivos:
+        conflictos = _turnos_en_conflicto(objetivo['usuario_id'], inicio_real, fin_real)
+        if conflictos:
+            conflictos_por_colaborador[objetivo['usuario']] = {'nombre': objetivo['nombre'], 'turnos_conflicto': conflictos}
+    if conflictos_por_colaborador and not forzar:
+        conn.close()
+        return jsonify({'ok': False, 'conflicto': True, 'conflictos_por_colaborador': conflictos_por_colaborador})
+
+    fecha_actual = obtener_fecha_actual()
+    turnos_creados = []
+    for objetivo in objetivos:
+        if db_type == 'postgres':
+            q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id"""
+            cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, fecha, inicio_real, fin_real,
+                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+            nuevo_id = cursor.fetchone()[0]
+        else:
+            q = f"""INSERT INTO turnos_asignados (usuario_id, tipo_turno_id, fecha, inicio_real, fin_real,
+                    area, sede, rol_profesional, observaciones, creado_por, fecha_creacion)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"""
+            cursor.execute(q, (objetivo['usuario_id'], tipo_turno_id, fecha, inicio_real, fin_real,
+                               area, sede, rol_profesional, observaciones, session['username'], fecha_actual))
+            nuevo_id = cursor.lastrowid
+        turnos_creados.append(nuevo_id)
+    conn.commit()
+    conn.close()
+
+    registrar_log(session['username'], "Turno Asignado a Grupo",
+                  f"{len(turnos_creados)} turno(s) el {fecha}: {', '.join(o['nombre'] for o in objetivos)} — área={area}, sede={sede}, rol={rol_profesional}")
+    return jsonify({'ok': True, 'turnos_creados': turnos_creados, 'total': len(turnos_creados), 'no_encontrados': no_encontrados})
 
 
 @app.route('/turnos/asignados/<int:turno_id>/eliminar', methods=['POST'])
@@ -20009,7 +20514,10 @@ def turnos_exportar_pdf():
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     elementos.append(tabla)
-    doc.build(elementos)
+    # 💧 Marca de agua institucional + pie de página "Powered by MosSoft" — mismo mecanismo ya
+    # usado por las actas de Asignación/Devolución de Inventario (_pdf_decoracion_pagina_acta,
+    # ver arriba), pedido por Tomás (20/09/2026) sobre este mismo PDF exportado.
+    doc.build(elementos, onFirstPage=_pdf_decoracion_pagina_acta, onLaterPages=_pdf_decoracion_pagina_acta)
     salida.seek(0)
     fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
     return Response(salida.read(), headers={
