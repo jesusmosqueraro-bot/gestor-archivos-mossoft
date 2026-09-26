@@ -211,10 +211,62 @@ def test_el_permiso_extra_turnos_es_puntual_no_abre_tipos_de_turno(client, app, 
     assert client.get('/turnos/tipos').status_code in (302, 403)
 
 
-def test_agente_entra_al_cuadro_sin_necesitar_el_permiso_extra(client, app, crear_usuario):
+def test_agente_ya_no_entra_al_cuadro_sin_el_permiso_extra(client, app, crear_usuario):
+    """Cambio de comportamiento pedido por Tomás, 26/09/2026: 'agente' YA NO recibe 'turnos'
+    automáticamente por rol (antes sí, por ROLES_CON_ACCESO_OPERATIVO) — ahora necesita que un
+    admin se lo asigne explícitamente como módulo extra, igual que 'estandar'."""
     usuario = crear_usuario(rol='agente')
     _sesion_como(client, app, usuario, 'agente')
+    assert client.get('/turnos/cuadro').status_code in (302, 403)
+
+
+def test_agente_con_el_permiso_extra_turnos_entra_pero_de_solo_lectura(client, app, crear_usuario):
+    usuario = crear_usuario(rol='agente')
+    _sesion_como(client, app, usuario, 'agente', modulos_extra=['turnos'])
     assert client.get('/turnos/cuadro').status_code == 200
+    # 🔒 Ver acceso, pero no puede escribir (ver usuario_puede_gestionar_turnos/
+    # turnos_gestion_required): solo 'admin'/'lider' pueden programar turnos.
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    r = client.post('/turnos/asignar', data={
+        'colaborador_usuario': usuario, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    assert r.status_code == 403
+    assert r.get_json()['ok'] is False
+
+
+def test_lider_entra_al_cuadro_y_puede_gestionar_turnos_sin_permiso_extra(client, app, crear_usuario):
+    """El rol nuevo 'lider' (pedido por Tomás, 26/09/2026) tiene acceso por DEFECTO a 'turnos',
+    sin necesitar el permiso extra, y sí puede programar turnos (a diferencia de un 'agente' o
+    'estandar' con acceso de solo lectura)."""
+    usuario = crear_usuario(rol='lider')
+    _sesion_como(client, app, usuario, 'lider')
+    assert client.get('/turnos/cuadro').status_code == 200
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    r = client.post('/turnos/asignar', data={
+        'colaborador_usuario': usuario, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    assert r.status_code == 200
+    assert r.get_json()['ok'] is True
+
+
+def test_estandar_con_permiso_extra_turnos_no_puede_programar_turnos(client, app, crear_usuario):
+    """El permiso extra 'turnos' ahora solo da acceso de CONSULTA — programar turnos, asignar
+    esquemas y registrar novedades queda reservado a 'admin'/'lider' (pedido de Tomás,
+    26/09/2026)."""
+    usuario = crear_usuario(rol='estandar')
+    _sesion_como(client, app, usuario, 'estandar', modulos_extra=['turnos'])
+    area, sede = _crear_area_y_sede(app)
+    tipo_id = _tipo_id(app, 'M6_12')
+    r = client.post('/turnos/asignar', data={
+        'colaborador_usuario': usuario, 'fecha': '2026-09-21', 'tipo_turno_id': str(tipo_id),
+        'area': area, 'sede': sede, 'rol_profesional': 'MEDICO',
+    })
+    assert r.status_code == 403
+    assert r.get_json()['ok'] is False
 
 
 def test_turnos_tipos_es_exclusivo_de_admin_ni_agente_entra(client, app, crear_usuario):
@@ -1299,7 +1351,10 @@ def test_horas_mes_calcula_transcurridas_total_y_diferencia_con_meta(admin_sessi
     assert '+2.0 h a favor' in texto  # 6h asignadas - 4h de meta = 2h a favor
 
 
-def test_horas_mes_sin_meta_configurada_la_diferencia_es_none(admin_session, app, crear_usuario):
+def test_horas_mes_sin_meta_manual_usa_la_meta_dinamica_por_esquema(admin_session, app, crear_usuario):
+    """Desde el 26/09/2026 (Esquema de Jornada) ya no existe "Sin meta definida": sin una meta
+    MANUAL fijada en Editar Usuario, se calcula una automáticamente según los días hábiles del
+    Esquema de Jornada del colaborador (por defecto 'LV', ver ESQUEMAS_JORNADA)."""
     colaborador = crear_usuario(usuario='colab_horas_mes_sin_meta')
     area, sede = _crear_area_y_sede(app)
     tipo_id = _tipo_id(app, 'M6_12')
@@ -1311,7 +1366,9 @@ def test_horas_mes_sin_meta_configurada_la_diferencia_es_none(admin_session, app
     r = admin_session.get('/turnos/horas_mes?mes=2026-09')
 
     assert r.status_code == 200
-    assert 'Sin meta definida' in r.get_data(as_text=True)
+    texto = r.get_data(as_text=True)
+    assert 'Sin meta definida' not in texto
+    assert 'automática por esquema' in texto
 
 
 def test_horas_mes_respeta_el_filtro_de_area(admin_session, app, crear_usuario):
@@ -1503,9 +1560,23 @@ def test_estandar_con_el_permiso_extra_turnos_entra_a_por_sede(client, app, crea
     assert client.get('/turnos/por_sede').status_code == 200
 
 
-def test_agente_entra_a_por_sede_sin_necesitar_el_permiso_extra(client, app, crear_usuario):
+def test_agente_ya_no_entra_a_por_sede_sin_el_permiso_extra(client, app, crear_usuario):
+    """Ver test_agente_ya_no_entra_al_cuadro_sin_el_permiso_extra: mismo cambio de comportamiento,
+    'agente' necesita ahora el permiso extra 'turnos' para cualquier ruta del módulo."""
     usuario = crear_usuario(rol='agente')
     _sesion_como(client, app, usuario, 'agente')
+    assert client.get('/turnos/por_sede').status_code in (302, 403)
+
+
+def test_agente_con_el_permiso_extra_turnos_entra_a_por_sede(client, app, crear_usuario):
+    usuario = crear_usuario(rol='agente')
+    _sesion_como(client, app, usuario, 'agente', modulos_extra=['turnos'])
+    assert client.get('/turnos/por_sede').status_code == 200
+
+
+def test_lider_entra_a_por_sede_sin_necesitar_el_permiso_extra(client, app, crear_usuario):
+    usuario = crear_usuario(rol='lider')
+    _sesion_como(client, app, usuario, 'lider')
     assert client.get('/turnos/por_sede').status_code == 200
 
 
