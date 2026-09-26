@@ -51,6 +51,21 @@
                 <i class="fa-solid fa-list-check"></i>
                 <span class="hidden sm:inline">Aplicativos</span>
             </button>
+            <!-- 🗂️ Histórico de bajas (pedido de Tomás, 26/09/2026): colaboradores SIN NI UN SOLO
+                 acceso activo en ningún aplicativo — distinto del filtro de Estado normal, que
+                 solo mira aplicativo por aplicativo. Ver 'vista' en ver_credenciales_colaboradores(). -->
+            {% if vista == 'bajas' %}
+            <a href="{{ url_for('ver_credenciales_colaboradores') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver a la vista normal</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('ver_credenciales_colaboradores', vista='bajas') }}" class="bg-slate-700 hover:bg-rose-600/40 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95" title="Colaboradores sin ningún acceso activo (offboarding completo)">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <span class="hidden sm:inline">Histórico de bajas</span>
+                {% if total_colaboradores_de_baja %}<span class="bg-rose-500/20 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{{ total_colaboradores_de_baja }}</span>{% endif %}
+            </a>
+            {% endif %}
             <button onclick="abrirModalCrear()" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-fuchsia-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-plus"></i>
                 <span>Nueva Alta</span>
@@ -64,6 +79,7 @@
                 {% include 'partials/perfil_boton.html' %}
                 {% include 'partials/chat_boton.html' %}
                 {% include 'partials/campanita.html' %}
+                {% include 'partials/cumpleanos_popup.html' %}
             </div>
         </div>
     </nav>
@@ -71,13 +87,22 @@
     <!-- CONTENIDO -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-4">
 
+        {% if vista == 'bajas' %}
+        <p class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3">
+            <i class="fa-solid fa-clock-rotate-left mr-1"></i>
+            <b>Histórico de bajas:</b> colaboradores que ya no tienen NI UN SOLO acceso activo en ningún aplicativo
+            (offboarding completo) — si alguien solo perdió acceso a UN aplicativo pero sigue activo en otros, no
+            aparece aquí (usa el filtro de Estado de la vista normal para ese caso).
+        </p>
+        {% else %}
         <p class="text-xs text-slate-400 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3">
             <i class="fa-solid fa-circle-info text-sky-400 mr-1"></i>
             Aquí queda el registro de cada credencial que se le crea a un colaborador en los aplicativos institucionales
-            (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx y los que agregues desde "Aplicativos"). Cada fila es un
-            aplicativo puntual: si alguien tiene varios accesos, aparecerá una fila por cada uno, y puedes dar de baja
-            uno sin afectar los demás.
+            (KUBAPP, SAMI, Moodle, Wolkvox, Correo, Solvyx y los que agregues desde "Aplicativos"). La tabla muestra
+            <b>una sola fila por colaborador</b>: haz clic en su nombre o en "Ver detalle" para ver/gestionar cada
+            aplicativo puntual (dar de baja uno no afecta los demás).
         </p>
+        {% endif %}
 
         <!-- NOTIFICACIÓN TOAST -->
         <div id="toast" class="fixed bottom-6 right-6 bg-emerald-600 text-white font-bold text-xs px-4 py-3 rounded-2xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 z-50 flex items-center gap-2">
@@ -87,6 +112,7 @@
 
         <!-- BARRA DE FILTROS -->
         <form method="GET" action="{{ url_for('ver_credenciales_colaboradores') }}" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <input type="hidden" name="vista" value="{{ vista }}">
             <div>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar (colaborador, aplicativo, solicitante)</label>
                 <div class="relative">
@@ -118,7 +144,7 @@
                     {% endfor %}
                 </select>
             </div>
-            <div>
+            <div {% if vista == 'bajas' %}class="opacity-40 pointer-events-none"{% endif %}>
                 <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
                 <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
                     <option value="activo" {% if f_estado == 'activo' %}selected{% endif %}>Activos</option>
@@ -128,92 +154,55 @@
             </div>
         </form>
 
-        <!-- TABLA -->
+        <!-- TABLA CONSOLIDADA: 1 fila por colaborador (pedido de Tomás, 26/09/2026) — el detalle
+             de cada aplicativo (y sus acciones de siempre: editar/deshabilitar/reactivar/eliminar)
+             vive ahora en el modal "Detalle del colaborador", ver abrirModalDetalleColaborador(). -->
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
             <table class="w-full text-left text-xs text-slate-300" data-tabla-interactiva="credenciales">
                 <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
                     <tr>
                         <th class="pb-3 px-3 font-bold">Colaborador</th>
-                        <th class="pb-3 px-3 font-bold">Aplicativo</th>
-                        <th class="pb-3 px-3 font-bold">Usuario</th>
-                        <th class="pb-3 px-3 font-bold">Clave</th>
-                        <th class="pb-3 px-3 font-bold">F. Creación</th>
-                        <th class="pb-3 px-3 font-bold">F. Solicitud</th>
-                        <th class="pb-3 px-3 font-bold">Analista</th>
-                        <th class="pb-3 px-3 font-bold">Solicitado por</th>
-                        <th class="pb-3 px-3 font-bold">Capacitado por</th>
-                        <th class="pb-3 px-3 font-bold">Enviado vía</th>
+                        <th class="pb-3 px-3 font-bold">Aplicativos</th>
+                        <th class="pb-3 px-3 font-bold text-center">Accesos</th>
                         <th class="pb-3 px-3 font-bold">Estado</th>
                         <th class="pb-3 px-3 font-bold text-right">Acciones</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-700/40">
-                    {% if registros %}
-                        {% for r in registros %}
-                        <tr class="hover:bg-slate-800/40 transition-colors">
-                            <td class="py-3 px-3 font-bold text-white whitespace-nowrap">{{ r.colaborador }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">
-                                <span class="px-2 py-0.5 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">{{ r.aplicativo }}</span>
+                    {% if colaboradores_agrupados %}
+                        {% for g in colaboradores_agrupados %}
+                        <tr class="hover:bg-slate-800/40 transition-colors cursor-pointer" onclick='abrirModalDetalleColaborador({{ g | tojson }})'>
+                            <td class="py-3 px-3 font-bold text-white whitespace-nowrap">
+                                <i class="fa-solid fa-user text-fuchsia-400 mr-1.5"></i>{{ g.colaborador }}
                             </td>
-                            <td class="py-3 px-3 whitespace-nowrap text-slate-300 font-mono">{{ r.usuario_aplicativo or '—' }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">
-                                <div class="flex items-center gap-1.5 font-mono">
-                                    <input type="password" id="pass-colab-{{ r.id }}" value="••••••••" readonly class="bg-transparent text-slate-200 w-20 focus:outline-none font-bold">
-                                    <button onclick="togglePasswordColab({{ r.id }}, this)" title="Ver clave" class="text-slate-400 hover:text-amber-400 p-1 transition-colors">
-                                        <i class="fa-regular fa-eye"></i>
-                                    </button>
-                                    <button onclick="copiarClaveColab({{ r.id }})" title="Copiar clave" class="text-slate-400 hover:text-emerald-400 p-1 transition-colors">
-                                        <i class="fa-regular fa-copy"></i>
-                                    </button>
-                                </div>
+                            <td class="py-3 px-3">
+                                <span class="text-slate-300">{{ g.aplicativos_resumen }}</span>
                             </td>
-                            <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ r.fecha_creacion or '—' }}</td>
-                            <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ r.fecha_solicitud or '—' }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">{{ r.analista_gestiona or '—' }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">{{ r.solicitado_por or '—' }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">{{ r.capacitado_por or '—' }}</td>
-                            <td class="py-3 px-3 whitespace-nowrap">{{ r.medio_envio or '—' }}</td>
+                            <td class="py-3 px-3 text-center whitespace-nowrap">
+                                <span class="px-2 py-0.5 bg-slate-700/60 text-slate-300 text-[10px] font-bold rounded-full">{{ g.total }}</span>
+                            </td>
                             <td class="py-3 px-3 whitespace-nowrap">
-                                {% if r.estado == 'activo' %}
-                                <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Activo</span>
+                                {% if g.estado_resumen == 'activo' %}
+                                    {% if g.deshabilitados %}
+                                    <span title="{{ g.activos }} activo(s), {{ g.deshabilitados }} deshabilitado(s)" class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Parcial</span>
+                                    {% else %}
+                                    <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Activo</span>
+                                    {% endif %}
                                 {% else %}
-                                <span title="Deshabilitado el {{ r.fecha_deshabilitacion }} por {{ r.deshabilitado_por }}" class="px-2.5 py-0.5 bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-bold rounded-full uppercase tracking-wider">Deshabilitado</span>
+                                <span class="px-2.5 py-0.5 bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-bold rounded-full uppercase tracking-wider">De baja</span>
                                 {% endif %}
                             </td>
                             <td class="py-3 px-3 text-right whitespace-nowrap">
-                                <div class="inline-flex items-center gap-1.5">
-                                    <button type="button" onclick='abrirModalEditarCredColab({{ r | tojson }})' title="Editar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold rounded-xl transition-all">
-                                        <i class="fa-solid fa-pen"></i> <span class="hidden lg:inline">Editar</span>
-                                    </button>
-                                    {% if r.estado == 'activo' %}
-                                    <form action="{{ url_for('deshabilitar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Deshabilitar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                        <button type="submit" class="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
-                                            <i class="fa-solid fa-user-slash"></i> <span class="hidden lg:inline">Deshabilitar</span>
-                                        </button>
-                                    </form>
-                                    {% else %}
-                                    <form action="{{ url_for('reactivar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Reactivar el acceso a {{ r.aplicativo }} de {{ r.colaborador }}?')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                        <button type="submit" class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-semibold rounded-xl transition-all">
-                                            <i class="fa-solid fa-user-check"></i> <span class="hidden lg:inline">Reactivar</span>
-                                        </button>
-                                    </form>
-                                    {% endif %}
-                                    <form action="{{ url_for('eliminar_credencial_colaborador', reg_id=r.id) }}" method="POST" class="inline" onsubmit="return confirm('¿Eliminar PERMANENTEMENTE el acceso a {{ r.aplicativo }} de {{ r.colaborador }}? Esta acción no se puede deshacer.')">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                        <button type="submit" title="Eliminar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-rose-600/30 text-slate-300 hover:text-rose-400 text-[11px] font-semibold rounded-xl transition-all">
-                                            <i class="fa-solid fa-trash-can"></i>
-                                        </button>
-                                    </form>
-                                </div>
+                                <button type="button" onclick='event.stopPropagation(); abrirModalDetalleColaborador({{ g | tojson }})' class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-fuchsia-600/30 text-slate-300 hover:text-fuchsia-300 text-[11px] font-semibold rounded-xl transition-all">
+                                    <i class="fa-solid fa-eye"></i> <span class="hidden lg:inline">Ver detalle</span>
+                                </button>
                             </td>
                         </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="12" class="text-center py-10 text-slate-500 font-bold">
-                                No se encontraron registros que coincidan con los filtros.
+                            <td colspan="5" class="text-center py-10 text-slate-500 font-bold">
+                                {% if vista == 'bajas' %}No hay colaboradores completamente dados de baja.{% else %}No se encontraron registros que coincidan con los filtros.{% endif %}
                             </td>
                         </tr>
                     {% endif %}
@@ -221,6 +210,36 @@
             </table>
         </div>
     </main>
+
+    <!-- MODAL DETALLE DEL COLABORADOR (pedido de Tomás, 26/09/2026: la tabla principal consolida
+         a 1 fila por colaborador; aquí vive el detalle de cada aplicativo con las mismas acciones
+         de siempre — mismo criterio que el modal "Ver Permisos" de Gestión de Usuarios). El
+         contenido se arma en JS (abrirModalDetalleColaborador) a partir del grupo ya calculado en
+         el servidor (g | tojson en cada fila de arriba), sin pedir nada nuevo al backend. -->
+    <div id="modal-detalle-colaborador" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-4xl w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="detalle-colaborador-titulo" class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-user text-fuchsia-400"></i> Detalle</h3>
+                <button type="button" onclick="cerrarModalDetalleColaborador()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                        <tr>
+                            <th class="pb-2 px-2 font-bold">Aplicativo</th>
+                            <th class="pb-2 px-2 font-bold">Usuario</th>
+                            <th class="pb-2 px-2 font-bold">Clave</th>
+                            <th class="pb-2 px-2 font-bold">F. Creación</th>
+                            <th class="pb-2 px-2 font-bold">Solicitado por</th>
+                            <th class="pb-2 px-2 font-bold">Estado</th>
+                            <th class="pb-2 px-2 font-bold text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detalle-colaborador-filas" class="divide-y divide-slate-700/40"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL NUEVA ALTA -->
     <div id="modal-alta" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
@@ -249,6 +268,31 @@
                         {% endfor %}
                     </datalist>
                     <div id="sugerencias-colaborador" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
+                    <!-- 🆕 Alta rápida de usuario (pedido de Tomás, 26/09/2026: "si el usuario no
+                         existe en la BD, permitir crearlo directamente desde dicho formulario") —
+                         mismo patrón que Inventario (crear_usuario_rapido_inventario), sin firma
+                         (aquí no se genera un acta con firma, solo se registra el acceso). -->
+                    <button type="button" onclick="mostrarPanelCrearUsuarioRapidoCred()" class="text-[10px] text-orange-400 hover:text-orange-300 font-semibold mt-1.5 inline-flex items-center gap-1">
+                        <i class="fa-solid fa-user-plus"></i> ¿Esta persona no tiene cuenta en Arkiv? Créala aquí
+                    </button>
+                    <div id="panel-crear-usuario-rapido-cred" class="hidden mt-2 p-3 bg-slate-900/60 border border-slate-700/60 rounded-xl">
+                        <p class="text-[11px] font-bold text-slate-200 mb-2"><i class="fa-solid fa-user-plus mr-1 text-orange-400"></i>Crear usuario para esta persona</p>
+                        <div class="grid grid-cols-2 gap-2 mb-2">
+                            <input type="text" id="rapido-cred-primer-nombre" placeholder="Primer nombre *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <input type="text" id="rapido-cred-segundo-nombre" placeholder="Segundo nombre" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <input type="text" id="rapido-cred-primer-apellido" placeholder="Primer apellido *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <input type="text" id="rapido-cred-segundo-apellido" placeholder="Segundo apellido" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500">
+                            <input type="email" id="rapido-cred-email" placeholder="Correo *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 col-span-2">
+                            <select id="rapido-cred-especialidad" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 col-span-2">
+                                <option value="">Cargo / especialidad *</option>
+                                {% for esp in especialidades %}<option value="{{ esp.nombre }}">{{ esp.nombre }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <button type="button" onclick="crearUsuarioRapidoCred()" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                            <i class="fa-solid fa-floppy-disk mr-1"></i>Crear usuario y usar en esta alta
+                        </button>
+                        <p id="mensaje-crear-usuario-rapido-cred" class="text-[10px] mt-1.5"></p>
+                    </div>
                 </div>
 
                 <div>
@@ -578,6 +622,107 @@
         function cerrarModalEditarCredColab() {
             document.getElementById('modal-editar-alta').classList.add('hidden');
             document.getElementById('modal-editar-alta').classList.remove('flex');
+        }
+
+        // 🆕 Alta rápida de usuario desde "Nueva Alta" de Credenciales (mismo patrón que
+        // Inventario, ver crearUsuarioRapido() en tickets_inventario.html) — sin firma.
+        function mostrarPanelCrearUsuarioRapidoCred() {
+            document.getElementById('panel-crear-usuario-rapido-cred').classList.remove('hidden');
+        }
+        async function crearUsuarioRapidoCred() {
+            const msg = document.getElementById('mensaje-crear-usuario-rapido-cred');
+            const datos = {
+                primer_nombre: document.getElementById('rapido-cred-primer-nombre').value.trim(),
+                segundo_nombre: document.getElementById('rapido-cred-segundo-nombre').value.trim(),
+                primer_apellido: document.getElementById('rapido-cred-primer-apellido').value.trim(),
+                segundo_apellido: document.getElementById('rapido-cred-segundo-apellido').value.trim(),
+                email: document.getElementById('rapido-cred-email').value.trim(),
+                especialidad: document.getElementById('rapido-cred-especialidad').value,
+            };
+            if (!datos.primer_nombre || !datos.primer_apellido || !datos.email || !datos.especialidad) {
+                msg.className = 'text-[10px] mt-1.5 text-rose-400 font-semibold';
+                msg.innerText = 'Completa nombre, apellido, correo y especialidad.';
+                return;
+            }
+            msg.className = 'text-[10px] mt-1.5 text-slate-400';
+            msg.innerText = 'Creando...';
+            try {
+                const body = new URLSearchParams(datos);
+                const resp = await fetch('/credenciales/colaboradores/usuarios/crear_rapido', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': CSRF_TOKEN },
+                    body: body.toString()
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.ok) {
+                    msg.className = 'text-[10px] mt-1.5 text-rose-400 font-semibold';
+                    msg.innerText = data.error || 'No se pudo crear el usuario.';
+                    return;
+                }
+                document.getElementById('input-colaborador-alta').value = data.nombre + ' (' + data.usuario + ')';
+                msg.className = 'text-[10px] mt-1.5 text-emerald-400 font-semibold';
+                msg.innerText = 'Usuario creado: ' + data.usuario + '. Ya quedó seleccionado arriba.';
+            } catch (e) {
+                msg.className = 'text-[10px] mt-1.5 text-rose-400 font-semibold';
+                msg.innerText = 'No se pudo crear el usuario. Intenta de nuevo.';
+            }
+        }
+
+        // 🗂️ Modal "Detalle del colaborador" (vista consolidada, pedido de Tomás, 26/09/2026): el
+        // servidor ya agrupó las filas de este colaborador (ver _colaboradores_consolidados en
+        // app.py) — aquí solo se dibuja el detalle, reutilizando exactamente las mismas acciones
+        // (editar/deshabilitar/reactivar/eliminar) que antes vivían en la fila plana.
+        function _escaparHtmlCred(v) {
+            return (v === null || v === undefined || v === '') ? '—' : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        // 🗂️ Mapa id -> fila del colaborador actualmente abierto en el modal de detalle — el
+        // botón "Editar" de cada fila lo consulta por id (editarDesdeDetalleCred) en vez de
+        // incrustar el JSON directamente en el atributo onclick (evita romper el HTML si el
+        // colaborador/aplicativo trae comillas o apóstrofes en el nombre).
+        let _filasDetalleColabActual = {};
+        function editarDesdeDetalleCred(regId) {
+            const r = _filasDetalleColabActual[regId];
+            if (r) abrirModalEditarCredColab(r);
+        }
+        function abrirModalDetalleColaborador(g) {
+            document.getElementById('detalle-colaborador-titulo').innerHTML =
+                '<i class="fa-solid fa-user text-fuchsia-400"></i> ' + _escaparHtmlCred(g.colaborador);
+            _filasDetalleColabActual = {};
+            g.filas.forEach(function (r) { _filasDetalleColabActual[r.id] = r; });
+            const tbody = document.getElementById('detalle-colaborador-filas');
+            tbody.innerHTML = g.filas.map(function (r) {
+                const badgeEstado = r.estado === 'activo'
+                    ? '<span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">Activo</span>'
+                    : '<span title="Deshabilitado el ' + _escaparHtmlCred(r.fecha_deshabilitacion) + ' por ' + _escaparHtmlCred(r.deshabilitado_por) + '" class="px-2.5 py-0.5 bg-slate-700/50 text-slate-400 border border-slate-600/40 text-[10px] font-bold rounded-full uppercase tracking-wider">Deshabilitado</span>';
+                const accionEstado = r.estado === 'activo'
+                    ? '<form action="/credenciales/colaboradores/' + r.id + '/deshabilitar" method="POST" class="inline" onsubmit="return confirm(\'¿Deshabilitar el acceso a ' + _escaparHtmlCred(r.aplicativo) + ' de ' + _escaparHtmlCred(g.colaborador) + '?\')"><input type="hidden" name="csrf_token" value="' + CSRF_TOKEN + '"/><button type="submit" class="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 text-[11px] font-semibold rounded-xl transition-all"><i class="fa-solid fa-user-slash"></i></button></form>'
+                    : '<form action="/credenciales/colaboradores/' + r.id + '/reactivar" method="POST" class="inline" onsubmit="return confirm(\'¿Reactivar el acceso a ' + _escaparHtmlCred(r.aplicativo) + ' de ' + _escaparHtmlCred(g.colaborador) + '?\')"><input type="hidden" name="csrf_token" value="' + CSRF_TOKEN + '"/><button type="submit" class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-semibold rounded-xl transition-all"><i class="fa-solid fa-user-check"></i></button></form>';
+                return (
+                    '<tr>' +
+                    '<td class="py-2.5 px-2"><span class="px-2 py-0.5 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">' + _escaparHtmlCred(r.aplicativo) + '</span></td>' +
+                    '<td class="py-2.5 px-2 font-mono">' + _escaparHtmlCred(r.usuario_aplicativo) + '</td>' +
+                    '<td class="py-2.5 px-2"><div class="flex items-center gap-1.5 font-mono">' +
+                    '<input type="password" id="pass-colab-' + r.id + '" value="••••••••" readonly class="bg-transparent text-slate-200 w-20 focus:outline-none font-bold">' +
+                    '<button onclick="togglePasswordColab(' + r.id + ', this)" title="Ver clave" class="text-slate-400 hover:text-amber-400 p-1 transition-colors"><i class="fa-regular fa-eye"></i></button>' +
+                    '<button onclick="copiarClaveColab(' + r.id + ')" title="Copiar clave" class="text-slate-400 hover:text-emerald-400 p-1 transition-colors"><i class="fa-regular fa-copy"></i></button>' +
+                    '</div></td>' +
+                    '<td class="py-2.5 px-2 text-slate-400">' + _escaparHtmlCred(r.fecha_creacion) + '</td>' +
+                    '<td class="py-2.5 px-2">' + _escaparHtmlCred(r.solicitado_por) + '</td>' +
+                    '<td class="py-2.5 px-2">' + badgeEstado + '</td>' +
+                    '<td class="py-2.5 px-2 text-right"><div class="inline-flex items-center gap-1.5">' +
+                    '<button type="button" onclick="editarDesdeDetalleCred(' + r.id + ')" title="Editar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold rounded-xl transition-all"><i class="fa-solid fa-pen"></i></button>' +
+                    accionEstado +
+                    '<form action="/credenciales/colaboradores/' + r.id + '/eliminar" method="POST" class="inline" onsubmit="return confirm(\'¿Eliminar PERMANENTEMENTE el acceso a ' + _escaparHtmlCred(r.aplicativo) + ' de ' + _escaparHtmlCred(g.colaborador) + '? Esta acción no se puede deshacer.\')"><input type="hidden" name="csrf_token" value="' + CSRF_TOKEN + '"/><button type="submit" title="Eliminar" class="px-2.5 py-1.5 bg-slate-700/60 hover:bg-rose-600/30 text-slate-300 hover:text-rose-400 text-[11px] font-semibold rounded-xl transition-all"><i class="fa-solid fa-trash-can"></i></button></form>' +
+                    '</div></td>' +
+                    '</tr>'
+                );
+            }).join('');
+            document.getElementById('modal-detalle-colaborador').classList.remove('hidden');
+            document.getElementById('modal-detalle-colaborador').classList.add('flex');
+        }
+        function cerrarModalDetalleColaborador() {
+            document.getElementById('modal-detalle-colaborador').classList.add('hidden');
+            document.getElementById('modal-detalle-colaborador').classList.remove('flex');
         }
 
         function abrirModalAplicativos() {
