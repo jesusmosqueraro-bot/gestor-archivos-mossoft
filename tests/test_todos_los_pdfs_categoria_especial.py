@@ -30,7 +30,7 @@ CASOS = [
     ('laboratorio', False, 'laboratorio'),
 ]
 
-# 🩹 Cómo debe verse la "variante" en el título de los PDFs de asignación/devolución para cada
+# 🪩 Cómo debe verse la "variante" en el título de los PDFs de asignación/devolución para cada
 # caso (ver TEXTOS_CATEGORIA_ESPECIAL / _categoria_especial_activo en app.py) — reportlab pone el
 # título en mayúsculas, así que se compara ya normalizado.
 VARIANTE_ESPERADA = {
@@ -75,6 +75,7 @@ def test_acta_de_asignacion_se_genera_para_las_4_categorias_mas_ti(admin_session
     datos = {
         'nombre': f'80100-{etiqueta}', 'tipo_activo': 'Otro', 'estado': 'Asignado',
         'asignado_a': 'Colaborador de Prueba', 'generar_acta_asignacion': 'on',
+        'marca': 'Genérica', 'modelo': 'Modelo de Prueba', 'numero_serie': f'SN-80100-{etiqueta}',
         'acta_asignacion_descripcion': f'Prueba PDF asignación — {etiqueta}',
     }
     if es_biomedico:
