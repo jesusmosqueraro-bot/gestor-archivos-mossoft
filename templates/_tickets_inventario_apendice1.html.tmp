@@ -1,0 +1,100 @@
+                    <div class="flex flex-col gap-3">
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Asignado a</label>
+                            <input type="text" name="asignado_a" id="input-activo-asignado" autocomplete="off" placeholder="Nombre del colaborador (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <div class="relative">
+                                <div class="flex items-center gap-2 mt-1.5">
+                                    <input type="text" id="input-activo-cedula-buscar" autocomplete="off" placeholder="Buscar por cédula o nombre..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <button type="button" onclick="buscarAsignadoPorCedula()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold rounded-xl transition-all flex items-center gap-1.5 shrink-0">
+                                        <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                                    </button>
+                                </div>
+                                <div id="sugerencias-cedula-activo" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
+                            </div>
+                            <p id="mensaje-busqueda-cedula" class="text-[10px] mt-1"></p>
+                            <p class="text-[10px] text-slate-500 mt-1">Puedes escribir cualquier nombre (tenga o no cuenta en Arkiv). Al escribir la cédula o el nombre de alguien ya registrado en Arkiv, aparecen sugerencias para elegir con un clic.</p>
+                            <button type="button" onclick="mostrarPanelCrearUsuarioRapido()" class="text-[10px] text-orange-400 hover:text-orange-300 font-semibold mt-1.5 inline-flex items-center gap-1">
+                                <i class="fa-solid fa-user-plus"></i> ¿Esta persona no tiene cuenta en Arkiv? Créala aquí
+                            </button>
+
+                            <div id="panel-crear-usuario-rapido" class="hidden mt-2 p-3 bg-slate-900/60 border border-slate-700/60 rounded-xl">
+                                <p class="text-[11px] font-bold text-slate-200 mb-2"><i class="fa-solid fa-user-plus mr-1 text-orange-400"></i>Crear usuario para esta persona</p>
+                                <div class="grid grid-cols-2 gap-2 mb-2">
+                                    <input type="text" id="rapido-primer-nombre" placeholder="Primer nombre *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-segundo-nombre" placeholder="Segundo nombre" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-primer-apellido" placeholder="Primer apellido *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="text" id="rapido-segundo-apellido" placeholder="Segundo apellido" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <input type="email" id="rapido-email" placeholder="Correo *" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 col-span-2">
+                                    <select id="rapido-especialidad" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 col-span-2">
+                                        <option value="">Cargo / especialidad *</option>
+                                        {% for esp in especialidades %}<option value="{{ esp.nombre }}">{{ esp.nombre }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-[10px] font-bold text-slate-300 uppercase">Firma (opcional)</p>
+                                        <div class="flex gap-1">
+                                            <button type="button" id="firma-rapido-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
+                                            <button type="button" id="firma-rapido-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
+                                        </div>
+                                    </div>
+                                    <div id="firma-rapido-panel-dibujar">
+                                        <canvas id="firma-rapido-canvas" width="340" height="90" class="w-full bg-white rounded-lg border border-slate-700" style="height:90px; touch-action: none;"></canvas>
+                                        <button type="button" id="firma-rapido-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                                    </div>
+                                    <div id="firma-rapido-panel-subir" class="hidden">
+                                        <input type="file" id="firma-rapido-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
+                                        <img id="firma-rapido-preview" class="hidden mt-1.5 max-h-20 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
+                                    </div>
+                                    <input type="hidden" id="firma-rapido-input">
+                                </div>
+                                <button type="button" onclick="crearUsuarioRapido()" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                    <i class="fa-solid fa-floppy-disk mr-1"></i>Crear usuario y asignar
+                                </button>
+                                <p id="mensaje-crear-usuario-rapido" class="text-[10px] mt-1.5"></p>
+                            </div>
+
+                            <div class="mt-2 bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                                <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                    <input type="checkbox" name="generar_acta_asignacion" id="input-generar-acta-asignacion" onchange="actualizarObligatoriedadCamposActa()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                    <i class="fa-solid fa-file-signature text-orange-400"></i> Generar acta de asignación (PDF)
+                                </label>
+                                <div class="mt-2">
+                                    <textarea name="acta_asignacion_descripcion" id="input-acta-asignacion-descripcion" rows="2" placeholder="Descripción breve (opcional, por si hay que anotar alguna novedad de esta entrega)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                                </div>
+                                <p class="text-[10px] text-slate-500 mt-1.5">Toma los datos del activo y de "Asignado a" para armar el acta. Se genera solo si esta casilla queda marcada al guardar. Incluye también tu firma como responsable de la asignación, si la tienes guardada en tu perfil.</p>
+                                <button type="button" onclick="abrirModalActasAsignacion()" id="btn-ver-actas-asignacion" class="hidden w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                    <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de asignación
+                                </button>
+                            </div>
+                        </div>
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <p class="text-slate-400 font-bold mb-2 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-boxes-packing mr-1 text-orange-400"></i>Accesorios entregados</p>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {% for ac in accesorios_activo %}
+                                <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
+                                    <input type="checkbox" name="accesorio_{{ ac.clave }}" id="input-accesorio-{{ ac.clave }}"
+                                        {% if ac.clave == 'otro' %}onchange="actualizarDetalleAccesorioOtro()"{% endif %}
+                                        class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                    {{ ac.etiqueta }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                            <div id="campo-accesorio-otro-detalle" class="hidden mt-2">
+                                <input type="text" name="accesorio_otro_detalle" id="input-accesorio-otro-detalle" maxlength="200" placeholder="Especifica cuál otro accesorio (obligatorio si marcas &quot;Otro&quot;)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                        </div>
+
+                        <div class="flex-1 flex flex-col">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones</label>
+                            <textarea name="observaciones" id="input-activo-observaciones" rows="2" class="w-full flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-orange-500/20 transition-all active:scale-95 mt-2">
+                    <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar
+                </button>
+            </form>
+        </div>
+    </div>
