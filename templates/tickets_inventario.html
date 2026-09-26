@@ -1,1 +1,390 @@
-PLACEHOLDER_WILL_REPLACE
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Inventario de Activos</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-orange bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex flex-wrap items-center justify-between gap-y-3">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="https://preventivaips.com.co/" target="_blank" rel="noopener noreferrer" title="Ir al sitio de Preventiva Salud IPS" class="shrink-0">
+                <img src="{{ logo_institucional_url }}" alt="Preventiva Salud IPS" class="h-9 w-auto rounded-md bg-white px-1.5 py-1">
+            </a>
+
+            <a href="/tickets/inicio" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-headset text-orange-400"></i> Inventario de Activos
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="abrirModalTiposActivo()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-layer-group"></i>
+                <span class="hidden sm:inline">Tipos de activo</span>
+            </button>
+            <button onclick="abrirModalImportarExportar()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-file-excel"></i>
+                <span class="hidden sm:inline">Importar / Exportar</span>
+            </button>
+            <button onclick="abrirModalNuevo()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-orange-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>Nuevo Activo</span>
+            </button>
+            <div class="flex items-center gap-2">
+                {% include 'partials/buscador.html' %}
+                {% with modulo='tickets_inventario' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
+                {% include 'partials/historial_sesiones_boton.html' %}
+                {% include 'partials/seguridad_boton.html' %}
+                {% include 'partials/perfil_boton.html' %}
+                {% include 'partials/chat_boton.html' %}
+                {% include 'partials/campanita.html' %}
+                {% include 'partials/cumpleanos_popup.html' %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="/tickets/inicio" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-house mr-1.5"></i>Inicio</a>
+            <a href="/tickets" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-ticket mr-1.5"></i>Todas las Solicitudes</a>
+            <a href="/tickets/conocimiento" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-book mr-1.5"></i>Base de Conocimiento</a>
+            <a href="/tickets/indicadores" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-chart-line mr-1.5"></i>Indicadores</a>
+            <a href="/tickets/mis_tareas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-list-check mr-1.5"></i>Mis Tareas</a>
+            <a href="/tickets/inventario" class="px-4 py-3 text-xs font-bold border-b-2 border-orange-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario</a>
+            <a href="/tickets/configuracion" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Configuración</a>
+            <a href="/tickets/plantillas" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-copy mr-1.5"></i>Plantillas</a>
+        </div>
+    </div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="space-y-2">
+                {% for categoria, mensaje in messages %}
+                <div class="p-4 rounded-2xl text-xs flex items-start gap-3 whitespace-pre-line {% if categoria == 'error' %}bg-rose-500/10 border border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if categoria == 'error' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} text-base mt-0.5"></i>
+                    <span>{{ mensaje }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if error_placa %}
+        <div class="px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>Ya existe un activo activo con el número de placa "<strong class="text-white">{{ error_placa }}</strong>". Cada placa debe ser única — usa otro número o edita el activo que ya existe.</span>
+        </div>
+        {% endif %}
+
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <p class="text-xs text-slate-400">
+                <i class="fa-solid fa-circle-info mr-1"></i>
+                {% if q_sede or q_tipo or q_busqueda %}
+                    Indicadores de <span class="text-white font-bold">{{ q_sede or 'todas las sedes' }}</span>{% if q_tipo %} · tipo <span class="text-white font-bold">{{ q_tipo }}</span>{% endif %}{% if q_busqueda %} · búsqueda "<span class="text-white font-bold">{{ q_busqueda }}</span>"{% endif %} — <a href="/tickets/inventario" class="text-orange-400 hover:underline">ver todas</a>
+                {% else %}
+                    Indicadores de <span class="text-white font-bold">todas las sedes</span> ({{ total_activos_general }} activo{{ 's' if total_activos_general != 1 else '' }} en total)
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-7 gap-4">
+            <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total</p>
+                <p class="text-2xl font-extrabold text-white">{{ total_activos }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Disponibles</p>
+                <p class="text-2xl font-extrabold text-emerald-400">{{ conteos_estado.Disponible }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-blue-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Asignados</p>
+                <p class="text-2xl font-extrabold text-blue-400">{{ conteos_estado.Asignado }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-amber-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">En mantenimiento</p>
+                <p class="text-2xl font-extrabold text-amber-400">{{ conteos_estado.Mantenimiento }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-violet-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Devolución</p>
+                <p class="text-2xl font-extrabold text-violet-400">{{ conteos_estado['Devolución'] }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-600/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">De baja</p>
+                <p class="text-2xl font-extrabold text-slate-400">{{ conteos_estado.Baja }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-rose-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Perdidos</p>
+                <p class="text-2xl font-extrabold text-rose-400">{{ conteos_estado.Perdido }}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="bg-slate-800/60 border border-emerald-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-sack-dollar mr-1"></i>Invertido en compra ({{ totales_costos.cantidad_propios }} activo{{ 's' if totales_costos.cantidad_propios != 1 else '' }})
+                </p>
+                <p class="text-2xl font-extrabold text-emerald-400">${{ '{:,.0f}'.format(totales_costos.total_compra) }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-cyan-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-calendar-days mr-1"></i>Alquiler mensual ({{ totales_costos.cantidad_alquilados }} activo{{ 's' if totales_costos.cantidad_alquilados != 1 else '' }})
+                </p>
+                <p class="text-2xl font-extrabold text-cyan-400">${{ '{:,.0f}'.format(totales_costos.total_alquiler_mensual) }}</p>
+            </div>
+            <div class="bg-slate-800/60 border border-orange-500/30 rounded-2xl p-4">
+                <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                    <i class="fa-solid fa-calendar-check mr-1"></i>Alquiler proyectado (anual)
+                </p>
+                <p class="text-2xl font-extrabold text-orange-400">${{ '{:,.0f}'.format(totales_costos.total_alquiler_anual) }}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por estado</h3>
+                <div class="h-52"><canvas id="chart-inv-estado"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por tipo de activo</h3>
+                <div class="h-52"><canvas id="chart-inv-tipo"></canvas></div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-5 shadow-xl">
+                <h3 class="text-sm font-bold text-white mb-3">Por sede</h3>
+                <div class="h-52"><canvas id="chart-inv-sede"></canvas></div>
+            </div>
+        </div>
+
+        {% if distribucion_por_sede|length > 1 %}
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-map-location-dot text-orange-400"></i> Distribución por sede
+            </h3>
+            <table class="w-full text-left text-xs text-slate-300 min-w-[560px]">
+                <thead class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-700/60">
+                    <tr>
+                        <th class="pb-2 px-2 font-bold">Sede</th>
+                        <th class="pb-2 px-2 font-bold text-center">Total</th>
+                        <th class="pb-2 px-2 font-bold text-center text-emerald-400">Disponibles</th>
+                        <th class="pb-2 px-2 font-bold text-center text-blue-400">Asignados</th>
+                        <th class="pb-2 px-2 font-bold text-center text-amber-400">Mantenimiento</th>
+                        <th class="pb-2 px-2 font-bold text-center text-violet-400">Devolución</th>
+                        <th class="pb-2 px-2 font-bold text-center text-slate-400">Baja</th>
+                        <th class="pb-2 px-2 font-bold text-center text-rose-400">Perdidos</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% for f in distribucion_por_sede %}
+                    <tr class="hover:bg-slate-800/40 transition-colors {% if f.sede == q_sede %}bg-orange-500/5{% endif %}">
+                        <td class="py-2.5 px-2 font-bold text-white">
+                            {% if f.sede == 'Sin sede asignada' %}
+                                <span class="italic text-slate-500 font-normal">{{ f.sede }}</span>
+                            {% else %}
+                                <a href="/tickets/inventario?sede={{ f.sede | urlencode }}" class="hover:text-orange-400 {% if f.sede == q_sede %}text-orange-400{% endif %}">{{ f.sede }}</a>
+                            {% endif %}
+                        </td>
+                        <td class="py-2.5 px-2 text-center font-bold">{{ f.total }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Disponible }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Asignado }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Mantenimiento }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados['Devolución'] }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Baja }}</td>
+                        <td class="py-2.5 px-2 text-center">{{ f.estados.Perdido }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <form method="GET" action="/tickets/inventario" class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                <select name="estado" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todos</option>
+                    {% for e in estados_activo %}<option value="{{ e }}" {% if e == q_estado %}selected{% endif %}>{{ e }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                <select name="tipo" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todos</option>
+                    {% for t in tipos_activo %}<option value="{{ t }}" {% if t == q_tipo %}selected{% endif %}>{{ t }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                <select name="sede" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for s in sedes %}<option value="{{ s.nombre }}" {% if s.nombre == q_sede %}selected{% endif %}>{{ s.nombre }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                <select name="area" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todas</option>
+                    {% for ar in areas %}<option value="{{ ar.nombre }}" {% if ar.nombre == q_area %}selected{% endif %}>{{ ar.nombre }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Proveedor</label>
+                <select name="proveedor" onchange="this.form.submit()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Todos</option>
+                    {% for p in proveedores %}<option value="{{ p.nombre }}" {% if p.nombre == q_proveedor %}selected{% endif %}>{{ p.nombre }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Buscar</label>
+                <div class="relative">
+                    <input type="text" name="q" value="{{ q_busqueda }}" placeholder="Placa, marca, serie, asignado a o su cédula..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <button type="submit" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+            </div>
+        </form>
+        {% if q_estado or q_tipo or q_sede or q_area or q_proveedor or q_busqueda %}
+        <div class="-mt-3">
+            <a href="/tickets/inventario" class="text-[11px] text-slate-400 hover:text-orange-400 font-bold"><i class="fa-solid fa-filter-circle-xmark mr-1"></i>Limpiar filtros</a>
+        </div>
+        {% endif %}
+
+        <div class="w-screen max-w-[1600px] relative left-1/2 -translate-x-1/2 px-4 sm:px-6 lg:px-8">
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 sm:p-6 shadow-xl overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300" data-tabla-interactiva="inventario-activos">
+                <thead class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-700/80">
+                    <tr>
+                        <th class="pb-3 px-3 font-bold">N° de Placa</th>
+                        <th class="pb-3 px-3 font-bold">Tipo</th>
+                        <th class="pb-3 px-3 font-bold">Marca / Modelo</th>
+                        <th class="pb-3 px-3 font-bold">N° Serie</th>
+                        <th class="pb-3 px-3 font-bold">Estado</th>
+                        <th class="pb-3 px-3 font-bold">Asignado a</th>
+                        <th class="pb-3 px-3 font-bold">Sede</th>
+                        <th class="pb-3 px-3 font-bold">Área</th>
+                        <th class="pb-3 px-3 font-bold">Proveedor</th>
+                        <th class="pb-3 px-3 font-bold">Costo</th>
+                        <th class="pb-3 px-3 font-bold text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/40">
+                    {% if activos %}
+                        {% for a in activos %}
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3.5 px-3 font-bold text-white">{{ a.nombre }}{% if a.es_biomedico %} <i class="fa-solid fa-kit-medical text-rose-400 ml-1" title="Activo biomédico"></i>{% elif a.categoria_especial %} <i class="fa-solid fa-hard-hat text-amber-400 ml-1" title="{{ {'sst': 'Insumo de SST', 'ambiental': 'Insumo Ambiental', 'laboratorio': 'Insumo de Laboratorio Clínico'}.get(a.categoria_especial, 'Categoría especial') }}"></i>{% endif %}</td>
+                            <td class="py-3.5 px-3">{{ a.tipo_activo }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">
+                                {{ a.marca or '-' }}{% if a.modelo %} · {{ a.modelo }}{% endif %}
+                                {% if a.ram_gb or a.disco_gb %}
+                                <div class="text-[10px] text-slate-500 mt-0.5 whitespace-nowrap">
+                                    {% if a.ram_gb %}RAM {{ a.ram_gb }}GB{% if a.tipo_ram %} {{ a.tipo_ram }}{% endif %}{% endif %}{% if a.ram_gb and a.disco_gb %} · {% endif %}{% if a.disco_gb %}{{ a.tipo_disco or 'Disco' }} {{ a.disco_gb }}GB{% endif %}
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-3 font-mono text-slate-500">{{ a.numero_serie or '-' }}</td>
+                            <td class="py-3.5 px-3">
+                                {% if a.estado == 'Disponible' %}
+                                    <span class="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Disponible</span>
+                                {% elif a.estado == 'Asignado' %}
+                                    <span class="px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Asignado</span>
+                                {% elif a.estado == 'Mantenimiento' %}
+                                    <span class="px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Mantenimiento</span>
+                                {% elif a.estado == 'Perdido' %}
+                                    <span class="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Perdido</span>
+                                {% elif a.estado == 'Devolución' %}
+                                    <span class="px-2.5 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap"><i class="fa-solid fa-lock mr-1"></i>Devolución</span>
+                                    {% if a.fecha_devolucion %}<div class="text-[10px] text-slate-500 mt-1 whitespace-nowrap">{{ a.fecha_devolucion }}</div>{% endif %}
+                                {% else %}
+                                    <span class="px-2.5 py-0.5 bg-slate-600/20 text-slate-400 border border-slate-600/30 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap">Baja</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-3 text-slate-400 italic">
+                                {{ a.asignado_a or '-' }}
+                                {% if a.firma_asignacion_url %}
+                                <a href="{{ a.firma_asignacion_url }}" target="_blank" rel="noopener" title="Ver firma de aceptación de la asignación" class="text-emerald-400 hover:text-emerald-300 ml-1 not-italic"><i class="fa-solid fa-signature"></i></a>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.sede or '-' }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.area or '-' }}</td>
+                            <td class="py-3.5 px-3 text-slate-400">{{ a.proveedor or '-' }}</td>
+                            <td class="py-3.5 px-3 whitespace-nowrap">
+                                {% if a.tipo_costo == 'propio' and a.costo_compra is not none %}
+                                    <span class="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold rounded-full uppercase tracking-wider">Propio</span>
+                                    <div class="text-slate-300 mt-1">${{ '{:,.0f}'.format(a.costo_compra) }} <span class="text-slate-500">compra</span></div>
+                                {% elif a.tipo_costo == 'alquilado' and a.costo_alquiler_mensual is not none %}
+                                    <span class="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[9px] font-bold rounded-full uppercase tracking-wider">Alquiler</span>
+                                    <div class="text-slate-300 mt-1">${{ '{:,.0f}'.format(a.costo_alquiler_mensual) }} <span class="text-slate-500">/mes</span></div>
+                                    <div class="text-slate-400">${{ '{:,.0f}'.format(a.costo_alquiler_mensual * 12) }} <span class="text-slate-500">/año</span></div>
+                                {% else %}
+                                    <span class="text-slate-600">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3.5 px-3 text-right">
+                                <div class="flex items-center justify-end gap-3 whitespace-nowrap">
+                                    <button type="button" onclick='abrirModalHistorialTickets({{ a | tojson }})' class="text-slate-400 hover:text-indigo-400 text-xs" title="Historial de tickets ({{ a.tickets_historial|length }})">
+                                        <i class="fa-solid fa-clock-rotate-left"></i>{% if a.tickets_historial %} <span class="text-[10px] font-bold">{{ a.tickets_historial|length }}</span>{% endif %}
+                                    </button>
+                                    <button type="button" onclick='abrirModalTrazabilidad({{ a | tojson }})' class="text-slate-400 hover:text-violet-400 text-xs" title="Trazabilidad del activo">
+                                        <i class="fa-solid fa-code-branch"></i>
+                                    </button>
+                                    <button type="button" onclick='abrirModalAdjuntos({{ a | tojson }})' class="text-slate-400 hover:text-cyan-400 text-xs" title="Adjuntos ({{ a.adjuntos|length }})">
+                                        <i class="fa-solid fa-paperclip"></i>{% if a.adjuntos %} <span class="text-[10px] font-bold">{{ a.adjuntos|length }}</span>{% endif %}
+                                    </button>
+                                    {% if a.estado == 'Devolución' and session.get('rol') != 'admin' %}
+                                    <span class="text-slate-600 text-xs cursor-not-allowed" title="Activo bloqueado en 'Devolución' — solo un administrador puede desbloquearlo"><i class="fa-solid fa-lock"></i></span>
+                                    {% else %}
+                                    <button type="button" onclick='abrirModalReemplazar({{ a | tojson }})' class="text-slate-400 hover:text-amber-400 text-xs" title="Reemplazar activo"><i class="fa-solid fa-arrows-rotate"></i></button>
+                                    <button type="button" onclick='abrirModalEditar({{ a | tojson }})' class="text-slate-400 hover:text-orange-400 text-xs"><i class="fa-solid fa-pen"></i></button>
+                                    {% endif %}
+                                    {% if session.get('rol') == 'admin' %}
+                                    <form method="POST" action="/tickets/inventario/{{ a.id }}/eliminar" class="inline" onsubmit="return confirm('¿Eliminar el activo {{ a.nombre }}?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="text-slate-400 hover:text-rose-400 text-xs"><i class="fa-solid fa-trash"></i></button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="11" class="text-center py-10 text-slate-500 font-bold">
+                                {% if q_busqueda or q_estado or q_tipo or q_sede or q_area or q_proveedor %}No hay activos que coincidan con los filtros.{% else %}Aún no hay activos registrados. Crea uno con "Nuevo Activo".{% endif %}
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        </div>
+
+    </main>
