@@ -1514,7 +1514,44 @@ def init_db():
                 # descanso) porque no todos los turnos son iguales. Solo afecta el cálculo de
                 # "Horas del Mes" (horas NETAS) — la matriz, el catálogo y las exportaciones del
                 # Cuadro de Turnos siguen mostrando el horario completo del turno, sin cambios.
-                "ALTER TABLE tipos_turno ADD COLUMN IF NOT EXISTS minutos_descanso INTEGER DEFAULT 0;"
+                "ALTER TABLE tipos_turno ADD COLUMN IF NOT EXISTS minutos_descanso INTEGER DEFAULT 0;",
+                # 🗓️ Esquema de Jornada por colaborador (pedido por Tomás, 26/09/2026: "permitir
+                # seleccionar el esquema base: Lunes a Viernes o Lunes a Sábado"), ver
+                # ESQUEMAS_JORNADA/_meta_horas_mes_por_esquema junto al módulo de Turnos. 'LV' por
+                # defecto: toda cuenta existente antes de este cambio queda en el esquema más
+                # común (5 días) hasta que un admin la corrija en Editar Usuario.
+                "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS esquema_jornada VARCHAR(5) DEFAULT 'LV';",
+                # 📋 Novedades de turno (incapacidad, permiso, calamidad, llegada tarde, salida
+                # temprana — pedido por Tomás, 26/09/2026): registradas por 'admin'/'lider' (ver
+                # ROLES_GESTIONAN_TURNOS), descuentan horas_afectadas del total neto de "Horas del
+                # Mes" de ese colaborador ese mes. turno_asignado_id es opcional (una incapacidad
+                # de varios días no siempre coincide con un turno puntual ya asignado).
+                """CREATE TABLE IF NOT EXISTS novedades_turno (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                    turno_asignado_id INTEGER REFERENCES turnos_asignados(id) ON DELETE SET NULL,
+                    tipo VARCHAR(30) NOT NULL,
+                    fecha VARCHAR(10) NOT NULL,
+                    horas_afectadas NUMERIC(5,2) NOT NULL,
+                    observaciones TEXT,
+                    registrado_por_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+                    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+                    fecha_registro VARCHAR(100) NOT NULL
+                );""",
+                # 🗓️ Override MENSUAL puntual del esquema de jornada de un colaborador (pedido por
+                # Tomás, 26/09/2026: "al configurar o asignar el horario mensual del colaborador,
+                # permitir seleccionar el esquema base") — para el mes/año que se le asigne aquí,
+                # gana sobre usuarios.esquema_jornada sin tener que cambiar su esquema permanente.
+                """CREATE TABLE IF NOT EXISTS turnos_esquemas_mensuales (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                    anio INTEGER NOT NULL,
+                    mes INTEGER NOT NULL,
+                    esquema VARCHAR(5) NOT NULL,
+                    creado_por VARCHAR(100) NOT NULL,
+                    fecha_creacion VARCHAR(100) NOT NULL,
+                    UNIQUE(usuario_id, anio, mes)
+                );"""
             ]:
                 try:
                     cursor.execute(col_query)
@@ -2119,13 +2156,44 @@ def init_db():
                 "ALTER TABLE usuarios ADD COLUMN meta_horas_mensual REAL;",
                 # 🍽️ Ver comentario equivalente en la rama de Postgres (minutos de almuerzo/
                 # descanso por Tipo de Turno).
-                "ALTER TABLE tipos_turno ADD COLUMN minutos_descanso INTEGER DEFAULT 0;"
+                "ALTER TABLE tipos_turno ADD COLUMN minutos_descanso INTEGER DEFAULT 0;",
+                # 🗓️📋 Ver comentarios equivalentes en la rama de Postgres (Esquema de Jornada,
+                # Novedades de Turno y el override mensual de esquema).
+                "ALTER TABLE usuarios ADD COLUMN esquema_jornada TEXT DEFAULT 'LV';"
             ]:
                 try:
                     cursor.execute(col_turnos_v2_sql)
                     conn.commit()
                 except Exception:
                     pass
+
+            cursor.execute('''CREATE TABLE IF NOT EXISTS novedades_turno (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                turno_asignado_id INTEGER,
+                tipo TEXT NOT NULL,
+                fecha TEXT NOT NULL,
+                horas_afectadas REAL NOT NULL,
+                observaciones TEXT,
+                registrado_por_id INTEGER,
+                estado TEXT NOT NULL DEFAULT 'activo',
+                fecha_registro TEXT NOT NULL,
+                FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+                FOREIGN KEY(turno_asignado_id) REFERENCES turnos_asignados(id) ON DELETE SET NULL,
+                FOREIGN KEY(registrado_por_id) REFERENCES usuarios(id) ON DELETE SET NULL
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS turnos_esquemas_mensuales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                anio INTEGER NOT NULL,
+                mes INTEGER NOT NULL,
+                esquema TEXT NOT NULL,
+                creado_por TEXT NOT NULL,
+                fecha_creacion TEXT NOT NULL,
+                FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+                UNIQUE(usuario_id, anio, mes)
+            )''')
+            conn.commit()
 
         # 📇 ÍNDICES — hasta ahora la única tabla con un índice real era 'usuarios' (por su
         # UNIQUE en 'usuario'); todo lo demás dependía de recorrer la tabla entera en cada
@@ -2180,6 +2248,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_notificaciones_turnos_turno ON notificaciones_turnos (turno_id);",
             "CREATE INDEX IF NOT EXISTS idx_turnos_favoritos_admin ON turnos_favoritos_colaborador (admin_usuario);",
             "CREATE INDEX IF NOT EXISTS idx_turnos_vistas_favoritas_usuario ON turnos_vistas_favoritas (usuario);",
+            "CREATE INDEX IF NOT EXISTS idx_novedades_turno_usuario_fecha ON novedades_turno (usuario_id, fecha);",
+            "CREATE INDEX IF NOT EXISTS idx_turnos_esquemas_mensuales_usuario ON turnos_esquemas_mensuales (usuario_id, anio, mes);",
         ]:
             try:
                 cursor.execute(indice_sql)
@@ -3061,8 +3131,29 @@ ROLES_FIRMA_GH_PAZ_Y_SALVO = ('admin', 'gestion_humana')
 # rol de la cuenta como equivalente legible en vez de un cargo real.
 _CARGO_LEGIBLE_POR_ROL = {
     'admin': 'Administrador', 'agente': 'Soporte TI', 'gestion_humana': 'Gestión Humana',
-    'estandar': 'Colaborador',
+    'estandar': 'Colaborador', 'lider': 'Líder de Turnos',
 }
+
+# 🗓️ Rol "Líder" (pedido por Tomás, 26/09/2026, junto con el resto de mejoras del Cuadro de
+# Turnos): tiene exactamente las mismas capacidades y vistas que 'estandar' en todo el resto del
+# sistema — a propósito NO se agrega a ROLES_CON_ACCESO_OPERATIVO, para no heredar Tickets/Soporte
+# TI, Bóveda de Accesos, Papelera, Auditoría, etc. — pero recibe acceso al módulo 'turnos' por
+# DEFECTO, sin necesitar el permiso extra de Gestión de Usuarios (ver usuario_tiene_modulo). Es el
+# rol pensado para quien coordina el Cuadro de Turnos sin ser Soporte TI.
+#
+# Restricción explícita del mismo pedido: 'agente' YA NO recibe 'turnos' automáticamente por rol
+# (antes sí, por estar en ROLES_CON_ACCESO_OPERATIVO) — un 'agente' que necesite entrar al Cuadro
+# de Turnos ahora requiere que un 'admin' se lo asigne explícitamente como módulo extra desde
+# Editar Usuario, igual que cualquier otro rol no operativo. Ver el caso especial para 'turnos'
+# dentro de usuario_tiene_modulo más abajo.
+#
+# Además, programar turnos, asignar esquemas de jornada y registrar novedades (incapacidades,
+# permisos, etc.) queda reservado a 'admin' y 'lider' — incluso una cuenta con acceso de solo
+# lectura a 'turnos' vía permiso extra (por ejemplo un 'agente' o 'estandar' con el módulo
+# asignado) puede CONSULTAR el Cuadro de Turnos, Horas del Mes y Colaboradores por Sede, pero no
+# puede crear/editar/cancelar turnos, cambiar el esquema de jornada de un colaborador ni registrar
+# una novedad — ver usuario_puede_gestionar_turnos/turnos_gestion_required más abajo.
+ROLES_GESTIONAN_TURNOS = ('admin', 'lider')
 
 # 🧩 MÓDULOS ASIGNABLES POR USUARIO (pedido por Tomás, 19/09/2026): "Quiero poder que el módulo
 # de usuario pueda indicar qué módulo o modal se le puede asignar a los usuarios, dado se
@@ -3163,10 +3254,50 @@ def usuario_tiene_modulo(clave_modulo):
     acceso operativo completo (admin/agente, ver ROLES_CON_ACCESO_OPERATIVO), o porque se le
     concedió ese módulo puntual como permiso EXTRA desde Gestión de Usuarios — ver
     MODULOS_ASIGNABLES arriba. Se expone también a las plantillas Jinja (ver el
-    context_processor _inyectar_modulos_extra) para ocultar/mostrar tarjetas y controles."""
-    if session.get('rol') in ROLES_CON_ACCESO_OPERATIVO:
+    context_processor _inyectar_modulos_extra) para ocultar/mostrar tarjetas y controles.
+
+    🗓️ Caso especial para 'turnos' (pedido por Tomás, 26/09/2026): a diferencia del resto de
+    módulos, 'agente' NO lo recibe automáticamente por estar en ROLES_CON_ACCESO_OPERATIVO — debe
+    asignársele como módulo extra igual que cualquier rol no operativo. En cambio 'lider' sí lo
+    recibe por defecto, sin necesitar el permiso extra. 'admin' conserva acceso total siempre."""
+    rol = session.get('rol')
+    if clave_modulo == 'turnos':
+        if rol == 'admin' or rol == 'lider':
+            return True
+        return 'turnos' in (session.get('modulos_extra') or [])
+    if rol in ROLES_CON_ACCESO_OPERATIVO:
         return True
     return clave_modulo in (session.get('modulos_extra') or [])
+
+
+def usuario_puede_gestionar_turnos():
+    """True si la sesión puede PROGRAMAR turnos, asignar esquemas de jornada y registrar
+    novedades del Cuadro de Turnos — reservado a 'admin' y 'lider' (ver ROLES_GESTIONAN_TURNOS),
+    incluso si otro rol tiene acceso de solo lectura al módulo 'turnos' vía permiso extra o vía
+    ROLES_CON_ACCESO_OPERATIVO ('agente'). Ver usuario_tiene_modulo('turnos') para el acceso de
+    solo lectura/consulta al módulo."""
+    return session.get('rol') in ROLES_GESTIONAN_TURNOS
+
+
+def turnos_gestion_required(f):
+    """Decorador para las acciones de ESCRITURA del Cuadro de Turnos (asignar, editar, cancelar,
+    publicar, cerrar, cambiar esquema de jornada, registrar/anular novedades) — se usa siempre
+    junto a @login_required y @turnos_o_extra_required, nunca solo: un usuario puede tener acceso
+    de solo lectura al módulo (por ejemplo un 'agente' con el permiso extra) sin poder escribir.
+    Todas las rutas de escritura del módulo son endpoints JSON/AJAX (el frontend siempre hace
+    fetch() y lee data.ok/data.error, nunca un submit de página completa) — por eso responde en
+    JSON con 403, igual que el resto de checks de autorización puntuales del sistema, en vez de
+    redirigir como hacen los decoradores de página completa."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not usuario_puede_gestionar_turnos():
+            # 🧩 Los distintos endpoints de escritura leen el mensaje de error de una clave
+            # distinta (`error` singular en cerrar/publicar, `errores` en lista en asignar/asignar
+            # a grupo) — se mandan las dos para que cualquiera de los dos lo muestre igual.
+            mensaje = 'No tienes permiso para hacer cambios en el Cuadro de Turnos.'
+            return jsonify({'ok': False, 'error': mensaje, 'errores': [mensaje]}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def modulo_o_acceso_operativo_required(*claves_modulo):
@@ -3206,7 +3337,8 @@ def _inyectar_modulos_extra():
     # modal "Ver Permisos" de usuarios.html reutilicen exactamente el mismo parseo que ya usa el
     # login, en vez de reimplementar el split/filtrado de claves en la plantilla.
     return dict(usuario_tiene_modulo=usuario_tiene_modulo, MODULOS_ASIGNABLES=MODULOS_ASIGNABLES,
-                modulos_extra_desde_texto=_modulos_extra_desde_texto)
+                modulos_extra_desde_texto=_modulos_extra_desde_texto,
+                usuario_puede_gestionar_turnos=usuario_puede_gestionar_turnos)
 
 
 # 🗄️ MÓDULO ADMINISTRADOR DE BASE DE DATOS (LECTURA + CONSOLA SQL LIBRE)
@@ -6581,7 +6713,7 @@ def _bot_evaluar_inactividad(usuario):
 @app.route('/chat/bot/estado')
 @login_required
 def chat_bot_estado():
-    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+    if session.get('rol') not in ('estandar', 'lider') or not _chat_estandar_habilitado():
         return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
     usuario_actual = session.get('username')
     _bot_evaluar_inactividad(usuario_actual)
@@ -6591,7 +6723,7 @@ def chat_bot_estado():
 @app.route('/chat/bot/enviar', methods=['POST'])
 @login_required
 def chat_bot_enviar():
-    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+    if session.get('rol') not in ('estandar', 'lider') or not _chat_estandar_habilitado():
         return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
     texto = (request.form.get('mensaje') or '').strip()
     if not texto:
@@ -6606,7 +6738,7 @@ def chat_bot_enviar():
 @app.route('/chat/bot/reiniciar', methods=['POST'])
 @login_required
 def chat_bot_reiniciar():
-    if session.get('rol') != 'estandar' or not _chat_estandar_habilitado():
+    if session.get('rol') not in ('estandar', 'lider') or not _chat_estandar_habilitado():
         return jsonify({'error': 'El Asistente de Chat no está disponible.'}), 403
     usuario_actual = session.get('username')
     _bot_fijar_estado(usuario_actual, 'menu', {})
@@ -15923,7 +16055,7 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
         except (TypeError, ValueError):
             pass
     nuevo_rol = datos.get('rol') or 'estandar'
-    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana', 'lider'):
         nuevo_rol = 'estandar'
     if nuevo_rol == 'admin' and creador != 'admin':
         nuevo_rol = 'estandar'
@@ -15971,13 +16103,19 @@ def _crear_usuario_interno(datos, creador, conn, cursor, db_type):
     except (TypeError, ValueError):
         meta_horas_nueva = None
 
+    # 🗓️ Esquema de Jornada (ver nota completa en editar_usuario): 'LV' por defecto si no llega
+    # uno válido desde el formulario de creación — cualquier cuenta siempre tiene un esquema.
+    esquema_nuevo = (datos.get('esquema_jornada') or '').strip()
+    if esquema_nuevo not in ESQUEMAS_JORNADA:
+        esquema_nuevo = 'LV'
+
     try:
         nuevo_user = _generar_username_unico(primer_nombre, primer_apellido, segundo_nombre, segundo_apellido)
         nombre_completo = ' '.join(p for p in [primer_nombre, segundo_nombre, primer_apellido, segundo_apellido] if p)
         nuevo_hash = generate_password_hash(nuevo_pass)
-        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s)" if db_type == 'postgres' else
-                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)")
-        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url, modulos_extra_texto, meta_horas_nueva))
+        q_ins = ("INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual, esquema_jornada) VALUES (%s, %s, %s, %s, 'activo', %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s)" if db_type == 'postgres' else
+                 "INSERT INTO usuarios (usuario, password_hash, correo, rol, estado, nombre, telefono, cedula, especialidad, sede, sede_dentro_de_radio, debe_cambiar_password, firma, modulos_extra, meta_horas_mensual, esquema_jornada) VALUES (?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)")
+        cursor.execute(q_ins, (nuevo_user, nuevo_hash, nuevo_email, nuevo_rol, nombre_completo, nuevo_telefono, nueva_cedula, nueva_especialidad, nueva_sede, sede_dentro_de_radio, firma_url, modulos_extra_texto, meta_horas_nueva, esquema_nuevo))
         conn.commit()
         registrar_log(creador, "Creación de Usuario", f"Usuario '{nuevo_user}' ({nombre_completo}) [{nuevo_rol}]")
 
@@ -16041,7 +16179,7 @@ def gestion_usuarios():
         # que, si hay un error de validación, el formulario se vuelva a mostrar con el rol ya
         # normalizado (no con un valor crudo que un POST manual pudo haber mandado).
         nuevo_rol = request.form.get('rol', 'estandar')
-        if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+        if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana', 'lider'):
             nuevo_rol = 'estandar'
         if nuevo_rol == 'admin' and session.get('username') != 'admin':
             nuevo_rol = 'estandar'
@@ -16063,6 +16201,7 @@ def gestion_usuarios():
             'sede': (request.form.get('sede') or '').strip() or None,
             'modulos_extra': modulos_extra_marcados,
             'meta_horas_mensual': (request.form.get('meta_horas_mensual') or '').strip() or None,
+            'esquema_jornada': (request.form.get('esquema_jornada') or '').strip() or None,
         }
         error, nuevo_user, _nombre_completo, _firma_url = _crear_usuario_interno(
             {**form_data, 'password': request.form.get('password') or '', 'firma_dataurl': request.form.get('firma_dataurl'),
@@ -16076,9 +16215,9 @@ def gestion_usuarios():
     # 🛡️ La cuenta 'admin' queda oculta del listado para el resto de administradores: solo
     # la propia sesión de 'admin' la ve. El resto de admins no sabe que existe esta fila.
     if session.get('username') == 'admin':
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual FROM usuarios ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual, esquema_jornada FROM usuarios ORDER BY id ASC")
     else:
-        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
+        cursor.execute("SELECT id, usuario, correo, rol, estado, nombre, telefono, cedula, especialidad, totp_habilitado, bloqueado_por_intentos, firma, modulos_extra, meta_horas_mensual, esquema_jornada FROM usuarios WHERE usuario != 'admin' ORDER BY id ASC")
     lista_usuarios = cursor.fetchall()
     conn.close()
     usuario_creado = request.args.get('creado', '').strip()
@@ -16378,7 +16517,7 @@ def buscar_usuarios():
 def editar_usuario(usuario_id):
     nuevo_email = request.form.get('email', '').strip()
     nuevo_rol = request.form.get('rol', 'estandar').strip()
-    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana', 'lider'):
         nuevo_rol = 'estandar'
     nueva_pass = request.form.get('password', '').strip()
     nuevo_nombre = request.form.get('nombre', '').strip()
@@ -16402,11 +16541,20 @@ def editar_usuario(usuario_id):
     # escribe algo que no es un número válido o es menor o igual a cero, se descarta ese valor y
     # se conserva la meta que ya tenía (mismo criterio permisivo que ram_gb/costo_compra).
     meta_horas_raw = request.form.get('meta_horas_mensual', '').strip()
+    # 🗓️ Esquema de Jornada (pedido por Tomás, 26/09/2026, junto con Novedades y la exportación de
+    # Horas del Mes): base para calcular DINÁMICAMENTE la meta de horas del mes según los días
+    # hábiles de ese esquema (ver ESQUEMAS_JORNADA/_meta_horas_mes_por_esquema más abajo, junto al
+    # módulo de turnos) — reemplaza en la práctica a meta_horas_mensual como forma principal de
+    # fijar la meta, aunque meta_horas_mensual sigue funcionando como override manual explícito
+    # (si está fijada, gana sobre el cálculo automático). Igual que especialidad, se trata como
+    # obligatorio: un valor vacío o fuera del catálogo conserva el que ya tenía, o 'LV' por
+    # defecto si la cuenta nunca tuvo uno (p. ej. creada antes de este cambio).
+    esquema_raw = request.form.get('esquema_jornada', '').strip()
 
     conn, db_type = get_db()
     cursor = conn.cursor()
     try:
-        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual FROM usuarios WHERE id = ?"
+        q_sel = "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual, esquema_jornada FROM usuarios WHERE id = %s" if db_type == 'postgres' else "SELECT usuario, rol, nombre, telefono, cedula, especialidad, correo, firma, meta_horas_mensual, esquema_jornada FROM usuarios WHERE id = ?"
         cursor.execute(q_sel, (usuario_id,))
         row = cursor.fetchone()
         user_target = row[0] if row else None
@@ -16468,6 +16616,12 @@ def editar_usuario(usuario_id):
             except ValueError:
                 meta_horas_final = meta_horas_original
 
+        esquema_original = row[9] if row and len(row) > 9 else None
+        if esquema_raw in ESQUEMAS_JORNADA:
+            esquema_final = esquema_raw
+        else:
+            esquema_final = esquema_original or 'LV'
+
         # 🧩 Módulos extra (pedido por Tomás, 19/09/2026): permiso EXTRA sobre el rol — esta
         # lista SOLO agrega acceso a módulos puntuales (ver MODULOS_ASIGNABLES/usuario_tiene_
         # modulo más arriba), nunca le quita a nadie lo que su rol ya le da. Admin y Agente ya
@@ -16523,12 +16677,12 @@ def editar_usuario(usuario_id):
             nuevo_hash = generate_password_hash(nueva_pass)
             # 🔒 Igual que al crear el usuario: si el admin le asigna una contraseña nueva desde
             # aquí, se obliga a cambiarla en su próximo inicio de sesión.
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ?, debe_cambiar_password = 1 WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, password_hash = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s, esquema_jornada = %s, debe_cambiar_password = TRUE WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, password_hash = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ?, esquema_jornada = ?, debe_cambiar_password = 1 WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nuevo_hash, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, esquema_final, usuario_id))
             detalle_log = f"Se actualizó correo, rol y CONTRASEÑA del usuario '{user_target}'"
         else:
-            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ? WHERE id = ?"
-            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, usuario_id))
+            q_upd = "UPDATE usuarios SET correo = %s, rol = %s, nombre = %s, telefono = %s, cedula = %s, especialidad = %s, firma = %s, modulos_extra = %s, meta_horas_mensual = %s, esquema_jornada = %s WHERE id = %s" if db_type == 'postgres' else "UPDATE usuarios SET correo = ?, rol = ?, nombre = ?, telefono = ?, cedula = ?, especialidad = ?, firma = ?, modulos_extra = ?, meta_horas_mensual = ?, esquema_jornada = ? WHERE id = ?"
+            cursor.execute(q_upd, (nuevo_email, nuevo_rol, nombre_final, telefono_final, cedula_final, especialidad_final, firma_final, modulos_extra_texto, meta_horas_final, esquema_final, usuario_id))
             detalle_log = f"Se actualizó correo y rol del usuario '{user_target}'"
 
         conn.commit()
@@ -16555,7 +16709,7 @@ def editar_usuario(usuario_id):
 @agente_o_admin_required
 def cambiar_rol_usuario(usuario_id):
     nuevo_rol = request.form.get('rol', '').strip()
-    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana'):
+    if nuevo_rol not in ('admin', 'agente', 'estandar', 'gestion_humana', 'lider'):
         flash("Rol no válido.", "error")
         return redirect(url_for('gestion_usuarios'))
 
@@ -19454,6 +19608,45 @@ MAX_DIAS_RANGO_FECHA_FIN = 366
 # bloquea la asignación de turnos por esto, igual que el resto de conflictos de horario del
 # módulo ("avisa, no bloquea").
 HORAS_MAXIMAS_LEGALES_MES_COLOMBIA = 210
+# Mismo tope legal, en semana — base para repartir la jornada diaria de cada Esquema de Jornada
+# (ver ESQUEMAS_JORNADA/_meta_horas_mes_por_esquema justo abajo).
+HORAS_MAXIMAS_LEGALES_SEMANA_COLOMBIA = 42
+
+# 🗓️ Esquemas de Jornada (pedido por Tomás, 26/09/2026: "permitir seleccionar el esquema base:
+# 'Lunes a Viernes' o 'Lunes a Sábado'... calcular dinámicamente la meta de horas laborales del
+# mes según los días hábiles del esquema elegido"). Cada colaborador tiene un esquema en su ficha
+# (usuarios.esquema_jornada, editable desde Editar Usuario — ver editar_usuario) que reparte el
+# máximo legal semanal (42h, ver constante de arriba) entre los días hábiles de ese esquema: 5
+# días (L-V) da una jornada diaria de 8.4h; 6 días (L-S) da 7h/día — el mismo criterio con el que
+# se reparte la jornada semanal en la práctica en Colombia según los días pactados.
+ESQUEMAS_JORNADA = {
+    'LV': {'etiqueta': 'Lunes a Viernes', 'dias_semana': (0, 1, 2, 3, 4)},
+    'LS': {'etiqueta': 'Lunes a Sábado', 'dias_semana': (0, 1, 2, 3, 4, 5)},
+}
+
+
+# 📋 Tipos de Novedad de Turno (pedido por Tomás, 26/09/2026) — descuentan horas_afectadas del
+# total NETO laborado de "Horas del Mes" del colaborador afectado. Registradas exclusivamente por
+# 'admin'/'lider' (ver ROLES_GESTIONAN_TURNOS/turnos_gestion_required).
+TIPOS_NOVEDAD_TURNO = {
+    'incapacidad': 'Incapacidad', 'permiso': 'Permiso', 'calamidad': 'Calamidad doméstica',
+    'llegada_tarde': 'Llegada tarde', 'salida_temprana': 'Salida temprana',
+}
+
+
+def _meta_horas_mes_por_esquema(esquema, anio, mes):
+    """Meta de horas laborales de un mes calculada DINÁMICAMENTE a partir de los días hábiles de
+    un Esquema de Jornada ('LV'/'LS', ver ESQUEMAS_JORNADA arriba): cuenta cuántos días de ese
+    mes caen en los días de la semana del esquema, y los multiplica por la jornada diaria que
+    resulta de repartir HORAS_MAXIMAS_LEGALES_SEMANA_COLOMBIA entre esos mismos días. Un esquema
+    desconocido/vacío se trata como 'LV' (el más común), nunca revienta el cálculo."""
+    info = ESQUEMAS_JORNADA.get(esquema) or ESQUEMAS_JORNADA['LV']
+    dias_semana = info['dias_semana']
+    horas_por_dia = HORAS_MAXIMAS_LEGALES_SEMANA_COLOMBIA / len(dias_semana)
+    total_dias_mes = calendar.monthrange(anio, mes)[1]
+    dias_habiles = sum(1 for d in range(1, total_dias_mes + 1) if datetime(anio, mes, d).weekday() in dias_semana)
+    return round(dias_habiles * horas_por_dia, 2)
+
 
 # 📲 WhatsApp Cloud API (Meta) — ver scripts/README_WHATSAPP_TURNOS.md para la guía de activación.
 WHATSAPP_CLOUD_API_TOKEN = os.environ.get('WHATSAPP_CLOUD_API_TOKEN')
@@ -20162,22 +20355,46 @@ def turnos_horas_mes():
         condiciones.append(f"ta.rol_profesional = {ph}")
         parametros.append(f_rol)
     cursor.execute(f"""
-        SELECT u.usuario, u.nombre, u.meta_horas_mensual, ta.fecha, tt.duracion_horas, tt.minutos_descanso
+        SELECT u.id, u.usuario, u.nombre, u.meta_horas_mensual, u.esquema_jornada, ta.fecha, tt.duracion_horas, tt.minutos_descanso
         FROM turnos_asignados ta
         JOIN usuarios u ON u.id = ta.usuario_id
         JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
         WHERE {' AND '.join(condiciones)}
     """, tuple(parametros))
     filas = cursor.fetchall()
+
+    # 🗓️ Override MENSUAL del Esquema de Jornada (ver turnos_esquemas_mensuales/turnos_horas_mes_
+    # esquema): si a este colaborador se le fijó un esquema puntual para ESTE mes/año, gana sobre
+    # el esquema permanente de su ficha (usuarios.esquema_jornada).
+    cursor.execute(
+        f"SELECT usuario_id, esquema FROM turnos_esquemas_mensuales WHERE anio = {ph} AND mes = {ph}",
+        (primer_dia.year, primer_dia.month)
+    )
+    overrides_esquema = {uid: esq for uid, esq in cursor.fetchall()}
+
+    # 📋 Novedades activas del mes (incapacidad/permiso/calamidad/llegada tarde/salida temprana,
+    # pedido por Tomás 26/09/2026) — sin filtro de sede/área/rol propio (la tabla no lo tiene: una
+    # novedad pertenece a la PERSONA, no a un turno puntual), así que solo se suman a un
+    # colaborador que ya quedó en el resumen por tener al menos un turno este mes/filtro; si no
+    # hay ningún filtro de sede/área/rol activo, también se agregan colaboradores que solo tengan
+    # novedades (sin turnos) para no perder su descuento de vista.
+    cursor.execute(f"""
+        SELECT n.usuario_id, u.usuario, u.nombre, u.meta_horas_mensual, u.esquema_jornada, n.fecha, n.horas_afectadas
+        FROM novedades_turno n
+        JOIN usuarios u ON u.id = n.usuario_id
+        WHERE n.estado = 'activo' AND n.fecha BETWEEN {ph} AND {ph}
+    """, (primer_dia.strftime('%Y-%m-%d'), ultimo_dia.strftime('%Y-%m-%d')))
+    filas_novedades = cursor.fetchall()
     conn.close()
 
     hoy_str = hoy.strftime('%Y-%m-%d')
     por_colaborador = {}
-    for usuario, nombre, meta, fecha_turno, duracion, minutos_descanso in filas:
-        entrada = por_colaborador.setdefault(usuario, {
+    for usuario_id, usuario, nombre, meta, esquema, fecha_turno, duracion, minutos_descanso in filas:
+        entrada = por_colaborador.setdefault(usuario_id, {
             'usuario': usuario, 'nombre': nombre,
-            'meta_horas_mensual': float(meta) if meta is not None else None,
-            'horas_transcurridas': 0.0, 'horas_programadas': 0.0,
+            'meta_horas_mensual_manual': float(meta) if meta is not None else None,
+            'esquema_jornada': overrides_esquema.get(usuario_id) or esquema or 'LV',
+            'horas_transcurridas': 0.0, 'horas_programadas': 0.0, 'horas_novedades': 0.0,
         })
         # ⚖️ Ley 2101 de 2021 / Art. 167 CST (20/09/2026): la hora de almuerzo/descanso no cuenta
         # como jornada laboral, así que aquí —y SOLO aquí, en "Horas del Mes"— se descuenta de la
@@ -20192,19 +20409,48 @@ def turnos_horas_mes():
         else:
             entrada['horas_programadas'] += duracion_neta
 
+    sin_filtros = not (f_sede or f_area or f_rol)
+    for usuario_id, usuario, nombre, meta, esquema, fecha_novedad, horas_afectadas in filas_novedades:
+        if usuario_id not in por_colaborador:
+            if not sin_filtros:
+                continue  # 🔎 no se sabe si esta persona cae dentro del filtro de sede/área/rol
+            por_colaborador[usuario_id] = {
+                'usuario': usuario, 'nombre': nombre,
+                'meta_horas_mensual_manual': float(meta) if meta is not None else None,
+                'esquema_jornada': overrides_esquema.get(usuario_id) or esquema or 'LV',
+                'horas_transcurridas': 0.0, 'horas_programadas': 0.0, 'horas_novedades': 0.0,
+            }
+        entrada = por_colaborador[usuario_id]
+        entrada['horas_novedades'] += float(horas_afectadas or 0)
+
     resumen = []
     for entrada in por_colaborador.values():
-        total = round(entrada['horas_transcurridas'] + entrada['horas_programadas'], 2)
-        meta = entrada['meta_horas_mensual']
+        # 📋 Las horas de novedades (incapacidad/permiso/etc.) descuentan del total NETO laborado
+        # — pedido de Tomás 26/09/2026: "ajustar el total de horas netas laboradas restando las
+        # horas de novedades que apliquen".
+        bruto = entrada['horas_transcurridas'] + entrada['horas_programadas']
+        total = round(max(0.0, bruto - entrada['horas_novedades']), 2)
+        # 🗓️ Meta DINÁMICA por Esquema de Jornada (pedido 26/09/2026): se calcula siempre según los
+        # días hábiles de ese esquema en este mes; la meta manual (usuarios.meta_horas_mensual,
+        # override histórico) sigue funcionando como excepción explícita cuando está fijada — gana
+        # sobre el cálculo automático.
+        meta_dinamica = _meta_horas_mes_por_esquema(entrada['esquema_jornada'], primer_dia.year, primer_dia.month)
+        meta_manual = entrada['meta_horas_mensual_manual']
+        meta_final = meta_manual if meta_manual is not None else meta_dinamica
         entrada['horas_transcurridas'] = round(entrada['horas_transcurridas'], 2)
         entrada['horas_programadas'] = round(entrada['horas_programadas'], 2)
+        entrada['horas_novedades'] = round(entrada['horas_novedades'], 2)
+        entrada['meta_horas_mensual'] = meta_final
+        entrada['meta_dinamica'] = meta_dinamica
+        entrada['meta_es_manual'] = meta_manual is not None
+        entrada['esquema_etiqueta'] = ESQUEMAS_JORNADA.get(entrada['esquema_jornada'], ESQUEMAS_JORNADA['LV'])['etiqueta']
         entrada['total_horas'] = total
-        entrada['diferencia'] = round(total - meta, 2) if meta is not None else None
+        entrada['diferencia'] = round(total - meta_final, 2)
         # ⚖️ Referencia informativa + aviso NO bloqueante (Ley 2101 de 2021, ver
         # HORAS_MAXIMAS_LEGALES_MES_COLOMBIA): nunca impide asignar turnos, solo se muestra en la
         # tabla de "Horas del Mes" para que Tomás/gestión humana lo tengan presente.
         entrada['excede_legal'] = total > HORAS_MAXIMAS_LEGALES_MES_COLOMBIA
-        entrada['meta_excede_legal'] = meta is not None and meta > HORAS_MAXIMAS_LEGALES_MES_COLOMBIA
+        entrada['meta_excede_legal'] = meta_final > HORAS_MAXIMAS_LEGALES_MES_COLOMBIA
         resumen.append(entrada)
     resumen.sort(key=lambda r: r['nombre'].lower())
 
@@ -20219,18 +20465,200 @@ def turnos_horas_mes():
         roles_profesionales=[{'clave': k, 'etiqueta': v} for k, v in ETIQUETAS_ROL_PROFESIONAL_TURNO.items()],
         f_sede=f_sede, f_area=f_area, f_rol=f_rol,
         horas_maximas_legales_mes=HORAS_MAXIMAS_LEGALES_MES_COLOMBIA,
+        esquemas_jornada=ESQUEMAS_JORNADA,
     )
 
 
+@app.route('/turnos/horas_mes/esquema', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+@turnos_gestion_required
+def turnos_horas_mes_esquema():
+    """Fija (o reemplaza) el Esquema de Jornada de UN colaborador para UN mes/año puntual (ver
+    turnos_esquemas_mensuales) — pedido de Tomás, 26/09/2026: "al configurar o asignar el horario
+    mensual del colaborador, permitir seleccionar el esquema base". Gana sobre el esquema
+    permanente de la ficha del colaborador (usuarios.esquema_jornada) solo para ese mes; no lo
+    modifica. Se administra desde la propia pestaña "Horas del Mes"."""
+    colaborador_usuario = (request.form.get('colaborador_usuario') or '').strip()
+    mes_str = (request.form.get('mes') or '').strip()
+    esquema = (request.form.get('esquema') or '').strip()
+    if esquema not in ESQUEMAS_JORNADA:
+        return jsonify({'ok': False, 'error': 'Elige un esquema de jornada válido.'}), 400
+    try:
+        mes_dt = datetime.strptime(mes_str, '%Y-%m')
+    except ValueError:
+        return jsonify({'ok': False, 'error': 'El mes no tiene un formato válido.'}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT id FROM usuarios WHERE usuario = {ph}", (colaborador_usuario,))
+    fila = cursor.fetchone()
+    if not fila:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'No se encontró ese colaborador.'}), 404
+    usuario_id = fila[0]
+    try:
+        cursor.execute(
+            f"SELECT id FROM turnos_esquemas_mensuales WHERE usuario_id = {ph} AND anio = {ph} AND mes = {ph}",
+            (usuario_id, mes_dt.year, mes_dt.month)
+        )
+        existente = cursor.fetchone()
+        if existente:
+            cursor.execute(f"UPDATE turnos_esquemas_mensuales SET esquema = {ph}, creado_por = {ph}, fecha_creacion = {ph} WHERE id = {ph}",
+                            (esquema, session['username'], obtener_fecha_actual(), existente[0]))
+        else:
+            cursor.execute(
+                f"INSERT INTO turnos_esquemas_mensuales (usuario_id, anio, mes, esquema, creado_por, fecha_creacion) VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+                (usuario_id, mes_dt.year, mes_dt.month, esquema, session['username'], obtener_fecha_actual())
+            )
+        conn.commit()
+        registrar_log(session['username'], "Cuadro de Turnos", f"Esquema de Jornada de '{colaborador_usuario}' para {mes_str} fijado a '{esquema}'")
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error fijando esquema mensual de '{colaborador_usuario}': {e}")
+        return jsonify({'ok': False, 'error': 'No se pudo guardar el esquema de jornada.'}), 500
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/turnos/novedades')
+@login_required
+@turnos_o_extra_required
+def turnos_novedades():
+    """Cuadro/registro de Novedades de turno (incapacidad, permiso, calamidad, llegada tarde,
+    salida temprana — pedido de Tomás, 26/09/2026): cualquiera con acceso al módulo 'turnos'
+    puede CONSULTARLAS, pero solo 'admin'/'lider' pueden registrar una nueva o anular una
+    existente (ver usuario_puede_gestionar_turnos, el formulario se oculta para el resto)."""
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
+    try:
+        mes_dt = datetime.strptime(request.args.get('mes', ''), '%Y-%m').date()
+    except ValueError:
+        mes_dt = hoy.replace(day=1)
+    primer_dia = mes_dt.replace(day=1)
+    ultimo_dia = mes_dt.replace(day=calendar.monthrange(mes_dt.year, mes_dt.month)[1])
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"""
+        SELECT n.id, u.usuario, u.nombre, n.tipo, n.fecha, n.horas_afectadas, n.observaciones, n.registrado_por_id, n.estado
+        FROM novedades_turno n
+        JOIN usuarios u ON u.id = n.usuario_id
+        WHERE n.fecha BETWEEN {ph} AND {ph}
+        ORDER BY n.fecha DESC, u.nombre ASC
+    """, (primer_dia.strftime('%Y-%m-%d'), ultimo_dia.strftime('%Y-%m-%d')))
+    columnas = ['id', 'usuario', 'nombre', 'tipo', 'fecha', 'horas_afectadas', 'observaciones', 'registrado_por_id', 'estado']
+    novedades = [dict(zip(columnas, fila)) for fila in cursor.fetchall()]
+    for n in novedades:
+        n['tipo_etiqueta'] = TIPOS_NOVEDAD_TURNO.get(n['tipo'], n['tipo'])
+    conn.close()
+
+    mes_anterior = (primer_dia - timedelta(days=1)).replace(day=1)
+    mes_siguiente = (ultimo_dia + timedelta(days=1))
+    return render_template(
+        'turnos_novedades.html',
+        novedades=novedades, tipos_novedad=TIPOS_NOVEDAD_TURNO,
+        mes_actual=primer_dia, mes_str=primer_dia.strftime('%Y-%m'),
+        mes_nombre=f"{MESES_ES[primer_dia.month - 1].capitalize()} {primer_dia.year}",
+        mes_anterior=mes_anterior.strftime('%Y-%m'), mes_siguiente=mes_siguiente.strftime('%Y-%m'),
+    )
+
+
+@app.route('/turnos/novedades/registrar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+@turnos_gestion_required
+def turnos_novedades_registrar():
+    colaborador_usuario = (request.form.get('colaborador_usuario') or '').strip()
+    tipo = (request.form.get('tipo') or '').strip()
+    fecha = (request.form.get('fecha') or '').strip()
+    horas_raw = (request.form.get('horas_afectadas') or '').strip()
+    observaciones = (request.form.get('observaciones') or '').strip() or None
+
+    errores = []
+    if tipo not in TIPOS_NOVEDAD_TURNO:
+        errores.append('Elige un tipo de novedad válido.')
+    try:
+        fecha_dt = datetime.strptime(fecha, '%Y-%m-%d')
+    except ValueError:
+        errores.append('La fecha no tiene un formato válido.')
+    try:
+        horas_afectadas = float(horas_raw)
+        if horas_afectadas <= 0:
+            errores.append('Las horas afectadas deben ser un número mayor que cero.')
+    except ValueError:
+        errores.append('Las horas afectadas deben ser un número.')
+    if not colaborador_usuario:
+        errores.append('Busca al colaborador por cédula o nombre y elige una sugerencia de la lista.')
+    if errores:
+        return jsonify({'ok': False, 'errores': errores}), 400
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"SELECT id FROM usuarios WHERE usuario = {ph}", (colaborador_usuario,))
+    fila = cursor.fetchone()
+    if not fila:
+        conn.close()
+        return jsonify({'ok': False, 'errores': ['No se encontró ese colaborador en Arkiv — búscalo de nuevo por cédula o nombre y elige una sugerencia.']}), 400
+    usuario_id = fila[0]
+    cursor.execute(f"SELECT id FROM usuarios WHERE usuario = {ph}", (session['username'],))
+    fila_registrador = cursor.fetchone()
+    registrado_por_id = fila_registrador[0] if fila_registrador else None
+
+    try:
+        cursor.execute(
+            f"INSERT INTO novedades_turno (usuario_id, tipo, fecha, horas_afectadas, observaciones, registrado_por_id, estado, fecha_registro) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},'activo',{ph})",
+            (usuario_id, tipo, fecha_dt.strftime('%Y-%m-%d'), horas_afectadas, observaciones, registrado_por_id, obtener_fecha_actual())
+        )
+        conn.commit()
+        registrar_log(session['username'], "Cuadro de Turnos",
+                       f"Se registró una novedad de '{TIPOS_NOVEDAD_TURNO.get(tipo, tipo)}' para '{colaborador_usuario}' el {fecha_dt.strftime('%Y-%m-%d')} ({horas_afectadas} h)")
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"⚠️ Error registrando novedad de turno para '{colaborador_usuario}': {e}")
+        return jsonify({'ok': False, 'errores': ['No se pudo registrar la novedad.']}), 500
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/turnos/novedades/<int:novedad_id>/eliminar', methods=['POST'])
+@login_required
+@turnos_o_extra_required
+@turnos_gestion_required
+def turnos_novedades_eliminar(novedad_id):
+    """Anula (soft delete, igual que turnos_asignados_eliminar) una novedad — nunca se borra del
+    historial, solo deja de contarse en Horas del Mes."""
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    cursor.execute(f"UPDATE novedades_turno SET estado = 'anulada' WHERE id = {ph} AND estado = 'activo'", (novedad_id,))
+    afectadas = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if not afectadas:
+        return jsonify({'ok': False, 'error': 'Esa novedad no existe o ya estaba anulada.'}), 404
+    registrar_log(session['username'], "Cuadro de Turnos", f"Se anuló la novedad de turno #{novedad_id}")
+    return jsonify({'ok': True})
+
+
 def _colaboradores_por_sede():
-    """Directorio de solo lectura de colaboradores agrupados por la Sede de su PERFIL de usuario
-    (usuarios.sede — el campo "Sede" que se asigna al crear la cuenta en Registrar Usuario, o se
-    ajusta después desde Gestión de Usuarios → Editar), pedido por Tomás (20/09/2026) para poder
-    ver dentro de Cuadro de Turnos a qué Sede está asociado cada colaborador. A propósito NO usa
-    la Sede que se elige al ASIGNAR un turno puntual (turnos_asignados.sede, que puede diferir por
-    una cobertura/reemplazo) — esta vista es sobre la Sede "de base" de cada cuenta, no sobre los
-    turnos. Incluye TODAS las cuentas activas del sistema (no solo quienes tienen acceso a
-    Turnos), porque el objetivo es ver la organización completa por Sede."""
+    """Directorio de colaboradores agrupados por Sede dentro de Cuadro de Turnos, pedido por
+    Tomás (20/09/2026, ampliado 26/09/2026: "debe cargar en cada sede, el horario que tienen
+    asignado cada usuario para una sede... no como esta ahora").
+
+    Prioriza la Sede/horario de su TURNO ASIGNADO vigente (turnos_asignados.sede — el próximo
+    turno activo si tiene uno programado hoy o a futuro, o si no el más reciente que ya tuvo)
+    sobre la Sede "de base" de su perfil (usuarios.sede): así un colaborador con un turno
+    asignado en una Sede puntual aparece agrupado y con su horario ahí (ej. Valentina en
+    "Preventiva Unicentro", Manuela en "Nuevo Naranjal"), en vez de en la Sede desactualizada de
+    su ficha o en "Sin sede asignada". Un colaborador SIN ningún turno todavía sigue
+    agrupándose por la Sede de su perfil, igual que antes de este cambio. Incluye TODAS las
+    cuentas activas del sistema (no solo quienes tienen acceso a Turnos), porque el objetivo es
+    ver la organización completa por Sede."""
     conn, db_type = get_db()
     cursor = conn.cursor()
     cursor.execute(
@@ -20238,23 +20666,56 @@ def _colaboradores_por_sede():
         "WHERE COALESCE(estado, 'activo') = 'activo' ORDER BY nombre ASC"
     )
     filas = cursor.fetchall()
+
+    hoy_str = datetime.now(ZONA_HORARIA_COLOMBIA).date().strftime('%Y-%m-%d')
+    cursor.execute("""
+        SELECT u.usuario, ta.sede, ta.fecha, tt.codigo, tt.nombre, tt.hora_inicio, tt.hora_fin
+        FROM turnos_asignados ta
+        JOIN usuarios u ON u.id = ta.usuario_id
+        JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+        WHERE ta.estado = 'activo'
+        ORDER BY ta.fecha ASC
+    """)
+    turnos_por_usuario = {}
+    for usuario, sede_turno, fecha_turno, codigo, nombre_tt, hora_inicio, hora_fin in cursor.fetchall():
+        turnos_por_usuario.setdefault(usuario, []).append({
+            'sede': (sede_turno or '').strip(), 'fecha': fecha_turno, 'codigo': codigo,
+            'nombre': nombre_tt, 'hora_inicio': hora_inicio, 'hora_fin': hora_fin,
+        })
     conn.close()
+
+    # 🗓️ De la lista (ordenada ascendente por fecha) de cada colaborador, se elige el primer turno
+    # de hoy en adelante si tiene uno programado; si no tiene ninguno a futuro, se usa el último
+    # de la lista (el más reciente que ya tuvo, por venir ordenada ascendente).
+    turno_vigente_por_usuario = {}
+    for usuario, lista in turnos_por_usuario.items():
+        futuros_o_de_hoy = [t for t in lista if t['fecha'] >= hoy_str]
+        turno_vigente_por_usuario[usuario] = futuros_o_de_hoy[0] if futuros_o_de_hoy else lista[-1]
 
     sedes_catalogo = _sedes_turno_disponibles()
     grupos = {s: [] for s in sedes_catalogo}
     sin_sede = []
-    for usuario, nombre, rol, sede, cedula, correo, telefono in filas:
+    for usuario, nombre, rol, sede_perfil, cedula, correo, telefono in filas:
+        turno_vigente = turno_vigente_por_usuario.get(usuario)
+        if turno_vigente and turno_vigente['sede']:
+            sede_efectiva = turno_vigente['sede']
+            horario_resumen = f"{turno_vigente['codigo']} · {turno_vigente['hora_inicio']}–{turno_vigente['hora_fin']}"
+            horario_fecha = turno_vigente['fecha']
+        else:
+            sede_efectiva = (sede_perfil or '').strip()
+            horario_resumen = None
+            horario_fecha = None
         colaborador = {
             'usuario': usuario, 'nombre': nombre or usuario, 'rol': rol,
             'rol_etiqueta': _CARGO_LEGIBLE_POR_ROL.get(rol, rol),
             'cedula': cedula or '', 'correo': correo or '', 'telefono': telefono or '',
+            'horario_resumen': horario_resumen, 'horario_fecha': horario_fecha,
         }
-        sede_limpia = (sede or '').strip()
-        if sede_limpia:
-            # Una Sede guardada en el perfil que ya no está en el catálogo activo (se renombró o
-            # se desactivó después de asignarla) igual se muestra, con su propio grupo aparte, en
-            # vez de perderla silenciosamente dentro de "Sin sede".
-            grupos.setdefault(sede_limpia, []).append(colaborador)
+        if sede_efectiva:
+            # Una Sede que ya no está en el catálogo activo (se renombró o se desactivó después
+            # de asignarla, ya sea en el perfil o en un turno) igual se muestra, con su propio
+            # grupo aparte, en vez de perderla silenciosamente dentro de "Sin sede".
+            grupos.setdefault(sede_efectiva, []).append(colaborador)
         else:
             sin_sede.append(colaborador)
 
@@ -20279,6 +20740,7 @@ def turnos_por_sede():
 @app.route('/turnos/asignar', methods=['POST'])
 @login_required
 @turnos_o_extra_required
+@turnos_gestion_required
 def turnos_asignar():
     # 🔎 El campo de colaborador viaja como `colaborador_usuario` (el nombre de usuario, texto) y
     # no como un id numérico: es exactamente lo que devuelve el buscador compartido
@@ -20462,6 +20924,7 @@ def turnos_asignar():
 @app.route('/turnos/asignar_grupo', methods=['POST'])
 @login_required
 @turnos_o_extra_required
+@turnos_gestion_required
 def turnos_asignar_grupo():
     """Asigna el MISMO turno a varios colaboradores de una vez ("una persona, varias, o todo el
     grupo" — pedido de Tomás, 20/09/2026). El "grupo" es, en la práctica, la lista de
@@ -20617,6 +21080,7 @@ def turnos_asignar_grupo():
 @app.route('/turnos/asignados/<int:turno_id>/eliminar', methods=['POST'])
 @login_required
 @turnos_o_extra_required
+@turnos_gestion_required
 def turnos_asignados_eliminar(turno_id):
     """Cancela (no borra) la asignación — mismo criterio de baja lógica que el resto de la app,
     para conservar el historial/auditoría."""
@@ -20684,6 +21148,7 @@ def _obtener_o_crear_cuadro(desde_str, hasta_str, sede, area, usuario):
 @app.route('/turnos/publicar_semana', methods=['POST'])
 @login_required
 @turnos_o_extra_required
+@turnos_gestion_required
 def turnos_publicar_semana():
     """Publica el cuadro de la semana/filtro actual: adopta los turnos sueltos de ese rango que
     todavía no pertenecían a ningún cuadro y marca el cuadro como 'publicado' (si estaba en
@@ -20726,6 +21191,7 @@ def turnos_publicar_semana():
 @app.route('/turnos/cuadros/<int:cuadro_id>/cerrar', methods=['POST'])
 @login_required
 @turnos_o_extra_required
+@turnos_gestion_required
 def turnos_cuadros_cerrar(cuadro_id):
     conn, db_type = get_db()
     cursor = conn.cursor()
@@ -20871,6 +21337,158 @@ def turnos_exportar_xlsx():
     return Response(salida.read(), headers={
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': f'attachment; filename="Arkiv_CuadroTurnos_{fecha_filename}.xlsx"'
+    })
+
+
+@app.route('/turnos/horas_mes/exportar_xlsx')
+@login_required
+@turnos_o_extra_required
+def turnos_horas_mes_exportar_xlsx():
+    """Exportación a Excel en formato MATRIZ MENSUAL (pedido por Tomás, 26/09/2026): una fila por
+    colaborador, una columna por cada día del mes (incluidos sábados y domingos) con las horas
+    NETAS (post almuerzo/descanso) que tuvo asignadas ese día, y al final las columnas de
+    totales: Horas Programadas, Horas Novedades/Descuentos, Total Horas Netas Laboradas, Meta
+    Horas del Mes (según Esquema de Jornada) y Diferencia/Balance de Horas. Reutiliza exactamente
+    el mismo criterio de cálculo que la pantalla "Horas del Mes" (ver turnos_horas_mes) para que
+    ambas siempre coincidan."""
+    hoy = datetime.now(ZONA_HORARIA_COLOMBIA).date()
+    try:
+        mes_dt = datetime.strptime(request.args.get('mes', ''), '%Y-%m').date()
+    except ValueError:
+        mes_dt = hoy.replace(day=1)
+    primer_dia = mes_dt.replace(day=1)
+    total_dias_mes = calendar.monthrange(mes_dt.year, mes_dt.month)[1]
+    ultimo_dia = mes_dt.replace(day=total_dias_mes)
+    f_sede = request.args.get('sede', '').strip()
+    f_area = request.args.get('area', '').strip()
+    f_rol = request.args.get('rol', '').strip()
+
+    conn, db_type = get_db()
+    cursor = conn.cursor()
+    ph = '%s' if db_type == 'postgres' else '?'
+    condiciones = [f"ta.estado = 'activo'", f"ta.fecha BETWEEN {ph} AND {ph}"]
+    parametros = [primer_dia.strftime('%Y-%m-%d'), ultimo_dia.strftime('%Y-%m-%d')]
+    if f_sede:
+        condiciones.append(f"ta.sede = {ph}")
+        parametros.append(f_sede)
+    if f_area:
+        condiciones.append(f"ta.area = {ph}")
+        parametros.append(f_area)
+    if f_rol:
+        condiciones.append(f"ta.rol_profesional = {ph}")
+        parametros.append(f_rol)
+    cursor.execute(f"""
+        SELECT u.id, u.usuario, u.nombre, u.meta_horas_mensual, u.esquema_jornada, ta.fecha, tt.duracion_horas, tt.minutos_descanso
+        FROM turnos_asignados ta
+        JOIN usuarios u ON u.id = ta.usuario_id
+        JOIN tipos_turno tt ON tt.id = ta.tipo_turno_id
+        WHERE {' AND '.join(condiciones)}
+    """, tuple(parametros))
+    filas = cursor.fetchall()
+
+    cursor.execute(
+        f"SELECT usuario_id, esquema FROM turnos_esquemas_mensuales WHERE anio = {ph} AND mes = {ph}",
+        (primer_dia.year, primer_dia.month)
+    )
+    overrides_esquema = {uid: esq for uid, esq in cursor.fetchall()}
+
+    cursor.execute(f"""
+        SELECT n.usuario_id, u.usuario, u.nombre, u.meta_horas_mensual, u.esquema_jornada, n.horas_afectadas
+        FROM novedades_turno n
+        JOIN usuarios u ON u.id = n.usuario_id
+        WHERE n.estado = 'activo' AND n.fecha BETWEEN {ph} AND {ph}
+    """, (primer_dia.strftime('%Y-%m-%d'), ultimo_dia.strftime('%Y-%m-%d')))
+    filas_novedades = cursor.fetchall()
+    conn.close()
+
+    por_colaborador = {}
+    for usuario_id, usuario, nombre, meta, esquema, fecha_turno, duracion, minutos_descanso in filas:
+        entrada = por_colaborador.setdefault(usuario_id, {
+            'usuario': usuario, 'nombre': nombre,
+            'meta_horas_mensual_manual': float(meta) if meta is not None else None,
+            'esquema_jornada': overrides_esquema.get(usuario_id) or esquema or 'LV',
+            'dias': {}, 'horas_novedades': 0.0,
+        })
+        duracion_bruta = float(duracion or 0)
+        descanso_horas = float(minutos_descanso or 0) / 60.0
+        duracion_neta = max(0.0, duracion_bruta - descanso_horas)
+        dia_num = int(fecha_turno[-2:])
+        entrada['dias'][dia_num] = entrada['dias'].get(dia_num, 0.0) + duracion_neta
+
+    sin_filtros = not (f_sede or f_area or f_rol)
+    for usuario_id, usuario, nombre, meta, esquema, horas_afectadas in filas_novedades:
+        if usuario_id not in por_colaborador:
+            if not sin_filtros:
+                continue
+            por_colaborador[usuario_id] = {
+                'usuario': usuario, 'nombre': nombre,
+                'meta_horas_mensual_manual': float(meta) if meta is not None else None,
+                'esquema_jornada': overrides_esquema.get(usuario_id) or esquema or 'LV',
+                'dias': {}, 'horas_novedades': 0.0,
+            }
+        por_colaborador[usuario_id]['horas_novedades'] += float(horas_afectadas or 0)
+
+    filas_resumen = []
+    for entrada in por_colaborador.values():
+        horas_programadas = round(sum(entrada['dias'].values()), 2)
+        horas_novedades = round(entrada['horas_novedades'], 2)
+        total_neto = round(max(0.0, horas_programadas - horas_novedades), 2)
+        meta_dinamica = _meta_horas_mes_por_esquema(entrada['esquema_jornada'], primer_dia.year, primer_dia.month)
+        meta_final = entrada['meta_horas_mensual_manual'] if entrada['meta_horas_mensual_manual'] is not None else meta_dinamica
+        entrada['horas_programadas'] = horas_programadas
+        entrada['horas_novedades'] = horas_novedades
+        entrada['total_neto'] = total_neto
+        entrada['meta_final'] = round(meta_final, 2)
+        entrada['diferencia'] = round(total_neto - meta_final, 2)
+        filas_resumen.append(entrada)
+    filas_resumen.sort(key=lambda r: r['nombre'].lower())
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Horas del Mes'
+    encabezados = ['Colaborador'] + [f"{d:02d}" for d in range(1, total_dias_mes + 1)] + [
+        'Horas Programadas', 'Horas Novedades / Descuentos', 'Total Horas Netas Laboradas',
+        'Meta Horas del Mes', 'Diferencia / Balance de Horas',
+    ]
+    ws.append(encabezados)
+    for celda in ws[1]:
+        celda.font = Font(bold=True, color='FFFFFF')
+        celda.fill = PatternFill(start_color='0EA5B7', end_color='0EA5B7', fill_type='solid')
+
+    # 🗓️ Sábados y domingos "visibles" (pedido explícito de Tomás): esas columnas quedan
+    # sombreadas para distinguirlas de un vistazo del resto de la matriz, sin cambiar el cálculo.
+    relleno_fin_de_semana = PatternFill(start_color='1E293B', end_color='1E293B', fill_type='solid')
+    for d in range(1, total_dias_mes + 1):
+        if datetime(mes_dt.year, mes_dt.month, d).weekday() >= 5:
+            ws.cell(row=1, column=1 + d).fill = relleno_fin_de_semana
+
+    for r in filas_resumen:
+        fila = [r['nombre']] + [(r['dias'].get(d) or None) for d in range(1, total_dias_mes + 1)] + [
+            r['horas_programadas'], r['horas_novedades'], r['total_neto'], r['meta_final'], r['diferencia'],
+        ]
+        ws.append(fila)
+        fila_num = ws.max_row
+        for d in range(1, total_dias_mes + 1):
+            if datetime(mes_dt.year, mes_dt.month, d).weekday() >= 5:
+                ws.cell(row=fila_num, column=1 + d).fill = relleno_fin_de_semana
+
+    ws.freeze_panes = 'B2'
+    ws.column_dimensions['A'].width = 26
+    for i in range(2, total_dias_mes + 2):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 6
+    for i, ancho in enumerate([20, 24, 24, 20, 24], start=total_dias_mes + 2):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = ancho
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    fecha_filename = datetime.now(ZONA_HORARIA_COLOMBIA).strftime('%Y%m%d_%H%M')
+    return Response(salida.read(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="Arkiv_HorasDelMes_{mes_dt.strftime("%Y%m")}_{fecha_filename}.xlsx"'
     })
 
 
