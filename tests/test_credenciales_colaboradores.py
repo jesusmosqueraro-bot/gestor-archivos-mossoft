@@ -173,8 +173,9 @@ def test_alta_credencial_usa_la_contrasena_puntual_cuando_se_diligencia(admin_se
 def test_filtro_por_pqrs_muestra_solo_los_registros_de_ese_pqrs(admin_session, app):
     """Ojo: 'colaboradores_existentes' (para el autocompletar del modal 'Nueva Alta') lista TODOS
     los colaboradores sin importar el filtro activo — por eso la prueba busca el patrón exacto de
-    una FILA de la tabla (">Nombre<"), no solo si el nombre aparece en algún lugar de la página
-    (podría aparecer igual dentro del <datalist>)."""
+    una FILA de la tabla consolidada (ver _colaboradores_consolidados, 26/09/2026: la tabla
+    principal ahora es 1 fila por colaborador, con un ícono antes del nombre), no solo si el
+    nombre aparece en algún lugar de la página (podría aparecer igual dentro del <datalist>)."""
     _crear_credencial_colaborador(app, colaborador='Empleado PQRS Uno')
     conn, db_type = app.get_db()
     cur = conn.cursor()
@@ -190,8 +191,8 @@ def test_filtro_por_pqrs_muestra_solo_los_registros_de_ese_pqrs(admin_session, a
 
     texto = admin_session.get('/credenciales/colaboradores?pqrs=00001&estado=todos').get_data(as_text=True)
 
-    assert '>Empleado PQRS Uno<' in texto
-    assert '>Empleado PQRS Dos<' not in texto
+    assert 'mr-1.5"></i>Empleado PQRS Uno' in texto
+    assert 'mr-1.5"></i>Empleado PQRS Dos' not in texto
 
 
 def test_pagina_de_credenciales_sugiere_los_pqrs_ya_usados(admin_session, app):
