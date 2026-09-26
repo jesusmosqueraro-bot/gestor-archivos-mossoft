@@ -1,0 +1,753 @@
+    <script>
+        function _reiniciarPanelCrearUsuarioRapido() {
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            panelCrear.classList.add('hidden');
+            panelCrear.dataset.cedula = '';
+            document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+            ['rapido-primer-nombre', 'rapido-segundo-nombre', 'rapido-primer-apellido', 'rapido-segundo-apellido', 'rapido-email'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) { el.value = ''; }
+            });
+            var especialidad = document.getElementById('rapido-especialidad');
+            if (especialidad) { especialidad.value = ''; }
+            var firmaInput = document.getElementById('firma-rapido-input');
+            if (firmaInput) { firmaInput.value = ''; }
+            var borrarFirma = document.getElementById('firma-rapido-borrar');
+            if (borrarFirma) { borrarFirma.click(); }
+            var firmaPreview = document.getElementById('firma-rapido-preview');
+            if (firmaPreview) { firmaPreview.classList.add('hidden'); firmaPreview.src = ''; }
+            var firmaArchivo = document.getElementById('firma-rapido-archivo');
+            if (firmaArchivo) { firmaArchivo.value = ''; }
+        }
+
+        function actualizarDetalleAccesorioOtro() {
+            var marcado = document.getElementById('input-accesorio-otro').checked;
+            var campo = document.getElementById('campo-accesorio-otro-detalle');
+            var input = document.getElementById('input-accesorio-otro-detalle');
+            campo.classList.toggle('hidden', !marcado);
+            input.required = marcado;
+            if (!marcado) { input.value = ''; }
+        }
+
+        var _modalActivoEsNuevo = true;
+        function abrirModalNuevo() {
+            _modalActivoEsNuevo = true;
+            document.getElementById('modal-activo-titulo').textContent = 'Nuevo Activo';
+            document.getElementById('form-activo').action = '/tickets/inventario/nuevo';
+            document.getElementById('input-activo-nombre').value = '';
+            document.getElementById('input-activo-tipo').value = '{{ tipos_activo[0] }}';
+            document.getElementById('input-activo-estado').value = 'Disponible';
+            document.getElementById('input-activo-marca').value = '';
+            document.getElementById('input-activo-modelo').value = '';
+            document.getElementById('input-activo-serie').value = '';
+            document.getElementById('input-activo-ram-gb').value = '';
+            document.getElementById('input-activo-tipo-ram').value = '';
+            document.getElementById('input-activo-disco-gb').value = '';
+            document.getElementById('input-activo-tipo-disco').value = '';
+            document.getElementById('input-activo-asignado').value = '';
+            document.getElementById('input-activo-cedula-buscar').value = '';
+            document.getElementById('mensaje-busqueda-cedula').textContent = '';
+            _reiniciarPanelCrearUsuarioRapido();
+            document.getElementById('input-activo-sede').value = {{ q_sede | tojson }};
+            document.getElementById('input-activo-area').value = {{ q_area | tojson }};
+            document.getElementById('input-activo-proveedor').value = {{ q_proveedor | tojson }};
+            document.getElementById('input-activo-observaciones').value = '';
+            document.getElementById('input-activo-tipo-costo').value = '';
+            document.getElementById('input-activo-costo-compra').value = '';
+            document.getElementById('input-activo-costo-alquiler').value = '';
+            actualizarCampoCostoInventario();
+            document.getElementById('input-activo-biomedico').checked = false;
+            document.getElementById('input-activo-categoria-especial').checked = false;
+            document.getElementById('input-categoria-especial-valor').value = 'sst';
+            {% for ac in accesorios_activo %}
+            document.getElementById('input-accesorio-{{ ac.clave }}').checked = false;
+            {% endfor %}
+            document.getElementById('input-accesorio-otro-detalle').value = '';
+            actualizarDetalleAccesorioOtro();
+            activoActualIdParaActas = null;
+            limpiarFormularioActaRecibido();
+            actualizarSeccionActaRecibido();
+            document.getElementById('input-generar-acta-asignacion').checked = false;
+            document.getElementById('input-acta-asignacion-descripcion').value = '';
+            document.getElementById('btn-ver-actas-asignacion').classList.add('hidden');
+            actualizarObligatoriedadCamposActa();
+            document.getElementById('modal-activo').classList.remove('hidden');
+            document.getElementById('modal-activo').classList.add('flex');
+            document.getElementById('modal-activo').scrollTop = 0;
+        }
+        function abrirModalEditar(activo) {
+            _modalActivoEsNuevo = false;
+            document.getElementById('sugerencias-activo-registrado').classList.add('hidden');
+            document.getElementById('modal-activo-titulo').textContent = 'Editar Activo';
+            document.getElementById('form-activo').action = '/tickets/inventario/' + activo.id + '/editar';
+            document.getElementById('input-activo-nombre').value = activo.nombre || '';
+            document.getElementById('input-activo-tipo').value = activo.tipo_activo || '';
+            document.getElementById('input-activo-estado').value = activo.estado || 'Disponible';
+            document.getElementById('input-activo-marca').value = activo.marca || '';
+            document.getElementById('input-activo-modelo').value = activo.modelo || '';
+            document.getElementById('input-activo-serie').value = activo.numero_serie || '';
+            document.getElementById('input-activo-ram-gb').value = activo.ram_gb != null ? activo.ram_gb : '';
+            document.getElementById('input-activo-tipo-ram').value = activo.tipo_ram || '';
+            document.getElementById('input-activo-disco-gb').value = activo.disco_gb != null ? activo.disco_gb : '';
+            document.getElementById('input-activo-tipo-disco').value = activo.tipo_disco || '';
+            document.getElementById('input-activo-asignado').value = activo.asignado_a || '';
+            document.getElementById('input-activo-cedula-buscar').value = '';
+            document.getElementById('mensaje-busqueda-cedula').textContent = '';
+            _reiniciarPanelCrearUsuarioRapido();
+            document.getElementById('input-activo-sede').value = activo.sede || '';
+            document.getElementById('input-activo-area').value = activo.area || '';
+            document.getElementById('input-activo-proveedor').value = activo.proveedor || '';
+            document.getElementById('input-activo-observaciones').value = activo.observaciones || '';
+            document.getElementById('input-activo-tipo-costo').value = activo.tipo_costo || '';
+            document.getElementById('input-activo-costo-compra').value = activo.costo_compra != null ? activo.costo_compra : '';
+            document.getElementById('input-activo-costo-alquiler').value = activo.costo_alquiler_mensual != null ? activo.costo_alquiler_mensual : '';
+            actualizarCampoCostoInventario();
+            document.getElementById('input-activo-biomedico').checked = !!activo.es_biomedico;
+            document.getElementById('input-activo-categoria-especial').checked = !activo.es_biomedico && !!activo.categoria_especial;
+            document.getElementById('input-categoria-especial-valor').value = activo.categoria_especial || 'sst';
+            var _accesoriosActivo = (activo.accesorios_asignados || '').split(',');
+            {% for ac in accesorios_activo %}
+            document.getElementById('input-accesorio-{{ ac.clave }}').checked = _accesoriosActivo.indexOf('{{ ac.clave }}') !== -1;
+            {% endfor %}
+            document.getElementById('input-accesorio-otro-detalle').value = activo.accesorio_otro_detalle || '';
+            actualizarDetalleAccesorioOtro();
+            activoActualIdParaActas = activo.id;
+            limpiarFormularioActaRecibido();
+            actualizarSeccionActaRecibido();
+            document.getElementById('input-generar-acta-asignacion').checked = false;
+            document.getElementById('input-acta-asignacion-descripcion').value = '';
+            document.getElementById('btn-ver-actas-asignacion').classList.remove('hidden');
+            actualizarObligatoriedadCamposActa();
+            document.getElementById('modal-activo').classList.remove('hidden');
+            document.getElementById('modal-activo').classList.add('flex');
+            document.getElementById('modal-activo').scrollTop = 0;
+        }
+        function cerrarModalActivo() {
+            document.getElementById('modal-activo').classList.add('hidden');
+            document.getElementById('modal-activo').classList.remove('flex');
+        }
+
+        var _timeoutBusquedaActivoRegistrado = null;
+        function buscarActivoRegistrado(valor) {
+            clearTimeout(_timeoutBusquedaActivoRegistrado);
+            var caja = document.getElementById('sugerencias-activo-registrado');
+            if (!_modalActivoEsNuevo || !valor || valor.trim().length < 2) {
+                caja.classList.add('hidden');
+                caja.innerHTML = '';
+                return;
+            }
+            _timeoutBusquedaActivoRegistrado = setTimeout(function () {
+                fetch('/tickets/inventario/buscar_activo?q=' + encodeURIComponent(valor.trim()))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        var resultados = data.resultados || [];
+                        if (!resultados.length) {
+                            caja.classList.add('hidden');
+                            caja.innerHTML = '';
+                            return;
+                        }
+                        caja.innerHTML = resultados.map(function (a, idx) {
+                            var detalle = [a.tipo_activo, [a.marca, a.modelo].filter(Boolean).join(' '), a.numero_serie ? ('Serie ' + a.numero_serie) : null]
+                                .filter(Boolean).join(' — ');
+                            return '<div class="px-3 py-2 hover:bg-slate-700/60 cursor-pointer border-b border-slate-700/40 last:border-0" onclick="seleccionarActivoRegistrado(' + idx + ')">' +
+                                '<p class="font-bold text-slate-200 text-xs">Placa ' + a.nombre + ' <span class="text-slate-500 font-normal">(' + (a.estado || '—') + ')</span></p>' +
+                                '<p class="text-slate-400 text-[11px]">' + (detalle || 'Sin datos técnicos registrados') + '</p>' +
+                                '</div>';
+                        }).join('');
+                        window._resultadosActivoRegistrado = resultados;
+                        caja.classList.remove('hidden');
+                    })
+                    .catch(function () { caja.classList.add('hidden'); });
+            }, 250);
+        }
+        function seleccionarActivoRegistrado(idx) {
+            var activo = (window._resultadosActivoRegistrado || [])[idx];
+            document.getElementById('sugerencias-activo-registrado').classList.add('hidden');
+            if (!activo) return;
+            abrirModalEditar(activo);
+        }
+        document.addEventListener('click', function (e) {
+            var caja = document.getElementById('sugerencias-activo-registrado');
+            if (caja && !caja.classList.contains('hidden') && !caja.contains(e.target) && e.target.id !== 'input-activo-nombre') {
+                caja.classList.add('hidden');
+            }
+        });
+        function abrirModalImportarExportar() {
+            document.getElementById('modal-import-export').classList.remove('hidden');
+            document.getElementById('modal-import-export').classList.add('flex');
+        }
+        function cerrarModalImportarExportar() {
+            document.getElementById('modal-import-export').classList.add('hidden');
+            document.getElementById('modal-import-export').classList.remove('flex');
+        }
+        function actualizarObligatoriedadCamposActa() {
+            var marcado = document.getElementById('input-generar-acta-asignacion').checked;
+            ['input-activo-marca', 'input-activo-modelo', 'input-activo-serie'].forEach(function (id) {
+                document.getElementById(id).required = marcado;
+            });
+        }
+        function actualizarCampoCostoInventario() {
+            const tipo = document.getElementById('input-activo-tipo-costo').value;
+            document.getElementById('campo-costo-compra').classList.toggle('hidden', tipo !== 'propio');
+            document.getElementById('campo-costo-alquiler').classList.toggle('hidden', tipo !== 'alquilado');
+        }
+
+        var activoActualIdParaActas = null;
+        var firmaActaWidget = null;
+
+        var TEXTOS_ACTA_RECIBIDO_JS = {
+            biomedico: {
+                intro: 'Si este equipo se está entregando a domicilio (paciente o cuidador), registra aquí el acta de recibido — queda un historial aparte por cada entrega, con la dirección y la firma de quien lo recibió, útil si el equipo se pierde o se daña.',
+                relaciones: [['paciente', 'Paciente'], ['cuidador', 'Cuidador/a'], ['otro', 'Otro responsable']]
+            },
+            sst: {
+                intro: 'Registra aquí el acta de recibido de este insumo de SST — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            },
+            ambiental: {
+                intro: 'Registra aquí el acta de recibido de este insumo Ambiental — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            },
+            laboratorio: {
+                intro: 'Registra aquí el acta de recibido de este insumo de Laboratorio Clínico — queda un historial aparte por cada entrega, con la dirección/ubicación y la firma de quien lo recibió.',
+                relaciones: [['colaborador', 'Colaborador'], ['contratista', 'Contratista / Proveedor'], ['otro', 'Otro responsable']]
+            }
+        };
+
+        function _categoriaActaActiva() {
+            if (document.getElementById('input-activo-biomedico').checked) return 'biomedico';
+            if (document.getElementById('input-activo-categoria-especial').checked) {
+                return document.getElementById('input-categoria-especial-valor').value || 'sst';
+            }
+            return null;
+        }
+
+        function actualizarSeccionActaRecibido() {
+            const categoria = _categoriaActaActiva();
+            const marcado = !!categoria;
+            document.getElementById('seccion-acta-recibido').classList.toggle('hidden', !marcado);
+            document.getElementById('seccion-categoria-especial-valor').classList.toggle('hidden', !document.getElementById('input-activo-categoria-especial').checked);
+            document.getElementById('btn-ver-actas-recibido').classList.toggle('hidden', !(marcado && activoActualIdParaActas));
+            if (marcado) {
+                const textos = TEXTOS_ACTA_RECIBIDO_JS[categoria] || TEXTOS_ACTA_RECIBIDO_JS.sst;
+                document.getElementById('texto-intro-acta-recibido').textContent = textos.intro;
+                const selectRelacion = document.getElementById('input-acta-relacion');
+                selectRelacion.innerHTML = textos.relaciones.map(function (r) {
+                    return '<option value="' + r[0] + '">' + r[1] + '</option>';
+                }).join('');
+            }
+        }
+
+        function limpiarFormularioActaRecibido() {
+            document.getElementById('input-acta-nombre').value = '';
+            document.getElementById('input-acta-documento').value = '';
+            document.getElementById('input-acta-telefono').value = '';
+            document.getElementById('input-acta-direccion').value = '';
+            if (firmaActaWidget) firmaActaWidget.reiniciar();
+        }
+
+        function abrirModalActasRecibido() {
+            if (!activoActualIdParaActas) return;
+            const lista = document.getElementById('lista-actas-recibido');
+            lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Cargando...</p>';
+            document.getElementById('modal-actas-recibido').classList.remove('hidden');
+            document.getElementById('modal-actas-recibido').classList.add('flex');
+            fetch('/tickets/inventario/' + activoActualIdParaActas + '/actas')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    lista.innerHTML = '';
+                    const actas = data.actas || [];
+                    if (actas.length === 0) {
+                        const vacio = document.createElement('p');
+                        vacio.className = 'text-slate-500 text-xs text-center py-4';
+                        vacio.textContent = 'Este activo todavía no tiene ningún acta de recibido registrada.';
+                        lista.appendChild(vacio);
+                        return;
+                    }
+                    const relaciones = {paciente: 'Paciente', cuidador: 'Cuidador/a', otro: 'Responsable'};
+                    actas.forEach(function(acta) {
+                        const fila = document.createElement('div');
+                        fila.className = 'bg-slate-950/60 border border-slate-800 rounded-xl p-3 mb-2 text-xs';
+                        const titulo = document.createElement('p');
+                        titulo.className = 'font-bold text-slate-200';
+                        titulo.textContent = acta.nombre_responsable + ' (' + (relaciones[acta.relacion_responsable] || acta.relacion_responsable) + ')';
+                        const detalle = document.createElement('p');
+                        detalle.className = 'text-slate-400 mt-0.5';
+                        detalle.textContent = acta.direccion_entrega + ' — ' + acta.fecha;
+                        const enlace = document.createElement('a');
+                        enlace.href = '/tickets/inventario/actas/' + acta.id + '/pdf';
+                        enlace.target = '_blank';
+                        enlace.className = 'inline-flex items-center gap-1.5 mt-2 text-orange-400 hover:text-orange-300 font-semibold';
+                        enlace.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Descargar acta en PDF';
+                        fila.appendChild(titulo);
+                        fila.appendChild(detalle);
+                        fila.appendChild(enlace);
+                        lista.appendChild(fila);
+                    });
+                })
+                .catch(function() {
+                    lista.innerHTML = '<p class="text-rose-400 text-xs text-center py-4">No se pudo cargar el historial. Intenta de nuevo.</p>';
+                });
+        }
+        function cerrarModalActasRecibido() {
+            document.getElementById('modal-actas-recibido').classList.add('hidden');
+            document.getElementById('modal-actas-recibido').classList.remove('flex');
+        }
+
+        function abrirModalActasAsignacion() {
+            if (!activoActualIdParaActas) return;
+            const lista = document.getElementById('lista-actas-asignacion');
+            lista.innerHTML = '<p class="text-slate-500 text-xs text-center py-4">Cargando...</p>';
+            document.getElementById('modal-actas-asignacion').classList.remove('hidden');
+            document.getElementById('modal-actas-asignacion').classList.add('flex');
+            fetch('/tickets/inventario/' + activoActualIdParaActas + '/actas_asignacion')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    lista.innerHTML = '';
+                    const actas = data.actas || [];
+                    if (actas.length === 0) {
+                        const vacio = document.createElement('p');
+                        vacio.className = 'text-slate-500 text-xs text-center py-4';
+                        vacio.textContent = 'Este activo todavía no tiene ninguna acta de asignación registrada.';
+                        lista.appendChild(vacio);
+                        return;
+                    }
+                    actas.forEach(function(acta) {
+                        const fila = document.createElement('div');
+                        fila.className = 'bg-slate-950/60 border border-slate-800 rounded-xl p-3 mb-2 text-xs';
+                        const titulo = document.createElement('p');
+                        titulo.className = 'font-bold text-slate-200';
+                        titulo.textContent = acta.asignado_a;
+                        const detalle = document.createElement('p');
+                        detalle.className = 'text-slate-400 mt-0.5';
+                        detalle.textContent = acta.fecha + ' — registrada por ' + acta.generado_por;
+                        fila.appendChild(titulo);
+                        fila.appendChild(detalle);
+                        if (acta.descripcion_breve) {
+                            const nota = document.createElement('p');
+                            nota.className = 'text-slate-400 mt-0.5 italic';
+                            nota.textContent = acta.descripcion_breve;
+                            fila.appendChild(nota);
+                        }
+                        const enlace = document.createElement('a');
+                        enlace.href = '/tickets/inventario/actas_asignacion/' + acta.id + '/pdf';
+                        enlace.target = '_blank';
+                        enlace.className = 'inline-flex items-center gap-1.5 mt-2 text-orange-400 hover:text-orange-300 font-semibold';
+                        enlace.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Descargar acta en PDF';
+                        fila.appendChild(enlace);
+                        lista.appendChild(fila);
+                    });
+                })
+                .catch(function() {
+                    lista.innerHTML = '<p class="text-rose-400 text-xs text-center py-4">No se pudo cargar el historial. Intenta de nuevo.</p>';
+                });
+        }
+        function cerrarModalActasAsignacion() {
+            document.getElementById('modal-actas-asignacion').classList.add('hidden');
+            document.getElementById('modal-actas-asignacion').classList.remove('flex');
+        }
+
+        function mostrarPanelCrearUsuarioRapido() {
+            var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+            panelCrear.dataset.cedula = cedula;
+            panelCrear.classList.remove('hidden');
+            var primerNombre = document.getElementById('rapido-primer-nombre');
+            if (primerNombre) { primerNombre.focus(); }
+        }
+
+        function buscarAsignadoPorCedula() {
+            var cedula = document.getElementById('input-activo-cedula-buscar').value.trim();
+            var mensaje = document.getElementById('mensaje-busqueda-cedula');
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            panelCrear.classList.add('hidden');
+            if (!cedula) {
+                mensaje.textContent = 'Escribe una cédula para buscar.';
+                mensaje.className = 'text-[10px] mt-1 text-amber-400';
+                return;
+            }
+            mensaje.textContent = 'Buscando...';
+            mensaje.className = 'text-[10px] mt-1 text-slate-400';
+            fetch('/usuarios/buscar_cedula?cedula=' + encodeURIComponent(cedula))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.encontrado) {
+                        document.getElementById('input-activo-asignado').value = data.nombre + ' (' + data.usuario + ')';
+                        mensaje.textContent = 'Encontrado: ' + data.nombre + ' (' + data.usuario + ')' +
+                            (data.firma ? ' — se usará su firma registrada como aceptación.' : '');
+                        mensaje.className = 'text-[10px] mt-1 text-emerald-400';
+                    } else {
+                        mensaje.textContent = 'No se encontró ningún usuario de Arkiv con esa cédula.';
+                        mensaje.className = 'text-[10px] mt-1 text-amber-400';
+                        document.getElementById('mensaje-crear-usuario-rapido').textContent = '';
+                        panelCrear.dataset.cedula = cedula;
+                        panelCrear.classList.remove('hidden');
+                    }
+                })
+                .catch(function() {
+                    mensaje.textContent = 'No se pudo completar la búsqueda. Intenta de nuevo.';
+                    mensaje.className = 'text-[10px] mt-1 text-rose-400';
+                });
+        }
+
+        function crearUsuarioRapido() {
+            var mensaje = document.getElementById('mensaje-crear-usuario-rapido');
+            var panelCrear = document.getElementById('panel-crear-usuario-rapido');
+            var datos = new URLSearchParams();
+            datos.set('csrf_token', document.querySelector('#form-activo input[name=csrf_token]').value);
+            datos.set('primer_nombre', document.getElementById('rapido-primer-nombre').value.trim());
+            datos.set('segundo_nombre', document.getElementById('rapido-segundo-nombre').value.trim());
+            datos.set('primer_apellido', document.getElementById('rapido-primer-apellido').value.trim());
+            datos.set('segundo_apellido', document.getElementById('rapido-segundo-apellido').value.trim());
+            datos.set('email', document.getElementById('rapido-email').value.trim());
+            datos.set('especialidad', document.getElementById('rapido-especialidad').value);
+            datos.set('cedula', panelCrear.dataset.cedula || '');
+            datos.set('firma_dataurl', document.getElementById('firma-rapido-input').value || '');
+
+            if (!datos.get('primer_nombre') || !datos.get('primer_apellido') || !datos.get('email') || !datos.get('especialidad')) {
+                mensaje.textContent = 'Nombre, apellido, correo y especialidad son obligatorios.';
+                mensaje.className = 'text-[10px] mt-1.5 text-amber-400';
+                return;
+            }
+
+            mensaje.textContent = 'Creando usuario...';
+            mensaje.className = 'text-[10px] mt-1.5 text-slate-400';
+            fetch('/tickets/inventario/usuarios/crear_rapido', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: datos.toString()
+            })
+                .then(function(r) { return r.json().then(function(data) { return {status: r.status, data: data}; }); })
+                .then(function(res) {
+                    if (res.data.ok) {
+                        document.getElementById('input-activo-asignado').value = res.data.nombre + ' (' + res.data.usuario + ')';
+                        mensaje.textContent = 'Usuario ' + res.data.usuario + ' creado y asignado.';
+                        mensaje.className = 'text-[10px] mt-1.5 text-emerald-400';
+                        setTimeout(function() { panelCrear.classList.add('hidden'); }, 1500);
+                    } else {
+                        mensaje.textContent = res.data.error || 'No se pudo crear el usuario.';
+                        mensaje.className = 'text-[10px] mt-1.5 text-rose-400';
+                    }
+                })
+                .catch(function() {
+                    mensaje.textContent = 'No se pudo completar la solicitud. Intenta de nuevo.';
+                    mensaje.className = 'text-[10px] mt-1.5 text-rose-400';
+                });
+        }
+
+        function abrirModalAdjuntos(activo) {
+            document.getElementById('modal-adjuntos-titulo').textContent = 'Adjuntos de: ' + (activo.nombre || '');
+            document.getElementById('form-adjuntar').action = '/tickets/inventario/' + activo.id + '/adjuntar';
+
+            var lista = document.getElementById('lista-adjuntos');
+            lista.innerHTML = '';
+            var adjuntos = activo.adjuntos || [];
+
+            if (adjuntos.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-3';
+                vacio.textContent = 'Este activo todavía no tiene archivos adjuntos.';
+                lista.appendChild(vacio);
+            } else {
+                adjuntos.forEach(function(adj) {
+                    var fila = document.createElement('div');
+                    fila.className = 'flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2 mb-2';
+
+                    var enlace = document.createElement('a');
+                    enlace.href = adj.url;
+                    enlace.target = '_blank';
+                    enlace.rel = 'noopener noreferrer';
+                    enlace.className = 'text-xs text-slate-300 hover:text-cyan-400 truncate flex-1 mr-2';
+                    enlace.textContent = adj.nombre_original || 'archivo';
+                    fila.appendChild(enlace);
+
+                    var form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/tickets/inventario/adjunto/' + adj.id + '/eliminar';
+                    form.onsubmit = function() { return confirm('¿Eliminar este adjunto?'); };
+
+                    var csrf = document.createElement('input');
+                    csrf.type = 'hidden';
+                    csrf.name = 'csrf_token';
+                    csrf.value = '{{ csrf_token() }}';
+                    form.appendChild(csrf);
+
+                    var btn = document.createElement('button');
+                    btn.type = 'submit';
+                    btn.className = 'text-slate-400 hover:text-rose-400 text-xs';
+                    btn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                    form.appendChild(btn);
+
+                    fila.appendChild(form);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-adjuntos').classList.remove('hidden');
+            document.getElementById('modal-adjuntos').classList.add('flex');
+            document.getElementById('modal-adjuntos').scrollTop = 0;
+        }
+        function cerrarModalAdjuntos() {
+            document.getElementById('modal-adjuntos').classList.add('hidden');
+            document.getElementById('modal-adjuntos').classList.remove('flex');
+        }
+
+        function abrirModalTiposActivo() {
+            document.getElementById('modal-tipos-activo').classList.remove('hidden');
+            document.getElementById('modal-tipos-activo').classList.add('flex');
+            document.getElementById('modal-tipos-activo').scrollTop = 0;
+        }
+
+        function cerrarModalTiposActivo() {
+            document.getElementById('modal-tipos-activo').classList.add('hidden');
+            document.getElementById('modal-tipos-activo').classList.remove('flex');
+        }
+
+        function abrirModalAgregarTipoRapido() {
+            var form = document.getElementById('form-agregar-tipo-rapido');
+            form.reset();
+            document.getElementById('tipo-rapido-error').classList.add('hidden');
+            var modal = document.getElementById('modal-agregar-tipo-rapido');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('tipo-rapido-key').focus();
+        }
+        function cerrarModalAgregarTipoRapido() {
+            var modal = document.getElementById('modal-agregar-tipo-rapido');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+        (function () {
+            var form = document.getElementById('form-agregar-tipo-rapido');
+            if (!form) return;
+            form.addEventListener('submit', function (ev) {
+                ev.preventDefault();
+                var errorEl = document.getElementById('tipo-rapido-error');
+                var boton = document.getElementById('tipo-rapido-guardar');
+                errorEl.classList.add('hidden');
+                boton.disabled = true;
+                boton.textContent = 'Guardando...';
+                fetch("{{ url_for('crear_tipo_activo_catalogo') }}", {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: { 'X-Requested-With': 'fetch' }
+                })
+                    .then(function (resp) { return resp.json().then(function (datos) { return { ok: resp.ok, datos: datos }; }); })
+                    .then(function (r) {
+                        if (!r.ok || !r.datos.success) {
+                            throw new Error((r.datos && r.datos.error) || 'No se pudo agregar el tipo.');
+                        }
+                        var select = document.getElementById('input-activo-tipo');
+                        var yaExiste = Array.from(select.options).some(function (opt) { return opt.value === r.datos.etiqueta; });
+                        if (!yaExiste) {
+                            var opcion = document.createElement('option');
+                            opcion.value = r.datos.etiqueta;
+                            opcion.textContent = r.datos.etiqueta;
+                            select.appendChild(opcion);
+                        }
+                        select.value = r.datos.etiqueta;
+                        cerrarModalAgregarTipoRapido();
+                    })
+                    .catch(function (err) {
+                        errorEl.textContent = err.message;
+                        errorEl.classList.remove('hidden');
+                    })
+                    .finally(function () {
+                        boton.disabled = false;
+                        boton.textContent = 'Guardar';
+                    });
+            });
+        })();
+
+        function abrirModalHistorialTickets(activo) {
+            document.getElementById('historial-tickets-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            var lista = document.getElementById('historial-tickets-lista');
+            lista.innerHTML = '';
+            var tickets = activo.tickets_historial || [];
+
+            if (tickets.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-6';
+                vacio.textContent = 'Este activo no tiene tickets registrados. Cuando se cree un ticket vinculado a este activo, aparecerá aquí.';
+                lista.appendChild(vacio);
+            } else {
+                tickets.forEach(function(tk) {
+                    var fila = document.createElement('a');
+                    fila.href = '/tickets/' + tk.id;
+                    fila.className = 'flex items-center justify-between bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5 hover:border-indigo-500/50 transition-colors';
+
+                    var izq = document.createElement('div');
+                    izq.className = 'flex flex-col';
+                    var codigo = document.createElement('span');
+                    codigo.className = 'text-[10px] text-slate-500 font-mono';
+                    codigo.textContent = tk.codigo;
+                    var titulo = document.createElement('span');
+                    titulo.className = 'text-xs text-slate-200';
+                    titulo.textContent = tk.titulo;
+                    izq.appendChild(codigo);
+                    izq.appendChild(titulo);
+
+                    var estado = document.createElement('span');
+                    estado.className = 'px-2 py-0.5 bg-slate-700/50 text-slate-300 text-[10px] font-bold rounded-full uppercase tracking-wider whitespace-nowrap';
+                    estado.textContent = tk.estado;
+
+                    fila.appendChild(izq);
+                    fila.appendChild(estado);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-historial-tickets').classList.remove('hidden');
+            document.getElementById('modal-historial-tickets').classList.add('flex');
+            document.getElementById('modal-historial-tickets').scrollTop = 0;
+        }
+        function cerrarModalHistorialTickets() {
+            document.getElementById('modal-historial-tickets').classList.add('hidden');
+            document.getElementById('modal-historial-tickets').classList.remove('flex');
+        }
+
+        function abrirModalTrazabilidad(activo) {
+            document.getElementById('trazabilidad-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            var lista = document.getElementById('trazabilidad-lista');
+            lista.innerHTML = '';
+            var eventos = activo.trazabilidad || [];
+
+            if (eventos.length === 0) {
+                var vacio = document.createElement('p');
+                vacio.className = 'text-[11px] text-slate-500 text-center py-6';
+                vacio.textContent = 'Este activo no tiene historial de reemplazos. Cuando un activo se reemplace por otro (por daño, renovación, etc.) la cadena aparecerá aquí para reconstruir la historia completa.';
+                lista.appendChild(vacio);
+            } else {
+                eventos.forEach(function(ev) {
+                    var fila = document.createElement('div');
+                    fila.className = 'bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5';
+
+                    var encabezado = document.createElement('div');
+                    encabezado.className = 'flex items-center justify-between mb-1';
+                    var titulo = document.createElement('span');
+                    titulo.className = 'text-xs font-bold ' + (ev.direccion === 'saliente' ? 'text-amber-400' : 'text-emerald-400');
+                    titulo.textContent = ev.direccion === 'saliente'
+                        ? 'Reemplazado por: ' + (ev.otro_nombre || 'sin activo asignado')
+                        : 'Reemplazó a: ' + (ev.otro_nombre || 'activo eliminado');
+                    var fecha = document.createElement('span');
+                    fecha.className = 'text-[10px] text-slate-500';
+                    fecha.textContent = ev.fecha_reemplazo;
+                    encabezado.appendChild(titulo);
+                    encabezado.appendChild(fecha);
+
+                    var detalle = document.createElement('p');
+                    detalle.className = 'text-[11px] text-slate-400';
+                    detalle.textContent = 'Motivo: ' + ev.motivo + (ev.notas ? ' — ' + ev.notas : '');
+
+                    fila.appendChild(encabezado);
+                    fila.appendChild(detalle);
+                    lista.appendChild(fila);
+                });
+            }
+
+            document.getElementById('modal-trazabilidad').classList.remove('hidden');
+            document.getElementById('modal-trazabilidad').classList.add('flex');
+            document.getElementById('modal-trazabilidad').scrollTop = 0;
+        }
+        function cerrarModalTrazabilidad() {
+            document.getElementById('modal-trazabilidad').classList.add('hidden');
+            document.getElementById('modal-trazabilidad').classList.remove('flex');
+        }
+
+        var ACTIVOS_PARA_REEMPLAZO = {{ activos_para_reemplazo | tojson }};
+
+        function seleccionarMotivoReemplazo(clave) {
+            document.getElementById('input-reemplazo-motivo').value = clave;
+            document.querySelectorAll('#reemplazo-motivo-cards .motivo-card').forEach(function(card) {
+                if (card.getAttribute('data-motivo') === clave) {
+                    card.classList.add('border-amber-500', 'bg-amber-500/10');
+                    card.classList.remove('border-slate-700', 'bg-slate-900/40');
+                } else {
+                    card.classList.remove('border-amber-500', 'bg-amber-500/10');
+                    card.classList.add('border-slate-700', 'bg-slate-900/40');
+                }
+            });
+        }
+
+        function filtrarActivosReemplazo() {
+            var texto = document.getElementById('input-reemplazo-buscar').value.trim().toLowerCase();
+            var select = document.getElementById('select-reemplazo-activo');
+            var activoActualId = parseInt(select.getAttribute('data-activo-actual'), 10);
+            select.innerHTML = '';
+
+            var opcionVacia = document.createElement('option');
+            opcionVacia.value = '';
+            opcionVacia.textContent = '-- Sin activo de reemplazo (solo dar de baja) --';
+            select.appendChild(opcionVacia);
+
+            ACTIVOS_PARA_REEMPLAZO.forEach(function(act) {
+                if (act.id === activoActualId) { return; }
+                var texto_act = (act.nombre + ' ' + (act.marca || '') + ' ' + (act.modelo || '')).toLowerCase();
+                if (texto && texto_act.indexOf(texto) === -1) { return; }
+                var opcion = document.createElement('option');
+                opcion.value = act.id;
+                opcion.textContent = act.nombre + ' — ' + (act.marca || '') + ' ' + (act.modelo || '') + ' (' + act.estado + ')';
+                select.appendChild(opcion);
+            });
+        }
+
+        function abrirModalReemplazar(activo) {
+            document.getElementById('reemplazar-subtitulo').textContent = activo.nombre + (activo.tipo_activo ? ' · ' + activo.tipo_activo : '');
+            document.getElementById('form-reemplazar').action = '/tickets/inventario/' + activo.id + '/reemplazar';
+            document.getElementById('input-reemplazo-motivo').value = '';
+            seleccionarMotivoReemplazo('');
+            document.getElementById('input-reemplazo-buscar').value = '';
+            document.getElementById('select-reemplazo-activo').setAttribute('data-activo-actual', activo.id);
+            filtrarActivosReemplazo();
+            var hoy = new Date().toISOString().slice(0, 10);
+            document.getElementById('input-reemplazo-fecha').value = hoy;
+            document.getElementById('input-reemplazo-estado').value = 'Baja';
+            document.getElementById('modal-reemplazar').classList.remove('hidden');
+            document.getElementById('modal-reemplazar').classList.add('flex');
+            document.getElementById('modal-reemplazar').scrollTop = 0;
+        }
+        function cerrarModalReemplazar() {
+            document.getElementById('modal-reemplazar').classList.add('hidden');
+            document.getElementById('modal-reemplazar').classList.remove('flex');
+        }
+
+        document.getElementById('form-reemplazar').addEventListener('submit', function(e) {
+            if (!document.getElementById('input-reemplazo-motivo').value) {
+                e.preventDefault();
+                alert('Selecciona el motivo del reemplazo.');
+            }
+        });
+    </script>
+
+    <script>
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        function donut(id, labels, data, colors) {
+            new Chart(document.getElementById(id), {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
+                options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, maintainAspectRatio: false }
+            });
+        }
+        function barra(id, labels, data, color) {
+            new Chart(document.getElementById(id), {
+                type: 'bar',
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: color, borderRadius: 6 }] },
+                options: {
+                    plugins: { legend: { display: false } },
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } }
+                }
+            });
+        }
+
+        donut('chart-inv-estado',
+            ['Disponibles', 'Asignados', 'En mantenimiento', 'Devolución', 'De baja', 'Perdidos'],
+            [{{ conteos_estado.Disponible }}, {{ conteos_estado.Asignado }}, {{ conteos_estado.Mantenimiento }}, {{ conteos_estado['Devolución'] }}, {{ conteos_estado.Baja }}, {{ conteos_estado.Perdido }}],
+            ['#34d399', '#38bdf8', '#f59e0b', '#a78bfa', '#64748b', '#fb7185']
+        );
+        barra('chart-inv-tipo', {{ por_tipo_activo.keys() | list | tojson }}, {{ por_tipo_activo.values() | list | tojson }}, '#a78bfa');
+        barra('chart-inv-sede', {{ distribucion_por_sede | map(attribute='sede') | list | tojson }}, {{ distribucion_por_sede | map(attribute='total') | list | tojson }}, '#2dd4bf');
+    </script>
