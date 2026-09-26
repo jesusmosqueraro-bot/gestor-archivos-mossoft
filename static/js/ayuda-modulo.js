@@ -982,22 +982,25 @@ var AYUDA_MODULOS = {
   },
   "turnos_horas_mes": {
       "titulo": "Horas del Mes",
-      "descripcion": "Reporte mensual, por colaborador, de las horas ya trabajadas, las que todavía tiene programadas ese mismo mes, el total, y cuántas horas tiene a favor o en contra de la meta mensual configurada en su ficha de usuario. Se calcula a partir de los turnos activos del Cuadro de Turnos, no requiere ningún registro aparte, y ya descuenta el almuerzo/descanso configurado (Art. 167 CST).",
+      "descripcion": "Reporte mensual, por colaborador, de las horas ya trabajadas, las que todavía tiene programadas ese mismo mes, las novedades que se le descontaron, el total neto, y cuántas horas tiene a favor o en contra de su meta mensual. Se calcula a partir de los turnos activos del Cuadro de Turnos y las Novedades registradas, ya descuenta el almuerzo/descanso (Art. 167 CST), y se puede exportar en una matriz de Excel con un día por columna.",
       "pasos": [
           "Usa \"Mes anterior\"/\"HOY\"/\"Mes siguiente\" para moverte entre meses, y los filtros de Sede/Área/Rol para acotar el reporte.",
-          "\"Horas transcurridas\" suma los turnos con fecha hasta hoy; \"Horas programadas\" suma los que quedan del mes (la proyección de lo que trabajará). Ambas ya vienen netas: se descontaron los minutos de almuerzo/descanso configurados en el Tipo de Turno o el horario personalizado de cada turno.",
-          "\"Meta mensual\" es el total fijo de horas configurado para esa persona en Gestión de Usuarios → Editar → \"Meta de horas mensuales\" (opcional, en blanco si nunca se definió).",
-          "\"Horas a favor / en contra\" es el total del mes menos esa meta; sin meta configurada, la columna solo muestra el total, sin comparar contra nada.",
+          "\"Horas transcurridas\" suma los turnos con fecha hasta hoy; \"Horas programadas\" suma los que quedan del mes. Ambas ya vienen netas: se descontaron los minutos de almuerzo/descanso configurados en el Tipo de Turno o el horario personalizado de cada turno.",
+          "\"Novedades\" resta las horas de incapacidad/permiso/calamidad/llegada tarde/salida temprana registradas ese mes (ver la pestaña Novedades) del total neto laborado.",
+          "\"Esquema\" es Lunes a Viernes o Lunes a Sábado — un Administrador o Líder puede cambiarlo ahí mismo, solo para ese mes, sin tocar el esquema permanente del colaborador (Gestión de Usuarios → Editar).",
+          "\"Meta mensual\" se calcula automáticamente según los días hábiles del Esquema de ese mes; si en Editar Usuario se fijó una meta manual, esa gana sobre el cálculo automático.",
+          "\"Horas a favor / en contra\" es el total neto del mes menos esa meta.",
+          "El botón \"Excel (matriz)\" exporta una fila por colaborador con una columna por día del mes (sábados y domingos sombreados) y los totales al final.",
           "El banner superior recuerda la jornada máxima legal vigente en Colombia (Ley 2101 de 2021: 42 horas/semana, 210 horas/mes); un ícono de alerta junto al total o la meta de un colaborador avisa cuando la supera — es solo informativo, nunca bloquea la asignación de turnos."
       ],
       "preguntas": [
           {
-              "q": "¿Un colaborador sin meta configurada no aparece en el reporte?",
-              "a": "Sí aparece, con su total de horas normal; solo la comparación \"a favor/en contra\" queda sin mostrar (\"Sin meta definida\") hasta que se le configure una meta mensual en Editar Usuario."
+              "q": "¿Quién puede cambiar el Esquema de Jornada o ver el botón de exportar?",
+              "a": "El Esquema de cada mes solo lo puede cambiar un Administrador o un Líder de Turnos; el resto de personas con acceso al módulo ve el esquema vigente sin poder editarlo. El botón de exportar a Excel está disponible para cualquiera con acceso a Horas del Mes."
           },
           {
               "q": "¿De dónde salen las horas de este reporte?",
-              "a": "De los turnos activos (no cancelados) del Cuadro de Turnos con fecha dentro del mes elegido — no hay que registrar nada aparte, es el mismo dato que ya se ve en la matriz semanal, pero descontando el almuerzo/descanso configurado."
+              "a": "De los turnos activos (no cancelados) del Cuadro de Turnos con fecha dentro del mes elegido, menos las Novedades activas de ese mismo mes — no hay que registrar nada aparte para los turnos, es el mismo dato que ya se ve en la matriz semanal, pero descontando el almuerzo/descanso configurado."
           },
           {
               "q": "¿Qué pasa si un colaborador supera las 210 horas/mes (42h/semana) de referencia legal?",
@@ -1007,21 +1010,42 @@ var AYUDA_MODULOS = {
   },
   "turnos_por_sede": {
       "titulo": "Colaboradores por Sede",
-      "descripcion": "Directorio de solo consulta dentro de Cuadro de Turnos: agrupa a todas las cuentas activas del sistema según la Sede que tienen asignada en su perfil de usuario, para saber de un vistazo a qué Sede pertenece cada colaborador.",
+      "descripcion": "Directorio dentro de Cuadro de Turnos: agrupa a cada colaborador según la Sede y el horario de su turno asignado vigente (el más reciente o el próximo programado), para saber de un vistazo dónde y con qué horario está cada uno.",
       "pasos": [
-          "Cada tarjeta es una Sede del catálogo (el mismo que se administra en Configuración de Tickets); dentro se listan los colaboradores cuyo perfil tiene esa Sede asignada, con su rol de cuenta.",
+          "Cada tarjeta es una Sede del catálogo (el mismo que se administra en Configuración de Tickets); dentro se listan los colaboradores cuyo turno vigente (o, si no tiene ninguno todavía, su perfil) tiene esa Sede.",
+          "Debajo del nombre de cada colaborador con turno asignado se ve su horario (código y horas) y la fecha de ese turno.",
           "Usa el buscador de arriba para filtrar por nombre, usuario o cédula sin recargar la página — las tarjetas sin ningún resultado se ocultan solas.",
-          "Un colaborador sin ninguna Sede en su perfil aparece en la tarjeta \"Sin sede asignada\", al final.",
-          "Esta vista es solo para consultar; para cambiar la Sede de alguien entra a Gestión de Usuarios → Editar."
+          "Un colaborador sin ningún turno asignado y sin Sede en su perfil aparece en la tarjeta \"Sin sede asignada\", al final.",
+          "Esta vista es solo para consultar; para cambiar la Sede u horario de un turno entra a Cuadro de Turnos, y para la Sede de perfil a Gestión de Usuarios → Editar o a Mi Perfil."
       ],
       "preguntas": [
           {
-              "q": "¿La Sede que aparece aquí es la misma que se elige al asignar un turno puntual?",
-              "a": "No necesariamente. Esta vista muestra la Sede \"de base\" del perfil de cada colaborador; al asignar un turno se puede elegir una Sede distinta puntualmente (por ejemplo, una cobertura o un reemplazo), y eso no cambia la Sede de su perfil."
+              "q": "¿Por qué aparece alguien en una Sede distinta a la de su perfil?",
+              "a": "Porque esta vista prioriza la Sede de su turno asignado vigente (el más cercano a hoy) sobre la Sede \"de base\" de su perfil — así refleja dónde está trabajando realmente, aunque su perfil todavía no se haya actualizado."
           },
           {
               "q": "¿Por qué veo aquí cuentas que no tienen acceso al módulo de Turnos?",
               "a": "Este directorio incluye a todas las cuentas activas del sistema, no solo a quienes pueden recibir turnos, porque el objetivo es ver la organización completa por Sede."
+          }
+      ]
+  },
+  "turnos_novedades": {
+      "titulo": "Novedades de Turno",
+      "descripcion": "Registro de incapacidades, permisos, calamidades domésticas, llegadas tarde y salidas tempranas de cada colaborador — las horas afectadas se descuentan del total neto laborado en Horas del Mes, sin tocar la matriz semanal ni las exportaciones.",
+      "pasos": [
+          "Busca al colaborador por cédula o nombre, elige el tipo de novedad, la fecha y cuántas horas afectó, y guarda — solo un Administrador o un Líder de Turnos pueden registrar o anular una novedad.",
+          "Cualquier persona con acceso al módulo de Turnos puede consultar el listado, filtrado por mes con las flechas de navegación.",
+          "Anular una novedad no la borra del historial: queda marcada como 'Anulada' y deja de descontar horas en Horas del Mes.",
+          "El descuento se ve reflejado de inmediato en la columna 'Novedades' y en el total neto de la pestaña Horas del Mes, para ese mismo mes."
+      ],
+      "preguntas": [
+          {
+              "q": "¿Quién puede registrar una novedad?",
+              "a": "Solo las cuentas con rol Administrador o Líder de Turnos — el resto de personas con acceso al módulo de Turnos (por ejemplo un Agente con el permiso extra) puede consultarlas, pero el formulario de registro no aparece para ellas."
+          },
+          {
+              "q": "¿Una novedad tiene que estar ligada a un turno ya asignado?",
+              "a": "No es obligatorio — una incapacidad de varios días, por ejemplo, puede no coincidir con ningún turno puntual ya asignado. Lo único obligatorio es el colaborador, el tipo, la fecha y las horas afectadas."
           }
       ]
   }
