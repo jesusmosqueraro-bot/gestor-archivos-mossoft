@@ -41,6 +41,7 @@ def test_pdf_de_acta_de_asignacion_incluye_el_pie_powered_by_mossoft(admin_sessi
     activo_id = _crear_activo(app, nombre='95004')
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '95004', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Colaborador Pie de Página',
+        'marca': 'Dell', 'modelo': 'Latitude', 'numero_serie': 'SN-95004',
         'generar_acta_asignacion': 'on',
     })
     conn, db_type = app.get_db()
@@ -83,6 +84,7 @@ def test_pdf_de_acta_de_asignacion_incluye_la_marca_de_agua_institucional(admin_
     activo_id = _crear_activo(app, nombre='95006')
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '95006', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Colaborador Marca De Agua',
+        'marca': 'Dell', 'modelo': 'Latitude', 'numero_serie': 'SN-95006',
         'generar_acta_asignacion': 'on',
     })
     conn, db_type = app.get_db()
