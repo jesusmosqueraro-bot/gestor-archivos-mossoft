@@ -1,0 +1,267 @@
+    <div id="modal-adjuntos" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-adjuntos-titulo" class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-paperclip text-cyan-400"></i> Adjuntos</h3>
+                <button onclick="cerrarModalAdjuntos()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div id="lista-adjuntos" class="mb-4 max-h-64 overflow-y-auto"></div>
+
+            <form id="form-adjuntar" method="POST" enctype="multipart/form-data" class="flex flex-col gap-2 text-xs border-t border-slate-700/60 pt-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Agregar archivo(s) — factura, foto, garantía, manual...</label>
+                <input type="file" name="adjuntos" multiple class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-cyan-500/20 transition-all active:scale-95 mt-1">
+                    <i class="fa-solid fa-upload mr-1"></i> Subir
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-tipos-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-layer-group text-orange-400"></i> Tipos de activo</h3>
+                <button onclick="cerrarModalTiposActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            {% if session.get('rol') == 'admin' %}
+            <form method="POST" action="{{ url_for('crear_tipo_activo_catalogo') }}" enctype="multipart/form-data" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-4 border-b border-slate-700/60 pb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="key" required maxlength="50" placeholder="Key (ej: TABLET)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 uppercase" style="text-transform:uppercase">
+                <input type="text" name="etiqueta" required maxlength="150" placeholder="Etiqueta (ej: Tablet)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500">
+                <select name="icono" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 sm:col-span-2">
+                    {% for ic in ICONOS_TIPO_ACTIVO %}<option value="{{ ic }}">{{ ic }}</option>{% endfor %}
+                </select>
+                <div class="sm:col-span-2">
+                    <label class="block text-slate-500 mb-1">O sube un ícono/imagen propio (opcional — si lo subes, se usa en vez del de la lista de arriba)</label>
+                    <input type="file" name="icono_archivo" accept=".jpg,.jpeg,.png,.gif,.webp" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-[11px]">
+                </div>
+                <button type="submit" class="sm:col-span-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold text-xs">
+                    <i class="fa-solid fa-plus mr-1"></i> Agregar tipo
+                </button>
+            </form>
+            {% endif %}
+
+            <div class="space-y-1.5" id="lista-tipos-activo">
+                {% for t in tipos_activo_catalogo %}
+                <div class="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 text-xs">
+                    <span class="text-slate-200 font-semibold flex items-center gap-2">
+                        {% if t.icono_url %}
+                        <img src="{{ t.icono_url }}" alt="" class="w-4 h-4 object-contain rounded-sm">
+                        {% else %}
+                        <i class="fa-solid fa-{{ t.icono }} text-orange-400 w-4 text-center"></i>
+                        {% endif %}
+                        {{ t.etiqueta }}
+                        <span class="text-slate-500 font-mono text-[10px]">{{ t.key }}</span>
+                    </span>
+                    {% if session.get('rol') == 'admin' %}
+                    <div class="flex items-center gap-1">
+                        <form method="POST" action="{{ url_for('reordenar_tipo_activo_catalogo', tipo_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="direccion" value="up">
+                            <button type="submit" title="Subir" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-arrow-up"></i></button>
+                        </form>
+                        <form method="POST" action="{{ url_for('reordenar_tipo_activo_catalogo', tipo_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="direccion" value="down">
+                            <button type="submit" title="Bajar" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-arrow-down"></i></button>
+                        </form>
+                        <form method="POST" action="{{ url_for('eliminar_tipo_activo_catalogo', tipo_id=t.id) }}" onsubmit="return confirm('¿Desactivar el tipo {{ t.etiqueta }}? Ya no aparecerá para nuevos activos.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" title="Desactivar" class="text-slate-400 hover:text-rose-400 p-1"><i class="fa-solid fa-trash-can"></i></button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <p class="text-slate-500 text-xs text-center py-4">No hay tipos de activo activos en el catálogo.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if session.get('rol') == 'admin' %}
+    <div id="modal-agregar-tipo-rapido" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-layer-group text-orange-400"></i> Agregar tipo</h3>
+                <button type="button" onclick="cerrarModalAgregarTipoRapido()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="form-agregar-tipo-rapido" class="flex flex-col gap-2 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="origen" value="rapido">
+                <input type="text" name="key" id="tipo-rapido-key" required maxlength="50" placeholder="Key (ej: TABLET)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500 uppercase" style="text-transform:uppercase">
+                <input type="text" name="etiqueta" id="tipo-rapido-etiqueta" required maxlength="150" placeholder="Etiqueta (ej: Tablet)" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500">
+                <select name="icono" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-orange-500">
+                    {% for ic in ICONOS_TIPO_ACTIVO %}<option value="{{ ic }}">{{ ic }}</option>{% endfor %}
+                </select>
+                <div>
+                    <label class="block text-slate-500 mb-1">O sube un ícono/imagen propio (opcional)</label>
+                    <input type="file" name="icono_archivo" accept=".jpg,.jpeg,.png,.gif,.webp" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-[11px]">
+                </div>
+                <p id="tipo-rapido-error" class="text-rose-400 text-[11px] hidden"></p>
+                <div class="flex justify-end gap-2 mt-2">
+                    <button type="button" onclick="cerrarModalAgregarTipoRapido()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl font-bold">Cancelar</button>
+                    <button type="submit" id="tipo-rapido-guardar" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="modal-import-export" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-file-excel text-emerald-400"></i> Importar / Exportar Inventario</h3>
+                <button onclick="cerrarModalImportarExportar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-5">
+                <div>
+                    <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-2"><i class="fa-solid fa-upload text-emerald-400"></i>Carga masiva desde Excel</h4>
+                    <p class="text-[11px] text-slate-400 mb-2">
+                        Sube un archivo .xlsx con una fila por activo. Usa exactamente las mismas columnas de la
+                        <a href="{{ url_for('inventario_plantilla_xlsx') }}" class="text-emerald-400 hover:underline font-semibold">plantilla descargable</a>.
+                        Los activos con número de placa repetido, o campos inválidos, se omiten y quedan listados en el resultado.
+                    </p>
+                    <form id="form-importar-inventario" method="POST" action="{{ url_for('importar_inventario_xlsx') }}" enctype="multipart/form-data" class="flex flex-col gap-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <input type="file" name="archivo" accept=".xlsx" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-300 text-xs">
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+                            <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Cargar activos
+                        </button>
+                    </form>
+                </div>
+
+                <div class="border-t border-slate-700/60 pt-4">
+                    <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-2"><i class="fa-solid fa-download text-cyan-400"></i>Exportar inventario</h4>
+                    <p class="text-[11px] text-slate-400 mb-3">Exporta los activos según los filtros que tengas aplicados ahora mismo en la vista ({{ total_activos }} activo{{ 's' if total_activos != 1 else '' }}).</p>
+                    <div class="grid grid-cols-3 gap-2">
+                        <a href="{{ url_for('inventario_exportar_csv', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-csv mr-1 text-emerald-400"></i> CSV
+                        </a>
+                        <a href="{{ url_for('inventario_exportar_xlsx', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-excel mr-1 text-emerald-400"></i> Excel
+                        </a>
+                        <a href="{{ url_for('inventario_exportar_pdf', estado=q_estado, tipo=q_tipo, sede=q_sede, area=q_area, proveedor=q_proveedor, q=q_busqueda) }}" class="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs text-center transition-all active:scale-95">
+                            <i class="fa-solid fa-file-pdf mr-1 text-rose-400"></i> PDF
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-actas-recibido" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-kit-medical text-rose-400"></i> Actas de recibido</h3>
+                <button onclick="cerrarModalActasRecibido()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="lista-actas-recibido" class="max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <div id="modal-actas-asignacion" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-file-signature text-orange-400"></i> Actas de asignación</h3>
+                <button onclick="cerrarModalActasAsignacion()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="lista-actas-asignacion" class="max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <div id="modal-historial-tickets" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-indigo-400"></i> Historial de tickets del activo</h3>
+                    <p id="historial-tickets-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalHistorialTickets()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="historial-tickets-lista" class="space-y-2 mt-4 max-h-[60vh] overflow-y-auto"></div>
+            <div class="mt-4 flex justify-end">
+                <button type="button" onclick="cerrarModalHistorialTickets()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-trazabilidad" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-code-branch text-violet-400"></i> Trazabilidad del activo</h3>
+                    <p id="trazabilidad-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalTrazabilidad()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="trazabilidad-lista" class="space-y-2 mt-4 max-h-[60vh] overflow-y-auto"></div>
+            <div class="mt-4 flex justify-end">
+                <button type="button" onclick="cerrarModalTrazabilidad()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-reemplazar" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-xl w-full p-6 shadow-2xl my-8">
+            <div class="flex items-center justify-between mb-1 border-b border-slate-700/60 pb-3">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2"><i class="fa-solid fa-arrows-rotate text-amber-400"></i> Reemplazar activo</h3>
+                    <p id="reemplazar-subtitulo" class="text-slate-500 text-[11px] mt-0.5"></p>
+                </div>
+                <button onclick="cerrarModalReemplazar()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form method="POST" id="form-reemplazar" class="flex flex-col gap-3 text-xs mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="motivo" id="input-reemplazo-motivo" required>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1.5 uppercase tracking-wider text-[10px]">Motivo del reemplazo *</label>
+                    <div id="reemplazo-motivo-cards" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {% for m in motivos_reemplazo %}
+                        <div data-motivo="{{ m.clave }}" onclick="seleccionarMotivoReemplazo('{{ m.clave }}')" class="motivo-card relative flex flex-col gap-1 p-2.5 rounded-xl border-2 border-slate-700 bg-slate-900/40 cursor-pointer transition-all">
+                            <span class="flex items-center gap-1.5 text-slate-200 font-bold text-[11px]"><i class="fa-solid fa-{{ m.icono }} text-amber-400"></i> {{ m.clave }}</span>
+                            <span class="text-slate-500 text-[10px] leading-snug">{{ m.descripcion }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Notas adicionales</label>
+                    <textarea name="notas" rows="2" placeholder="Información adicional (opcional)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Activo de reemplazo (opcional)</label>
+                    <input type="text" id="input-reemplazo-buscar" oninput="filtrarActivosReemplazo()" placeholder="Busca por nombre, marca, modelo..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <select name="activo_nuevo_id" id="select-reemplazo-activo" size="4" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <option value="">-- Sin activo de reemplazo (solo dar de baja) --</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha del reemplazo</label>
+                        <input type="date" name="fecha_reemplazo" id="input-reemplazo-fecha" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-slate-500 text-[10px] mt-1">Cuándo pasó físicamente (puede ser retroactivo).</p>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">¿Qué pasa con el activo anterior?</label>
+                        <select name="estado_anterior_resultante" id="input-reemplazo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            {% for e in estados_resultantes_reemplazo %}<option value="{{ e.valor }}">{{ e.etiqueta }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mt-2 flex justify-end gap-2">
+                    <button type="button" onclick="cerrarModalReemplazar()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold text-xs"><i class="fa-solid fa-arrows-rotate mr-1"></i> Reemplazar</button>
+                </div>
+            </form>
+        </div>
+    </div>
