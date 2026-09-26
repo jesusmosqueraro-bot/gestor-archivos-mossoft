@@ -227,7 +227,7 @@
                                     <button type="button" onclick="alternarFijarFila('{{ fila.usuario }}')" class="fijar-pin shrink-0 text-[11px] text-slate-600 hover:text-indigo-400" title="Fijar esta fila arriba (solo en este navegador)">
                                         <i class="fa-solid fa-thumbtack"></i>
                                     </button>
-                                    {#- 💈 Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su
+                                    {#- 🛈 Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su
                                          nombre (pedido de Tomás, 20/09/2026: "que se reflejen los datos del usuario") —
                                          cédula, correo, teléfono, Sede y cargo/rol de cuenta, ver fila.perfil en
                                          turnos_cuadro(). Usa el atributo title= nativo (no un tooltip a medida) para
@@ -267,7 +267,13 @@
         <!-- LISTADO PLANO (consolidado: pedido de Tomás, 26/09/2026 — "agrupar las asignaciones
              para que cada colaborador figure únicamente UNA vez en la lista principal"; el detalle
              de sus turnos del periodo se ve al hacer clic en "Ver detalle", ver
-             #modal-detalle-turnos-colaborador más abajo) -->
+             #modal-detalle-turnos-colaborador más abajo)
+
+             🚑 'is defined': mientras app.py (que arma listado_agrupado en turnos_cuadro()) todavía
+             no se ha desplegado, esta variable quedaría UNDEFINED y Jinja lanza un error al usarla
+             — rompiendo esta página con un 500. Este valor por defecto lo evita sin cambiar el
+             comportamiento una vez que app.py sí esté desplegado. -->
+        {% set listado_agrupado = listado_agrupado if listado_agrupado is defined else [] %}
         <div>
             <h3 class="text-sm font-bold text-white mb-2 flex items-center gap-2"><i class="fa-solid fa-list text-indigo-400"></i> Listado de la semana <span class="text-slate-500 font-normal">({{ listado_agrupado|length }} colaborador{{ 'es' if listado_agrupado|length != 1 else '' }} · {{ listado|length }} turno{{ 's' if listado|length != 1 else '' }})</span></h3>
             <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
