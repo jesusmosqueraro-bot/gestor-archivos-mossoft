@@ -388,3 +388,188 @@
         </div>
 
     </main>
+
+    <div id="modal-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-start justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-slate-800 border border-slate-700 rounded-3xl max-w-6xl w-full p-6 shadow-2xl my-4">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                <h3 id="modal-activo-titulo" class="text-base font-bold text-white">Nuevo Activo</h3>
+                <button onclick="cerrarModalActivo()" class="text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="form-activo" method="POST" action="/tickets/inventario/nuevo" class="flex flex-col gap-3 text-xs">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">
+                    <div class="flex flex-col gap-3">
+                        <div class="relative">
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de Placa *</label>
+                            <input type="text" name="nombre" id="input-activo-nombre" required maxlength="200" placeholder="Ej: 15011" autocomplete="off" oninput="buscarActivoRegistrado(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <p class="text-[10px] text-slate-500 mt-1">Debe ser único: no puede repetirse en dos activos activos a la vez.</p>
+                            <div id="sugerencias-activo-registrado" class="hidden absolute z-20 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-56 overflow-y-auto"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo</label>
+                                <div class="flex items-center gap-1.5">
+                                    <select name="tipo_activo" id="input-activo-tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        {% for t in tipos_activo %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                                    </select>
+                                    {% if session.get('rol') == 'admin' %}
+                                    <button type="button" onclick="abrirModalAgregarTipoRapido()" title="Agregar un tipo nuevo sin salir de este formulario"
+                                            class="shrink-0 w-9 h-9 flex items-center justify-center bg-slate-700 hover:bg-orange-600 text-slate-200 rounded-xl transition-all">
+                                        <i class="fa-solid fa-plus text-xs"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Estado</label>
+                                <select name="estado" id="input-activo-estado" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    {% for e in estados_activo %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Marca</label>
+                                <input type="text" name="marca" id="input-activo-marca" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Modelo</label>
+                                <input type="text" name="modelo" id="input-activo-modelo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Número de serie</label>
+                            <input type="text" name="numero_serie" id="input-activo-serie" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <p class="text-slate-400 font-bold mb-2 uppercase tracking-wider text-[10px]"><i class="fa-solid fa-microchip mr-1 text-orange-400"></i>Especificaciones técnicas (opcional)</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">RAM (GB)</label>
+                                    <input type="number" name="ram_gb" id="input-activo-ram-gb" min="1" step="1" list="lista-ram-gb" placeholder="Ej: 16" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <datalist id="lista-ram-gb">
+                                        <option value="4"><option value="8"><option value="12"><option value="16"><option value="32"><option value="64">
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Tipo de RAM</label>
+                                    <select name="tipo_ram" id="input-activo-tipo-ram" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="">Sin especificar</option>
+                                        {% for tr in ['DDR3', 'DDR4', 'DDR5'] %}<option value="{{ tr }}">{{ tr }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Disco duro (GB)</label>
+                                    <input type="number" name="disco_gb" id="input-activo-disco-gb" min="1" step="1" list="lista-disco-gb" placeholder="Ej: 512" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <datalist id="lista-disco-gb">
+                                        <option value="120"><option value="128"><option value="240"><option value="256"><option value="480"><option value="512"><option value="1000"><option value="2000">
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label class="block text-slate-500 font-semibold mb-1 text-[10px]">Tipo de disco</label>
+                                    <select name="tipo_disco" id="input-activo-tipo-disco" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                        <option value="">Sin especificar</option>
+                                        {% for td in ['SSD', 'HDD'] %}<option value="{{ td }}">{{ td }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Sede</label>
+                                <select name="sede" id="input-activo-sede" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    {% for s in sedes %}<option value="{{ s.nombre }}">{{ s.nombre }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Área</label>
+                                <select name="area" id="input-activo-area" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    {% for ar in areas %}<option value="{{ ar.nombre }}">{{ ar.nombre }}</option>{% endfor %}
+                                </select>
+                                <p class="text-[10px] text-slate-500 mt-1">Para ubicar con más precisión el equipo dentro de la sede (ej: Sistemas, Urgencias, Facturación).</p>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Proveedor</label>
+                                <select name="proveedor" id="input-activo-proveedor" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    {% for p in proveedores %}<option value="{{ p.nombre }}">{{ p.nombre }}</option>{% endfor %}
+                                </select>
+                                <p class="text-[10px] text-slate-500 mt-1">Quién vendió o suministró el equipo. Administra la lista en Configuración.</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo del activo</label>
+                                <select name="tipo_costo" id="input-activo-tipo-costo" onchange="actualizarCampoCostoInventario()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="">Sin especificar</option>
+                                    <option value="propio">Propio (costo de compra)</option>
+                                    <option value="alquilado">Alquilado (costo mensual)</option>
+                                </select>
+                            </div>
+                            <div id="campo-costo-compra" class="hidden">
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo de compra</label>
+                                <input type="number" name="costo_compra" id="input-activo-costo-compra" min="0" step="0.01" placeholder="$ 0" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div id="campo-costo-alquiler" class="hidden">
+                                <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Costo de alquiler (mensual)</label>
+                                <input type="number" name="costo_alquiler_mensual" id="input-activo-costo-alquiler" min="0" step="0.01" placeholder="$ 0" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                        </div>
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                <input type="checkbox" name="es_biomedico" id="input-activo-biomedico" onchange="if(this.checked){document.getElementById('input-activo-categoria-especial').checked=false;} actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                <i class="fa-solid fa-kit-medical text-rose-400"></i> Es un activo biomédico (bomba de infusión y similares)
+                            </label>
+                        </div>
+                        <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                            <label class="flex items-center gap-2 text-slate-300 font-bold text-xs cursor-pointer">
+                                <input type="checkbox" name="es_categoria_especial" id="input-activo-categoria-especial" onchange="if(this.checked){document.getElementById('input-activo-biomedico').checked=false;} actualizarSeccionActaRecibido()" class="rounded border-slate-600 bg-slate-900 text-orange-500 focus:ring-orange-500">
+                                <i class="fa-solid fa-hard-hat text-amber-400"></i> Es un insumo de SST, Ambiental o Laboratorio Clínico
+                            </label>
+                            <div id="seccion-categoria-especial-valor" class="hidden mt-2">
+                                <select name="categoria_especial" id="input-categoria-especial-valor" onchange="actualizarSeccionActaRecibido()" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <option value="sst">SST (Seguridad y Salud en el Trabajo)</option>
+                                    <option value="ambiental">Ambiental</option>
+                                    <option value="laboratorio">Laboratorio Clínico</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="seccion-acta-recibido" class="hidden bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 space-y-2">
+                            <p class="text-[10px] text-slate-500" id="texto-intro-acta-recibido"></p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input type="text" name="acta_nombre_responsable" id="input-acta-nombre" placeholder="Nombre de quien recibe" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <select name="acta_relacion_responsable" id="input-acta-relacion" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></select>
+                                <input type="text" name="acta_documento_responsable" id="input-acta-documento" placeholder="Documento de identidad (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <input type="text" name="acta_telefono_contacto" id="input-acta-telefono" placeholder="Teléfono de contacto (opcional)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <textarea name="acta_direccion_entrega" id="input-acta-direccion" rows="2" placeholder="Dirección de entrega" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <p class="text-[10px] font-bold text-slate-300 uppercase">Firma de quien recibe</p>
+                                    <div class="flex gap-1">
+                                        <button type="button" id="firma-acta-tab-dibujar" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-orange-600 text-white transition-all">Dibujar</button>
+                                        <button type="button" id="firma-acta-tab-subir" class="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-700 text-slate-300 transition-all">Subir</button>
+                                    </div>
+                                </div>
+                                <div id="firma-acta-panel-dibujar">
+                                    <canvas id="firma-acta-canvas" width="380" height="110" class="w-full bg-white rounded-lg border border-slate-700" style="height:110px; touch-action: none;"></canvas>
+                                    <button type="button" id="firma-acta-borrar" class="mt-1 text-[9px] text-slate-400 hover:text-rose-400 font-semibold"><i class="fa-solid fa-eraser mr-1"></i>Borrar</button>
+                                </div>
+                                <div id="firma-acta-panel-subir" class="hidden">
+                                    <input type="file" id="firma-acta-archivo" accept="image/*" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-300">
+                                    <img id="firma-acta-preview" class="hidden mt-1.5 max-h-24 rounded-lg border border-slate-700 bg-white p-1" alt="Vista previa de la firma">
+                                </div>
+                                <input type="hidden" name="acta_firma_dataurl" id="firma-acta-input">
+                            </div>
+
+                            <button type="button" onclick="abrirModalActasRecibido()" id="btn-ver-actas-recibido" class="hidden w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 rounded-lg text-[11px] transition-all active:scale-95">
+                                <i class="fa-solid fa-clock-rotate-left mr-1"></i> Ver historial de actas de este activo
+                            </button>
+                        </div>
+                    </div>
