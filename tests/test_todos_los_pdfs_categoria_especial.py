@@ -30,7 +30,7 @@ CASOS = [
     ('laboratorio', False, 'laboratorio'),
 ]
 
-# 🪩 Cómo debe verse la "variante" en el título de los PDFs de asignación/devolución para cada
+# 🩹 Cómo debe verse la "variante" en el título de los PDFs de asignación/devolución para cada
 # caso (ver TEXTOS_CATEGORIA_ESPECIAL / _categoria_especial_activo en app.py) — reportlab pone el
 # título en mayúsculas, así que se compara ya normalizado.
 VARIANTE_ESPERADA = {

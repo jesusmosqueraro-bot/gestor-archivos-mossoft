@@ -146,7 +146,7 @@ def test_pdf_de_certificado_de_devolucion_incrusta_el_logo(admin_session, app):
 
 def test_encabezado_con_logo_no_revienta_si_el_archivo_no_existe(app, monkeypatch):
     """Si el archivo del logo llegara a faltar (ruta movida, despliegue incompleto), el PDF debe
-    seguir generandose con solo el título — nunca debe romper la descarga ni el envío por
+    seguir generándose con solo el título — nunca debe romper la descarga ni el envío por
     correo del acta."""
     monkeypatch.setattr(app, '_RUTA_LOGO_PREVENTIVA', '/ruta/que/no/existe/logo.png')
     from reportlab.lib.styles import getSampleStyleSheet

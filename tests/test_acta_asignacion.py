@@ -175,10 +175,10 @@ def test_actas_asignacion_requiere_rol_operativo(sesion_usuario, app):
     assert r.status_code in (302, 403)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # FIRMA DE QUIEN ASIGNA (pedido de Tomás, 06/09/2026): se auto-resuelve del perfil de quien
 # genera el acta — igual de automática que la firma de quien recibe — sin ningún widget nuevo.
-# ──────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 
 def test_acta_de_asignacion_incluye_la_firma_de_quien_la_genera_si_la_tiene_guardada(admin_session, app):
     conn, db_type = app.get_db()
