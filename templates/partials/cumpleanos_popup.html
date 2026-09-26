@@ -10,9 +10,14 @@
    "Una vez por día por navegador" se controla con localStorage (mismo criterio ya usado en esta
    app para preferencias puramente locales, ver 'alternarFijarFila' en turnos_cuadro.html) — no
    con una notificación de campanita, porque el pop-up debe aparecer solo, sin que nadie tenga que
-   ir a buscarlo. #}
+   ir a buscarlo.
+
+   🚑 'is defined': mientras app.py (con el context_processor que expone esta función) todavía no
+   se ha desplegado, esta llamada quedaría UNDEFINED y Jinja lanza un error al intentar
+   invocarla — rompiendo TODAS las páginas autenticadas con un 500. Este chequeo lo evita sin
+   cambiar el comportamiento una vez que app.py sí esté desplegado. #}
 {% if session.get('logged_in') %}
-    {% set _cumpleanos_hoy = colaboradores_cumpleanos_hoy() %}
+    {% set _cumpleanos_hoy = colaboradores_cumpleanos_hoy() if colaboradores_cumpleanos_hoy is defined else [] %}
     {% if _cumpleanos_hoy %}
     <div id="modal-cumpleanos-hoy" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-[60]">
         <div class="bg-gradient-to-br from-fuchsia-600 via-violet-600 to-indigo-600 rounded-3xl max-w-md w-full p-6 shadow-2xl text-center relative overflow-hidden">
