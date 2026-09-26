@@ -338,7 +338,7 @@
         // el backend (ver /buscar/api) — así buscar "papeleria" encuentra "Papelería" tanto
         // aquí como en el buscador global, sin obligar a escribir el acento exacto.
         function _normalizarBusquedaConfig(texto) {
-            return (texto || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();
+            return (texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
         }
 
         // 🔎 Filtro de búsqueda por nombre (y NIT en Proveedores) dentro de cada columna
