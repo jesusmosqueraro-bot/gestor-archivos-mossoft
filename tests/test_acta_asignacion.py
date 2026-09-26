@@ -2,7 +2,14 @@
 activo, marcando la casilla 'Generar acta de asignación' queda un registro histórico en
 'actas_asignacion' (nunca se sobreescribe con una reasignación posterior — igual que el acta de
 recibido biomédico), descargable en PDF, con un título distinto según si el activo está marcado
-como biomédico o no."""
+como biomédico o no.
+
+Nota (26/09/2026): desde la validación de campos técnicos obligatorios pedida por Tomás (ver
+_validar_campos_tecnicos_para_acta_asignacion en app.py y tests/test_asignacion_validacion.py),
+marcar 'generar_acta_asignacion' exige Marca/Modelo/N° de serie ya diligenciados — por eso todos
+los POST de este archivo que marcan esa casilla incluyen esos tres campos."""
+
+_SPECS_MINIMAS_PARA_ACTA = {'marca': 'Dell', 'modelo': 'Latitude 5420', 'numero_serie': 'SN-0001'}
 
 
 def _crear_activo_directo(app, nombre='70001', es_biomedico=False, asignado_a=None, estado='Disponible'):
@@ -23,6 +30,7 @@ def test_crear_activo_marcando_generar_acta_registra_el_acta_de_asignacion(admin
     r = admin_session.post('/tickets/inventario/nuevo', data={
         'nombre': '70010', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Laura Gómez',
         'generar_acta_asignacion': 'on', 'acta_asignacion_descripcion': 'Entregado con cargador nuevo.',
+        **_SPECS_MINIMAS_PARA_ACTA,
     }, follow_redirects=True)
 
     assert r.status_code == 200
@@ -59,7 +67,7 @@ def test_generar_acta_marcada_sin_asignado_a_no_bloquea_el_guardado_pero_avisa(a
     r = admin_session.post('/tickets/inventario/nuevo', data={
         'nombre': '70012', 'tipo_activo': 'Portátil', 'estado': 'Disponible',
         # Sin 'asignado_a' — la casilla queda marcada, pero no hay a quién hacerle el acta.
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     }, follow_redirects=True)
 
     assert r.status_code == 200
@@ -82,6 +90,7 @@ def test_activo_que_pasa_a_devolucion_no_registra_acta_de_asignacion_aunque_se_m
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '70013', 'tipo_activo': 'Portátil', 'estado': 'Devolución', 'asignado_a': 'Mario Duarte',
         'generar_acta_asignacion': 'on', 'acta_asignacion_descripcion': 'No debería registrarse.',
+        **_SPECS_MINIMAS_PARA_ACTA,
     })
 
     conn, db_type = app.get_db()
@@ -96,11 +105,11 @@ def test_editar_activo_agrega_una_segunda_acta_de_asignacion_sin_borrar_la_prime
 
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '70014', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Primer Usuario',
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     })
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '70014', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Segundo Usuario',
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     })
 
     conn, db_type = app.get_db()
@@ -116,6 +125,7 @@ def test_listar_actas_de_asignacion_de_un_activo(admin_session, app):
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '70015', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Ana Torres',
         'generar_acta_asignacion': 'on', 'acta_asignacion_descripcion': 'Sin novedad.',
+        **_SPECS_MINIMAS_PARA_ACTA,
     })
 
     r = admin_session.get(f'/tickets/inventario/{activo_id}/actas_asignacion')
@@ -130,11 +140,11 @@ def test_acta_asignacion_pdf_ti_y_biomedico_usan_titulos_distintos(admin_session
     activo_bio = _crear_activo_directo(app, nombre='70017', asignado_a='Usuario Bio', estado='Asignado', es_biomedico=True)
     admin_session.post(f'/tickets/inventario/{activo_ti}/editar', data={
         'nombre': '70016', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Usuario TI',
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     })
     admin_session.post(f'/tickets/inventario/{activo_bio}/editar', data={
         'nombre': '70017', 'tipo_activo': 'Bomba de infusión', 'estado': 'Asignado', 'asignado_a': 'Usuario Bio',
-        'es_biomedico': 'on', 'generar_acta_asignacion': 'on',
+        'es_biomedico': 'on', 'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     })
 
     conn, db_type = app.get_db()
@@ -165,10 +175,10 @@ def test_actas_asignacion_requiere_rol_operativo(sesion_usuario, app):
     assert r.status_code in (302, 403)
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # FIRMA DE QUIEN ASIGNA (pedido de Tomás, 06/09/2026): se auto-resuelve del perfil de quien
 # genera el acta — igual de automática que la firma de quien recibe — sin ningún widget nuevo.
-# ────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def test_acta_de_asignacion_incluye_la_firma_de_quien_la_genera_si_la_tiene_guardada(admin_session, app):
     conn, db_type = app.get_db()
@@ -180,7 +190,7 @@ def test_acta_de_asignacion_incluye_la_firma_de_quien_la_genera_si_la_tiene_guar
 
     admin_session.post('/tickets/inventario/nuevo', data={
         'nombre': '70019', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Nuevo Usuario',
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     })
 
     conn, db_type = app.get_db()
@@ -198,7 +208,7 @@ def test_acta_de_asignacion_sin_firma_guardada_de_quien_genera_no_falla(admin_se
     registrada (firma_asigna_url en NULL) — no bloquea nada."""
     r = admin_session.post('/tickets/inventario/nuevo', data={
         'nombre': '70020', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Otro Usuario',
-        'generar_acta_asignacion': 'on',
+        'generar_acta_asignacion': 'on', **_SPECS_MINIMAS_PARA_ACTA,
     }, follow_redirects=True)
     assert r.status_code == 200
 

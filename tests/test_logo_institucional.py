@@ -106,6 +106,7 @@ def test_pdf_de_acta_de_asignacion_incrusta_el_logo(admin_session, app):
     activo_id = _crear_activo(app, nombre='95002')
     admin_session.post(f'/tickets/inventario/{activo_id}/editar', data={
         'nombre': '95002', 'tipo_activo': 'Portátil', 'estado': 'Asignado', 'asignado_a': 'Colaborador de Prueba',
+        'marca': 'Dell', 'modelo': 'Latitude', 'numero_serie': 'SN-95002',
         'generar_acta_asignacion': 'on',
     })
     conn, db_type = app.get_db()
@@ -145,7 +146,7 @@ def test_pdf_de_certificado_de_devolucion_incrusta_el_logo(admin_session, app):
 
 def test_encabezado_con_logo_no_revienta_si_el_archivo_no_existe(app, monkeypatch):
     """Si el archivo del logo llegara a faltar (ruta movida, despliegue incompleto), el PDF debe
-    seguir generándose con solo el título — nunca debe romper la descarga ni el envío por
+    seguir generandose con solo el título — nunca debe romper la descarga ni el envío por
     correo del acta."""
     monkeypatch.setattr(app, '_RUTA_LOGO_PREVENTIVA', '/ruta/que/no/existe/logo.png')
     from reportlab.lib.styles import getSampleStyleSheet
