@@ -75,6 +75,7 @@
                     {% include 'partials/perfil_boton.html' %}
                     {% include 'partials/chat_boton.html' %}
                     {% include 'partials/campanita.html' %}
+                    {% include 'partials/cumpleanos_popup.html' %}
                 </div>
             </div>
         </div>
@@ -281,7 +282,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }}, {{ (u[14] or "LV") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }}, {{ (u[14] or "LV") | tojson }}, {{ (u[15] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% elif u[1] == session.get('username') %}
@@ -599,6 +600,15 @@
                                 <option value="LS" {% if form_data and form_data.esquema_jornada == 'LS' %}selected{% endif %}>Lunes a Sábado</option>
                             </select>
                         </div>
+
+                        <!-- 🎂 Fecha de nacimiento (pedido por Tomás, 26/09/2026): opcional — se usa
+                             solo para el aviso emergente de cumpleaños que ven todos los usuarios
+                             activos (ver partials/cumpleanos_popup.html). -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Fecha de nacimiento (opcional)</label>
+                            <input type="date" name="fecha_nacimiento" value="{{ form_data.fecha_nacimiento if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            <p class="text-[10px] text-slate-500 mt-1">Se usa solo para saludar a la persona el día de su cumpleaños.</p>
+                        </div>
                     </div>
                 </div>
 
@@ -723,6 +733,12 @@
                             <option value="LV">Lunes a Viernes</option>
                             <option value="LS">Lunes a Sábado</option>
                         </select>
+                    </div>
+
+                    <!-- 🎂 Ver comentario equivalente en el formulario de Registrar Usuario. -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1">Fecha de nacimiento (opcional)</label>
+                        <input type="date" id="edit_fecha_nacimiento" name="fecha_nacimiento" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
                     </div>
                 </div>
 
@@ -964,7 +980,7 @@
             });
         }
 
-        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma, modulosExtra, metaHorasMensual, esquemaJornada) {
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma, modulosExtra, metaHorasMensual, esquemaJornada, fechaNacimiento) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
@@ -982,6 +998,7 @@
             document.getElementById('edit_especialidad').value = especialidad || '';
             document.getElementById('edit_meta_horas_mensual').value = (metaHorasMensual || metaHorasMensual === 0) ? metaHorasMensual : '';
             document.getElementById('edit_esquema_jornada').value = esquemaJornada || 'LV';
+            document.getElementById('edit_fecha_nacimiento').value = fechaNacimiento || '';
             // 🧩 Módulos extra: marca solo las casillas de los módulos que esta cuenta ya tiene
             // concedidos (texto separado por coma guardado en usuarios.modulos_extra).
             var clavesModulosExtra = (modulosExtra || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);
