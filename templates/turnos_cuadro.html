@@ -107,6 +107,7 @@
                 {% include 'partials/perfil_boton.html' %}
                 {% include 'partials/chat_boton.html' %}
                 {% include 'partials/campanita.html' %}
+                {% include 'partials/cumpleanos_popup.html' %}
             </div>
         </div>
     </nav>
@@ -226,7 +227,7 @@
                                     <button type="button" onclick="alternarFijarFila('{{ fila.usuario }}')" class="fijar-pin shrink-0 text-[11px] text-slate-600 hover:text-indigo-400" title="Fijar esta fila arriba (solo en este navegador)">
                                         <i class="fa-solid fa-thumbtack"></i>
                                     </button>
-                                    {#- 🛈 Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su
+                                    {#- 💈 Tooltip con los datos del PERFIL del colaborador al pasar el mouse sobre su
                                          nombre (pedido de Tomás, 20/09/2026: "que se reflejen los datos del usuario") —
                                          cédula, correo, teléfono, Sede y cargo/rol de cuenta, ver fila.perfil en
                                          turnos_cuadro(). Usa el atributo title= nativo (no un tooltip a medida) para
@@ -263,40 +264,35 @@
             </div>
         </div>
 
-        <!-- LISTADO PLANO -->
+        <!-- LISTADO PLANO (consolidado: pedido de Tomás, 26/09/2026 — "agrupar las asignaciones
+             para que cada colaborador figure únicamente UNA vez en la lista principal"; el detalle
+             de sus turnos del periodo se ve al hacer clic en "Ver detalle", ver
+             #modal-detalle-turnos-colaborador más abajo) -->
         <div>
-            <h3 class="text-sm font-bold text-white mb-2 flex items-center gap-2"><i class="fa-solid fa-list text-indigo-400"></i> Listado de la semana <span class="text-slate-500 font-normal">({{ listado|length }})</span></h3>
+            <h3 class="text-sm font-bold text-white mb-2 flex items-center gap-2"><i class="fa-solid fa-list text-indigo-400"></i> Listado de la semana <span class="text-slate-500 font-normal">({{ listado_agrupado|length }} colaborador{{ 'es' if listado_agrupado|length != 1 else '' }} · {{ listado|length }} turno{{ 's' if listado|length != 1 else '' }})</span></h3>
             <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
                 <table class="w-full text-xs text-left" data-tabla-interactiva="turnos">
                     <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
                         <tr>
-                            <th class="p-3">Colaborador</th><th class="p-3">Fecha</th><th class="p-3">Turno</th>
-                            <th class="p-3">Horario</th><th class="p-3">Área</th><th class="p-3">Sede</th>
-                            <th class="p-3">Rol</th><th class="p-3">Observaciones</th><th class="p-3">Acciones</th>
+                            <th class="p-3">Colaborador</th><th class="p-3">Turnos</th>
+                            <th class="p-3">Área(s)</th><th class="p-3">Sede(s)</th>
+                            <th class="p-3">Rol</th><th class="p-3">Acciones</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-800">
-                        {% for r in listado %}
+                        {% for g in listado_agrupado %}
                         <tr>
-                            <td class="p-3 font-bold text-slate-200">{{ r.colaborador }}</td>
-                            <td class="p-3 text-slate-400">{{ r.fecha }}</td>
-                            <td class="p-3 text-slate-300"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background-color: {{ r.color }};"></span>{{ r.turno_nombre }}</td>
-                            <td class="p-3 text-slate-400">{{ r.horario }}</td>
-                            <td class="p-3 text-slate-400">{{ r.area }}</td>
-                            <td class="p-3 text-slate-400">{{ r.sede }}</td>
-                            <td class="p-3 text-slate-400">{{ r.rol_etiqueta }}</td>
-                            <td class="p-3 text-slate-500">{{ r.observaciones or '—' }}</td>
+                            <td class="p-3 font-bold text-slate-200">{{ g.colaborador }}</td>
+                            <td class="p-3 text-slate-300"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-300">{{ g.turnos|length }}</span></td>
+                            <td class="p-3 text-slate-400">{{ g.turnos | map(attribute='area') | select | unique | join(', ') or '—' }}</td>
+                            <td class="p-3 text-slate-400">{{ g.turnos | map(attribute='sede') | select | unique | join(', ') or '—' }}</td>
+                            <td class="p-3 text-slate-400">{{ g.turnos[0].rol_etiqueta if g.turnos else '—' }}</td>
                             <td class="p-3 whitespace-nowrap">
-                                {% if usuario_puede_gestionar_turnos() %}
-                                <button type="button" class="text-slate-500 hover:text-indigo-400 mr-2" title="Editar" onclick='abrirModalAsignar({{ r | tojson }})'><i class="fa-solid fa-pen"></i></button>
-                                <button type="button" class="text-slate-500 hover:text-rose-400" title="Cancelar" onclick="cancelarTurno({{ r.id }})"><i class="fa-solid fa-ban"></i></button>
-                                {% else %}
-                                <span class="text-slate-700">—</span>
-                                {% endif %}
+                                <button type="button" class="text-indigo-400 hover:text-indigo-300 font-bold" onclick="abrirModalDetalleTurnosColaborador({{ loop.index0 }})"><i class="fa-solid fa-eye mr-1"></i>Ver detalle</button>
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="9" class="text-center py-10 text-slate-500 font-bold">No se encontraron turnos que coincidan con los filtros.</td></tr>
+                        <tr><td colspan="6" class="text-center py-10 text-slate-500 font-bold">No se encontraron turnos que coincidan con los filtros.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -590,6 +586,30 @@
         </div>
     </div>
 
+    <!-- 🗂️ Detalle de los turnos de UN colaborador (se abre desde "Ver detalle" en el listado
+         consolidado de la semana, ver #tbody arriba). Reutiliza abrirModalAsignar()/cancelarTurno()
+         ya definidos para el modal de asignar — el detalle solo lista, editar/cancelar delega. -->
+    <div id="modal-detalle-turnos-colaborador" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-3xl max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2"><i class="fa-solid fa-calendar-days text-indigo-400"></i> Turnos de <span id="detalle-turnos-colaborador-nombre" class="text-indigo-300"></span></h3>
+                <button type="button" onclick="cerrarModalDetalleTurnosColaborador()" class="text-slate-500 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
+                <table class="w-full text-xs text-left">
+                    <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                        <tr>
+                            <th class="p-3">Fecha</th><th class="p-3">Turno</th>
+                            <th class="p-3">Horario</th><th class="p-3">Área</th><th class="p-3">Sede</th>
+                            <th class="p-3">Rol</th><th class="p-3">Observaciones</th><th class="p-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-detalle-turnos-colaborador" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <script>
         // 🔎 Colaboradores visibles en la matriz filtrada actual — precarga inicial del modal de
         // grupo (ver abrirModalAsignarGrupo()); se puede agregar/quitar libremente desde ahí.
@@ -597,6 +617,12 @@
             {% for fila in matriz %}{usuario: {{ fila.usuario | tojson }}, nombre: {{ fila.nombre | tojson }}}{{ ',' if not loop.last }}
             {% endfor %}
         ];
+
+        // 🗂️ Listado de la semana agrupado por colaborador (ver _colaboradores_consolidados_turnos
+        // en app.py) — usado por abrirModalDetalleTurnosColaborador() para poblar el modal de
+        // detalle sin tener que volver a pedirle nada al servidor.
+        const TURNOS_AGRUPADOS = {{ listado_agrupado | tojson }};
+        const PUEDE_GESTIONAR_TURNOS = {{ usuario_puede_gestionar_turnos() | tojson }};
 
         const CSRF_TOKEN = "{{ csrf_token() }}";
 
@@ -974,6 +1000,87 @@
         function cancelarTurnoDesdeModal() {
             const id = document.getElementById('boton-cancelar-turno').getAttribute('data-turno-id');
             if (id) { cancelarTurno(id); }
+        }
+
+        // 🧱 Celda de texto plano construida con textContent (no innerHTML) — evita cualquier
+        // riesgo de inyección con observaciones/nombres que vengan de la BD.
+        function _celdaTextoDetalleTurnos(texto) {
+            const td = document.createElement('td');
+            td.className = 'p-3 text-slate-400';
+            td.textContent = texto || '—';
+            return td;
+        }
+
+        function abrirModalDetalleTurnosColaborador(idx) {
+            const g = TURNOS_AGRUPADOS[idx];
+            if (!g) return;
+            document.getElementById('detalle-turnos-colaborador-nombre').textContent = g.colaborador || '';
+            const tbody = document.getElementById('tbody-detalle-turnos-colaborador');
+            tbody.innerHTML = '';
+            (g.turnos || []).forEach(function (t) {
+                const tr = document.createElement('tr');
+
+                const tdFecha = document.createElement('td');
+                tdFecha.className = 'p-3 text-slate-400';
+                tdFecha.textContent = t.fecha || '—';
+                tr.appendChild(tdFecha);
+
+                const tdTurno = document.createElement('td');
+                tdTurno.className = 'p-3 text-slate-300';
+                const punto = document.createElement('span');
+                punto.className = 'inline-block w-2.5 h-2.5 rounded-full mr-1.5';
+                punto.style.backgroundColor = t.color || '#64748b';
+                tdTurno.appendChild(punto);
+                tdTurno.appendChild(document.createTextNode(t.turno_nombre || '—'));
+                tr.appendChild(tdTurno);
+
+                tr.appendChild(_celdaTextoDetalleTurnos(t.horario));
+                tr.appendChild(_celdaTextoDetalleTurnos(t.area));
+                tr.appendChild(_celdaTextoDetalleTurnos(t.sede));
+                tr.appendChild(_celdaTextoDetalleTurnos(t.rol_etiqueta));
+                tr.appendChild(_celdaTextoDetalleTurnos(t.observaciones));
+
+                const tdAcciones = document.createElement('td');
+                tdAcciones.className = 'p-3 whitespace-nowrap';
+                if (PUEDE_GESTIONAR_TURNOS) {
+                    const btnEditar = document.createElement('button');
+                    btnEditar.type = 'button';
+                    btnEditar.className = 'text-slate-500 hover:text-indigo-400 mr-2';
+                    btnEditar.title = 'Editar';
+                    btnEditar.innerHTML = '<i class="fa-solid fa-pen"></i>';
+                    btnEditar.onclick = function () { cerrarModalDetalleTurnosColaborador(); abrirModalAsignar(t); };
+                    tdAcciones.appendChild(btnEditar);
+
+                    const btnCancelar = document.createElement('button');
+                    btnCancelar.type = 'button';
+                    btnCancelar.className = 'text-slate-500 hover:text-rose-400';
+                    btnCancelar.title = 'Cancelar';
+                    btnCancelar.innerHTML = '<i class="fa-solid fa-ban"></i>';
+                    btnCancelar.onclick = function () { cerrarModalDetalleTurnosColaborador(); cancelarTurno(t.id); };
+                    tdAcciones.appendChild(btnCancelar);
+                } else {
+                    tdAcciones.innerHTML = '<span class="text-slate-700">—</span>';
+                }
+                tr.appendChild(tdAcciones);
+
+                tbody.appendChild(tr);
+            });
+            if (!g.turnos || !g.turnos.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 8;
+                td.className = 'text-center py-6 text-slate-500 font-bold';
+                td.textContent = 'Sin turnos en este periodo.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            }
+            document.getElementById('modal-detalle-turnos-colaborador').classList.remove('hidden');
+            document.getElementById('modal-detalle-turnos-colaborador').classList.add('flex');
+        }
+
+        function cerrarModalDetalleTurnosColaborador() {
+            document.getElementById('modal-detalle-turnos-colaborador').classList.add('hidden');
+            document.getElementById('modal-detalle-turnos-colaborador').classList.remove('flex');
         }
 
         function cerrarCuadro(id) {
