@@ -1,0 +1,58 @@
+{# 🎂 Aviso emergente de cumpleaños (pedido por Tomás, 26/09/2026): "Si la fecha actual coincide
+   con el cumpleaños de un colaborador, desplegar una notificación emergente (pop-up/banner de
+   felicitaciones) a todos los usuarios activos al iniciar sesión o cargar la plataforma". Se
+   incluye junto a partials/campanita.html en las mismas plantillas autenticadas.
+
+   La consulta a BD (colaboradores_cumpleanos_hoy(), ver _colaboradores_de_cumpleanos_hoy en
+   app.py) solo se dispara aquí, adentro del include — nunca en páginas sin sesión iniciada — y
+   solo compara MES/DÍA de usuarios.fecha_nacimiento contra la fecha de hoy, así que es liviana.
+
+   "Una vez por día por navegador" se controla con localStorage (mismo criterio ya usado en esta
+   app para preferencias puramente locales, ver 'alternarFijarFila' en turnos_cuadro.html) — no
+   con una notificación de campanita, porque el pop-up debe aparecer solo, sin que nadie tenga que
+   ir a buscarlo. #}
+{% if session.get('logged_in') %}
+    {% set _cumpleanos_hoy = colaboradores_cumpleanos_hoy() %}
+    {% if _cumpleanos_hoy %}
+    <div id="modal-cumpleanos-hoy" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-[60]">
+        <div class="bg-gradient-to-br from-fuchsia-600 via-violet-600 to-indigo-600 rounded-3xl max-w-md w-full p-6 shadow-2xl text-center relative overflow-hidden">
+            <button type="button" onclick="cerrarModalCumpleanosHoy()" class="absolute top-3 right-3 text-white/70 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+            <div class="text-5xl mb-2">🎉🎂🎈</div>
+            <h3 class="text-lg font-extrabold text-white mb-2">¡Feliz cumpleaños!</h3>
+            <p class="text-white/90 text-sm leading-relaxed">
+                Hoy celebramos el cumpleaños de
+                <b>{{ _cumpleanos_hoy | join(', ') }}</b>.
+                ¡Envíale tus felicitaciones! 🥳
+            </p>
+            <button type="button" onclick="cerrarModalCumpleanosHoy()" class="mt-4 bg-white/15 hover:bg-white/25 text-white font-bold py-2 px-5 rounded-xl text-xs transition-all">
+                Cerrar
+            </button>
+        </div>
+    </div>
+    <script>
+        (function () {
+            // 🗓️ La fecha de "hoy" para la clave de localStorage la calcula el propio navegador
+            // — así el aviso vuelve a aparecer un día distinto sin depender de nada del backend.
+            var claveVisto = 'arkiv_cumple_visto_' + new Date().toISOString().slice(0, 10);
+            function yaSeVioHoy() {
+                try { return localStorage.getItem(claveVisto) === '1'; } catch (e) { return false; }
+            }
+            function marcarVistoHoy() {
+                try { localStorage.setItem(claveVisto, '1'); } catch (e) { /* modo privado u otro bloqueo — no pasa nada, solo se repite el pop-up */ }
+            }
+            window.cerrarModalCumpleanosHoy = function () {
+                var modal = document.getElementById('modal-cumpleanos-hoy');
+                if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+                marcarVistoHoy();
+            };
+            document.addEventListener('DOMContentLoaded', function () {
+                if (yaSeVioHoy()) return;
+                var modal = document.getElementById('modal-cumpleanos-hoy');
+                if (!modal) return;
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            });
+        })();
+    </script>
+    {% endif %}
+{% endif %}
