@@ -282,7 +282,13 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }}, {{ (u[14] or "LV") | tojson }}, {{ (u[15] or "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    {# 🚑 u[15] (fecha_nacimiento) solo existe en la fila cuando el SELECT de
+                                       app.py ya la incluye — mientras esa versión de app.py no se haya
+                                       desplegado, u sigue teniendo 15 columnas (índices 0-14) y u[15]
+                                       lanzaría un IndexError ("tuple index out of range"), rompiendo esta
+                                       página con un 500. u|length lo evita sin cambiar el comportamiento
+                                       una vez que app.py sí esté desplegado. #}
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }}, {{ (u[14] or "LV") | tojson }}, {{ (u[15] if u|length > 15 and u[15] else "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% elif u[1] == session.get('username') %}
