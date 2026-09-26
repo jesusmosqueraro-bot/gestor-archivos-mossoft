@@ -143,6 +143,7 @@
                 <option value="agente">Agente</option>
                 <option value="estandar">Estándar</option>
                 <option value="gestion_humana">Gestión Humana</option>
+                <option value="lider">Líder de Turnos</option>
             </select>
             <select id="filtro-estado" onchange="filtrarUsuarios()" class="px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500">
                 <option value="">Todos los estados</option>
@@ -280,7 +281,7 @@
                                        comillas simples en el atributo y tojson en cada valor (que escapa
                                        comillas, backslashes y demás) esto queda seguro para cualquier nombre,
                                        correo o usuario, incluidos los que tengan tildes, comillas o símbolos. #}
-                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
+                                    <button onclick='abrirModalEditarUsuario({{ u[0] }}, {{ u[1] | tojson }}, {{ u[2] | tojson }}, {{ u[3] | tojson }}, {{ (u[5] or "") | tojson }}, {{ (u[6] or "") | tojson }}, {{ (u[7] or "") | tojson }}, {{ (u[8] or "") | tojson }}, {{ (u[11] or "") | tojson }}, {{ (u[12] or "") | tojson }}, {{ (u[13] if u[13] is not none else "") | tojson }}, {{ (u[14] or "LV") | tojson }})' class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Editar">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     {% elif u[1] == session.get('username') %}
@@ -303,6 +304,7 @@
                                         <select name="rol" class="bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-cyan-500">
                                             <option value="estandar" {% if u[3] == 'estandar' %}selected{% endif %}>Estándar</option>
                                             <option value="gestion_humana" {% if u[3] == 'gestion_humana' %}selected{% endif %}>Gestión Humana</option>
+                                            <option value="lider" {% if u[3] == 'lider' %}selected{% endif %}>Líder de Turnos</option>
                                         </select>
                                         <button type="submit" class="p-1.5 text-slate-400 hover:text-cyan-400 transition-colors" title="Cambiar rol">
                                             <i class="fa-solid fa-check"></i>
@@ -574,6 +576,7 @@
                                 <option value="estandar" {% if form_data and form_data.rol == 'estandar' %}selected{% endif %}>Estándar (Solo lectura y descargas)</option>
                                 <option value="agente" {% if form_data and form_data.rol == 'agente' %}selected{% endif %}>Agente (Soporte TI / PQRS)</option>
                                 <option value="gestion_humana" {% if form_data and form_data.rol == 'gestion_humana' %}selected{% endif %}>Gestión Humana (Certificación de devolución de activos)</option>
+                                <option value="lider" {% if form_data and form_data.rol == 'lider' %}selected{% endif %}>Líder de Turnos (Programar y coordinar el Cuadro de Turnos)</option>
                                 {% if session.get('username') == 'admin' %}
                                 <option value="admin" {% if form_data and form_data.rol == 'admin' %}selected{% endif %}>Administrador (Control total)</option>
                                 {% endif %}
@@ -586,7 +589,15 @@
                         <div>
                             <label class="block text-xs font-semibold text-slate-300 uppercase mb-1" title="Total de horas que se espera que esta persona trabaje cada mes — se usa en Cuadro de Turnos → Horas del Mes para calcular las horas a favor.">Meta de horas mensuales (opcional)</label>
                             <input type="number" step="0.5" min="0" name="meta_horas_mensual" placeholder="Ej: 192" autocomplete="off" value="{{ form_data.meta_horas_mensual if form_data else '' }}" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                            <p class="text-[10px] text-slate-500 mt-1">Se puede dejar vacía y configurarla después desde Editar.</p>
+                            <p class="text-[10px] text-slate-500 mt-1">Opcional — si se deja vacía, Horas del Mes calcula la meta automáticamente según el Esquema de Jornada.</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1" title="Base para calcular automáticamente la meta de horas del mes en Cuadro de Turnos → Horas del Mes, según los días hábiles de cada mes.">Esquema de Jornada</label>
+                            <select name="esquema_jornada" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                                <option value="LV" {% if not form_data or (form_data.esquema_jornada or 'LV') == 'LV' %}selected{% endif %}>Lunes a Viernes</option>
+                                <option value="LS" {% if form_data and form_data.esquema_jornada == 'LS' %}selected{% endif %}>Lunes a Sábado</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -688,6 +699,7 @@
                                 <option value="estandar">Estándar</option>
                                 <option value="agente">Agente (Soporte TI / PQRS)</option>
                                 <option value="gestion_humana">Gestión Humana (Certificación de devolución de activos)</option>
+                                <option value="lider">Líder de Turnos (Programar y coordinar el Cuadro de Turnos)</option>
                                 <option value="admin">Administrador</option>
                             </select>
                         </div>
@@ -701,8 +713,16 @@
                         <div>
                             <label class="block text-xs font-semibold text-slate-300 uppercase mb-1" title="Total de horas que se espera que esta persona trabaje cada mes — se usa en Cuadro de Turnos → Horas del Mes para calcular las horas a favor.">Meta de horas mensuales</label>
                             <input type="number" step="0.5" min="0" id="edit_meta_horas_mensual" name="meta_horas_mensual" placeholder="Ej: 192" autocomplete="off" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
-                            <p class="text-[10px] text-slate-500 mt-1">Opcional. Vacío = sin meta definida.</p>
+                            <p class="text-[10px] text-slate-500 mt-1">Opcional — vacía calcula la meta automáticamente según el Esquema de Jornada.</p>
                         </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 uppercase mb-1" title="Base para calcular automáticamente la meta de horas del mes en Cuadro de Turnos → Horas del Mes.">Esquema de Jornada</label>
+                        <select id="edit_esquema_jornada" name="esquema_jornada" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-cyan-500">
+                            <option value="LV">Lunes a Viernes</option>
+                            <option value="LS">Lunes a Sábado</option>
+                        </select>
                     </div>
                 </div>
 
@@ -944,7 +964,7 @@
             });
         }
 
-        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma, modulosExtra, metaHorasMensual) {
+        function abrirModalEditarUsuario(id, username, email, rol, nombre, telefono, cedula, especialidad, firma, modulosExtra, metaHorasMensual, esquemaJornada) {
             document.getElementById('formEditarUsuario').action = `/editar_usuario/${id}`;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_rol').value = rol;
@@ -961,6 +981,7 @@
             document.getElementById('edit_cedula').value = cedula || '';
             document.getElementById('edit_especialidad').value = especialidad || '';
             document.getElementById('edit_meta_horas_mensual').value = (metaHorasMensual || metaHorasMensual === 0) ? metaHorasMensual : '';
+            document.getElementById('edit_esquema_jornada').value = esquemaJornada || 'LV';
             // 🧩 Módulos extra: marca solo las casillas de los módulos que esta cuenta ya tiene
             // concedidos (texto separado por coma guardado en usuarios.modulos_extra).
             var clavesModulosExtra = (modulosExtra || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);

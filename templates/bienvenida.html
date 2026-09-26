@@ -191,7 +191,7 @@
                     <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </div>
             </a>
-            {% elif rol == 'estandar' and chat_estandar_habilitado %}
+            {% elif rol in ('estandar', 'lider') and chat_estandar_habilitado %}
             <!-- 3.3 Asistente de Chat (usuarios estándar, solo si un admin lo habilitó) -->
             <a href="{{ url_for('chat_pagina') }}" class="group card-acento-sky bg-slate-900/80 border border-slate-800 hover:border-sky-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
@@ -242,10 +242,11 @@
             </a>
             {% endif %}
 
-            {% if rol in ['admin', 'agente'] or usuario_tiene_modulo('turnos') %}
-            <!-- 3.6 Cuadro de Turnos Hospitalarios y Administrativos (Admin/Agente por su rol; el
-            resto solo si se le concedió el módulo 'turnos' como permiso extra desde Gestión de
-            Usuarios — pedido de Tomás, 20/09/2026, ver MODULOS_ASIGNABLES). -->
+            {% if usuario_tiene_modulo('turnos') %}
+            <!-- 3.6 Cuadro de Turnos Hospitalarios y Administrativos (Admin siempre, y desde el
+            26/09/2026 también 'lider' por defecto — ver ROLES_GESTIONAN_TURNOS; el resto —
+            incluido 'agente', que YA NO lo recibe automático por rol — solo si se le concedió el
+            módulo 'turnos' como permiso extra desde Gestión de Usuarios, ver MODULOS_ASIGNABLES). -->
             <a href="{{ url_for('turnos_cuadro') }}" class="group card-acento-indigo bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 rounded-3xl p-6 transition-all duration-200 shadow-xl hover:-translate-y-1 flex flex-col justify-between">
                 <div>
                     <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">

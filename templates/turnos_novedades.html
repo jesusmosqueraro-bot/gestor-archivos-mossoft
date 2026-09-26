@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkiv | Novedades de Turno</title>
+    <!-- FAVICON OFICIAL ARKIV (SÍMBOLO GEOMÉTRICO) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1329'/><path d='M50 20 L20 80 L38 80 L50 60 L62 80 L80 80 Z' fill='%23e2e8f0'/><path d='M50 20 L80 80 L62 80 L50 60 Z' fill='%2364748b'/><path d='M50 35 L62 55 L38 55 Z' fill='%230b1329'/><path d='M50 38 L58 50 L42 50 Z' fill='%2338bdf8'/><circle cx='50' cy='46' r='3' fill='white'/><path d='M35 60 L65 60 L50 56 Z' fill='%23e2e8f0'/></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tema-claro.css">
+    <link rel="stylesheet" href="/static/css/tema-descanso.css">
+    <!-- 🎨 Manual de marca de Preventiva Salud IPS (tipografía Montserrat global, pedido por
+         Tomás, 12/09/2026) — ver static/css/marca-institucional.css. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/marca-institucional.css">
+    {% include 'partials/colores_modal_personalizados.html' %}
+</head>
+<body class="pagina-acento-indigo bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+
+    <!-- NAVBAR -->
+    <nav class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 sm:px-8 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('bienvenida') }}" title="Ir al inicio" class="group shrink-0">
+                <div class="w-9 h-9 rounded-xl bg-[#1e293b] flex items-center justify-center border border-slate-700/50 group-hover:border-cyan-500/50 transition-all">
+                    <svg class="w-5 h-5" viewBox="0 0 100 100">
+                        <polygon points="50,16 18,78 30,78 50,52 70,78 82,78" fill="#1e293b" />
+                        <polygon points="50,16 18,78 32,78 50,42" fill="#e2e8f0" />
+                        <polygon points="50,16 82,78 68,78 50,42" fill="#94a3b8" />
+                        <polygon points="32,54 68,54 60,46 40,46" fill="#020617" />
+                        <polygon points="34,52 66,52 60,46 40,46" fill="#e2e8f0" />
+                        <polygon points="50,28 58,40 50,52 42,40" fill="#0f172a" stroke="#f8fafc" stroke-width="1.5" />
+                        <circle cx="50" cy="40" r="2.5" fill="#f8fafc" />
+                    </svg>
+                </div>
+            </a>
+
+            <a href="{{ url_for('turnos_cuadro') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span class="hidden sm:inline">Volver</span>
+            </a>
+            <div class="h-6 w-px bg-slate-700"></div>
+            <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-clipboard-list text-indigo-400"></i> Novedades de Turno
+            </h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include 'partials/logo_preventiva_nav.html' %}
+            {% include 'partials/buscador.html' %}
+            {% with modulo='turnos_novedades' %}{% include 'partials/ayuda_modulo.html' %}{% endwith %}
+            {% include 'partials/historial_sesiones_boton.html' %}
+            {% include 'partials/seguridad_boton.html' %}
+            {% include 'partials/perfil_boton.html' %}
+            {% include 'partials/chat_boton.html' %}
+            {% include 'partials/campanita.html' %}
+        </div>
+    </nav>
+
+    <!-- SUB-NAV DEL MÓDULO -->
+    <div class="bg-slate-800/40 border-b border-slate-700/60 px-4 sm:px-8">
+        <div class="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
+            <a href="{{ url_for('turnos_cuadro') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-table-cells mr-1.5"></i>Cuadro de Turnos</a>
+            {% if session.get('rol') == 'admin' %}
+            <a href="{{ url_for('turnos_tipos') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-sliders mr-1.5"></i>Tipos de Turno</a>
+            {% endif %}
+            <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
+            <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
+            <a href="{{ url_for('turnos_novedades') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-clipboard-list mr-1.5"></i>Novedades</a>
+        </div>
+    </div>
+
+    <!-- CONTENIDO -->
+    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <div>
+            <h2 class="text-xl font-extrabold text-white mb-1">Novedades — {{ mes_nombre }}</h2>
+            <p class="text-sm text-slate-400">Incapacidades, permisos, calamidades, llegadas tarde y salidas tempranas de cada colaborador. Las horas afectadas se descuentan del total neto laborado en Horas del Mes. {% if not usuario_puede_gestionar_turnos() %}Solo un Administrador o Líder puede registrar o anular una novedad — aquí puedes consultarlas.{% endif %}</p>
+        </div>
+
+        {% if usuario_puede_gestionar_turnos() %}
+        <!-- REGISTRAR NOVEDAD -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-3xl p-4 shadow-xl">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><i class="fa-solid fa-plus text-indigo-400"></i> Registrar novedad</h3>
+            <form id="form-novedad" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs items-end" onsubmit="event.preventDefault(); registrarNovedad();">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="colaborador_usuario" id="input-colaborador-usuario" value="">
+                <div class="relative lg:col-span-2">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Colaborador *</label>
+                    <input type="text" id="input-colaborador-nombre" autocomplete="off" required
+                           placeholder="Busca por cédula o nombre..."
+                           class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <div id="sugerencias-colaborador-novedad" class="hidden absolute z-10 left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto"></div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Tipo *</label>
+                    <select name="tipo" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Selecciona...</option>
+                        {% for clave, etiqueta in tipos_novedad.items() %}<option value="{{ clave }}">{{ etiqueta }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Fecha *</label>
+                    <input type="date" name="fecha" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Horas afectadas *</label>
+                    <input type="number" step="0.5" min="0.5" name="horas_afectadas" placeholder="Ej: 8" required class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div class="sm:col-span-2 lg:col-span-4">
+                    <label class="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[10px]">Observaciones (opcional)</label>
+                    <input type="text" name="observaciones" placeholder="Detalle adicional..." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- NAVEGACIÓN DE MES -->
+        <div class="flex items-center gap-1.5 text-xs">
+            <a href="{{ url_for('turnos_novedades', mes=mes_anterior) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all" title="Mes anterior"><i class="fa-solid fa-chevron-left"></i></a>
+            <a href="{{ url_for('turnos_novedades') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all">HOY</a>
+            <a href="{{ url_for('turnos_novedades', mes=mes_siguiente) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2.5 rounded-xl font-bold transition-all" title="Mes siguiente"><i class="fa-solid fa-chevron-right"></i></a>
+            <span class="text-slate-200 font-bold px-2 whitespace-nowrap">{{ mes_nombre }}</span>
+        </div>
+
+        <!-- LISTADO -->
+        <div class="overflow-x-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl">
+            <table class="w-full text-xs text-left" data-tabla-interactiva="novedades">
+                <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
+                    <tr>
+                        <th class="p-3">Colaborador</th><th class="p-3">Tipo</th><th class="p-3">Fecha</th>
+                        <th class="p-3 text-right">Horas afectadas</th><th class="p-3">Observaciones</th>
+                        <th class="p-3">Estado</th>
+                        {% if usuario_puede_gestionar_turnos() %}<th class="p-3">Acciones</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800">
+                    {% for n in novedades %}
+                    <tr>
+                        <td class="p-3 font-bold text-slate-200">{{ n.nombre }}</td>
+                        <td class="p-3 text-slate-300">{{ n.tipo_etiqueta }}</td>
+                        <td class="p-3 text-slate-400">{{ n.fecha }}</td>
+                        <td class="p-3 text-right text-slate-300">{{ n.horas_afectadas }} h</td>
+                        <td class="p-3 text-slate-500">{{ n.observaciones or '—' }}</td>
+                        <td class="p-3">
+                            {% if n.estado == 'activo' %}
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400">Activa</span>
+                            {% else %}
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-400">Anulada</span>
+                            {% endif %}
+                        </td>
+                        {% if usuario_puede_gestionar_turnos() %}
+                        <td class="p-3">
+                            {% if n.estado == 'activo' %}
+                            <button type="button" class="text-slate-500 hover:text-rose-400 text-[11px] font-bold" onclick="anularNovedad({{ n.id }})"><i class="fa-solid fa-ban"></i> Anular</button>
+                            {% else %}
+                            <span class="text-slate-700">—</span>
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-10 text-slate-500 font-bold">Sin novedades registradas este mes.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <!-- 🌗 Botón flotante para alternar tema claro/oscuro — la preferencia se guarda en la
+         cuenta del usuario (ver ruta /perfil/tema), así que lo sigue a cualquier dispositivo. -->
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
+
+        function mostrarToast(msg) { alert(msg); }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            var inputNombre = document.getElementById('input-colaborador-nombre');
+            if (inputNombre) {
+                activarAutocompletarPersona({
+                    inputId: 'input-colaborador-nombre',
+                    listaId: 'sugerencias-colaborador-novedad',
+                    onSeleccionar: function (persona) {
+                        document.getElementById('input-colaborador-nombre').value = persona.nombre;
+                        document.getElementById('input-colaborador-usuario').value = persona.usuario;
+                    }
+                });
+            }
+        });
+
+        function registrarNovedad() {
+            if (!document.getElementById('input-colaborador-usuario').value) {
+                mostrarToast('Busca al colaborador por cédula o nombre y elige una sugerencia de la lista.');
+                return;
+            }
+            const datos = new URLSearchParams(new FormData(document.getElementById('form-novedad')));
+            fetch('{{ url_for("turnos_novedades_registrar") }}', { method: 'POST', body: datos })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.ok) {
+                        location.reload();
+                    } else {
+                        mostrarToast((data.errores || ['No se pudo registrar la novedad.']).join(' '));
+                    }
+                })
+                .catch(function () { mostrarToast('Error de red registrando la novedad.'); });
+        }
+
+        function anularNovedad(id) {
+            if (!confirm('¿Anular esta novedad? Ya no descontará horas en Horas del Mes.')) return;
+            fetch('/turnos/novedades/' + id + '/eliminar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) { location.reload(); } else { mostrarToast(data.error || 'No se pudo anular la novedad.'); }
+            }).catch(function () { mostrarToast('Error de red anulando la novedad.'); });
+        }
+    </script>
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/tabla-interactiva.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
+    <script src="/static/js/autocompletar_persona.js"></script>
+</body>
+</html>

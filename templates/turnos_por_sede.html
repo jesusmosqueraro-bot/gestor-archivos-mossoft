@@ -67,6 +67,7 @@
             {% endif %}
             <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
             <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
+            <a href="{{ url_for('turnos_novedades') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-clipboard-list mr-1.5"></i>Novedades</a>
         </div>
     </div>
 
@@ -76,7 +77,7 @@
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h2 class="text-xl font-extrabold text-white mb-1">Colaboradores por Sede</h2>
-                <p class="text-sm text-slate-400 max-w-2xl">Directorio de solo consulta: agrupa a todas las cuentas activas del sistema según la Sede asignada en su perfil (se elige al crear el usuario en Registrar Usuario, o se ajusta después desde Gestión de Usuarios → Editar). Para cambiar la Sede de alguien, hazlo desde ahí — esta vista no modifica nada.</p>
+                <p class="text-sm text-slate-400 max-w-2xl">Directorio de solo consulta: agrupa a cada colaborador según la Sede y el horario de su turno asignado vigente (el próximo si tiene uno programado, o el más reciente si no); si todavía no tiene ningún turno, se agrupa por la Sede de su perfil. Para cambiar la Sede de un turno, hazlo desde Cuadro de Turnos — esta vista no modifica nada.</p>
             </div>
             <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-300 whitespace-nowrap">
                 <i class="fa-solid fa-users mr-1.5 text-indigo-400"></i>{{ total_colaboradores }} colaborador{{ 'es' if total_colaboradores != 1 else '' }} en total
@@ -106,6 +107,9 @@
                         <div class="min-w-0">
                             <p class="text-xs font-bold text-slate-200 truncate">{{ c.nombre }}</p>
                             <p class="text-[10px] text-slate-500 truncate">@{{ c.usuario }}{% if c.cedula %} · CC {{ c.cedula }}{% endif %}</p>
+                            {% if c.horario_resumen %}
+                            <p class="text-[10px] text-emerald-400 truncate mt-0.5" title="Turno asignado el {{ c.horario_fecha }}"><i class="fa-solid fa-clock mr-1"></i>{{ c.horario_resumen }} <span class="text-slate-600">({{ c.horario_fecha }})</span></p>
+                            {% endif %}
                         </div>
                         <span class="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-300 whitespace-nowrap">{{ c.rol_etiqueta }}</span>
                     </div>

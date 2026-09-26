@@ -67,6 +67,7 @@
             {% endif %}
             <a href="{{ url_for('turnos_horas_mes') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-indigo-500 text-white transition-all whitespace-nowrap"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Horas del Mes</a>
             <a href="{{ url_for('turnos_por_sede') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-building-user mr-1.5"></i>Por Sede</a>
+            <a href="{{ url_for('turnos_novedades') }}" class="px-4 py-3 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap"><i class="fa-solid fa-clipboard-list mr-1.5"></i>Novedades</a>
         </div>
     </div>
 
@@ -120,6 +121,9 @@
                 {% if f_sede or f_area or f_rol %}
                 <a href="{{ url_for('turnos_horas_mes', mes=mes_str) }}" class="text-slate-400 hover:text-indigo-400 font-bold px-2 py-2.5"><i class="fa-solid fa-filter-circle-xmark"></i> Limpiar</a>
                 {% endif %}
+                <a href="{{ url_for('turnos_horas_mes_exportar_xlsx', mes=mes_str, sede=f_sede, area=f_area, rol=f_rol) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2" title="Exportar matriz mensual a Excel">
+                    <i class="fa-solid fa-file-excel text-emerald-400"></i> Excel (matriz)
+                </a>
             </form>
         </div>
 
@@ -129,9 +133,11 @@
                 <thead class="text-slate-400 uppercase text-[10px] border-b border-slate-700/60">
                     <tr>
                         <th class="p-3">Colaborador</th>
+                        <th class="p-3">Esquema</th>
                         <th class="p-3 text-right">Horas transcurridas</th>
                         <th class="p-3 text-right">Horas programadas</th>
-                        <th class="p-3 text-right">Total del mes</th>
+                        <th class="p-3 text-right">Novedades</th>
+                        <th class="p-3 text-right">Total neto del mes</th>
                         <th class="p-3 text-right">Meta mensual</th>
                         <th class="p-3 text-right">Horas a favor / en contra</th>
                     </tr>
@@ -140,8 +146,20 @@
                     {% for r in resumen %}
                     <tr>
                         <td class="p-3 font-bold text-slate-200">{{ r.nombre }}</td>
+                        <td class="p-3 text-slate-400">
+                            {% if usuario_puede_gestionar_turnos() %}
+                            <select class="bg-slate-900 border border-slate-700 rounded-lg px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-indigo-500" onchange="fijarEsquemaMensual('{{ r.usuario }}', this.value)" title="Esquema de jornada para {{ mes_nombre }} — se puede fijar solo para este mes, sin cambiar el esquema permanente del colaborador">
+                                {% for clave, info in esquemas_jornada.items() %}
+                                <option value="{{ clave }}" {% if clave == r.esquema_jornada %}selected{% endif %}>{{ info.etiqueta }}</option>
+                                {% endfor %}
+                            </select>
+                            {% else %}
+                            {{ r.esquema_etiqueta }}
+                            {% endif %}
+                        </td>
                         <td class="p-3 text-right text-slate-300">{{ r.horas_transcurridas }} h</td>
                         <td class="p-3 text-right text-slate-400">{{ r.horas_programadas }} h</td>
+                        <td class="p-3 text-right text-slate-400">{% if r.horas_novedades %}<span class="text-rose-400">-{{ r.horas_novedades }} h</span>{% else %}—{% endif %}</td>
                         <td class="p-3 text-right font-bold text-slate-200">
                             {{ r.total_horas }} h
                             {% if r.excede_legal %}
@@ -149,15 +167,14 @@
                             {% endif %}
                         </td>
                         <td class="p-3 text-right text-slate-400">
-                            {{ (r.meta_horas_mensual ~ ' h') if r.meta_horas_mensual is not none else '—' }}
+                            {{ r.meta_horas_mensual }} h
+                            <span class="block text-[9px] text-slate-600">{{ 'manual' if r.meta_es_manual else 'automática por esquema' }}</span>
                             {% if r.meta_excede_legal %}
                             <i class="fa-solid fa-triangle-exclamation text-amber-400 ml-1" title="La meta configurada supera las {{ horas_maximas_legales_mes }} horas/mes de referencia legal (Ley 2101 de 2021, 42h/semana)."></i>
                             {% endif %}
                         </td>
                         <td class="p-3 text-right">
-                            {% if r.diferencia is none %}
-                            <span class="text-slate-600" title="Configura una meta mensual en Editar Usuario para ver esta comparación">Sin meta definida</span>
-                            {% elif r.diferencia > 0 %}
+                            {% if r.diferencia > 0 %}
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400">+{{ r.diferencia }} h a favor</span>
                             {% elif r.diferencia < 0 %}
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400">{{ r.diferencia }} h en contra</span>
@@ -167,7 +184,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="6" class="text-center py-10 text-slate-500 font-bold">Sin turnos asignados este mes con estos filtros.</td></tr>
+                    <tr><td colspan="8" class="text-center py-10 text-slate-500 font-bold">Sin turnos ni novedades este mes con estos filtros.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -189,6 +206,21 @@
         </button>
     </form>
 
+    <script>
+        const CSRF_TOKEN = "{{ csrf_token() }}";
+
+        // 🗓️ Fijar el Esquema de Jornada de un colaborador SOLO para el mes que se está viendo
+        // (ver /turnos/horas_mes/esquema) — no toca su esquema permanente de ficha.
+        function fijarEsquemaMensual(colaboradorUsuario, esquema) {
+            fetch('{{ url_for("turnos_horas_mes_esquema") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN, colaborador_usuario: colaboradorUsuario, mes: '{{ mes_str }}', esquema: esquema }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) { location.reload(); } else { alert(data.error || 'No se pudo guardar el esquema de jornada.'); }
+            }).catch(function () { alert('Error de red guardando el esquema de jornada.'); });
+        }
+    </script>
     <script src="/static/js/buscador.js"></script>
     <script src="/static/js/notificaciones.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>

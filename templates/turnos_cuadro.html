@@ -48,6 +48,7 @@
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
+            {% if usuario_puede_gestionar_turnos() %}
             <button onclick="abrirModalAsignar({fecha: '{{ hoy_str }}'})" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg shadow-indigo-500/20 text-xs transition-all flex items-center gap-2 active:scale-95">
                 <i class="fa-solid fa-plus"></i><span>Nuevo turno</span>
             </button>
@@ -58,6 +59,7 @@
             <button onclick="abrirModalAsignarGrupo()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95" title="Asignar el mismo turno a varios colaboradores del grupo filtrado a la vez">
                 <i class="fa-solid fa-users"></i><span class="hidden sm:inline">Asignar a Grupo</span>
             </button>
+            {% endif %}
 
             <!-- ⏱️ Horas del Mes (pedido de Tomás, 20/09/2026) — reporte mensual de horas
                  trabajadas/programadas y "horas a favor" contra la meta configurable de cada
@@ -71,6 +73,12 @@
                  al crear la cuenta) — ver /turnos/por_sede y _colaboradores_por_sede(). -->
             <a href="{{ url_for('turnos_por_sede') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Colaboradores por Sede">
                 <i class="fa-solid fa-building-user"></i><span class="hidden lg:inline">Por Sede</span>
+            </a>
+
+            <!-- 📋 Novedades (incapacidad, permiso, calamidad, llegada tarde, salida temprana —
+                 pedido de Tomás, 26/09/2026) — ver /turnos/novedades. -->
+            <a href="{{ url_for('turnos_novedades') }}" class="bg-slate-700 hover:bg-slate-600 text-slate-200 p-2 rounded-xl transition-all text-xs font-bold flex items-center gap-1.5" title="Novedades">
+                <i class="fa-solid fa-clipboard-list"></i><span class="hidden lg:inline">Novedades</span>
             </a>
 
             <!-- 📤 Exportar: respeta la semana y los filtros de sede/área/rol actuales. -->
@@ -153,9 +161,11 @@
                 {% if f_sede or f_area or f_rol %}
                 <a href="{{ url_for('turnos_cuadro', desde=desde.strftime('%Y-%m-%d')) }}" class="text-slate-400 hover:text-indigo-400 font-bold px-2 py-2.5"><i class="fa-solid fa-filter-circle-xmark"></i> Limpiar</a>
                 {% endif %}
+                {% if usuario_puede_gestionar_turnos() %}
                 <button type="button" onclick="publicarSemana()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl flex items-center gap-2" title="Agrupa esta semana/filtro en un cuadro publicado, listo para cerrarse cuando termine el periodo (el aviso por correo a cada colaborador ya se envía al crear, modificar o cancelar su turno, sin esperar a publicar)">
                     <i class="fa-solid fa-paper-plane"></i> Publicar semana
                 </button>
+                {% endif %}
             </form>
         </div>
 
@@ -237,7 +247,7 @@
                                     <p class="font-extrabold text-[10px]">{{ dia.turno_codigo }}</p>
                                     <p class="font-normal text-[9px] opacity-90">{{ dia.hora_inicio }}-{{ dia.hora_fin }}</p>
                                 </div>
-                                {% else %}
+                                {% elif usuario_puede_gestionar_turnos() %}
                                 <button type="button" class="w-full h-10 rounded-lg border border-dashed border-slate-700 text-slate-600 hover:text-indigo-400 hover:border-indigo-400 transition-all" title="Agregar turno" onclick='abrirModalAsignar({{ dict(colaborador=fila.nombre, usuario=fila.usuario, fecha=dias_semana[loop.index0].strftime("%Y-%m-%d")) | tojson }})'>
                                     <i class="fa-solid fa-plus text-[10px]"></i>
                                 </button>
@@ -277,8 +287,12 @@
                             <td class="p-3 text-slate-400">{{ r.rol_etiqueta }}</td>
                             <td class="p-3 text-slate-500">{{ r.observaciones or '—' }}</td>
                             <td class="p-3 whitespace-nowrap">
+                                {% if usuario_puede_gestionar_turnos() %}
                                 <button type="button" class="text-slate-500 hover:text-indigo-400 mr-2" title="Editar" onclick='abrirModalAsignar({{ r | tojson }})'><i class="fa-solid fa-pen"></i></button>
                                 <button type="button" class="text-slate-500 hover:text-rose-400" title="Cancelar" onclick="cancelarTurno({{ r.id }})"><i class="fa-solid fa-ban"></i></button>
+                                {% else %}
+                                <span class="text-slate-700">—</span>
+                                {% endif %}
                             </td>
                         </tr>
                         {% else %}
@@ -314,7 +328,7 @@
                                 </span>
                             </td>
                             <td class="p-3">
-                                {% if c.estado == 'publicado' %}
+                                {% if c.estado == 'publicado' and usuario_puede_gestionar_turnos() %}
                                 <button type="button" class="text-slate-500 hover:text-indigo-400 text-[11px] font-bold" onclick="cerrarCuadro({{ c.id }})"><i class="fa-solid fa-lock"></i> Cerrar cuadro</button>
                                 {% else %}
                                 <span class="text-slate-600 text-[11px]">—</span>
