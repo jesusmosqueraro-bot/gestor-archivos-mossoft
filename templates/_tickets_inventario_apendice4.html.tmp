@@ -1,0 +1,43 @@
+
+    {% include 'partials/chat_flotante.html' %}
+
+    <form method="POST" action="/perfil/tema" class="fixed bottom-5 right-5 z-50">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% set tema_actual = session.get('tema') or 'oscuro' %}
+        {% set tema_siguiente = 'oscuro' if tema_actual == 'claro' else ('descanso' if tema_actual == 'oscuro' else 'claro') %}
+        <input type="hidden" name="tema" value="{{ tema_siguiente }}">
+        <button type="submit" title="Cambiar a tema {{ tema_siguiente }}" class="w-11 h-11 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-700/60 text-slate-200 shadow-lg shadow-slate-950/40 flex items-center justify-center transition-all active:scale-95">
+            <i class="fa-solid {{ 'fa-sun' if tema_actual == 'claro' else ('fa-mug-hot' if tema_actual == 'descanso' else 'fa-moon') }}"></i>
+        </button>
+    </form>
+
+    <script src="/static/js/buscador.js"></script>
+    <script src="/static/js/autocompletar_persona.js"></script>
+    <script src="/static/js/notificaciones.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="/static/js/tiempo_real.js"></script>
+    <script src="/static/js/atajos_teclado.js"></script>
+    <script src="/static/js/firma-digital.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            inicializarFirmaDigital('firma-rapido');
+            firmaActaWidget = inicializarFirmaDigital('firma-acta');
+
+            activarAutocompletarPersona({
+                inputId: 'input-activo-cedula-buscar',
+                listaId: 'sugerencias-cedula-activo',
+                onSeleccionar: function (persona) {
+                    document.getElementById('input-activo-asignado').value = persona.nombre + ' (' + persona.usuario + ')';
+                    document.getElementById('panel-crear-usuario-rapido').classList.add('hidden');
+                    var mensaje = document.getElementById('mensaje-busqueda-cedula');
+                    mensaje.textContent = 'Encontrado: ' + persona.nombre + ' (' + persona.usuario + ')' +
+                        (persona.firma ? ' — se usará su firma registrada como aceptación.' : '');
+                    mensaje.className = 'text-[10px] mt-1 text-emerald-400';
+                }
+            });
+        });
+    </script>
+    <script src="/static/js/tabla-interactiva.js"></script>
+    <script src="/static/js/ayuda-modulo.js"></script>
+</body>
+</html>
