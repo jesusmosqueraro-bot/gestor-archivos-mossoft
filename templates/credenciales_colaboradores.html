@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+{# 🚑 'is defined': mientras app.py (que arma especialidades/colaboradores_agrupados/vista/
+   total_colaboradores_de_baja en ver_credenciales_colaboradores()) todavía no se ha desplegado,
+   especialidades quedaría UNDEFINED y el {% for %} de más abajo lanzaría un error — rompiendo
+   esta página con un 500. Este valor por defecto lo evita sin cambiar el comportamiento una vez
+   que app.py sí esté desplegado. #}
+{% set especialidades = especialidades if especialidades is defined else [] %}
 <html lang="es" data-theme="{{ session.get('tema') if session.get('tema') in ('claro', 'descanso') else 'oscuro' }}">
 <head>
     <meta charset="UTF-8">
